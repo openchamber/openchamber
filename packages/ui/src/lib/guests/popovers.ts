@@ -24,14 +24,48 @@ type PopoverPositionRequest = Pick<GuestPopoverRequest, 'anchor' | 'width' | 'he
 
 const GUTTER = 8;
 const GAP = 6;
-export const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+/** The host box an opened popover's frame sits in: a floating card, or the phone's sheet. */
+const GUEST_POPOVER_OVERLAY_SELECTOR = '[data-guest-popover-overlay]';
+const HIDDEN_SELECTOR = '[inert],[aria-hidden="true"],[data-base-ui-inert]';
 
-/** A guest preview must never cover a host permission or modal dialog. */
+/**
+ * A guest preview must never cover a host permission or modal dialog. Some
+ * modal boxes are not in the way: one hidden from everyone (the phone keeps
+ * its closed drawers mounted, off screen and `aria-hidden`), one the owner
+ * frame sits in (the phone's workspace drawer holds the Status tab), and the
+ * phone's sheet that holds the popover itself.
+ */
 export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
-  !frame.isConnected || frame.closest('[inert],[aria-hidden="true"],[data-base-ui-inert]') !== null
+  !frame.isConnected || frame.closest(HIDDEN_SELECTOR) !== null
   || frame.ownerDocument.documentElement.classList.contains('oc-dialog-open')
-  || Array.from(frame.ownerDocument.querySelectorAll(GUEST_POPOVER_MODAL_SELECTOR)).some((element) => element.getClientRects().length > 0)
+  || Array.from(frame.ownerDocument.querySelectorAll(GUEST_POPOVER_MODAL_SELECTOR)).some((element) => (
+    element.getClientRects().length > 0 && element.closest(HIDDEN_SELECTOR) === null
+    && !element.contains(frame) && !element.querySelector(GUEST_POPOVER_OVERLAY_SELECTOR)
+  ))
 );
+
+/**
+ * Calls `onBlocked` once a host modal opens over an open popover's owner, or
+ * the owner is hidden, so an idle guest's popover (floating or in the phone's
+ * sheet) never stays above a dialog that opened after it. Returns the disposer.
+ */
+export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked: () => void): (() => void) => {
+  const view = ownerFrame.ownerDocument.defaultView;
+  if (!view) return () => {};
+  const observer = new view.MutationObserver((records) => {
+    const modalChanged = records.some((record) => {
+      if (record.type === 'attributes' && record.attributeName !== 'aria-modal') return record.target.contains(ownerFrame);
+      const candidates = record.type === 'attributes' ? [record.target] : Array.from(record.addedNodes);
+      return candidates.some((node) => node instanceof view.Element
+        && (node.matches(GUEST_POPOVER_MODAL_SELECTOR) || node.querySelector(GUEST_POPOVER_MODAL_SELECTOR)));
+    });
+    if (modalChanged && guestPopoverOwnerBlocked(ownerFrame)) onBlocked();
+  });
+  observer.observe(ownerFrame.ownerDocument.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['aria-modal', 'aria-hidden', 'inert', 'data-base-ui-inert'] });
+  return () => observer.disconnect();
+};
 
 export type GuestPopoverActivation = {
   id: string;

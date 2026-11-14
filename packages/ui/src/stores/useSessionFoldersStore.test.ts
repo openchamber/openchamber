@@ -121,6 +121,19 @@ describe('useSessionFoldersStore folder assignments', () => {
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project-worktree')[0]?.sessionIds).toEqual(['ses_1', 'ses_2']);
   });
 
+  test('a session moved into a worktree leaves the folder of the project it left', () => {
+    const store = useSessionFoldersStore.getState();
+    const tasks = store.createFolder('/workspace/project', 'Tasks');
+    store.addSessionsToFolder('/workspace/project', tasks.id, ['ses_moved', 'ses_stays']);
+    const before = useSessionFoldersStore.getState().foldersMap;
+
+    store.followSessionMove('ses_moved', '/workspace/project/docs', null);
+    expect(useSessionFoldersStore.getState().foldersMap).toBe(before);
+
+    store.followSessionMove('ses_moved', '/workspace/project-worktree', '/workspace/project-worktree');
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')[0]?.sessionIds).toEqual(['ses_stays']);
+  });
+
   test('restores independent folder snapshots across runtime switches', async () => {
     useSessionFoldersStore.getState().createFolder('/workspace/project', 'Runtime A');
     await waitForPersist();

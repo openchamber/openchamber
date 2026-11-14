@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -204,6 +206,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.pl,
   ...secretRequestI18n.pl,
   ...sessionNoticesI18n.pl,
+  ...settingsHintsI18n.pl,
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
   ...sessionWarmingI18n.pl,
@@ -217,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.pl,
   ...opencodeToolOutputI18n.pl,
   ...agentStatusI18n.pl,
+  ...androidWidgetsI18n.pl,
   ...snippetsI18n.pl,
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
@@ -1618,6 +1622,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.model': 'Model',
   'chat.modelControls.noAgentSelected': 'Nie wybrano agenta.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" nie jest dostępny w folderze tej sesji. Wybierz innego agenta.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" nie jest już dostępny. Jego dostawcę usunięto lub wyłączono. Wybierz inny model.',
   'chat.modelControls.noModelsFound': 'Nie znaleziono modeli',
   'chat.modelControls.output': 'Wyjście',
   'chat.modelControls.permissionLabel.allow': 'Zezwól',
@@ -3264,6 +3269,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.actions.cancel': 'Anuluj',
   'session.newWorktree.actions.createWorktree': 'Utwórz drzewo pracy',
   'session.newWorktree.actions.creating': 'Tworzenie...',
+  'session.newWorktree.creatingWithCommand': 'Trwa wykonywanie Twojego polecenia tworzenia…',
   'session.newWorktree.actions.reset': 'Resetuj',
   'session.newWorktree.actions.unlink': 'Odłącz',
   'session.newWorktree.start.title': 'Punkt startowy',
@@ -3508,6 +3514,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'Anuluj',
   'vscodeLayout.actions.newSessionAria': 'Nowa sesja',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Zmień rozmiar panelu sesji',
+  'vscodeLayout.actions.showSessionsAria': 'Pokaż sesje',
+  'vscodeLayout.actions.hideSessionsAria': 'Ukryj sesje',
   'vscodeLayout.actions.settingsAria': 'Ustawienia',
   'vscodeLayout.title.chat': 'Czat',
   'vscodeLayout.title.newSession': 'Nowa sesja',

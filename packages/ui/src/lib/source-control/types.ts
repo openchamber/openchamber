@@ -13,6 +13,12 @@ export interface SourceControlIdentity {
    * Named apart from a repository's own `sshUrl` clone address.
    */
   instanceSshUrl?: string;
+  /**
+   * Other web addresses the instance is served under, in its own spelling (a
+   * host or an origin). A link on one names an item of this instance; reads
+   * still go to `instance`. Absent where none were added.
+   */
+  instanceAliases?: string[];
 }
 
 export interface SourceControlRepositoryEndpoint {

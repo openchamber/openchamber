@@ -17,7 +17,7 @@ const MARK_TONE_CLASS = {
 } satisfies Record<GuestTone, string>;
 
 /** An extension's mark as a bare icon in its tone; a name the sprite lacks draws the fallback glyph. */
-const GuestRowMarkIcon: React.FC<{ mark: RowGuestMark; className?: string }> = ({ mark, className }) => (
+export const GuestRowMarkIcon: React.FC<{ mark: RowGuestMark; className?: string }> = ({ mark, className }) => (
   <Icon name={resolveGuestIconName(mark.icon)} className={cn('h-3 w-3 flex-shrink-0', MARK_TONE_CLASS[mark.tone], className)} />
 );
 

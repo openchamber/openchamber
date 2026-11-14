@@ -2287,6 +2287,172 @@ describe('createWorktree', () => {
     }
   });
 
+  describe('with a project create command', () => {
+    let previousXdgDataHome;
+    beforeEach(() => {
+      previousXdgDataHome = process.env.XDG_DATA_HOME;
+      process.env.XDG_DATA_HOME = createTempDir();
+    });
+    afterEach(() => {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+    });
+
+    const createRepo = () => {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      return repo;
+    };
+    const branchExists = (repo, branch) => {
+      try {
+        runGit(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it('adopts a locked worktree a copy-on-write tool keeps in its store behind a symlink, and removes it', async () => {
+      if (!canRunGit() || process.platform === 'win32') return;
+      const repo = createRepo();
+      const store = fs.realpathSync(createTempDir());
+      // What such a tool does: the checkout lives in its store, locked, and the
+      // path that was asked for is a symlink to it.
+      const createCommand = `target="${store}/$(basename "$WORKTREE_PATH")" && git worktree add "$target" "$WORKTREE_BRANCH" && git worktree lock "$target" && ln -s "$target" "$WORKTREE_PATH"`;
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/cow',
+        worktreeName: 'cow',
+        returnAfterDirectoryCreated: true,
+        createCommand,
+        startCommand: 'echo setup > SETUP_RAN',
+      });
+
+      // The request waited for the command and answers with the real checkout.
+      expect(created.path).toBe(path.join(store, 'cow'));
+      expect(created.branch).toBe('feature/cow');
+      expect(created.head).toBe(runGit(repo, ['rev-parse', 'main']).trim());
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({ status: 'ready', phase: 'setup-ready' });
+      expect(fs.readFileSync(path.join(created.path, 'SETUP_RAN'), 'utf8')).toBe('setup\n');
+      expect(fs.readFileSync(path.join(created.path, 'README.md'), 'utf8')).toBe('# Test\n');
+      const worktreeRoot = path.join(process.env.XDG_DATA_HOME, 'opencode', 'worktree');
+      const link = path.join(worktreeRoot, fs.readdirSync(worktreeRoot)[0], 'cow');
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+
+      await removeWorktree(repo, { directory: created.path, deleteLocalBranch: true });
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(branchExists(repo, 'feature/cow')).toBe(false);
+      // The tool's link goes with the worktree, so the name is free again.
+      expect(() => fs.lstatSync(link)).toThrow();
+    });
+
+    it('checks out an existing branch through the command', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+      runGit(repo, ['branch', 'feature/kept']);
+
+      const created = await createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'feature/kept',
+        worktreeName: 'kept',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
+      });
+
+      expect(created.branch).toBe('feature/kept');
+      expect(runGit(created.path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature/kept');
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({ status: 'ready' });
+    });
+
+    it('fails with the command output and drops the branch it made when the command fails', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/failed-cow',
+        worktreeName: 'failed-cow',
+        returnAfterDirectoryCreated: true,
+        createCommand: 'echo "source checkout is dirty" >&2; exit 3',
+      }).catch((error) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+      // The tool's own words, without the command the user wrote repeated.
+      expect(failure.message).toBe('Worktree create command failed: source checkout is dirty');
+      expect(branchExists(repo, 'feature/failed-cow')).toBe(false);
+    });
+
+    it('keeps a local branch it did not make when making the branch fails', async () => {
+      if (!canRunGit()) return;
+      const remote = createTempDir();
+      runGit(remote, ['init', '--bare', '-b', 'main']);
+      const repo = createRepo();
+      runGit(repo, ['remote', 'add', 'origin', remote]);
+      runGit(repo, ['push', '-q', 'origin', 'main:topic']);
+      runGit(repo, ['fetch', '-q', 'origin']);
+      // A local branch of the same name that is not checked out anywhere.
+      fs.writeFileSync(path.join(repo, 'local.txt'), 'local\n');
+      runGit(repo, ['add', 'local.txt']);
+      runGit(repo, ['commit', '-qm', 'local work']);
+      runGit(repo, ['branch', 'topic']);
+      runGit(repo, ['reset', '-q', '--hard', 'HEAD~1']);
+      const localTip = runGit(repo, ['rev-parse', 'topic']).trim();
+
+      const failure = await createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'origin/topic',
+        worktreeName: 'topic',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
+      }).catch((error) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(runGit(repo, ['rev-parse', 'topic']).trim()).toBe(localTip);
+    });
+
+    it('keeps a worktree the failed command made and locked removable', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/half',
+        worktreeName: 'half',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH" && git worktree lock "$WORKTREE_PATH" && exit 3',
+      }).catch((error) => error);
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+
+      const half = (await getWorktrees(repo)).find((entry) => entry.branch === 'feature/half');
+      expect(half).toBeDefined();
+      await removeWorktree(repo, { directory: half.path, deleteLocalBranch: true });
+      expect(fs.existsSync(half.path)).toBe(false);
+      expect(branchExists(repo, 'feature/half')).toBe(false);
+    });
+
+    it('fails when the command leaves no worktree at the path', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/nothing',
+        worktreeName: 'nothing',
+        createCommand: 'true',
+      }).catch((error) => error);
+
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+      expect(failure.message).toContain('no worktree of this repository');
+      expect(branchExists(repo, 'feature/nothing')).toBe(false);
+    });
+  });
+
   it('does not report Git-ready when checkout hydration is incomplete', async () => {
     if (!canRunGit()) return;
     const repo = createTempDir();

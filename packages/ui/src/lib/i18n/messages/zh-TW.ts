@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -204,6 +206,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],
+  ...settingsHintsI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
   ...sessionWarmingI18n['zh-TW'],
@@ -217,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n['zh-TW'],
   ...opencodeToolOutputI18n['zh-TW'],
   ...agentStatusI18n['zh-TW'],
+  ...androidWidgetsI18n['zh-TW'],
   ...snippetsI18n['zh-TW'],
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
@@ -2381,6 +2385,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '來自 {source}',
   'session.newWorktree.actions.cancel': '取消',
   'session.newWorktree.actions.creating': '建立中...',
+  'session.newWorktree.creatingWithCommand': '正在執行你的建立命令…',
   'session.newWorktree.actions.createWorktree': '建立 Worktree',
   'session.newWorktree.actions.reset': '重設',
   'session.newWorktree.actions.unlink': '取消連結',
@@ -2881,6 +2886,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '新增供應商',
   'chat.modelControls.noAgentSelected': '未選擇 Agent。',
   'chat.modelControls.agentUnavailable': '此會話的資料夾中沒有 Agent "{agent}"。請選擇其他 Agent。',
+  'chat.modelControls.modelUnavailable': '模型 "{model}" 已無法使用。它的提供者已被移除或停用。請選擇其他模型。',
   'chat.modelControls.searchModels': '搜尋模型',
   'chat.modelControls.modelListAria': '模型',
   'chat.modelControls.searchAgents': '搜尋 Agent',
@@ -3397,6 +3403,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '取消',
   'vscodeLayout.actions.newSessionAria': '新增會話',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '調整會話側邊欄大小',
+  'vscodeLayout.actions.showSessionsAria': '顯示工作階段',
+  'vscodeLayout.actions.hideSessionsAria': '隱藏工作階段',
   'vscodeLayout.actions.settingsAria': '設定',
   'updateDialog.header.updateAvailable': '有可用更新',
   'updateDialog.header.updating': '正在更新 OpenChamber...',

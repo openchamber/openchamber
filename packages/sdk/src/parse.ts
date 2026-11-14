@@ -167,6 +167,7 @@ const panelSchema = z.object({
   entry: z.string().trim().refine(isSafeAssetPath).optional(),
   dock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   size: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
+  mobile: z.literal(true).optional(),
 });
 
 const integrationSettingSchema = z.object({
@@ -798,6 +799,7 @@ const contributesSchema = z.object({
   page: z.union([z.literal(true), z.object({
     entry: z.string().trim().refine(isSafeAssetPath),
     title: z.string().trim().min(1).max(200).optional(),
+    mobile: z.literal(true).optional(),
   })]).optional(),
   statusSection: z.union([z.literal(true), z.object({
     entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')).optional(),
@@ -1168,13 +1170,15 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
         : `panel.dock is one of ${GUEST_SURFACE_DOCKS.join(', ')}.`);
     case 'contributes.panel.size':
       return fail('invalid-panel', `panel.size is a whole number of CSS pixels from ${GUEST_SURFACE_DOCK_SIZE_MIN} to ${GUEST_SURFACE_DOCK_SIZE_MAX}.`);
+    case 'contributes.panel.mobile':
+      return fail('invalid-panel', 'panel.mobile is true or left out.');
     case 'contributes.capabilities':
       return fail('invalid-capabilities', 'contributes.capabilities may list "prompt", "sessions", and "files".');
     default:
       break;
   }
   if (path === 'contributes.page' || path.startsWith('contributes.page.')) {
-    return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title" }.');
+    return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title", mobile?: true }.');
   }
   if (path === 'contributes.statusSection' || path.startsWith('contributes.statusSection.')) {
     return fail('invalid-status-section', issue.code === 'custom'

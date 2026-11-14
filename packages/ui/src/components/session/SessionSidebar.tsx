@@ -78,6 +78,8 @@ interface SessionSidebarProps {
   allowReselect?: boolean;
   hideDirectoryControls?: boolean;
   showOnlyMainWorkspace?: boolean;
+  /** Where the header puts its list controls instead of its search row (the desktop sidebar's top strip). */
+  listControlsSlot?: HTMLElement | null;
   /**
    * The phone's list: its sheet has the header with the search field, the
    * footer and the dialogs, and draws the rows itself over the same model.
@@ -100,6 +102,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   allowReselect = false,
   hideDirectoryControls = false,
   showOnlyMainWorkspace = false,
+  listControlsSlot = null,
   phone,
 }) => {
   streamPerfMark('react.session_sidebar_render');
@@ -807,6 +810,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         showPagesSection={!mobileVariant && !isVSCode}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
+        listControlsSlot={listControlsSlot}
         closeSessionSearch={resetSessionSearch}
         sessionSearchInputRef={sessionSearchInputRef}
         sessionSearchQuery={sessionSearchText}

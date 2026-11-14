@@ -5,6 +5,9 @@ import { getModelDisplayName } from './mobileControlsUtils';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
+import { Icon } from '@/components/icon/Icon';
+import { useModelMissingFromCatalog } from './agentAvailability';
+import { useChatSessionSelection } from './chatColumnSession';
 
 interface MobileModelButtonProps {
     onOpenModel: () => void;
@@ -22,6 +25,14 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
     const modelLabel = isAuto
         ? t('chat.modelControls.autoModel')
         : getModelDisplayName(currentProvider, currentModelId, t('chat.modelControls.selectModel'));
+    // The send would stop with an error, so the button says so beforehand.
+    // A controlled button (`model` given) belongs to its column's folder; the
+    // main chat's reads the active selection, so it checks the active catalog.
+    const columnDirectory = useChatSessionSelection().directory ?? undefined;
+    const modelUnavailable = useModelMissingFromCatalog(model === undefined ? undefined : columnDirectory, currentProviderId, currentModelId);
+    const unavailableText = modelUnavailable
+        ? t('chat.modelControls.modelUnavailable', { model: modelLabel })
+        : undefined;
 
     return (
         <button
@@ -45,10 +56,13 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
                 'focus:outline-none hover:bg-[var(--interactive-hover)]',
                 className
             )}
-            title={modelLabel}
+            title={unavailableText ?? modelLabel}
+            aria-label={unavailableText}
         >
             <span className="flex h-full w-full min-w-0 items-center gap-1">
-                {currentProviderId && !isAuto ? (
+                {unavailableText ? (
+                    <Icon name="error-warning" className="size-4 flex-shrink-0 text-[var(--status-warning)]" />
+                ) : currentProviderId && !isAuto ? (
                     <ProviderLogo providerId={currentProviderId} className="size-4 flex-shrink-0" />
                 ) : null}
                 <span className="truncate">{modelLabel}</span>

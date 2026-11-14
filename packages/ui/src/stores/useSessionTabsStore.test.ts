@@ -146,6 +146,39 @@ describe('useSessionTabsStore', () => {
     expect(state().sets[GLOBAL_SESSION_TAB_SCOPE]?.tabIds).toEqual(['a']);
   });
 
+  test('a moved session takes its tab from the folder it left to the one it went to', () => {
+    useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['slack', 'moved'], previewTabId: 'moved', sets: { global: { tabIds: ['moved'], previewTabId: null } } });
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => ['moved']);
+    expect(state().tabIds).toEqual(['slack']);
+    expect(state().previewTabId).toBeNull();
+    // A scope never shown opens with its seed; the global set is another setting's and stays.
+    expect(state().sets['rt|/wt']).toEqual({ tabIds: ['moved'], previewTabId: null });
+    expect(state().sets.global?.tabIds).toEqual(['moved']);
+
+    // Into a set the user already has: appended there, out of every other one.
+    useSessionTabsStore.setState({ scope: 'rt|/wt', tabIds: ['w1'], previewTabId: null, sets: { 'rt|/repo': { tabIds: ['moved'], previewTabId: null }, 'other|/repo': { tabIds: ['moved'], previewTabId: null } } });
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => []);
+    expect(state().tabIds).toEqual(['w1', 'moved']);
+    expect(state().sets['rt|/repo']?.tabIds).toEqual([]);
+    expect(state().sets['other|/repo']?.tabIds).toEqual(['moved']);
+  });
+
+  test('a move before the session list loaded leaves the destination to its first visit', () => {
+    useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['moved'], previewTabId: null, sets: {} });
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => null);
+    expect(state().tabIds).toEqual([]);
+    expect(state().sets['rt|/wt']).toBeUndefined();
+    state().enterScope('rt|/wt', () => ['moved', 'w1']);
+    expect(state().tabIds).toEqual(['moved', 'w1']);
+  });
+
+  test('a moved session without a tab opens none', () => {
+    useSessionTabsStore.setState({ scope: 'rt|/repo', tabIds: ['a'], previewTabId: null, sets: {} });
+    const before = state();
+    state().followSessionMove('moved', 'rt|/wt', 'rt|', () => ['moved']);
+    expect(state()).toBe(before);
+  });
+
   test('stored tabs of the one global set carry over', async () => {
     const options = useSessionTabsStore.persist.getOptions();
     const migrated = await options.migrate?.({ tabIds: ['a', 'b'], previewTabId: 'b' }, 0);

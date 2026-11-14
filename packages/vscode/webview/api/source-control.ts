@@ -55,6 +55,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   authComplete: unsupported,
   authSetToken: unsupported,
   authSetSshUrl: unsupported,
+  setInstanceAliases: unsupported,
   authDisconnect: unsupported,
   authActivate: unsupported,
   authSetCliDisabled: unsupported,

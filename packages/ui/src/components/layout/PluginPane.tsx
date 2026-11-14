@@ -48,6 +48,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { useHostDevice } from '@/lib/guests/useHostDevice';
 import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
@@ -100,6 +101,7 @@ import { isForegroundShellStopping } from '@/components/chat/message/parts/foreg
 import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
 import type { Session } from '@/lib/opencode/model';
 import { GuestPopover } from './GuestPopover';
+import { GuestPopoverSheet } from './GuestPopoverSheet';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
 
 type PluginPaneProps = {
@@ -151,6 +153,10 @@ type PluginPaneProps = {
 const OPAQUE_FRAME_TARGET_ORIGIN = '*';
 
 const HOST_RADIUS_FALLBACK = '0.5625rem';
+
+// The phone has no room to float a card beside its anchor: a popover opens in
+// the app's bottom sheet there, and only the user closes it.
+const popoverOpensAsSheet = (): boolean => isMobileSurfaceRuntime();
 
 // Sent to the guest, not shown by the host; the guest decides how to surface it.
 const NOT_GRANTED_MESSAGE = 'The user has not allowed this capability for the extension.';
@@ -282,11 +288,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   // A frame in a docked panel paints the panel's colour, not the chat's.
   const pageColors = usePageColors();
   const typography = useHostTypography();
+  const device = useHostDevice();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
     if (surface === 'status' && onStatusControls) features.statusControls = true;
-    if (!popoverHost && !popover && !headless && !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+    if (!popoverHost && !popover && !headless && !isVSCodeRuntime()
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
     // A hidden frame is nobody's panel: it neither takes kept answers nor leaves any.
     if (!headless) features.lateGenerateResults = true;
@@ -343,8 +350,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     ...(block ? { block: block.call } : {}),
     popover: popoverHost?.context ?? popover,
     features,
+    device,
     };
-  }, [block, connection, currentTheme, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, connection, currentTheme, device, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -749,7 +757,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           // A status section in a chat draft without a project has no
           // directory of its own; the rail opens its panels under the chat's.
           directory: directoryRef.current || effectiveDirectoryRef.current || null,
-          supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+          supported: !isVSCodeRuntime(),
         }),
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);
@@ -929,7 +937,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           directory: directoryRef.current || null,
           git,
           currentBranch: (dir) => (git ? readCurrentBranch(git, dir) : Promise.resolve(null)),
-          supported: !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+          supported: !isVSCodeRuntime(),
           });
         },
         resize: (height) => {
@@ -955,7 +963,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           waiter({ ok: true, item: payload.item });
         },
         openPopover: (request) => {
-          if (childPopover || popover || headless || isVSCodeRuntime() || isMobileSurfaceRuntime()
+          if (childPopover || popover || headless || isVSCodeRuntime()
             || !(surface === 'panel' || surface === 'page' || surface === 'status')) {
             throw new HostRequestError('UNSUPPORTED', 'This frame cannot open a popover.');
           }
@@ -1010,7 +1018,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             onPopoverActivityRef.current?.(active);
             return;
           }
-          if (activePopoverRef.current?.request.id !== id) return;
+          // A sheet stays until the user closes it; a phone's anchor has no hover to lose.
+          if (activePopoverRef.current?.request.id !== id || popoverOpensAsSheet()) return;
           clearPopoverCloseTimer();
           popoverAnchorActiveRef.current = active;
           if (!active) {
@@ -1116,6 +1125,91 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     return null;
   }
 
+  const sheet = popoverOpensAsSheet();
+  const popoverChild = activePopover ? (
+    // Floats over the app, so never on a docked panel's page.
+    <DockedPanelSurfaceContext.Provider value={false}>
+    <PluginPane
+      mode={mode}
+      surface="popover"
+      item={null}
+      popoverHost={{
+        entry: activePopover.entry,
+        directory: activePopover.directory,
+        context: { id: activePopover.request.id, data: activePopover.request.data },
+        activation: activePopover.activation,
+        focus: Boolean(activePopover.request.focus),
+      }}
+      isActive={() => getGuestPopoverController(document).authorize(activePopover.activation)}
+      onResize={(height) => {
+        const current = activePopoverRef.current;
+        const frame = iframeRef.current;
+        if (!current || current.activation !== activePopover.activation || !frame
+          || !getGuestPopoverController(document).authorize(current.activation)) return;
+        // The guest reports content height; a floating card adds its two border pixels, the sheet has none.
+        const nextHeight = Math.max(GUEST_POPOVER_HEIGHT_MIN, Math.min(GUEST_POPOVER_HEIGHT_MAX, height + (sheet ? 0 : 2)));
+        if (current.request.height === nextHeight) return;
+        const request = { ...current.request, height: nextHeight };
+        if (sheet) {
+          const next = { ...current, request };
+          activePopoverRef.current = next;
+          setActivePopover(next);
+          return;
+        }
+        const bounds = frame.getBoundingClientRect();
+        const position = positionGuestPopover({
+          ...request,
+          frame: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height,
+            clientWidth: frame.clientWidth, clientHeight: frame.clientHeight },
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+        });
+        if (!position) { closeActivePopover('anchor'); return; }
+        const next = { ...current, request, position };
+        activePopoverRef.current = next;
+        setActivePopover(next);
+      }}
+      onPopoverClosed={(event) => {
+        if (activePopoverRef.current?.request.id === event.id) closeActivePopover(event.reason);
+      }}
+      onPopoverActivity={(active) => {
+        if (sheet || activePopoverRef.current?.activation !== activePopover.activation) return;
+        popoverOverlayActiveRef.current = active;
+        if (active) clearPopoverCloseTimer();
+        else schedulePopoverClose(activePopover.activation, 'outside');
+      }}
+    />
+    </DockedPanelSurfaceContext.Provider>
+  ) : null;
+  const popoverOverlay = !activePopover ? null : sheet ? (
+    <GuestPopoverSheet height={activePopover.request.height} label={guest.name} ownerFrame={iframeRef.current} onClose={() => closeActivePopover('outside')}>
+      {popoverChild}
+    </GuestPopoverSheet>
+  ) : (
+    <GuestPopover
+      position={activePopover.position}
+      focused={Boolean(activePopover.request.focus)}
+      label={guest.name}
+      ownerFrame={iframeRef.current}
+      onClose={(reason) => closeActivePopover(reason)}
+      onEnter={() => {
+        popoverOverlayActiveRef.current = true;
+        clearPopoverCloseTimer();
+      }}
+      onLeave={() => {
+        popoverOverlayActiveRef.current = false;
+        schedulePopoverClose(activePopover.activation, 'outside');
+      }}
+      onOutsideHover={() => {
+        if (!popoverAnchorActiveRef.current && !popoverOverlayActiveRef.current && popoverCloseTimerRef.current !== null) return;
+        popoverAnchorActiveRef.current = false;
+        popoverOverlayActiveRef.current = false;
+        schedulePopoverClose(activePopover.activation, 'outside');
+      }}
+    >
+      {popoverChild}
+    </GuestPopover>
+  );
+
   return (
     <>
       <iframe
@@ -1145,76 +1239,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         sendBackgroundAction();
       }}
       />
-      {activePopover ? (
-        <GuestPopover
-          position={activePopover.position}
-          focused={Boolean(activePopover.request.focus)}
-          label={guest.name}
-          ownerFrame={iframeRef.current}
-          onClose={(reason) => closeActivePopover(reason)}
-          onEnter={() => {
-            popoverOverlayActiveRef.current = true;
-            clearPopoverCloseTimer();
-          }}
-          onLeave={() => {
-            popoverOverlayActiveRef.current = false;
-            schedulePopoverClose(activePopover.activation, 'outside');
-          }}
-          onOutsideHover={() => {
-            if (!popoverAnchorActiveRef.current && !popoverOverlayActiveRef.current && popoverCloseTimerRef.current !== null) return;
-            popoverAnchorActiveRef.current = false;
-            popoverOverlayActiveRef.current = false;
-            schedulePopoverClose(activePopover.activation, 'outside');
-          }}
-        >
-          {/* Floats over the app, so never on a docked panel's page. */}
-          <DockedPanelSurfaceContext.Provider value={false}>
-          <PluginPane
-            mode={mode}
-            surface="popover"
-            item={null}
-            popoverHost={{
-              entry: activePopover.entry,
-              directory: activePopover.directory,
-              context: { id: activePopover.request.id, data: activePopover.request.data },
-              activation: activePopover.activation,
-              focus: Boolean(activePopover.request.focus),
-            }}
-            isActive={() => getGuestPopoverController(document).authorize(activePopover.activation)}
-            onResize={(height) => {
-              const current = activePopoverRef.current;
-              const frame = iframeRef.current;
-              if (!current || current.activation !== activePopover.activation || !frame
-                || !getGuestPopoverController(document).authorize(current.activation)) return;
-              // The guest reports content height; include the host's two border pixels.
-              const nextHeight = Math.max(GUEST_POPOVER_HEIGHT_MIN, Math.min(GUEST_POPOVER_HEIGHT_MAX, height + 2));
-              if (current.request.height === nextHeight) return;
-              const bounds = frame.getBoundingClientRect();
-              const request = { ...current.request, height: nextHeight };
-              const position = positionGuestPopover({
-                ...request,
-                frame: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height,
-                  clientWidth: frame.clientWidth, clientHeight: frame.clientHeight },
-                viewport: { width: window.innerWidth, height: window.innerHeight },
-              });
-              if (!position) { closeActivePopover('anchor'); return; }
-              const next = { ...current, request, position };
-              activePopoverRef.current = next;
-              setActivePopover(next);
-            }}
-            onPopoverClosed={(event) => {
-              if (activePopoverRef.current?.request.id === event.id) closeActivePopover(event.reason);
-            }}
-            onPopoverActivity={(active) => {
-              if (activePopoverRef.current?.activation !== activePopover.activation) return;
-              popoverOverlayActiveRef.current = active;
-              if (active) clearPopoverCloseTimer();
-              else schedulePopoverClose(activePopover.activation, 'outside');
-            }}
-          />
-          </DockedPanelSurfaceContext.Provider>
-        </GuestPopover>
-      ) : null}
+      {popoverOverlay}
     </>
   );
 };

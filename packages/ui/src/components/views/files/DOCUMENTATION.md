@@ -787,7 +787,10 @@ built-in preview: a text editor only text files, a binary editor
 surface="file"` with a per-mount channel (`lib/guests/file-editor-channel.ts`)
 holding the draft at mount; the frame gets the file on `hello` / load, answers
 snapshot requests within `GUEST_REQUEST_TIMEOUT_MS`, and reports changes. VS
-Code and mobile keep the extension catalog empty, so there nothing matches.
+Code keeps the extension catalog empty, so nothing matches there. The phone's
+Files tab (`MobileFilesSurface` → `FilesView`) matches editors like the
+desktop, with no manifest opt-in: a file editor owns the whole view, so it
+needs none of the room a panel would.
 
 The contract is one-directional content. The frame reads the file it was
 handed at mount, so `FilesView` remounts it with a `key` of path plus

@@ -4854,9 +4854,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   ) : null;
 
   const openExcalidrawExtensionCard = React.useCallback(() => {
-    const ui = useUIStore.getState();
-    ui.requestSettingsJump('integrations', 'integrations.extensions.excalidraw');
-    ui.setSettingsDialogOpen(true);
+    useUIStore.getState().openSettingsAt('integrations', 'integrations.extensions.excalidraw');
   }, []);
 
   // Above the scroller, so an editor opened far down the file is on screen.

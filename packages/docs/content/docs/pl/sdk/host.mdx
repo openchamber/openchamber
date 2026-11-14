@@ -32,6 +32,7 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 | `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
 | `connection` | `{ connected, account }` dla Twojej integracji |
 | `settings` | wartości pól zadeklarowanych w `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` lub `desktop`; `coarse` lub `fine`; marginesy bezpiecznego obszaru w px; px zasłonięte przez klawiaturę ekranową. Wysyłane ponownie, gdy coś się zmieni, na przykład przy obrocie lub klawiaturze. Starsze hosty go pomijają. Zobacz [Na telefonie](/sdk/#na-telefonie). |
 
 Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 
@@ -45,7 +46,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | --- | --- |
 | `toast({ kind, message })` | pokazuje toast w aplikacji. `kind` to `info`, `success` lub `error`. |
 | `openUrl(url)` | otwiera adres URL w przeglądarce użytkownika |
-| `openSurface(surfaceId)` | przełącza aplikację na ten ekran |
+| `openSurface(surfaceId)` | przełącza aplikację na ten ekran. Na telefonie twój panel otwiera się jako jego karta w obszarze roboczym, gdy manifest ustawia `panel.mobile`, a w przeciwnym razie wywołanie jest odrzucane z `UNSUPPORTED`. |
 | `writeClipboard(text)` | kopiuje tekst. Od 1 do 32000 znaków. |
 | `compose({ text, mode? })` | wstawia tekst do pola czatu bez wysyłania. `mode` to `append` (domyślnie) lub `replace`. Od 1 do 16000 znaków po przycięciu. |
 | `attach({ ... })` | umieszcza chip na polu czatu, w tym samym miejscu, gdzie trafiają elementy z GitHub i Linear. Tylko jeden chip naraz. |
@@ -272,7 +273,7 @@ await host.setMark({ sessionId }, null);
 | `{ directory, branch }` | każda sesja na tej gałęzi i wiersz worktree tej gałęzi; `directory` to dowolny folder repozytorium |
 | `{ directory }` | sesje w tym folderze i worktree, który się w nim znajduje |
 
-`icon` to nazwa z Remixicon, `tone` to `neutral`, `info`, `success`, `warning` albo `error`, a `text` (do 200 znaków) to podpowiedź, pokazywana po nazwie rozszerzenia. Kliknięcie otwiera Twój panel w sesji tego wiersza. Rozszerzenie bez panelu może dodać adres `https` w `url`, a kliknięcie otwiera ten adres.
+`icon` to nazwa z Remixicon, `tone` to `neutral`, `info`, `success`, `warning` albo `error`, a `text` (do 200 znaków) to podpowiedź, pokazywana po nazwie rozszerzenia. Kliknięcie otwiera Twój panel w sesji tego wiersza. Rozszerzenie bez panelu może dodać adres `https` w `url`, a kliknięcie otwiera ten adres. Na telefonie dotknięcie otwiera kartę twojego panelu w obszarze roboczym, w sesji tego wiersza, gdy manifest ustawia `panel.mobile`; w przeciwnym razie pokazuje `text` znacznika i otwiera jego `url`, jeśli go ma.
 
 Ponowne ustawienie celu zastępuje jego znacznik, a `null` go usuwa. Wiersz rysuje najwyżej dwa znaczniki, po jednym na rozszerzenie, i wymienia wszystkie w swojej podpowiedzi. W wierszu jednoliniowym przyciski wiersza zasłaniają znaczniki, gdy wskaźnik jest nad nim, więc kliknięcie trafia w znacznik w wierszach dwuliniowych i na ekranach dotykowych.
 

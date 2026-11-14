@@ -179,6 +179,35 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
   );
 };
 
+/**
+ * The user's own command that creates this project's worktrees in place of
+ * `git worktree add`. Personal only: it names a tool on this machine.
+ */
+const CreateCommand: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; setupState: ProjectSetupState }> = ({ projectRef, setup, setupState }) => {
+  const { t } = useI18n();
+  const value = setup.personal.createWorktreeCommand;
+  return (
+    <div className="space-y-2">
+      <div className="flex max-w-[40rem] items-center gap-2">
+        <CommandInput
+          value={value}
+          placeholder={t('settings.openchamber.worktrees.create.commandPlaceholder')}
+          ariaLabel={t('settings.openchamber.worktrees.create.commandAria')}
+          onCommit={(command) => void updateProjectSetup(projectRef, { createWorktreeCommand: command.trim() }).then(async (ok) => {
+            if (!ok) toast.error(t('settings.openchamber.worktrees.create.toast.saveFailed'));
+            await setupState.reload();
+          })}
+        />
+        <ProjectScopeChip source="personal" />
+      </div>
+      <div className="space-y-0.5">
+        <p className="typography-meta font-medium text-foreground">{t('settings.openchamber.worktrees.create.emptyUsesGit')}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.worktrees.create.syntax')}</p>
+      </div>
+    </div>
+  );
+};
+
 export const ProjectWorktreesTab: React.FC<{
   projectRef: ProjectRef;
   setupState: ProjectSetupState;
@@ -212,6 +241,16 @@ export const ProjectWorktreesTab: React.FC<{
 
   return (
     <>
+      {setupState.load.state === 'ready' ? (
+        <SettingsSection
+          title={t('settings.openchamber.worktrees.create.title')}
+          settingsItem="projects.worktree.create"
+          info={t('settings.openchamber.worktrees.create.info')}
+        >
+          <CreateCommand projectRef={projectRef} setup={setupState.load.setup} setupState={setupState} />
+        </SettingsSection>
+      ) : null}
+
       <SettingsSection
         title={t('settings.openchamber.worktrees.setup.title')}
         settingsItem="projects.worktree"

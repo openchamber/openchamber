@@ -80,7 +80,8 @@ import { useClosePinnedWork } from '../works/useClosePinnedWork';
 import { getSessionPinList, isSessionPinned } from '@/lib/sessionPins';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { useI18n } from '@/lib/i18n';
-import { useConversationSearch, type ContentSearchStatus } from '@/hooks/useConversationSearch';
+import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
+import { useSidebarConversationSearch } from '../useSidebarConversationSearch';
 import { searchScopeQuery, type SearchScope } from '@/lib/search/omniQuery';
 import { resolveSidebarSearchScope, sidebarSearchMetadata } from '../sidebarConversationSearch';
 import type { ConversationResultProject } from '@/components/search/conversationResultContext';
@@ -237,15 +238,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     isAdmitted: searchScope.isAdmitted, owners: ownership.bySessionId, projects: topology.projects, worktrees: topology.availableWorktreesByProject,
   }) : [], [searchActive, allSearchSessions, searchScope, ownership.bySessionId, topology.projects, topology.availableWorktreesByProject]);
   const searchQuery = React.useMemo(() => searchScopeQuery(view.searchScope), [view.searchScope]);
-  const conversationSearch = useConversationSearch({
+  // Archived conversations are always searched; the list shows them after the active ones.
+  const conversationSearch = useSidebarConversationSearch({
     enabled: searchActive && searchScope.available,
     text: view.searchText,
-    // Archived conversations are always searched; the list shows them after the active ones.
-    lifecycle: 'all',
     searchIn: searchQuery.searchIn,
     author: searchQuery.author,
     metadataItems: searchMetadata,
-    branchOnly: true,
     isAdmitted: searchScope.isAdmitted,
     directories: searchScope.directories,
   });
@@ -1268,7 +1267,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     ? new Set<string>(['chats', 'pinned', 'work', 'timeline', PROJECTS_CAPTION_COLLAPSE_KEY, ...visibleSections.flatMap((section) => (
       section.kind === 'custom' ? [sidebarSectionActivityKey(section.section.id)] : []))])
     : projectView.collapsedActivities), [blockDrag, projectView.collapsedActivities, visibleSections]);
-  const hasMoreSearchResults = conversationSearch.contentStatus.kind === 'ready' && conversationSearch.contentStatus.hasMore;
+  const searchSectionsWithMore = conversationSearch.sectionsWithMore;
   const searchIncomplete = conversationSearch.contentStatus.kind === 'loading' || (conversationSearch.contentStatus.kind === 'ready'
     && (conversationSearch.contentStatus.indexing !== null || !conversationSearch.contentStatus.lifecycleComplete));
   const sidebarRowModel = React.useMemo(() => buildSessionSidebarRowModel({
@@ -1289,7 +1288,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     foldersMap,
     contentSearchResults: conversationResults,
     revealedSearchSections,
-    hasMoreSearchResults,
+    searchSectionsWithMore,
     searchIncomplete,
     searchLocationById,
     searchProjectById,
@@ -1317,7 +1316,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
     blocks: sidebarBlocks,
-  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, hasMoreSearchResults, searchIncomplete, searchLocationById, searchProjectById]);
+  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
   React.useEffect(() => {
     onSearchMatchCountChange(searchTotalCount);
   }, [searchTotalCount, onSearchMatchCountChange]);

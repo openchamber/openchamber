@@ -169,8 +169,8 @@ the models.dev logo and the generic fallback. An upload or an extension's logo
 keeps its colours, so it gets no `dark:invert`. While one loads the slot stays
 empty at its size, except that a bundled logo stays on screen until an
 extension's replaces it, and a failed load or draw falls through to the next
-mark. VS Code and mobile keep the guest catalog empty, so extension logos do not
-reach them. A custom provider sets the image in its edit form, beside the icon
+mark. VS Code keeps the guest catalog empty, so extension logos do not reach
+it; the phone loads the catalog and draws them like the desktop. A custom provider sets the image in its edit form, beside the icon
 picker, and Save applies what the user did there after the provider itself is
 saved: a picked file is uploaded, Remove deletes the stored image, and an
 untouched field keeps whatever is stored (a logo kept from when the provider

@@ -46,14 +46,12 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { GuestRowMarkLines, GuestRowMarks } from './GuestRowMarks';
-import { useRowGuestMarks } from './useRowGuestMarks';
+import { useSessionRowGuestMarks } from './useRowGuestMarks';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { RowGuestMark } from '@/lib/guests/marks';
-import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { useGitBranchLabel } from '@/stores/useGitStore';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
@@ -446,33 +444,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     sessionProjectId ? state.projects.find((entry) => entry.id === sessionProjectId)?.path ?? null : null,
   );
   const trackerDirectory = projectRootDirectory ?? sessionDirectory;
-  // Extensions' marks (`contributes.marks`): the session's own, its branch's
-  // and its folder's. An isolated space's rows show none, since no service
-  // hears of a space's sessions, and VS Code loads no extensions.
-  const guestMarksOff = isVSCode || isSpaceDirectory(sessionDirectory);
-  const markRootDirectory = normalizePath(projectRootDirectory);
-  // The folder that holds the session's own: its worktree, else the project
-  // root. In the tree a row without a worktree lies in the root, whatever
+  // Extensions' marks (`contributes.marks`); VS Code loads no extensions.
+  // In the tree a row without a worktree lies in the project root, whatever
   // subfolder the session started in; elsewhere only the root itself counts.
-  const markContainerDirectory = guestMarksOff
-    ? null
-    : normalizePath(node.worktree?.path ?? null) ?? (markRootDirectory && sessionDirectory && (
-      sessionDirectory === markRootDirectory
-      || (renderContext === 'project' && !archivedBucket && sessionDirectory.startsWith(`${markRootDirectory}/`))
-    ) ? markRootDirectory : null);
-  // The row's branch is the one the sidebar already has, live Git state
-  // first; a row that knows none shows no branch mark.
-  const liveBranch = useGitBranchLabel(guestMarksOff ? null : sessionDirectory);
-  const liveContainerBranch = useGitBranchLabel(markContainerDirectory);
-  const markBranch = guestMarksOff
-    ? null
-    : liveBranch || liveContainerBranch || node.worktree?.branch?.trim() || (branchInSpace ? null : secondaryMeta?.branchLabel?.trim()) || null;
-  const guestMarks = useRowGuestMarks({
-    sessionId: guestMarksOff ? null : session.id,
-    projectId: guestMarksOff ? null : sessionProjectId ?? null,
-    branch: markBranch,
-    folder: guestMarksOff ? null : sessionDirectory,
-    containerFolder: markContainerDirectory,
+  const guestMarks = useSessionRowGuestMarks({
+    shown: !isVSCode,
+    sessionId: session.id,
+    directory: sessionDirectory,
+    projectId: sessionProjectId ?? null,
+    projectRoot: projectRootDirectory,
+    worktree: node.worktree,
+    inProjectTree: renderContext === 'project' && !archivedBucket,
+    metaBranch: branchInSpace ? null : secondaryMeta?.branchLabel ?? null,
   });
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a

@@ -33,4 +33,10 @@ describe('UI kit styles', () => {
     expect(UI_CSS).toContain(GUEST_UI_LOOK_CSS);
     expect(UI_CSS).toContain('.oc-sdk-btn { display: inline-flex;');
   });
+
+  test('a coarse pointer grows rows to the app touch floor in the bundle geometry', () => {
+    const coarse = UI_CSS.slice(UI_CSS.indexOf('@media (pointer: coarse)'));
+    expect(coarse).toContain('.oc-sdk-row, .oc-sdk-option { min-height: calc(44rem / 14); }');
+    expect(GUEST_UI_LOOK_CSS).not.toContain('pointer: coarse');
+  });
 });
