@@ -672,7 +672,12 @@ the process was spawned: the main process's own `[startup-performance]` marks
 (entry module, Electron ready, window created and shown, main module loaded,
 server start and ready, OpenCode ready, application navigation and load), and
 renderer readiness from `startup-probe.mjs`, a recorder installed into the
-application document before it runs and checked once per animation frame:
+application document and checked once per animation frame. The application
+navigates before the debugging port answers, so the recorder usually goes into
+a document that is already loading; marks from before that moment come from
+the polled fields, and `trace:` marks the app made earlier are missing.
+`applicationDocuments` in a sample counts the application documents seen: more
+than one means the window loaded the application again during startup.
 
 - `reactMounted`: a child of `#root` carries React's fiber expando. `#root`
   holds the HTML splash `#initial-loading` from the first parsed byte, so a
@@ -690,6 +695,11 @@ application document before it runs and checked once per animation frame:
   and a selected model;
 - `trace:<name>`: the first occurrence of every `markStartupTrace` mark (the
   recorder turns the `OPENCHAMBER_STARTUP_TRACE` flag on);
+- `transcriptPresent` and `transcriptShown` with `--transcript`: a message of
+  the session the launch restores is rendered, then its reveal has finished.
+  The home has to restore one: import a session into the bench home
+  (*A Real Session In The Stand*, with the bench home's `HOME` and `XDG_*`),
+  open it once in the bench app and quit, then run without `--fresh`;
 - `rendererIdle` once the renderer main thread stayed quiet for `--settle-ms`.
 
 Medians and p95 with min…max over the measured runs. A launch fails, and the
