@@ -159,7 +159,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "yaml": "^2.8.1",
-    "zod": "^4.3.6",
+    "zod": "^4.6.7",
     "zustand": "^5.0.8"
   },
   "overrides": {
@@ -207,6 +207,7 @@
     "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch",
     "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch",
     "happy-dom@21.0.4": "bun-patches/happy-dom@21.0.4.patch",
-    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch"
+    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch",
+    "zod@4.6.7": "bun-patches/zod@4.6.7.patch"
   }
 }
