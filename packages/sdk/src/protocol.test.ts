@@ -215,6 +215,43 @@ describe('parseHostMessage', () => {
     }
   });
 
+  test('accepts a session snapshot with a context fill', () => {
+    const message = parseHostMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'session',
+      payload: {
+        session: {
+          id: 'ses-1',
+          title: 'Hello',
+          busy: true,
+          usage: { totalTokens: 62_400, contextLimit: 200_000, percentage: 31.2 },
+        },
+      },
+    });
+    expect(message?.type).toBe('session');
+    if (message?.type === 'session') {
+      expect(message.payload.session?.usage).toEqual({ totalTokens: 62_400, contextLimit: 200_000, percentage: 31.2 });
+    }
+  });
+
+  test('drops a context fill it cannot trust', () => {
+    const ready = (usage: unknown) => hostMessageSchema.safeParse({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'ready',
+      payload: {
+        ...readyPayload,
+        session: { id: 'ses-1', title: 'Hello', busy: false, usage },
+      },
+    }).success;
+    expect(ready({ totalTokens: 10, contextLimit: 0, percentage: 1 })).toBe(false);
+    expect(ready({ totalTokens: -1, contextLimit: 100, percentage: 1 })).toBe(false);
+    expect(ready({ totalTokens: 10, contextLimit: 100, percentage: -1 })).toBe(false);
+    expect(ready({ totalTokens: 10.5, contextLimit: 100, percentage: 10 })).toBe(false);
+    expect(ready({ totalTokens: 10, contextLimit: 100, percentage: 10 })).toBe(true);
+  });
+
   test('drops ready without a surface field', () => {
     expect(hostMessageSchema.safeParse({
       channel: OPENCHAMBER_SDK_CHANNEL,

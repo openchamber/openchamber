@@ -95,7 +95,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `theme.tokens` | surfaces, text, interaction states, `primary`, status colors, `font`, `fontSize` (the app's body text in px, follows the interface font size; absent from older hosts), `mono`, `radius` | Pass to `applyHostReady` before mounting UI |
 | `locale`       | `string`                 | Host language tag                                                                        |
 | `directory`    | `string                  | null`                                                                                    |
-| `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
+| `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present. `usage` is `{ totalTokens, contextLimit, percentage }` from the host's own reading, absent while the fill is unknown or a finished compaction reset it |
 | `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover' \| 'block'` | Where the host mounted this frame |
 | `popover` | optional `{ id, data }` | Present in a host-created popover frame. `data` is bounded JSON from the owning frame |
 | `connection`   | `{ connected, account }` | Integration link state; a tracker extension without an integration gets its tracker account |

@@ -9,6 +9,7 @@ import {
   guestSessionLifecyclePhase,
   guestSessionModelId,
   toGuestSessionSnapshot,
+  toGuestSessionUsage,
 } from './host-bridge.ts';
 
 const toast: GuestMessage = {
@@ -639,6 +640,44 @@ describe('toGuestSessionSnapshot', () => {
     expect(guestSessionModelId({ providerID: 'anthropic', id: 'claude' })).toBe('anthropic/claude');
     expect(guestSessionModelId({ providerID: '  ', id: 'claude' })).toBe(undefined);
     expect(guestSessionModelId(undefined)).toBe(undefined);
+  });
+
+  test('carries the context fill when the host measured one', () => {
+    expect(toGuestSessionSnapshot({
+      id: 'ses-1',
+      usage: { totalTokens: 62_400, contextLimit: 200_000 },
+    })).toEqual({
+      id: 'ses-1',
+      title: 'ses-1',
+      busy: false,
+      usage: { totalTokens: 62_400, contextLimit: 200_000, percentage: 31.2 },
+    });
+  });
+
+  test('leaves usage out rather than sending zeros', () => {
+    expect(toGuestSessionSnapshot({ id: 'ses-1', usage: null })).not.toHaveProperty('usage');
+    expect(toGuestSessionSnapshot({ id: 'ses-1' })).not.toHaveProperty('usage');
+  });
+
+  test('drops a fill the guest could not read', () => {
+    expect(toGuestSessionUsage({ totalTokens: 10, contextLimit: 0 })).toBe(undefined);
+    expect(toGuestSessionUsage({ totalTokens: 10, contextLimit: -1 })).toBe(undefined);
+    expect(toGuestSessionUsage({ totalTokens: Number.NaN, contextLimit: 1_000 })).toBe(undefined);
+    expect(toGuestSessionUsage({ totalTokens: -1, contextLimit: 1_000 })).toBe(undefined);
+    expect(toGuestSessionUsage(null)).toBe(undefined);
+  });
+
+  test('rounds tokens and reports a window the session outgrew', () => {
+    expect(toGuestSessionUsage({ totalTokens: 205_000.4, contextLimit: 200_000 })).toEqual({
+      totalTokens: 205_000,
+      contextLimit: 200_000,
+      percentage: 102.5,
+    });
+    expect(toGuestSessionUsage({ totalTokens: 1, contextLimit: 3 })).toEqual({
+      totalTokens: 1,
+      contextLimit: 3,
+      percentage: 33.33,
+    });
   });
 });
 

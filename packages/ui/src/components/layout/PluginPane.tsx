@@ -102,6 +102,7 @@ import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
 import type { Session } from '@/lib/opencode/model';
 import { GuestPopover } from './GuestPopover';
 import { GuestPopoverSheet } from './GuestPopoverSheet';
+import { useSessionContextReading } from './useCurrentContextReading';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
 
 type PluginPaneProps = {
@@ -269,6 +270,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [clearBadge, guestId, headless, surface]);
   const sessionBusy = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
   const lifecyclePhase = guestSessionLifecyclePhase(sessionStatus);
+  // The same fill the header reads, for the session this frame shows.
+  const { fill: contextFill, limit: contextLimit } = useSessionContextReading(currentSessionId ?? null, directory || undefined);
   const sessionSnapshot = React.useMemo(
     () => toGuestSessionSnapshot(
       currentSessionId
@@ -278,10 +281,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           busy: sessionBusy,
           model: session?.model,
           agent: session?.agent,
+          // A compacted fill is unknown, not empty; the snapshot leaves it out.
+          usage: contextFill?.state === 'measured'
+            ? { totalTokens: contextFill.totalTokens, contextLimit }
+            : undefined,
         }
         : null,
     ),
-    [actionItem, currentSessionId, session, sessionBusy],
+    [actionItem, contextFill, contextLimit, currentSessionId, session, sessionBusy],
   );
 
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);

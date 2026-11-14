@@ -543,6 +543,7 @@ export type {
   HostThemeMode,
   HostThemeTokens,
   SessionSnapshot,
+  SessionUsage,
   ToastKind,
   ToastRequest,
 } from './contract.ts';
