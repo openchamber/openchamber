@@ -14,7 +14,7 @@ const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => (
 
 describe('sidebarSectionsSchema', () => {
   test('an empty list is the default order, and what is not a list is rejected', () => {
-    expect(sidebarSectionsSchema.parse([]).map((entry) => entry.id)).toEqual(['chats', 'pinned', 'work', 'projects']);
+    expect(sidebarSectionsSchema.parse([]).map((entry) => entry.id)).toEqual(['pages', 'chats', 'pinned', 'work', 'projects']);
     expect(sidebarSectionsSchema.safeParse('junk').success).toBe(false);
   });
 
@@ -28,11 +28,33 @@ describe('sidebarSectionsSchema', () => {
       'junk',
       { kind: 'builtin', id: 'chats' },
     ]);
-    // Pinned follows Chats, as by default, and In work follows Pinned.
-    expect(sections.map((entry) => entry.id)).toEqual(['projects', 'mine', 'chats', 'pinned', 'work']);
+    // Pages leads, Pinned follows Chats, as by default, and In work follows Pinned.
+    expect(sections.map((entry) => entry.id)).toEqual(['pages', 'projects', 'mine', 'chats', 'pinned', 'work']);
     const mine = sections.find((entry) => entry.id === 'mine');
     expect(mine).toMatchObject({ kind: 'custom', name: 'Mine', grouping: 'time', claims: false, hideWhenEmpty: true });
     expect(mine?.kind === 'custom' ? mine.filter.states : null).toEqual(['running']);
+  });
+
+  test('an order saved before Pages existed gets it first', () => {
+    const sections = sidebarSectionsSchema.parse([
+      { kind: 'builtin', id: 'chats' },
+      { kind: 'builtin', id: 'pinned' },
+      { kind: 'custom', id: 'mine', name: 'Mine' },
+      { kind: 'builtin', id: 'work' },
+      { kind: 'builtin', id: 'projects' },
+    ]);
+    expect(sections.map((entry) => entry.id)).toEqual(['pages', 'chats', 'pinned', 'mine', 'work', 'projects']);
+  });
+
+  test('an order that has Pages keeps it where the user put it', () => {
+    const sections = sidebarSectionsSchema.parse([
+      { kind: 'builtin', id: 'chats' },
+      { kind: 'builtin', id: 'pinned' },
+      { kind: 'builtin', id: 'work' },
+      { kind: 'builtin', id: 'projects' },
+      { kind: 'builtin', id: 'pages' },
+    ]);
+    expect(sections.map((entry) => entry.id)).toEqual(['chats', 'pinned', 'work', 'projects', 'pages']);
   });
 
   test('a section keeps the folders it asks for, and a group of projects drops them', () => {

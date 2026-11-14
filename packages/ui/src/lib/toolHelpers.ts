@@ -170,6 +170,14 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        ]
      },
 
+    // The chat row takes the Work Status section's localized name (`ToolPart`).
+    todowrite: {
+      displayName: 'Tasks',
+      category: 'ai',
+      outputLanguage: 'text',
+      inputFields: []
+    },
+
     openchamber: {
       displayName: 'OpenChamber',
       category: 'system',

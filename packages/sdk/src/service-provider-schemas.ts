@@ -165,6 +165,7 @@ const mutationResultSchema = z.object({
   outcome: z.enum(['queued', 'merging']).optional(),
   stacked: z.boolean().optional(),
   ready: z.boolean().optional(),
+  draft: z.boolean().optional(),
   commented: z.boolean().optional(),
   failureStatus: z.number().int().min(400).max(599).optional(),
   failureCode: text.optional(),

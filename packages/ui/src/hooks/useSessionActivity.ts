@@ -1,7 +1,7 @@
 import React from 'react';
 import { getLastConversationMessage, isIncompleteAssistantTurn, type Message } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionStatus, useSessionMessagesSelector, useSessionPermissions, useSessionForms } from '@/sync/sync-context';
+import { useSessionStatus, useSessionStatusSnapshotReady, useSessionMessagesSelector, useSessionPermissions, useSessionForms } from '@/sync/sync-context';
 
 // Mirrors OpenCode SessionStatus: busy|retry|idle.
 type SessionActivityPhase = 'idle' | 'busy' | 'retry';
@@ -38,6 +38,7 @@ const IDLE_RESULT: SessionActivityResult = {
  */
 export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
   const status = useSessionStatus(sessionId ?? '', directory);
+  const statusSnapshotReady = useSessionStatusSnapshotReady(directory, sessionId ?? '');
   const hasPendingAssistant = useSessionMessagesSelector(sessionId ?? '', directory, selectHasPendingAssistant);
   const permissions = useSessionPermissions(sessionId ?? '', directory);
   const forms = useSessionForms(sessionId ?? '', directory);
@@ -52,8 +53,11 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
     const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
 
     // Only trust the trailing assistant message as a transient fallback while
-    // waiting for session.status/message.updated to settle.
-    const hasAuthoritativeStatus = status !== undefined;
+    // waiting for session.status/message.updated to settle. OpenCode lists
+    // only running sessions, so once the directory's status snapshot has landed
+    // an omitted status is idle: a turn OpenCode was stopped under (the app
+    // restarted) keeps its assistant message incomplete for good.
+    const hasAuthoritativeStatus = status !== undefined || statusSnapshotReady;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
     const isWorking = statusWorking || hasPendingAssistant;
 
@@ -67,7 +71,7 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
       isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
       isCooldown: false,
     };
-  }, [sessionId, status, hasPendingAssistant, permissions, forms]);
+  }, [sessionId, status, statusSnapshotReady, hasPendingAssistant, permissions, forms]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

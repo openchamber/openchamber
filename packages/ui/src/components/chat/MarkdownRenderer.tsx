@@ -6,8 +6,9 @@ import { getLoadedMarkdownRendererModule, loadMarkdownRendererModule } from './m
 import type { MarkdownContentProps, MarkdownRendererProps, SimpleMarkdownRendererProps as SimpleRendererProps } from './MarkdownRendererImpl';
 
 // Thin lazy wrapper around the MarkdownRenderer implementation.
-// Streamdown, its official plugins and beautiful-mermaid load on demand, keeping the
-// initial bundle lean.
+// Streamdown and its official plugins load on demand, keeping the initial
+// bundle lean; beautiful-mermaid loads later still, with the first diagram
+// (`markdown/MarkdownMermaid.tsx`).
 
 const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
   loadMarkdownRendererModule().then((m) => ({ default: m.MarkdownRenderer }))

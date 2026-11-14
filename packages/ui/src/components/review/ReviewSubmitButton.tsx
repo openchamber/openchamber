@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -197,6 +198,7 @@ export const ReviewSubmitButton: React.FC<{
                 <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
                     <Popover.Popup aria-label={t('review.submit.button')} className={cn(dropdownMenuPopupClass, 'w-[34rem] max-w-[calc(100vw-2rem)] p-3')}>
                         {form}
+                        <GlassRedrawGuard />
                     </Popover.Popup>
                 </Popover.Positioner>
             </Popover.Portal>

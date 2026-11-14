@@ -156,6 +156,7 @@ describe('Gerrit through the route shell', () => {
     const { app, gerrit } = await appWith({
       [`POST ${CHANGE}/submit`]: { ...fixtures.change, status: 'MERGED' },
       [`POST ${CHANGE}/ready`]: () => new Response('', { status: 200 }),
+      [`POST ${CHANGE}/wip`]: () => new Response('', { status: 200 }),
       [`POST ${CHANGE}/abandon`]: { ...fixtures.change, status: 'ABANDONED' },
       [`POST ${CHANGE}/revisions/current/review`]: fixtures.reviewResult,
       [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult,
@@ -173,6 +174,7 @@ describe('Gerrit through the route shell', () => {
       ['/pr/comment', { body: 'A note' }],
       ['/pr/merge', { method: 'submit' }],
       ['/pr/ready', {}],
+      ['/pr/draft', {}],
       ['/pr/state', { state: 'closed' }],
       ['/pr/reviewers', { reviewers: ['1000098'] }],
     ]) {

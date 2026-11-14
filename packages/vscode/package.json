@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -320,7 +320,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode/client": "2.2.6",
+    "@opencode/client": "2.3.0",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

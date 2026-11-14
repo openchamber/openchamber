@@ -11,6 +11,7 @@ type CompletedStepStats = {
   toolDurationMs: number | null;
   adjustedLlmDurationMs: number | null;
   ttftMs: number | null;
+  firstOutputMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
   reasoningTokens: number | null;
@@ -28,6 +29,8 @@ export type CompletedTurnStats = {
   totalLlmDurationMs: number | null;
   totalToolDurationMs: number | null;
   avgTtftMs: number | null;
+  /** Wait until the model's first output of any kind, as OpenCode records it (`time.firstToken`). */
+  avgFirstOutputMs: number | null;
   tokensPerSecond: number | null;
   responseTokensPerSecond: number | null;
   inputTokens: number | null;
@@ -221,6 +224,15 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     }
   }
 
+  // OpenCode's own record of the first output (text, reasoning or a tool
+  // call), stored with the step, so it reads the same live and after a
+  // reload. Steps written before OpenCode 2.3.0 have none.
+  const firstToken = info.time.firstToken;
+  const firstOutputMs = validWindow && firstToken !== undefined && Number.isFinite(firstToken)
+    && firstToken >= created && firstToken <= completed
+    ? firstToken - created
+    : null;
+
   const inputTokens = nonnegative(info.tokens?.input);
   const outputTokens = nonnegative(info.tokens?.output);
   const reasoningTokens = nonnegative(info.tokens?.reasoning);
@@ -232,6 +244,7 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     toolDurationMs,
     adjustedLlmDurationMs,
     ttftMs,
+    firstOutputMs,
     inputTokens,
     outputTokens,
     reasoningTokens,
@@ -331,8 +344,10 @@ function calculateTurnStats(
   let totalCacheWriteTokens: number | null = 0;
   let totalCost: number | null = 0;
   let totalTtft: number | null = 0;
+  let totalFirstOutput: number | null = 0;
 
   for (const step of stepStatsList) {
+    totalFirstOutput = add(totalFirstOutput, step.firstOutputMs);
     totalLlmDurationMs = add(totalLlmDurationMs, step.adjustedLlmDurationMs);
     totalToolDurationMs = add(totalToolDurationMs, step.toolDurationMs);
     totalInputTokens = add(totalInputTokens, step.inputTokens);
@@ -345,6 +360,7 @@ function calculateTurnStats(
   }
 
   const avgTtftMs = totalTtft === null ? null : totalTtft / stepStatsList.length;
+  const avgFirstOutputMs = totalFirstOutput === null ? null : totalFirstOutput / stepStatsList.length;
 
   const totalGeneratedTokens = add(totalOutputTokens, totalReasoningTokens);
   const tokensPerSecond = totalGeneratedTokens !== null && totalLlmDurationMs !== null
@@ -364,6 +380,7 @@ function calculateTurnStats(
     totalLlmDurationMs,
     totalToolDurationMs,
     avgTtftMs,
+    avgFirstOutputMs,
     tokensPerSecond,
     responseTokensPerSecond: calculateResponseTokenRate(records[lastCompletedAssistantIdx]),
     inputTokens: totalInputTokens,

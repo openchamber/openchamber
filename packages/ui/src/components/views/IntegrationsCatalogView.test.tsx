@@ -14,7 +14,7 @@ const descriptors = new Map<string, PropertyDescriptor | undefined>();
 // React DOM detects input-event support when imported, so install the DOM first.
 for (const [key, value] of Object.entries({
   window: browser,
-  document: browser.document,
+  document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent,
   navigator: browser.navigator,
   localStorage: browser.localStorage,
   Element: browser.Element,

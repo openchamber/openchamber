@@ -24,6 +24,10 @@
  *   `web/server/lib/pr-watch`): the row says what changed and opens the pull
  *   request. It does not expand, because the text only repeats that in an
  *   envelope and tells the agent what to do next.
+ * - An extension wait waking the agent (`source: "openchamber-wait"`,
+ *   `web/server/lib/extension-waits`): the row names the wait and opens to
+ *   the extension's report, which can run longer than the description's one
+ *   line.
  *
  * Hidden, and why:
  * - The rest about the session's instructions, as noise the maintainer saw in
@@ -33,8 +37,10 @@
  *   (`metadata.instruction.paths`, an AGENTS.md of a folder the agent entered).
  * - Composer context (an inline comment, terminal output, a linked issue):
  *   it folds into the user message as context chips.
- * - A background subagent's report and a dispatched session's result: they
- *   render as their own rows already (`subagent-run`, `dispatched-session`).
+ * - A background subagent's report, a dispatched session's result, a
+ *   workflow run's report and a shared page's answer: they render as their
+ *   own rows already (`subagent-run`, `dispatched-session`,
+ *   `workflows/report`, `share-pages/answer`).
  * - A background shell command's completion: it finishes the shell call's
  *   own row (`background-shell`).
  * - OpenChamber's notes to the agent that the user stopped a subagent or a
@@ -50,6 +56,7 @@ import { readContextPart } from "@/lib/messages/contextParts"
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
+import { readShareAnswer } from "@/lib/share-pages/answer"
 import type { Message, Metadata, Part, ToolPart } from "./model"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
@@ -65,12 +72,23 @@ const pullRequestNoticeSchema = z.object({
 
 export type PullRequestNotice = z.infer<typeof pullRequestNoticeSchema>
 
+const extensionWaitNoticeSchema = z.object({
+  kind: z.literal("extension-wait"),
+  subject: z.string().min(1),
+  outcome: z.enum(["fired", "ended"]),
+  summary: z.string(),
+  text: z.string(),
+})
+
+export type ExtensionWaitNotice = z.infer<typeof extensionWaitNoticeSchema>
+
 export type SessionNotice =
   | { kind: "plugin"; label: string; text: string }
   | { kind: "restart"; text: string }
   | { kind: "command-failed"; command: string; text: string }
   | { kind: "moved"; folder: string | null; text: string }
   | PullRequestNotice
+  | ExtensionWaitNotice
 
 const HIDDEN_DESCRIPTIONS = new Set(["ACP embedded context"])
 
@@ -105,6 +123,17 @@ const readPullRequestWake = (text: string, metadata: Metadata): PullRequestNotic
   return { kind: "pull-request", url, number: Number(number), events, failedChecks, authors, text }
 }
 
+const extensionWaitWakeSchema = extensionWaitNoticeSchema.pick({ subject: true, outcome: true, summary: true }).extend({
+  source: z.literal("openchamber-wait"),
+})
+
+const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitNotice | undefined => {
+  const parsed = extensionWaitWakeSchema.safeParse(metadata)
+  if (!parsed.success) return undefined
+  const { subject, outcome, summary } = parsed.data
+  return { kind: "extension-wait", subject, outcome, summary, text }
+}
+
 /** The notice a message carries, or undefined when the timeline does not show it. */
 export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (message.role === "system") return readMove(message)
@@ -113,13 +142,13 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (!description) return undefined
   const metadata = message.metadata ?? {}
   if (readContextPart({ type: "text", metadata: message.metadata })) return undefined
-  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message)) return undefined
+  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message) || readShareAnswer(message)) return undefined
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text
   if (restartSchema.safeParse(metadata).success) return { kind: "restart", text }
   if (failedCommandSchema.safeParse(metadata).success) return { kind: "command-failed", command: description, text }
-  return readPullRequestWake(text, metadata) ?? { kind: "plugin", label: description, text }
+  return readPullRequestWake(text, metadata) ?? readExtensionWaitWake(text, metadata) ?? { kind: "plugin", label: description, text }
 }
 
 // --- Notice rows inside a turn's Activity -----------------------------------
@@ -139,6 +168,7 @@ const noticeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("command-failed"), command: z.string(), text: z.string() }),
   z.object({ kind: z.literal("moved"), folder: z.string().nullable(), text: z.string() }),
   pullRequestNoticeSchema,
+  extensionWaitNoticeSchema,
 ])
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })

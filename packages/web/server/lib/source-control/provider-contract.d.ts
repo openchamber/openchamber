@@ -23,6 +23,8 @@ export interface ProviderCapabilities {
   issues: boolean;
   changeRequests: boolean;
   draftChangeRequests: boolean;
+  /** The host turns an open change request into a draft, not only the reverse. Absent means no. */
+  draftConversion?: boolean;
   merge: false | { methods: MergeMethod[] };
   ci: boolean;
   comments: boolean;

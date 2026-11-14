@@ -65,6 +65,12 @@ Options:
                            another one. Measures what an idle session costs
                            while a different session is active in the
                            background.
+  --parallel <n>           Stream the prompt into this many sessions at once
+                           (default: 1). The first one is displayed; the rest
+                           are new sessions in the same directory, created
+                           before recording, which is what running several
+                           agents side by side looks like to the page. The
+                           recording ends when every one of them is idle.
   --grow <turns>           Before recording, send this many turns into the
                            session while the page shows it, so the history
                            accumulates in memory the way it does for someone
@@ -159,6 +165,7 @@ const parseArgs = (argv) => {
     dir: repoRoot,
     session: null,
     viewSession: null,
+    parallel: 1,
     expandProjects: false,
     expandSessions: false,
     prompt: DEFAULT_PROMPT,
@@ -210,6 +217,7 @@ const parseArgs = (argv) => {
     else if (value === "--dir") options.dir = argv[++index]
     else if (value === "--session") options.session = argv[++index]
     else if (value === "--view-session") options.viewSession = argv[++index]
+    else if (value === "--parallel") options.parallel = Number(argv[++index])
     else if (value === "--expand-projects") options.expandProjects = true
     else if (value === "--expand-sessions") options.expandSessions = true
     else if (value === "--grow") options.grow = Number(argv[++index])
@@ -242,6 +250,8 @@ const parseArgs = (argv) => {
   }
   if (!Number.isFinite(options.quiet) || options.quiet < 0) throw new Error("--quiet must be a number of seconds")
   if (!Number.isInteger(options.grow) || options.grow < 0) throw new Error("--grow must be a number of turns")
+  if (!Number.isInteger(options.parallel) || options.parallel < 1) throw new Error("--parallel must be a number of sessions, 1 or more")
+  if (options.parallel > 1 && options.quiet > 0) throw new Error("--parallel streams into several sessions; --quiet sends no prompt")
   if (!Number.isFinite(options.cpuThrottle) || options.cpuThrottle < 1) throw new Error("--cpu-throttle must be a rate of 1 or more")
   if (options.grow > 0 && options.viewSession) throw new Error("--grow fills the displayed session; it cannot run with --view-session")
   if (options.processCpuOnly && (options.renderProbe || options.heapSampling)) throw new Error("--process-cpu-only switches every in-page instrument off; it cannot run with --render-probe or --heap-sampling")
@@ -300,8 +310,13 @@ const countRenderedMessages = async (client) => {
   const raw = await evaluateValue(client, `JSON.stringify({
     messages: document.querySelectorAll("[data-message-id]").length,
     characters: document.body.innerText.length,
-    perMessage: Object.fromEntries([...document.querySelectorAll("[data-message-id]")]
-      .map((element) => [element.getAttribute("data-message-id"), element.innerText.length])),
+    // A long message is several rows with the same id; count all of them,
+    // whatever order the list keeps them in.
+    perMessage: [...document.querySelectorAll("[data-message-id]")].reduce((total, element) => {
+      const id = element.getAttribute("data-message-id");
+      total[id] = (total[id] ?? 0) + element.innerText.length;
+      return total;
+    }, {}),
   })`)
   try {
     return JSON.parse(raw ?? "{}")
@@ -667,6 +682,17 @@ const main = async () => {
   } else {
     console.log(`Reusing session ${sessionId}`)
   }
+  // Created before the page loads, so the sidebar lists them from the start
+  // and only their streams fall inside the recording.
+  const parallelSessionIds = []
+  for (let index = 1; index < options.parallel; index += 1) {
+    const created = await runSessionCli([
+      "create", ...cliBase,
+      "--title", `perf: ${options.label ?? "streaming capture"} (parallel ${index + 1})`,
+    ])
+    parallelSessionIds.push(created.sessionId)
+  }
+  if (parallelSessionIds.length > 0) console.log(`Created ${parallelSessionIds.length} parallel sessions`)
 
   const port = attached ? options.attach : await reservePort()
   if (attached && options.forceAccessibility) throw new Error("--force-accessibility launches Chrome; it does not apply with --attach")
@@ -839,9 +865,9 @@ const main = async () => {
     if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.start()`)
     const startedAt = Date.now()
 
-    const sendArgs = [
+    const sendArgsFor = (id) => [
       "send", ...cliBase,
-      "--session", sessionId,
+      "--session", id,
       "--prompt", options.prompt,
       ...(options.model ? ["--model", options.model] : []),
       ...(options.agent ? ["--agent", options.agent] : []),
@@ -849,17 +875,25 @@ const main = async () => {
     const quiet = options.quiet > 0
     console.log(quiet
       ? `Recording ${options.quiet}s with the session open; no prompt is sent.`
-      : "Dispatching the prompt and recording until the session reports idle.")
-    const dispatch = quiet ? Promise.resolve(null) : runSessionCli(sendArgs, { timeoutMs: options.timeout * 1000 })
+      : `Dispatching the prompt into ${options.parallel} session(s) and recording until every one reports idle.`)
+    const dispatch = quiet ? Promise.resolve(null) : runSessionCli(sendArgsFor(sessionId), { timeoutMs: options.timeout * 1000 })
+    // The CLI's own wait ends each background send when its turn ends, so a
+    // reply that finishes between two status polls still counts as finished.
+    const parallelSettled = new Set()
+    const parallelDispatch = quiet ? [] : parallelSessionIds.map((id) => runSessionCli(
+      [...sendArgsFor(id), "--wait", "--timeout", String(options.timeout)],
+      { timeoutMs: (options.timeout + 30) * 1000 },
+    ).finally(() => { parallelSettled.add(id) }))
+    let sawBusy = false
 
     const samples = []
     let dispatchError = null
     let animationSnapshot = null
     let becameIdle = false
     dispatch.catch((error) => { dispatchError = error })
+    for (const pending of parallelDispatch) pending.catch((error) => { dispatchError = error })
 
     const deadline = startedAt + options.timeout * 1000
-    let sawBusy = false
     while (Date.now() < deadline) {
       await wait(1_000)
       const current = metricMap((await client.send("Performance.getMetrics")).metrics)
@@ -890,10 +924,16 @@ const main = async () => {
         .catch(() => null)
       const type = status?.sessionStatus?.type ?? status?.status
       if (type && type !== "idle") sawBusy = true
-      if (sawBusy && type === "idle") { becameIdle = true; break }
+      if (sawBusy && type === "idle" && parallelSettled.size === parallelSessionIds.length) { becameIdle = true; break }
     }
 
     if (dispatchError) throw dispatchError
+    // A background send can still fail after the loop; a run with a failed
+    // background session is not the workload it claims to be.
+    if (becameIdle) {
+      const failed = (await Promise.allSettled(parallelDispatch)).find((result) => result.status === "rejected")
+      if (failed) throw failed.reason
+    }
     if (!becameIdle) console.warn(`WARNING: the session did not report idle within ${options.timeout}s; the capture is truncated.`)
 
     const streamEndedAt = Date.now()
@@ -906,6 +946,10 @@ const main = async () => {
     await processCpu.sampleWakeups()
     const signals = pageSignals ? await pageSignals.stop() : null
     const assistantResponse = quiet ? null : await readAssistantResponse(cliBase, sessionId)
+    const parallelResponses = quiet ? [] : await Promise.all(parallelSessionIds.map(async (id) => ({
+      sessionId: id,
+      ...await readAssistantResponse(cliBase, id),
+    })))
     if (options.tail > 0) await wait(options.tail * 1000)
 
     const frameLiveness = await evaluateValue(client, `new Promise((resolveFrames) => {
@@ -1015,6 +1059,8 @@ const main = async () => {
       assistantResponse,
       renderedStream,
       grownTurns: options.grow,
+      parallelSessions: options.parallel,
+      parallelResponses,
       cpuThrottle: options.cpuThrottle,
       historyRecordsBefore,
       historyRecordsAfter,
@@ -1124,6 +1170,14 @@ const main = async () => {
         "\nWARNING: the session went idle without an assistant message, so no response streamed."
         + " The provider most likely rejected the request; check the OpenCode log and the --model value."
         + " This capture measures nothing.",
+      )
+    }
+
+    const silentParallel = parallelResponses.filter((response) => !response.responded)
+    if (silentParallel.length > 0) {
+      console.warn(
+        `\nWARNING: ${silentParallel.length} of ${parallelResponses.length} background sessions went idle without an assistant message`
+        + ` (${silentParallel.map((response) => response.sessionId).join(", ")}), so fewer sessions streamed than --parallel asked for.`,
       )
     }
 

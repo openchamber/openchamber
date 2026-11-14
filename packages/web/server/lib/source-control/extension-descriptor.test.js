@@ -98,6 +98,8 @@ describe('extension source-control descriptors', () => {
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.capabilities).not.toHaveProperty('reviewModel');
     expect(descriptor.capabilities).not.toHaveProperty('revisions');
+    // A host that cannot draft says nothing; the route answers 501 there.
+    expect(descriptor.capabilities).not.toHaveProperty('draftConversion');
     // Branch heads keep the UI's default: an extension cannot turn them off.
     expect(descriptor.presentation.features).not.toHaveProperty('branchHeads');
     expect(descriptor.presentation.features).not.toHaveProperty('submitRequirements');
@@ -107,14 +109,14 @@ describe('extension source-control descriptors', () => {
   it('passes the change-based fields through, and still creates through the API', () => {
     const descriptor = build({
       terminology: { changeRequest: 'change', ci: 'checks' },
-      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, draftConversion: true },
       token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] },
       presentation: { ...contribution().presentation, features: { authorCanReview: false, issueCloseReason: false, submitRequirements: true } },
     });
     expect(isDeeplyFrozen(descriptor)).toBe(true);
     expect(descriptor.terminology.changeRequest).toBe('change');
     expect(descriptor.capabilities).toMatchObject({
-      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false,
+      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false, draftConversion: true,
     });
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.presentation.features.submitRequirements).toBe(true);

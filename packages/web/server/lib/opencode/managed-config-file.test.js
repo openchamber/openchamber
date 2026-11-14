@@ -232,11 +232,34 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: false,
       includeNotify: false,
       includeRender: false,
+      includeShare: false,
       includeImage: false,
       includeSecret: false,
       includeUsage: false,
       includeWorkflow: false,
     });
+  });
+
+  it('offers sharing on the render tool unless enterprise mode has no pinned relay, and rewrites it when that changes', async () => {
+    const saved = { mode: process.env.OPENCHAMBER_ENTERPRISE_MODE, relay: process.env.OPENCHAMBER_RELAY_URL };
+    try {
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+      const { runtime, agentToolRuntime } = await createHarness({ settings: {} });
+      await runtime.buildManagedChildEnv();
+      expect(agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeRender: true, includeShare: true }));
+
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+      process.env.OPENCHAMBER_RELAY_URL = '';
+      await runtime.refreshManagedConfigFile();
+      expect(agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeRender: true, includeShare: false }));
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.acme.test/ws';
+      await runtime.refreshManagedConfigFile();
+      expect(agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeShare: true }));
+    } finally {
+      process.env.OPENCHAMBER_ENTERPRISE_MODE = saved.mode ?? '';
+      process.env.OPENCHAMBER_RELAY_URL = saved.relay ?? '';
+    }
   });
 
   it('injects the image tool only when it is switched on, and then disables OpenCode\'s own', async () => {
@@ -300,6 +323,7 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: false,
       includeNotify: true,
       includeRender: false,
+      includeShare: false,
       includeImage: false,
       includeSecret: false,
       includeUsage: false,
@@ -325,6 +349,7 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: false,
       includeNotify: false,
       includeRender: false,
+      includeShare: false,
       includeImage: false,
       includeSecret: false,
       includeUsage: true,

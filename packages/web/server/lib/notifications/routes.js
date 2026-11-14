@@ -39,6 +39,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     removeApnsToken,
     updateUiVisibility,
     clearPendingPushBadge,
+    clearSessionPushNotifications,
     isUiVisible,
     getUiNotificationClients,
     writeSseEvent,
@@ -327,11 +328,13 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   // Whether a session is unread is OpenCode's own state (`time.viewed`, set by
-  // `POST /api/session/:id/view`). These two routes only tell the native push
-  // badge that the user is engaging with the app.
+  // `POST /api/session/:id/view`). These two routes tell the native push badge
+  // that the user is engaging with the app, and remove the session's pushed
+  // notifications from every device: the user saw it or answered it.
   app.post('/api/sessions/:id/view', (req, res) => {
     const sessionId = req.params.id;
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
+    void clearSessionPushNotifications?.(sessionId);
 
     return res.json({
       success: true,
@@ -345,6 +348,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     // Sending a message means the user is active in the app; reset the native
     // push badge so it counts only notifications since this engagement.
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
+    void clearSessionPushNotifications?.(sessionId);
 
     return res.json({
       success: true,

@@ -211,8 +211,8 @@ before touching the filesystem). Rationale: metadata rides every
      consecutive failure settles the goal as `blocked` ("progress audit
      unavailable") — resumable, and settling resets the streak so Resume gets
      fresh tolerance. A dead checker can never drive the loop blind to the turn
-     cap. Measured on 144 hand-written goal-report turns plus 8 real ones (lab:
-     `~/projects/openchamber-extensions/jev-goal-lab`): Jev 142/144 with both
+     cap. Measured on 144 hand-written goal-report turns plus 8 real ones (a
+     private lab outside this repository): Jev 142/144 with both
      misses on the safe side, gpt-6-luna 141/144. Change the questions or the
      threshold only with a new run of that lab. A small, narrow wording change
      to a criterion in `audit.js` needs only a few targeted cases on Jev and

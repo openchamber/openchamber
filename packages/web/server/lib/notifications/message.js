@@ -10,6 +10,7 @@ const GENERIC_NOTIFICATION_TITLES = {
   goal_budget: 'Goal reached its token budget',
   review: 'Review finished',
   'pull-request': 'Pull request update',
+  'share-answer': 'A shared page was answered',
 };
 
 export const genericNotificationTitle = (kind) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';

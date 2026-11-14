@@ -8,6 +8,8 @@ import {
   forgetServiceFailure,
   getServiceFailure,
   getServiceStatus,
+  guestIdOfServiceToken,
+  onGuestServiceEnded,
   beginGuestServiceHost,
   beginGuestServiceShutdown,
   proxyGuestServiceRequest,
@@ -18,6 +20,7 @@ import {
 import { setCapabilityGrants, writeExtensionStore } from './persist.js';
 import { listInstalledGuests, noteGuestPackageChanged } from './catalog.js';
 import { SERVICE_TOKEN_ENV, recordGuestService } from './service-registry.js';
+import { createGuestMarks } from './marks.js';
 
 const writeFixture = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-service-'));
@@ -447,6 +450,90 @@ describe('pause before the request reads the store', () => {
       expect(getServiceStatus('docker')).toBe('stopped');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('a service that ended', () => {
+  // The fixture leaves its token beside its entry, so the test can ask who it names.
+  const start = async ({ packageRoot, persistPath }) => {
+    await fs.appendFile(path.join(packageRoot, 'service', 'main.js'), "\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('./token', import.meta.url), token);\n");
+    await setCapabilityGrants('docker', persistPath, ['service']);
+    const params = {
+      guestId: 'docker',
+      packageRoot,
+      service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+      granted: ['service'],
+      persistPath,
+      method: 'GET',
+      path: '/ping',
+    };
+    await proxyGuestServiceRequest(params);
+    return { params, token: await fs.readFile(path.join(packageRoot, 'service', 'token'), 'utf8') };
+  };
+  /** What each report found the service's token naming at that moment. */
+  const listen = (token) => {
+    const reports = [];
+    const stop = onGuestServiceEnded((guestId) => reports.push([guestId, guestIdOfServiceToken(token)]));
+    return { reports, stop };
+  };
+
+  test('a stop is reported once the token names nothing', async () => {
+    const fixture = await writeFixture();
+    const { token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    const marks = createGuestMarks();
+    try {
+      expect(guestIdOfServiceToken(token)).toBe('docker');
+      expect(marks.set('docker', token, { sessionId: 'ses_1' }, { icon: 'alert', tone: 'warning', text: 'Waiting' })).toBe('changed');
+      expect(marks.list('docker')).toHaveLength(1);
+      await stopGuestService('docker');
+      expect(reports).toEqual([['docker', null]]);
+      // What the process set is gone with it, and its token sets nothing more.
+      expect(marks.dropEnded('docker')).toBe(true);
+      expect(marks.list('docker')).toEqual([]);
+      expect(marks.set('docker', token, { sessionId: 'ses_1' }, { icon: 'alert', tone: 'warning', text: 'Waiting' })).toBe('ended');
+      // Nothing is running: a second stop ends nothing.
+      await stopGuestService('docker');
+      expect(reports).toHaveLength(1);
+    } finally {
+      stop();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a process killed from outside is reported, and its restart is not', async () => {
+    const fixture = await writeFixture();
+    const { params, token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    try {
+      process.kill(readServicePid('docker'), 'SIGKILL');
+      for (let tries = 0; tries < 250 && reports.length === 0; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(reports).toEqual([['docker', null]]);
+      await proxyGuestServiceRequest(params);
+      const next = await fs.readFile(path.join(fixture.packageRoot, 'service', 'token'), 'utf8');
+      expect(next).not.toBe(token);
+      expect(guestIdOfServiceToken(next)).toBe('docker');
+      // Replacing the dead process discards its runtime, which reports the same end again; nothing new ended.
+      expect(reports.every(([guestId, named]) => guestId === 'docker' && named === null)).toBe(true);
+    } finally {
+      stop();
+      await fs.rm(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a removed listener hears nothing', async () => {
+    const fixture = await writeFixture();
+    const { token } = await start(fixture);
+    const { reports, stop } = listen(token);
+    try {
+      stop();
+      await stopGuestService('docker');
+      expect(reports).toEqual([]);
+    } finally {
+      await fs.rm(fixture.dir, { recursive: true, force: true });
     }
   });
 });

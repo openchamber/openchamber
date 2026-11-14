@@ -481,6 +481,7 @@ and small notes about its cells. These must stay true:
 - The grid draws only the columns near the view from `COLUMN_WINDOW_MIN` columns
   up. All `<col>`s stay and a spanning cell stands for what is not drawn, so widths
   stay exact. A frozen column and the one being edited are always drawn.
+- Each spanning gap is split into cells of at most 1,000 columns. Browsers clamp larger `colspan` values, which would place the drawn cells in the wrong columns and make the far end unreachable.
 - Reading a column's values for the filter menu takes every row, so it happens
   when the submenu mounts and never in render.
 
@@ -490,6 +491,14 @@ keeps the office limit. Past `DEFAULT_TABLE_ROW_CAP` rows the grid holds the fir
 ones, and a capped SQLite result sorts in the database (`onSort`) because the
 grid does not hold the rows that would come first. Filters and search see only
 the rows the grid holds.
+
+### Why CSV change traces retain parsed rows
+
+The parser produces immutable row arrays, which the trace keeps directly. Creating a map entry and coordinate string for every cell blocked the main thread for seconds on a wide sparse CSV. First loads and own edits adopt the rows without scanning them; outside changes compare values and field presence, so a missing field and a present empty field remain distinct. Workbook traces keep cell maps because their edits arrive as individual cell patches.
+
+### Why long column gaps use several cells
+
+HTML clamps `colspan` to 1,000. Splitting a larger virtual gap keeps the drawn cells at their logical columns, with the same widths as the column definitions. One large spanning cell would shift those cells toward the start and leave the far end of a wide table blank.
 
 ### Data files, archives, notebooks
 
@@ -673,6 +682,29 @@ the changelog opens without a task over 10 ms, and a resize costs what it
 costs with a short file. The blocks render as they do in a streamed reply,
 pixel for pixel the same as the whole document.
 
+The preview's Outline button (`MarkdownPreviewOutline`) lists the headings the
+preview rendered (`readPreviewHeadings`: `h1` to `h6` inside
+`[data-markdown-content]`) and scrolls to the heading element the reader
+picked. Like the find bar, it holds every block mounted while it is open and
+lets go when it closes, and it rescans when the rendered document changes. The
+button exists for every Markdown file in every mode, so the row never changes
+with the mode, and pressing it never changes the mode: in the source it opens
+the editor's Symbols list, which lists a Markdown file's headings. The panel is
+closed by default, closes when the preview goes away or another file opens,
+and stores nothing.
+
+### Why the outline reads the rendered headings
+
+The outline could have parsed the file text and matched each entry to a heading
+by position or title. A raw HTML `<h2>` renders as a heading that a text parser
+does not list, inline formatting and image alt text read differently in the
+text and in the DOM, and duplicate titles need counting, so a match could land
+on the wrong heading or on none. Reading the rendered headings makes the list
+the document as shown, and a pick scrolls the element itself. The price is that
+a long document is mounted whole while the panel is open, which the find bar
+already costs. Parsing the text and mounting blocks only on a pick is the
+fallback if that mount time proves too slow on a very long file.
+
 ### Why document assets resolve before node updates
 
 Media and link components own their resources and cleanup. Rewriting the
@@ -755,7 +787,10 @@ built-in preview: a text editor only text files, a binary editor
 surface="file"` with a per-mount channel (`lib/guests/file-editor-channel.ts`)
 holding the draft at mount; the frame gets the file on `hello` / load, answers
 snapshot requests within `GUEST_REQUEST_TIMEOUT_MS`, and reports changes. VS
-Code and mobile keep the extension catalog empty, so there nothing matches.
+Code keeps the extension catalog empty, so nothing matches there. The phone's
+Files tab (`MobileFilesSurface` → `FilesView`) matches editors like the
+desktop, with no manifest opt-in: a file editor owns the whole view, so it
+needs none of the room a panel would.
 
 The contract is one-directional content. The frame reads the file it was
 handed at mount, so `FilesView` remounts it with a `key` of path plus

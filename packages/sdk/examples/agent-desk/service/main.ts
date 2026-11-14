@@ -65,6 +65,8 @@ const route = async (path: string, body: string, res: http.ServerResponse): Prom
     const { directory }: { directory?: string | null } = JSON.parse(body);
     const started = await host.sessions.start({ prompt: 'Say hello from Agent Desk in one line.', title: 'Agent Desk', ...(directory ? { directory } : {}) });
     json(res, 200, started);
+    // The session's row in the sidebar carries the desk's mark until this process ends.
+    await host.setMark({ sessionId: started.sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' }).catch(() => undefined);
     return;
   }
   if (path === '/note') {

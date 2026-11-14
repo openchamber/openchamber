@@ -47,7 +47,7 @@ const isElement = (node: Node): node is Element => node.nodeType === ELEMENT_NOD
 
 const isBlockElement = (element: Element): boolean => {
   if (element.matches('.katex-display')) return true;
-  if (element.matches('[data-streamdown="mermaid-block"], [data-streamdown="code-block"], [data-streamdown="table-wrapper"]')) return true;
+  if (element.matches('[data-streamdown="mermaid-block"], [data-streamdown="svg-block"], [data-streamdown="code-block"], [data-streamdown="table-wrapper"]')) return true;
   if (element.hasAttribute('data-oc-media-source')) return false;
   return BLOCK_TAGS.has(element.tagName);
 };
@@ -174,6 +174,10 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
   if (element.matches('[data-streamdown="mermaid-block"]')) {
     const source = element.getAttribute('data-oc-mermaid-source') ?? '';
     return plain ? source : fence(source, 'mermaid');
+  }
+  if (element.matches('[data-streamdown="svg-block"]')) {
+    const source = element.getAttribute('data-oc-svg-source') ?? '';
+    return plain ? source : fence(source, 'svg');
   }
   if (element.matches('.katex-display')) {
     const tex = texOf(element);
@@ -345,6 +349,14 @@ export const normalizeMarkdownCopyContent = (root: HTMLElement): void => {
     code.textContent = diagram.getAttribute('data-oc-mermaid-source') ?? '';
     pre.append(code);
     diagram.replaceWith(pre);
+  }
+  for (const figure of Array.from(root.querySelectorAll('[data-streamdown="svg-block"]'))) {
+    const pre = doc.createElement('pre');
+    const code = doc.createElement('code');
+    code.className = 'language-svg';
+    code.textContent = figure.getAttribute('data-oc-svg-source') ?? '';
+    pre.append(code);
+    figure.replaceWith(pre);
   }
   for (const card of Array.from(root.querySelectorAll('[data-streamdown="code-block"]'))) {
     if (!root.contains(card)) continue;

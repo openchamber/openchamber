@@ -1,3 +1,8 @@
+import fs from 'node:fs/promises';
+import https from 'node:https';
+import os from 'node:os';
+import nodePath from 'node:path';
+import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { getModelsMetadata } from './models-metadata.js';
 
@@ -32,6 +37,7 @@ const requestSchema = z.object({
   modelsPath: z.unknown().optional(),
   apiKey: z.unknown().optional(),
   headers: z.unknown().optional(),
+  tls: z.unknown().optional(),
   enrich: z.unknown().optional(),
   metadataProviderID: z.unknown().optional(),
 });
@@ -131,6 +137,78 @@ const resolveApiKey = (value, env) => {
   const key = optionalString(value);
   return key ? resolveEnvReference(key, env) : null;
 };
+
+const FILE_REFERENCE = /^\{file:([^}]+)\}$/;
+
+/**
+ * One `settings.tls` value as OpenCode reads it: `{file:path}` is the file's
+ * text, trimmed, `{env:NAME}` the variable, anything else the value as
+ * written (a literal passphrase keeps its spaces).
+ */
+const resolveTlsValue = async (value, env, field) => {
+  const text = optionalString(value);
+  if (!text) return undefined;
+  const file = text.match(FILE_REFERENCE)?.[1]?.trim();
+  if (!file) return ENV_REFERENCE.test(text) ? resolveEnvReference(text, env) : value;
+  const filePath = file.startsWith('~/') ? nodePath.join(os.homedir(), file.slice(2)) : file;
+  try {
+    return (await fs.readFile(filePath, 'utf8')).trim();
+  } catch {
+    throw discoveryError(`Cannot read the client certificate ${field} file ${file}`, 400, 'client_certificate');
+  }
+};
+
+const tlsSchema = z.object({ cert: z.unknown(), key: z.unknown(), passphrase: z.unknown().optional() });
+
+/** The client certificate the provider's gateway asks for (`settings.tls`), or null when none is set. */
+const resolveClientCertificate = async (value, env) => {
+  if (value === undefined || value === null) return null;
+  const parsed = tlsSchema.safeParse(value);
+  if (!parsed.success) throw discoveryError('Client certificate settings must be an object');
+  const cert = await resolveTlsValue(parsed.data.cert, env, 'certificate');
+  const key = await resolveTlsValue(parsed.data.key, env, 'key');
+  if (!cert || !key) throw discoveryError('A client certificate needs both the certificate and the key', 400, 'client_certificate');
+  const passphrase = await resolveTlsValue(parsed.data.passphrase, env, 'passphrase');
+  const certificate = { cert, key };
+  if (passphrase) certificate.passphrase = passphrase;
+  return certificate;
+};
+
+/**
+ * GET over HTTPS presenting a client certificate. The global fetch takes no
+ * certificate in Node, so this goes through `node:https` and answers with a
+ * standard Response, which the rest of discovery reads as usual. Redirects are
+ * not followed, so the certificate goes to no other host. Each call opens its
+ * own connection: the shared agent pools sockets without the passphrase in
+ * its key, so a reused socket would skip the check of a changed passphrase.
+ */
+const fetchWithClientCertificate = (url, init, certificate) => new Promise((resolve, reject) => {
+  let request;
+  try {
+    // The TLS context is built here, so an unreadable certificate or key, or
+    // a wrong passphrase, throws before any connection.
+    request = https.request(url, { method: 'GET', headers: init.headers, signal: init.signal, agent: false, ...certificate }, onResponse);
+  } catch (error) {
+    reject(discoveryError(
+      `The client certificate cannot be used: ${error instanceof Error ? error.message : String(error)}. Check that both files are PEM and that the passphrase matches the key.`,
+      400,
+      'client_certificate',
+    ));
+    return;
+  }
+  function onResponse(response) {
+    const status = response.statusCode ?? 502;
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(response.headers)) {
+      if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+    }
+    const bodyless = status === 204 || status === 205 || status === 304;
+    if (bodyless) response.resume();
+    resolve(new Response(bodyless ? null : Readable.toWeb(response), { status, headers }));
+  }
+  request.on('error', (error) => reject(discoveryError(`Provider model endpoint failed: ${error.message}`, 502, 'provider_error')));
+  request.end();
+});
 
 const resolveHeaderValue = (value, env, name) => {
   const headerValue = optionalString(value);
@@ -325,12 +403,22 @@ export async function discoverProviderModels(input, options = {}) {
     ? optionalString(options.storedApiKey)
     : null;
   const apiKey = requestedApiKey ?? resolveApiKey(storedApiKey, env);
-  const response = await (options.fetch ?? fetch)(endpoint, {
+  // A certificate is presented only in a TLS handshake, as OpenCode does.
+  const certificate = endpoint.protocol === 'https:' ? await resolveClientCertificate(body.tls, env) : null;
+  const init = {
     method: 'GET',
     headers: buildHeaders(body.headers, apiKey, env),
     redirect: 'manual',
     signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-  });
+  };
+  const response = certificate
+    ? await (options.fetchWithClientCertificate ?? fetchWithClientCertificate)(endpoint, init, certificate)
+    : await (options.fetch ?? fetch)(endpoint, init).catch((error) => {
+      // fetch says only "fetch failed"; the reason (a refused connection, a
+      // TLS handshake the gateway ended) is its cause.
+      const reason = error?.cause instanceof Error ? error.cause.message : error instanceof Error ? error.message : String(error);
+      throw discoveryError(`Provider model endpoint failed: ${reason}`, 502, 'provider_error');
+    });
   if (response.status >= 300 && response.status < 400) {
     throw discoveryError('Provider model endpoint redirected', 502, 'provider_redirect');
   }
@@ -360,4 +448,4 @@ export async function discoverProviderModels(input, options = {}) {
   }
 }
 
-export const modelDiscoveryInternals = { buildModelsUrl, buildHeaders, normalizeProviderResponse, enrichModels };
+export const modelDiscoveryInternals = { buildModelsUrl, buildHeaders, normalizeProviderResponse, enrichModels, resolveClientCertificate };

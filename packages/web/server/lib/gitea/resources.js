@@ -680,6 +680,15 @@ export function createGiteaResourceService({
       return { ready: !request.draft };
     },
 
+    async draftChangeRequest({ providerTarget, expectedTarget }) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      requireExpected({ number: expectedTarget.number, headSha: expectedTarget.headSha }, current);
+      if (current.draft) return { draft: true };
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}`, { title: asDraftTitle(current.title) });
+      const request = requirePull(raw, projectOfTarget(providerTarget));
+      return { draft: request.draft };
+    },
+
     /** Close or reopen, through the issue a pull request also is. */
     async setState({ providerTarget, state, kind }) {
       const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`, { state });
@@ -709,6 +718,10 @@ export function createGiteaResourceService({
       }
       if (kind === 'change-request-ready') {
         if (!request.draft) return { state: 'succeeded', result: { ready: true } };
+        return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
+      }
+      if (kind === 'change-request-draft') {
+        if (request.draft) return { state: 'succeeded', result: { draft: true } };
         return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
       }
       return { state: 'outcome-unknown' };

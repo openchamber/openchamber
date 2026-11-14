@@ -6,7 +6,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
-import { applyPrWatch, resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
+import { applyPrWatches, resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
 import { setWorkflowRunningSessions } from '@/sync/workflow-activity';
 import { installHookTestDom } from '../test-utils/testDom';
 import { useSidebarLiveFacts } from './useSidebarLiveFacts';
@@ -93,9 +93,9 @@ test('a session idling on a workflow run or its pull request is running', async 
   await act(async () => setWorkflowRunningSessions([]));
   expect(facts.unreadIds.has('waiting')).toBe(true);
 
-  await act(async () => applyPrWatch(1, 'waiting', {
+  await act(async () => applyPrWatches(1, 'waiting', [{
     sessionID: 'waiting', directory: '/repo', url: 'https://example.test/pr/1', number: 1, title: 'PR', status: 'pending', startedAt: 1,
-  }));
+  }]));
   expectWaiting();
 });
 

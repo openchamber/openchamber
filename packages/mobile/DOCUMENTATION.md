@@ -7,6 +7,38 @@
   parity is no reason to shape a browser feature, and browser work needs no
   mobile plan.
 
+# Checking push handling without a device
+
+What the shells do with a push (sealed text, clearing handled notifications, see the server's `packages/web/server/lib/notifications/DOCUMENTATION.md`) can be checked locally, within limits:
+
+- **iOS Simulator.** `xcrun simctl push <udid> com.openchamber.app payload.json` delivers visible pushes, but it refuses a background push ("no user visible content") and does not run the notification service extension. Call the background handler through lldb instead: `[(id)[[UIApplication sharedApplication] delegate] application:... didReceiveRemoteNotification:@{...} fetchCompletionHandler:^(unsigned long r){}]`, and read `getDeliveredNotificationsWithCompletionHandler:` the same way. A simulator build has no `aps-environment`, so the push plugin's own calls fail; the notification permission prompt comes from `PushNotifications.requestPermissions()` evaluated in the WebView. The extension's path needs a device.
+- **Android emulator.** `am startservice` cannot hand a message to the messaging service: Firebase takes messages from its own queue, which only Google Play services fills. A temporary `Instrumentation` class (declared in the manifest, run with `am instrument -w`) can build a `RemoteMessage` from a `Bundle` and call `onMessageReceived` on the service in the app's process. `notify` and `cancel` reach the system asynchronously, so wait before reading `getActiveNotifications()`. A debug build cannot replace an installed release build; use a separate AVD.
+
+# Android home-screen widgets
+
+## Ownership
+
+`WidgetRenderer` and the two `AppWidgetProvider`s under `android/app/src/main/java/com/openchamber/app/` draw the Sessions and Usage widgets with `RemoteViews`. They read only snapshots in app-private preferences. `packages/ui/src/apps/useNativeWidgetSync.ts` writes those snapshots through the `WidgetBridge` plugin. Sessions come from `buildMobileWidgetSnapshot` (`mobileWidgetSnapshot.ts`, the snapshot the iOS widgets read too); usage comes from `createWidgetUsageSnapshot` over the quota store.
+
+## Invariants
+
+- The widgets never hold credentials or reach the network. Every fetch runs in the connected app; a refresh tapped on a widget is a counter in preferences that the app picks up, then acknowledges or reports failed. While the app is not connected the footer says so.
+- Nothing syncs while no widget is placed (`WidgetBridge.installed`). Placing or removing one notifies the running app.
+- A store that has not loaded yet is not written: an empty list before the first load would read as "No sessions yet".
+- Colors come from the app's active theme and text from the app's language, both inside each snapshot; English and the default dark theme apply only until the first snapshot.
+- The session row matches the iOS widget (unread mark, title, project) plus one live status from the global status channel: running, retrying or error.
+- Both widgets are scrolling lists. A Usage row repeats the Usage page's window card: the app formats the value, reset text and bar tone with the page's own helpers (`lib/quota`), so the widget and the page never disagree; the native side only draws the bar.
+
+## Decisions
+
+### Why one layout tinted from code and not a dark and a light copy of each
+
+Every surface is a shape recolored with `setColorFilter` and every text color is set by the renderer, so a theme change needs no new resources and the two copies cannot drift apart, as the earlier light empty state did with white text on a light background.
+
+### Why the app pushes snapshots and not a native pull on background, as on iOS
+
+The Sessions widget shows live activity, which changes while the app sits in the background with its WebView still running. Store subscriptions keep the widget current without polling; the iOS widgets only show unread state, which a pull on background covers.
+
 # Native runtime WebSockets
 
 ## Ownership
@@ -29,7 +61,9 @@ The Foundation-only factory lets the native regression test receive large snapsh
 
 ### Why native sockets and not browser WebSockets
 
-Browser WebSockets cannot attach proxy headers. OkHttp on Android and URLSessionWebSocketTask on iOS can send them without adding a local proxy server or changing feature callers. OkHttp 5.3.2 supports the app's Android compile SDK 35; newer 5.5 releases require SDK 37.
+Browser WebSockets cannot attach proxy headers. OkHttp on Android and URLSessionWebSocketTask on iOS can send them without adding a local proxy server or changing feature callers. OkHttp 5.5 requires compile SDK 37, which needs Android Gradle plugin 9.5 or later; the app compiles against 37 and still targets 35.
+
+The Android build leaves the Kotlin standard library to Gradle's resolution. A forced version applies to every configuration: a pin to 1.9 pulled OkHttp and AndroidX below the 2.x stdlib they are compiled against, and crashed AGP 9's lint.
 
 ### Why SSE stays in fetch and not a native stream plugin
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, jest, mock, test } from "bun:test"
 import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
@@ -851,6 +851,65 @@ describe("messages and config", () => {
     expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", null, null])
   })
 
+  describe("a page asked before the capability is known", () => {
+    const shellsHeaders = () => requests
+      .filter((request) => request.url.pathname === "/api/session/ses_1/message")
+      .map((request) => request.headers.get("x-openchamber-part-shells"))
+    const capable = () => json({ compatibility: { capabilities: ["api.message-part-shells.v1"] } })
+    const emptyPage = () => json({ data: [], cursor: {} })
+    // A macrotask: every request the client would send without waiting is out by then.
+    const settle = () => new Promise((resolve) => setImmediate(resolve))
+    const pendingCheck = () => {
+      let answer: (response: Response) => void = () => undefined
+      responses.push(() => new Promise<Response>((resolve) => { answer = resolve }))
+      return (response: Response) => answer(response)
+    }
+
+    test("waits for the check and asks for shells", async () => {
+      runtimeKey = "shells-first-page"
+      responses.push(capable(), emptyPage())
+      await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      expect(shellsHeaders()).toEqual(["v1"])
+    })
+
+    test("waits once per check for a check that does not answer", async () => {
+      runtimeKey = "shells-hung-check"
+      jest.useFakeTimers()
+      try {
+        const answer = pendingCheck()
+        opencodeClient.learnMessagePageShellsSupport()
+        responses.push(emptyPage(), emptyPage(), emptyPage())
+        const first = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([])
+        jest.advanceTimersByTime(5_000)
+        await first
+        // The bound has passed, so the next page goes out without waiting again.
+        const second = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([null, null])
+        await second
+        answer(capable())
+        await settle()
+        await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        expect(shellsHeaders()).toEqual([null, null, "v1"])
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    test("is dropped when the runtime changes during the wait", async () => {
+      runtimeKey = "shells-switch-from"
+      const answer = pendingCheck()
+      const page = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      await settle()
+      runtimeKey = "shells-switch-to"
+      answer(capable())
+      await expect(page).rejects.toThrow("Runtime instance changed")
+      expect(shellsHeaders()).toEqual([])
+    })
+  })
+
   test("a page lost to a relay tunnel drop keeps asking for shelled pages", async () => {
     const pageRequests = () => requests.filter((request) => request.url.pathname === "/api/session/ses_1/message")
     runtimeKey = "shells-relay"
@@ -1322,5 +1381,34 @@ describe("a subagent transcript showing a message its parent stores", () => {
     expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
       .toMatchObject({ status: 500, operation: "session.get" })
     expect(paths()).toHaveLength(2)
+  })
+})
+
+describe("stopBackgroundShells", () => {
+  const shells = [
+    { shellID: "sh_1", shellDirectory: "/repo/app", command: "sleep 100" },
+    { shellID: "sh_2", shellDirectory: "/repo/app", command: "sleep 200" },
+  ] as const
+
+  test("tells the agent first, then removes the commands", async () => {
+    responses.push(json({ id: "syn_1" }), noContent(), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "POST /api/session/ses_1/synthetic",
+      "DELETE /api/shell/sh_1",
+      "DELETE /api/shell/sh_2",
+    ])
+  })
+
+  // The kills would reach the new server: the note stays on the old one.
+  test("removes nothing when the runtime changes while the note is on its way", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return json({ id: "syn_1" })
+    })
+    await expect(
+      opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
   })
 })

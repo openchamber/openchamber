@@ -371,8 +371,8 @@ const prepareStructuredText = async (file: File, extension: string): Promise<Fil
 /**
  * A HEIC/HEIF image the bundled decoder cannot read. Apple's HDR gain-map
  * photos are the known case: the vendored `heic2any` predates that format.
- * The attachment is still refused, but the caller can now name the cause
- * instead of falling back to the generic "failed to attach" toast.
+ * The store attaches such a file as a note naming it where OpenCode runs, and
+ * names the cause only when it cannot put the file there either.
  */
 export class HeicConversionError extends Error {
   constructor(file: File) {

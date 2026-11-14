@@ -87,11 +87,20 @@ design within it; the budget only tells you when a zone has grown loud.
   (success): finished, waiting to be read. Yellow (warning): waiting on the
   user (a question, a permission). Red: an error. Everything that is not a
   state (a pin, a picked effort, an agent's label text, a mode chip) is muted
-  or plain text; an agent keeps its colour on its icon only. One state per
+  or plain text; an agent keeps its colour on its icon only, and the
+  composer shows that icon muted at rest (`restingAgentColor`: its hue mixed
+  toward the muted text), while pickers and menus listing agents keep the
+  full colour. One state per
   spot: while a session waits on the user, its running mark and timer step
   aside for the yellow mark. A state's colour stays visible at rest; making
   it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
   coloured text), never colour that waits for a hover.
+- **Two tints are the app's voice, and stay.** The user's message bubble
+  carries the theme's warm tint and a faint ring: it marks the user's own
+  words, and a neutral bubble made the app read as washed out (users pushed
+  back on it). Inline code in prose has its own hue, kept apart from the
+  state colours (never the success green). Neither is a state, and a pass
+  that removes colour "because colour is for state" leaves both alone.
 - **Rarely used actions go in a menu, last in the row.** A row of icons that
   say nothing without a hover becomes the few everyday controls plus one
   "More" (`more` icon) at the end: the sidebar's pages, a file's actions
@@ -242,6 +251,15 @@ Controls in one row share one height.
   nobody needs to read may fade: separators (`·`, `/`), disabled controls,
   calendar days outside the month, large empty-state illustrations. Never
   muted text on a muted fill, or a list whose every line is grey.
+- **Activity rows: muted name, bright argument.** In the transcript's
+  activity list every row's name is muted at regular weight, icon included
+  (`--tools-description`, `--tools-icon`): tools, Thinking, groups, subagents,
+  MCP tools, notices. The detail is foreground (`--tools-title`) when it is
+  something the user scans for and acts on (a command, a path, a search
+  query, a URL, a skill or tool argument) and muted when it is prose (a
+  thinking preview, a description sentence, a summary), so a Thinking row is
+  muted throughout. Durations and counts stay muted, diff counts keep their
+  green and red, and a state colour (working mark, error red) still wins.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 

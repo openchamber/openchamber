@@ -38,15 +38,13 @@ const putAwayRevealed = (): boolean => {
 const MobileCaption: React.FC<{
   label: string;
   collapsed: boolean;
-  forceExpanded: boolean;
   onToggle: () => void;
-}> = ({ label, collapsed, forceExpanded, onToggle }) => {
+}> = ({ label, collapsed, onToggle }) => {
   const { t } = useI18n();
   return (
     <button
       type="button"
       className={cn(SECTION_HEADER_CLASS, 'w-full gap-1')}
-      disabled={forceExpanded}
       onClick={() => {
         if (!putAwayRevealed()) onToggle();
       }}
@@ -55,7 +53,7 @@ const MobileCaption: React.FC<{
       style={{ touchAction: 'manipulation' }}
     >
       <span className="min-w-0 truncate typography-ui-label font-medium text-muted-foreground">{label}</span>
-      {forceExpanded ? null : <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4 shrink-0 text-muted-foreground" />}
+      <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4 shrink-0 text-muted-foreground" />
     </button>
   );
 };
@@ -66,7 +64,7 @@ export const MobileZoneHeader: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={row.label ?? (isBuiltinActivityKey(row.activityKey) ? t(ACTIVITY_TITLE_KEY[row.activityKey]) : '')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? (isBuiltinActivityKey(row.activityKey) ? t(ACTIVITY_TITLE_KEY[row.activityKey]) : '')} collapsed={row.collapsed} onToggle={onToggle} />;
 };
 
 /** The caption over the projects: closed, it folds every project away. */
@@ -75,7 +73,7 @@ export const MobileProjectsCaption: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} onToggle={onToggle} />;
 };
 
 const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
@@ -150,7 +148,7 @@ export const MobileProjectHeader: React.FC<{
           type="button"
           className={SECTION_HEADER_CLASS}
           onClick={() => {
-            if (!putAwayRevealed() && !row.forceExpanded) onToggle();
+            if (!putAwayRevealed()) onToggle();
           }}
           aria-expanded={!row.collapsed}
           aria-label={row.collapsed ? t('sessions.sidebar.group.expandAria', { label }) : t('sessions.sidebar.group.collapseAria', { label })}
@@ -177,13 +175,13 @@ export const MobileGroupHeader: React.FC<{
 }> = ({ row, geometry, onToggle }) => {
   const { t } = useI18n();
   const label = row.group.label;
-  const expanded = row.forceExpanded || !row.collapsed;
+  const expanded = !row.collapsed;
   return (
     <button
       type="button"
       className="flex min-h-10 w-full items-center gap-0.5 py-1 pe-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={() => {
-        if (!putAwayRevealed() && !row.empty && !row.forceExpanded) onToggle(row.groupKey);
+        if (!putAwayRevealed() && !row.empty) onToggle(row.groupKey);
       }}
       aria-expanded={row.empty ? undefined : expanded}
       aria-label={row.empty ? label : expanded ? t('sessions.sidebar.group.collapseAria', { label }) : t('sessions.sidebar.group.expandAria', { label })}
@@ -203,14 +201,14 @@ export const MobileFolderRow: React.FC<{
   geometry: MobileTreeGeometry;
 }> = ({ row, geometry }) => {
   const { t } = useI18n();
-  const expanded = row.forceExpanded || !row.collapsed;
+  const expanded = !row.collapsed;
   const project = useProjectsStore((state) => (row.mixed ? state.projects.find((entry) => entry.id === row.projectId) : undefined));
   return (
     <button
       type="button"
       className="flex min-h-10 w-full items-center gap-0.5 py-1 pe-3 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={() => {
-        if (!putAwayRevealed() && !row.empty && !row.forceExpanded) useSessionFoldersStore.getState().toggleFolderCollapse(row.folder.id);
+        if (!putAwayRevealed() && !row.empty) useSessionFoldersStore.getState().toggleFolderCollapse(row.folder.id);
       }}
       aria-expanded={row.empty ? undefined : expanded}
       aria-label={row.empty

@@ -19,6 +19,11 @@ interface ProviderLogoProps {
     ignoreCustomIcon?: boolean;
     /** Shown when this provider has no chosen icon and no logo. `null` shows nothing. */
     fallback?: React.ReactNode;
+    /**
+     * Draw the app's monochrome logo in the text colour (a mask), so a caller
+     * can mute it like an icon. Uploaded and extension logos keep their colours.
+     */
+    tint?: boolean;
 }
 
 const NO_URLS: ReadonlySet<string> = new Set();
@@ -35,6 +40,7 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     onError: externalOnError,
     ignoreCustomIcon = false,
     fallback,
+    tint = false,
 }) => {
     const { src, onError: handleInternalError, hasLogo, isBundled } = useProviderLogo(providerId);
     const customIcon = useUIStore((state) => state.customProviderIcons[providerId]);
@@ -87,6 +93,31 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     if (!hasLogo || !src) {
         if (fallback !== undefined) return <>{fallback}</>;
         return fallbackIcon ? <Icon name={fallbackIcon} className={cn('text-muted-foreground', className)} /> : null;
+    }
+
+    if (tint) {
+        // The logo's shape in the current text colour, for any theme. A mask
+        // reports no load failure, so a hidden image of the same file still
+        // does, and a logo that fails falls back as an untinted one would.
+        // A mask is fetched in CORS mode; the image asks the same way, so the
+        // two share one request instead of fetching the file twice.
+        return (
+            <>
+            <img src={src} alt="" aria-hidden hidden crossOrigin="anonymous" onError={handleError} />
+            <span
+                role={alt === '' ? undefined : 'img'}
+                aria-label={alt === '' ? undefined : alt ?? `${providerId} logo`}
+                aria-hidden={alt === '' ? true : undefined}
+                className={cn('inline-block bg-current', className)}
+                style={{
+                    maskImage: `url("${src}")`, WebkitMaskImage: `url("${src}")`,
+                    maskSize: 'contain', WebkitMaskSize: 'contain',
+                    maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat',
+                    maskPosition: 'center', WebkitMaskPosition: 'center',
+                }}
+            />
+            </>
+        );
     }
 
     return (

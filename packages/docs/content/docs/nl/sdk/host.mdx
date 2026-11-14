@@ -32,6 +32,7 @@ Het is geen eenmalige callback voor het opbouwen van de interface. Bouw uw UI en
 | `item` | waarvoor de weergave werd geopend, of `null`: het aangeklikte gekoppelde item met dezelfde velden als bij `attach`, inclusief `data`, een bericht met `kind: "message"` of een sessie met `kind: "session"` uit een opgegeven actie. Zie [Acties](/nl/sdk/#acties-opdrachten-en-de-badge). |
 | `connection` | `{ connected, account }` voor uw integratie |
 | `settings` | waarden van de velden uit `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` of `desktop`; `coarse` of `fine`; de marges van de veilige zone in px; de px die het schermtoetsenbord bedekt. Wordt opnieuw gestuurd als er iets verandert, zoals bij draaien of het toetsenbord. Oudere hosts laten het weg. Zie [Op de telefoon](/sdk/#op-de-telefoon). |
 
 Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 
@@ -45,7 +46,7 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | --- | --- |
 | `toast({ kind, message })` | toont een melding in de app; `kind` is `info`, `success` of `error` |
 | `openUrl(url)` | opent een URL in de browser van de gebruiker |
-| `openSurface(surfaceId)` | schakelt de app naar die weergave |
+| `openSurface(surfaceId)` | schakelt de app naar die weergave. Op de telefoon opent uw paneel als zijn tabblad in de werkruimte als het manifest `panel.mobile` instelt, anders wordt de aanroep geweigerd met `UNSUPPORTED`. |
 | `writeClipboard(text)` | kopieert tekst, van 1 tot 32000 tekens |
 | `compose({ text, mode? })` | plaatst tekst in het chatveld zonder te versturen; `mode` is standaard `append`, of `replace`; 1 tot 16000 tekens na trimmen |
 | `attach({ ... })` | koppelt een item aan het chatveld, op dezelfde plek als GitHub- en Linear-items; maximaal één tegelijk |
@@ -66,7 +67,7 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | `onResolve(handler)` | registreert de afhandeling van slash-opdrachten; ontvangt `{ command, args }` en geeft een te koppelen item of `null` terug |
 | `setBadge(count)` | zet een stip op het balkpictogram en toont het getal van 0 tot 999 in de tooltip; `null` wist het |
 | `openCommit(sha)` | opent de diffweergave voor de commit in het huidige project; `sha` heeft 7 tot 64 hexadecimale tekens; OpenChamber leest de commit zelf |
-| `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 320 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
+| `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 480 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
 | `onFileOpen(listener)` | voor editors: ontvangt `{ path, name, readOnly }` plus `encoding: "text"` met `content`, of `encoding: "binary"` met `bytes`; activeert ook opslaan via Cmd/Ctrl+S in de pagina |
 | `onFileSnapshot(handler)` | voor editors: geeft het volledige bewerkte bestand als `{ content, version }` of `{ bytes, version }` terug; aangeroepen bij opslaan en vóór wisselen naar bronweergave of volledig scherm |
 | `onFileSaved(listener)` | voor editors: de momentopname met die `version` staat op schijf; antwoord met `reportFileChange` |
@@ -279,6 +280,28 @@ Een service start bij het eerste verzoek, en de service van een rol stopt bij in
 ```
 
 Een run is één `POST /schedule`. Lees hem met `readServiceScheduleRequest` en antwoord met 200. Een run die is gemist terwijl OpenChamber niet draaide, vervalt. Een service die externe gebeurtenissen nodig heeft, houdt een eigen verbinding open of pollt.
+
+## Markeringen op rijen in de zijbalk
+
+Met `contributes.marks: true` kan uw service kleine pictogrammen op rijen in de zijbalk zetten, bijvoorbeeld een rood kruis bij elke sessie van een branch waarvan de checks falen. De gebruiker keurt dit als eigen regel goed.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Doel | Rijen |
+| --- | --- |
+| `{ sessionId }` | die sessie |
+| `{ directory, branch }` | elke sessie op die branch en de worktree-rij van de branch; `directory` is een willekeurige map van de repository |
+| `{ directory }` | de sessies in die map en de worktree die daar staat |
+
+`icon` is een Remixicon-naam, `tone` is `neutral`, `info`, `success`, `warning` of `error`, en `text` (maximaal 200 tekens) is de tooltip, getoond na de naam van de extensie. Een klik opent uw paneel in de sessie van die rij. Een extensie zonder paneel kan een `https`-adres meegeven als `url`, en de klik opent dat adres. Op de telefoon opent een tik het tabblad van uw paneel in de werkruimte, in de sessie van die rij, als het manifest `panel.mobile` instelt; anders toont hij de `text` van de markering en opent hij haar `url`, als die er is.
+
+Een doel opnieuw instellen vervangt de markering, en `null` verwijdert haar. Een rij tekent hoogstens twee markeringen, één per extensie, en toont ze allemaal in zijn tooltip. Op een rij van één regel bedekken de knoppen van de rij de markeringen zolang de aanwijzer erboven staat, dus een klik bereikt een markering op rijen van twee regels en op aanraakschermen.
+
+Een markering leeft zo lang als uw serviceproces. Declareer daarom `service.keepRunning` en zet de markeringen opnieuw wanneer de service start. Een service houdt maximaal 200 markeringen vast en wijzigt ze maximaal 60 keer per minuut. Markeringen vereisen een OpenChamber-versie die nieuwer is dan 2.7.0: een oudere negeert de sleutel en weigert de aanroep.
 
 ## Rijen in het @-menu
 

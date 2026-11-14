@@ -60,6 +60,36 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
+    // A background push from the server that removes notifications whose cause was handled
+    // elsewhere (PushClearing), and sets the icon badge to the count that remains. iOS wakes
+    // the app for it unless the user swiped the app away; those notifications then go with
+    // the next visible push.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        let entries = PushClearing.entries(in: userInfo)
+        guard !entries.isEmpty else {
+            completionHandler(.noData)
+            return
+        }
+        let badge = userInfo["badge"] as? Int
+        PushClearing.removeDelivered(entries) {
+            DispatchQueue.main.async {
+                // While the app is in front its badge stays cleared (sceneDidBecomeActive).
+                if let badge, application.applicationState != .active {
+                    if #available(iOS 17.0, *) {
+                        UNUserNotificationCenter.current().setBadgeCount(badge)
+                    } else {
+                        UIApplication.shared.applicationIconBadgeNumber = badge
+                    }
+                }
+                completionHandler(.newData)
+            }
+        }
+    }
+
 }
 
 /// APNs environment of this build: "development" for Xcode/dev-signed installs,

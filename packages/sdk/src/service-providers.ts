@@ -504,6 +504,7 @@ export type SourceControlMutationResult = {
   outcome?: 'queued' | 'merging';
   stacked?: boolean;
   ready?: boolean;
+  draft?: boolean;
   commented?: boolean;
   failureStatus?: number;
   failureCode?: string;

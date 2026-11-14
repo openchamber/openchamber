@@ -17,7 +17,9 @@ const settingsRegistry = createRequire(import.meta.url)('./settings-registry.jso
 // The sidebar's sections and pin lists, the same shapes the UI keeps
 // (packages/ui/src/lib/sidebarSections.ts, which also restores missing built-in
 // sections on read). The server keeps what is well formed and drops the rest.
-const SIDEBAR_BUILTIN_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'];
+const SIDEBAR_BUILTIN_SECTION_IDS = ['pages', 'chats', 'pinned', 'work', 'projects'];
+// The user's sections (SIDEBAR_SECTIONS_MAX in the UI) and every built-in one.
+const SIDEBAR_SECTIONS_STORED_MAX = 24 + SIDEBAR_BUILTIN_SECTION_IDS.length;
 const sidebarSectionIdSchema = z.string().trim().min(1).max(64);
 const sidebarSectionNameSchema = z.string().trim().min(1).transform((value) => value.slice(0, 60));
 const sidebarChips = (values) => z.array(z.unknown()).transform((entries) => (
@@ -69,11 +71,28 @@ const sanitizeSidebarSections = (entries) => {
   const seen = new Set();
   for (const entry of entries) {
     const parsed = sidebarSectionSchema.safeParse(entry);
-    if (!parsed.success || seen.has(parsed.data.id) || result.length >= 28) continue;
+    if (!parsed.success || seen.has(parsed.data.id) || result.length >= SIDEBAR_SECTIONS_STORED_MAX) continue;
     if (parsed.data.kind === 'custom' && SIDEBAR_BUILTIN_SECTION_IDS.includes(parsed.data.id)) continue;
     seen.add(parsed.data.id);
     result.push(parsed.data);
   }
+  return result;
+};
+
+// A client saves the whole sections order, and one older than a built-in
+// section does not list it. Its save keeps the stored entry of each built-in
+// it omits, after the stored neighbour it followed (first when none did), so
+// the user's placement survives a save from an older client. A client that
+// lists the built-in decides where it goes.
+const keepOmittedBuiltinSections = (stored, incoming) => {
+  const result = [...incoming];
+  const has = (id) => result.some((entry) => entry.id === id);
+  stored.forEach((entry, index) => {
+    if (entry?.kind !== 'builtin' || has(entry.id)) return;
+    const previous = stored.slice(0, index).reverse().find((candidate) => has(candidate?.id));
+    const at = previous ? result.findIndex((candidate) => candidate.id === previous.id) + 1 : 0;
+    result.splice(at, 0, entry);
+  });
   return result;
 };
 
@@ -108,12 +127,16 @@ const SECRET_SETTINGS_KEYS = Object.freeze(
     .filter(([, field]) => field.secret === true)
     .map(([key]) => key),
 );
+
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
   DEFAULT_INPUT_HISTORY_SCOPE,
   isInputHistoryLimit,
   isInputHistoryScope,
 } from './input-history-scope.js';
+
+/** `provider/model` dreaming runs on, or empty for the default model. */
+const dreamingModelSchema = z.string().trim().refine((value) => value === '' || /^[^/\s]+\/\S+$/.test(value));
 
 // Icons a custom provider may show instead of its logo; mirrors
 // CUSTOM_PROVIDER_ICONS in packages/ui/src/lib/customProviderIcons.ts.
@@ -157,6 +180,13 @@ const sanitizeCustomProviderLogos = (value) => {
   }
   return result;
 };
+
+/**
+ * Message search is on unless the user turned it off. A settings file that
+ * never mentions it is a user who never chose, and gets the default; an
+ * explicit `false` is a choice and stays.
+ */
+export const isMessageSearchEnabled = (settings) => settings?.messageSearchEnabled !== false;
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -488,6 +518,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
       result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
     }
+    if (typeof candidate.sidebarKeepPinnedInPlace === 'boolean') {
+      result.sidebarKeepPinnedInPlace = candidate.sidebarKeepPinnedInPlace;
+    }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }
@@ -625,6 +658,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.openLinksInBrowserPanel === true || candidate.openLinksInBrowserPanel === false) {
       result.openLinksInBrowserPanel = candidate.openLinksInBrowserPanel;
+    }
+    if (candidate.agentBrowserSharesLogins === true || candidate.agentBrowserSharesLogins === false) {
+      result.agentBrowserSharesLogins = candidate.agentBrowserSharesLogins;
     }
     if (Number.isInteger(candidate.liveBrowserTabLimit) && candidate.liveBrowserTabLimit >= 1 && candidate.liveBrowserTabLimit <= 20) {
       result.liveBrowserTabLimit = candidate.liveBrowserTabLimit;
@@ -932,6 +968,14 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
       result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
     }
+    if (candidate.agentMemoryDreamingEnabled === true || candidate.agentMemoryDreamingEnabled === false) {
+      result.agentMemoryDreamingEnabled = candidate.agentMemoryDreamingEnabled;
+    }
+    // Empty is a choice: dreaming then runs on the default model, so it is kept, not dropped.
+    const dreamingModel = dreamingModelSchema.safeParse(candidate.agentMemoryDreamingModel);
+    if (dreamingModel.success) result.agentMemoryDreamingModel = dreamingModel.data;
+    const dreamingVariant = z.string().trim().safeParse(candidate.agentMemoryDreamingVariant);
+    if (dreamingVariant.success) result.agentMemoryDreamingVariant = dreamingVariant.data;
     if (candidate.agentKnowledgeToolEnabled === true || candidate.agentKnowledgeToolEnabled === false) {
       result.agentKnowledgeToolEnabled = candidate.agentKnowledgeToolEnabled;
     }
@@ -1373,6 +1417,10 @@ export const createSettingsHelpers = (dependencies) => {
       ),
     };
 
+    if (Array.isArray(changes.sidebarSections) && Array.isArray(current.sidebarSections)) {
+      next.sidebarSections = keepOmittedBuiltinSections(sanitizeSidebarSections(current.sidebarSections), changes.sidebarSections);
+    }
+
     return next;
   };
 
@@ -1408,6 +1456,8 @@ export const createSettingsHelpers = (dependencies) => {
       mobileKeyboardMode,
       inputHistoryScope,
       inputHistoryLimit,
+      // Always sent, resolved: the client holds its own copy of this switch and must follow the server's.
+      messageSearchEnabled: isMessageSearchEnabled(sanitized),
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'

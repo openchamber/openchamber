@@ -120,21 +120,14 @@ describe('TitlebarLeftControls', () => {
     expect(overlay!.style.maxWidth).toBe('');
   });
 
-  test('lets the labelled New session button shrink so its label truncates', async () => {
-    useUIStore.getState().setSidebarOpen(true);
+  for (const open of [true, false]) test(`New session is the same icon button with the sidebar ${open ? 'open' : 'closed'}`, async () => {
+    useUIStore.getState().setSidebarOpen(open);
     await renderControls();
 
-    const button = document.querySelector<HTMLButtonElement>('button.w-auto');
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="New session"]');
     expect(button).not.toBeNull();
-    expect(button!.classList.contains('shrink-0')).toBe(false);
-    expect(button!.classList.contains('min-w-0')).toBe(true);
-
-    const label = button!.querySelector<HTMLSpanElement>('span');
-    expect(label).not.toBeNull();
-    expect(label!.classList.contains('truncate')).toBe(true);
-
-    const icon = button!.querySelector<SVGElement>('svg');
-    expect(icon).not.toBeNull();
-    expect(icon!.classList.contains('shrink-0')).toBe(true);
+    expect(button!.textContent?.trim()).toBe('');
+    expect(button!.classList.contains('shrink-0')).toBe(true);
+    expect(button!.querySelector('use')?.getAttribute('href')).toBe('#oc-edit-box');
   });
 });

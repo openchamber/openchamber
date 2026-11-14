@@ -200,13 +200,44 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 | `sessions.answerPermission(sessionId, requestId, { decision, message? })` | `sessionControl: { answers: true }` | Answers the request a `permission-asked` event names in `event.permission.requestId`. `allow` lets the agent do it this once; `deny` refuses, and `message` (up to `SERVICE_ANSWER_MESSAGE_MAX`, 2,000) reaches the agent as the reason. "Always allow" stays a click in the app |
 | `sessions.answerForm(sessionId, formId, values, message?)` | `sessionControl: { answers: true }` | Answers the form a `question-asked` event names in `event.question.id` (`kind: "form"`). `values` are keyed by the field `key` from the event's content; a choice field takes an option's `value`. `null` dismisses the form and `message` tells the agent why. A `page` cannot be answered from a service: send to the session instead |
 | `setInstructions(directory, text)` | `contributes.instructions` | Text the agent reads in every session under `directory`, or everywhere with `null`, up to `SERVICE_INSTRUCTIONS_MAX` (4096). Empty text removes it. It stays on the server, so no message waits on your process |
+| `setMark(target, mark)` | `contributes.marks` | Puts one icon on the sidebar rows `target` names, in place of the one you set there before; `null` removes it. `target` is `{ sessionId }`, `{ directory, branch }` or `{ directory }`; `mark` is `{ icon, tone, text, url? }`. Answers `{ saved: true }`. See *Marks on sidebar rows* |
 | `emit(topic, data?)` | nothing | Sends `data` to the extension's open frames, which hear it through `host.onServiceEvent`. Up to `SERVICE_EVENT_RATE_MAX` (30) a second and `SERVICE_EVENT_DATA_MAX` (64 000) characters of JSON. Nothing replays: a frame that opens later reads the current state from the service |
 | `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
 | `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
 
-A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Past a limit the call answers 429 and does nothing.
+A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Marks change at most `SERVICE_MARK_RATE_MAX` (60) times a minute. Past a limit the call answers 429 and does nothing.
 
 `sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. `answers: true` adds `sessionAnswers`, a line of its own too: the service answers for the user in any session, so a messenger bridge can carry the agent's requests to the user and their decisions back. Hosts up to 2.6.1 refuse the key, so declare an `engines.openchamber` floor above it. An answer to a request that settled meanwhile, in the app or on another device, is a 404. A failed session call answers what the session service told the caller, never its internals.
+
+## Marks on sidebar rows (`contributes.marks`)
+
+`contributes.marks: true` lets the service put small icons on the rows of the sidebar: a red cross on the sessions of a branch whose checks fail, a robot on a session the extension started. It needs `contributes.service`, and the approval dialog shows it as its own line, "Show marks in the sidebar".
+
+```ts
+await host.setMark({ directory: '/repo', branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+The target says which rows:
+
+| Target | Rows |
+|---|---|
+| `{ sessionId }` | That session's row |
+| `{ directory, branch }` | Every session on that branch of the repository `directory` belongs to, and the branch's worktree row. `directory` is any folder of the repository: the project root or any worktree. A row whose branch OpenChamber does not know yet shows no branch mark |
+| `{ directory }` | The sessions in that folder, the sessions in the worktree at it, and that worktree's row |
+
+The mark is drawn by OpenChamber from four values. `icon` is a Remixicon kebab name (`close-circle`), as in a status view; a name the app lacks draws a generic glyph. `tone` is `neutral`, `info`, `success`, `warning` or `error` and sets the colour from the theme. `text` is plain text for the tooltip, up to `SERVICE_MARK_TEXT_MAX` (200) characters, and OpenChamber puts the extension's name before it. `url` is an optional `https` address without credentials, up to `SERVICE_MARK_URL_MAX` (2,048) characters. A call with anything else is a 400 and sets nothing.
+
+A click on a mark opens your panel in that row's session when the extension has a panel, and `url` is ignored then. Without a panel it opens `url` in the browser. With neither, the mark only has its tooltip.
+
+One mark per target: setting a target again replaces its mark. When one row matches several of your targets, the session's mark shows before the branch's and the branch's before the folder's. A row draws at most two marks, one per extension in the order of the Extensions list, and its tooltip lists them all. On a one-line row the row's buttons cover the marks on hover, so a click reaches a mark on two-line rows and on touch screens.
+
+A mark lives as long as your process. When the service stops, for any reason, its marks are gone, and the next process starts with none. Declare `service.keepRunning`, and set the marks again on start from your own state. OpenChamber does not check that a target exists: a mark for a deleted session shows nowhere and still counts.
+
+You hold at most `SERVICE_MARKS_MAX` (200) marks; one more answers 409 `TOO_MANY_MARKS` until you remove one. Setting a mark to what it already is costs nothing and counts against no limit, so a service can set its marks on every check without comparing first.
+
+VS Code, mobile and the rows of an isolated space show no marks. Marks ship in the first OpenChamber release after 2.7.0; an older host ignores the manifest key and refuses the call, so declare an `engines.openchamber` floor above 2.7.0.
 
 ## Running with nobody asking
 
@@ -306,7 +337,7 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `referencePrefix` | `{ changeRequest, issue }`, 1–4 characters each (`#`, `!`) |
 | `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
 | `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
-| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
+| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `draftConversion?` (the service also serves `/pr/draft`; absent means the route answers 501), `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
 | `login` | Optional `{ kind: "service", hint }`. The service owns sign-in; `hint` is 1 to 2000 characters shown when this instance has no login. At least `login` or `token` is required |
 | `token` | Optional `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
@@ -705,6 +736,52 @@ OpenChamber posts `POST /session-events` (`SESSION_EVENTS_PATH`) with the servic
 - Session events alone grant no OpenCode access. A service with the separately approved `opencode` role can read through its own connection during event handling and between events, under the [OpenCode access](#opencode-access) contract.
 
 `examples/session-events-log` is the reference: a service-only extension that journals every event to a file.
+
+## Waits (`contributes.waits`)
+
+A service can offer agents things to wait on without holding a turn open: a deploy that finishes, a URL that comes up, a timer. The agent starts a wait with the `openchamber` tool's `wait.start`, ends its turn, and OpenChamber wakes its session with one message when the service says the wait fired. It asks for less than `sessionControl`: the service never sends to a session itself, and OpenChamber writes only to the session that started the wait, once. It has its own capability, `wake`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"waits": [
+  { "id": "timer", "title": "Timer", "description": "Wakes the session once the given number of seconds has passed",
+    "params": { "seconds": { "type": "number", "required": true } }, "interval": 10000 }
+]
+```
+
+| Field | Rule |
+|---|---|
+| `id` | Kebab-case, unique in the package, at most 32 characters. The agent names it as `<panel.id>/<id>` |
+| `title` | 1 to 40 characters; the approval dialog lists it and the wake message names it |
+| `description` | 1 to 200 characters, written for the agent: when the wait fires |
+| `params` | Up to 8 flat arguments, each `{ type: "string" \| "number" \| "boolean", description?, required?: true }`. OpenChamber checks the agent's arguments against them before your service sees a request |
+| `interval` | Milliseconds between two checks, 10 000 to 3 600 000; default 30 000 |
+
+`waits` needs `contributes.service` (`invalid-waits` otherwise) and, like session events, lets the service go without a panel or background entry. Declaring any asks for the `wake` capability, shown as a line of its own with the wait titles under it. Its grant scope is the sorted list of wait ids, so a version that adds a wait is unapproved until the user approves again. Hosts up to 2.7.0 drop the key at parse, so a service with nothing else to start it fails there as `invalid-panel`; declare `engines.openchamber: ">=2.7.1"`.
+
+### Wire
+
+Both requests are `POST` with the service bearer. Parse them with `readWaitStartRequest` and `readWaitCheckRequest` (zod-free; `null` is a body of another version, answer HTTP 400), and answer HTTP 200 with JSON.
+
+| Route | Body | Answer |
+|---|---|---|
+| `/waits/start` (`WAITS_START_PATH`) | `{ v: 1, requestId, wait: { id, type, args, session: { id, directory } } }` | `{ ok: true, state?, label? }` takes the wait; `{ ok: false, error }` refuses it, and the agent's call fails with `error` |
+| `/waits/check` (`WAITS_CHECK_PATH`) | `{ v: 1, requestId, waits: [{ id, type, args, state }] }`, the due waits of one type, at most 50 | `{ results: [{ id, fired: false, state? } \| { id, fired: true, summary }] }`. A wait left out keeps waiting unchanged |
+
+- `state` is any JSON up to 4 096 characters; OpenChamber stores it and posts it back on the next check, so the service needs no storage of its own and may stop between checks. `label` (up to 80, cut it yourself: a longer one refuses the wait) names the wait next to its title: the deploy, the URL.
+- `summary` (1 to 2 000 characters) is what the agent reads when it wakes. OpenChamber removes `<` and `>` from it and wraps it in an envelope that names your extension, so write it as a report of what happened, never as instructions.
+- An answer whose `results` envelope does not parse, a non-200 status, or no answer is a failed check: nothing fires and nothing changes, and OpenChamber asks that type again after its interval doubled per failure, up to ten minutes. A wait whose every check failed for six hours ends with a wake that says so.
+- Inside a good envelope each entry is read on its own. An entry that breaks the limits, such as a `state` over 4 096 characters or a `summary` over 2 000, ends that wait with a wake saying OpenChamber could not read it; the other entries are applied.
+- Each request has `WAIT_REQUEST_TIMEOUT_MS` (10 s). Requests go through the same proxy as `serviceRequest`, so the service starts on the first one and stops ten minutes after the last.
+
+### Delivery
+
+- One wake ends the wait. The agent starts another when it needs to wait again.
+- The message waits until the session and its subagents are idle, and an archived session is not woken.
+- Pausing or removing the extension, withdrawing its approval, or dropping a wait type from the manifest ends the waits it held with a wake that says so.
+- Sessions inside isolated spaces cannot start waits.
+
+`examples/wait-kit` is the reference: a timer and a URL that starts answering.
 
 ## Shared surface (`surface: true`)
 

@@ -2,14 +2,13 @@ import React from 'react';
 
 import { InlineDictationButton } from '@/components/dictation/InlineDictationButton';
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
-import { Icon } from '@/components/icon/Icon';
 import { createChatDraftIdentity, readChatDraft, writeChatDraft } from '@/lib/chatDraftPersistence';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
-import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { useI18n } from '@/lib/i18n';
 
 /** The counter appears only once the text gets close to the limit. */
 const COUNTER_THRESHOLD = 0.8;
@@ -111,7 +110,7 @@ const useKnowledgeDraft = (projectPath: string, kind: KnowledgeDraftKind) => {
  * The one way every section adds an entry: a single line that grows with its
  * text. Enter adds. A multiline field follows the chat composer: Shift+Enter
  * starts a new line on desktop, and on a phone, whose keyboard has no
- * Shift+Enter, Return starts a new line and the send button adds. A one-line
+ * Shift+Enter, Return starts a new line and the Add button adds. A one-line
  * field turns pasted line breaks into spaces.
  *
  * The draft lives here, so dictation can continue it and a failed add can
@@ -129,9 +128,10 @@ export const KnowledgeComposer: React.FC<{
   disabled?: boolean;
   /** Resolves false when the entry was not added; the text then stays. */
   onSubmit: (text: string) => Promise<boolean> | boolean;
-  /** Extra controls before the add button, such as an import action. */
+  /** Extra controls before the Add button, such as an import action. */
   extraActions?: React.ReactNode;
 }> = ({ placeholder, addLabel, maxLength, projectPath, draftKind, multiline = false, dictation = true, disabled = false, onSubmit, extraActions }) => {
+  const { t } = useI18n();
   const { text, setText, currentText, takeForAdd } = useKnowledgeDraft(projectPath, draftKind);
   const fieldRef = React.useRef<HTMLTextAreaElement>(null);
   const emojiPicker = useEmojiPicker(fieldRef);
@@ -216,19 +216,22 @@ export const KnowledgeComposer: React.FC<{
         />
       ) : null}
       {extraActions}
-      <ButtonTooltip label={addLabel} className="shrink-0">
-        {/* The chat composer's send button: the same glyph, primary when it
-            can send, faded when it cannot. A plus read as "attach a file". */}
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!canSend}
-          className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, canSend ? 'text-primary hover:text-primary' : 'disabled:opacity-30')}
-          aria-label={addLabel}
-        >
-          <Icon name="send-plane-2" className="h-4 w-4" />
-        </button>
-      </ButtonTooltip>
+      {/* A word, because an icon here meant something else every time: a plus
+          read as "attach a file", the chat's send glyph as "send to the agent",
+          the same glyph a todo row uses for exactly that. */}
+      <button
+        type="button"
+        onClick={() => void submit()}
+        disabled={!canSend}
+        className={cn(
+          'inline-flex h-6 flex-shrink-0 items-center rounded-md px-1.5 typography-ui-label font-medium transition-colors',
+          'focus-visible:outline-none disabled:cursor-not-allowed',
+          canSend ? 'text-[var(--primary-text)] hover:bg-interactive-hover' : 'text-muted-foreground opacity-50',
+        )}
+        aria-label={addLabel}
+      >
+        {t('rightSidebar.contextNotesTodo.composer.add')}
+      </button>
     </div>
   );
 };

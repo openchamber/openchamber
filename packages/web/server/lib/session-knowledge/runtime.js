@@ -222,6 +222,17 @@ const buildMemoryBlock = ({ global, project, enabled = false, complete = false }
   ].join('\n\n');
 };
 
+/**
+ * How a store's titles fit the index a session is given, as dreaming reads it
+ * (`../agent-memory/dreaming.js`): the characters the memory entry has, the
+ * characters the index takes, and how many titles it leaves out.
+ */
+export const measureMemoryIndex = ({ global, project }) => {
+  const block = buildMemoryBlock({ global, project, enabled: true, complete: true });
+  const omitted = Number(/(\d+) older titles did not fit here/.exec(block)?.[1] ?? 0);
+  return { budget: KNOWLEDGE_MAX_LENGTH, used: block.length, omitted };
+};
+
 const buildPinnedBlock = ({ notes, plans }) => {
   const sections = [];
   if (notes.length > 0) {

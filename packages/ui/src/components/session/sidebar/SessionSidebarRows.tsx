@@ -60,6 +60,8 @@ type Props = {
   guideSlotStartPx?: number;
   /** Brings a row to the middle of the list; a new `id` asks again for the same row. */
   scrollRequest?: { index: number; id: number } | null;
+  /** Draws the hairline between a closed section and the next project header. */
+  projectDivider?: boolean;
   /** How much of the scroller's top a pinned header covers: the row the user sees first sits under it. */
   getStickyHeaderHeight?: (scrollElement: HTMLElement) => number;
   /**
@@ -84,6 +86,7 @@ export function SessionSidebarRows({
   scrollRequest = null,
   getStickyHeaderHeight,
   heldRowRef,
+  projectDivider = true,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -301,7 +304,7 @@ export function SessionSidebarRows({
     return <div data-sidebar-virtual-pending="true">
       {indexes.map((index) => {
         const row = rows[index];
-        return row ? <div key={row.key} className={sectionWrapperClass(row, rows[index + 1])}>{renderRowWithGuides(row, index)}</div> : null;
+        return row ? <div key={row.key} className={sectionWrapperClass(row, rows[index + 1], projectDivider)}>{renderRowWithGuides(row, index)}</div> : null;
       })}
       {estimatedTotal > renderedHeight ? <div aria-hidden="true" style={{ height: estimatedTotal - renderedHeight }} /> : null}
     </div>;
@@ -313,7 +316,7 @@ export function SessionSidebarRows({
       key={ghost.row.key}
       aria-hidden="true"
       inert
-      className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(ghost.row, ghost.nextRow)}`}
+      className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(ghost.row, ghost.nextRow, projectDivider)}`}
       data-sidebar-ghost="true"
       data-sidebar-row-key={ghost.row.key}
       data-sidebar-virtual-start={ghost.start}
@@ -335,7 +338,7 @@ export function SessionSidebarRows({
         key={row.key}
         // Isolated virtual rows cannot collapse neighboring margins: 1px per side preserves the 2px gap.
         // The row box, not the row: a session row in rename keeps the same margins.
-        className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(row, rows[item.index + 1])}`}
+        className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(row, rows[item.index + 1], projectDivider)}`}
         data-index={item.index}
         data-sidebar-row-key={row.key}
         data-sidebar-virtual-start={item.start}

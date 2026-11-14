@@ -4066,11 +4066,23 @@ var requestSchema = object({
   jsonrpc: literal("2.0"),
   id: union([string2(), number2()]).optional(),
   method: string2(),
-  params: object({ name: string2().optional(), protocolVersion: string2().optional(), arguments: object({ scope: string2().optional(), project: string2().optional() }).optional() }).optional()
+  params: object({ name: string2().optional(), protocolVersion: string2().optional(), arguments: object({ scope: string2().optional(), project: string2().optional(), key: string2().optional(), query: string2().optional() }).optional() }).optional()
 });
 var tools = [
   { name: "findings", description: "Show a clearly labeled sample code review. Does not inspect files.", inputSchema: { type: "object", properties: { scope: { type: "string", description: "Label for this sample review" } }, required: ["scope"] } },
-  { name: "checks", description: "Show sample project checks. Does not run commands or inspect files.", inputSchema: { type: "object", properties: { project: { type: "string", description: "Label for these sample checks" } }, required: ["project"] } }
+  { name: "checks", description: "Show sample project checks. Does not run commands or inspect files.", inputSchema: { type: "object", properties: { project: { type: "string", description: "Label for these sample checks" } }, required: ["project"] } },
+  { name: "issue", description: "Show one sample tracker issue. Does not contact a tracker.", inputSchema: { type: "object", properties: { key: { type: "string", description: "Sample issue key: DEMO-482, DEMO-477 or DEMO-470" } }, required: ["key"] } },
+  { name: "issues", description: "List the sample tracker issues. Does not contact a tracker.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Label for this sample search" } }, required: ["query"] } }
+];
+var issue2 = (key, summary, status, priority, type) => ({
+  key,
+  url: `https://tracker.example.com/browse/${key}`,
+  fields: { summary, status: { name: status }, assignee: { displayName: "Olena K." }, priority: { name: priority }, issuetype: { name: type } }
+});
+var issues = [
+  issue2("DEMO-482", "Login fails after token refresh", "In Progress", "High", "Bug"),
+  issue2("DEMO-477", "Rate limiter drops webhook retries", "Blocked", "High", "Bug"),
+  issue2("DEMO-470", "Billing export misses refunds", "To Do", "Medium", "Task")
 ];
 var samples = {
   findings: { summary: "Sample review · 3 findings · no files inspected", items: [
@@ -4106,10 +4118,12 @@ lines.on("line", (line) => {
       reply({});
     else if (request.method === "tools/call") {
       const name = request.params?.name;
-      if (name !== "findings" && name !== "checks")
-        reply({ isError: true, content: [{ type: "text", text: "Unknown sample tool." }] });
+      const found = issues.find((entry) => entry.key === request.params?.arguments?.key);
+      const result = name === "findings" || name === "checks" ? samples[name] : name === "issue" ? found : name === "issues" ? { summary: `Sample search · ${issues.length} issues · no tracker contacted`, items: issues } : undefined;
+      if (result === undefined)
+        reply({ isError: true, content: [{ type: "text", text: name === "issue" ? "No sample issue has that key." : "Unknown sample tool." }] });
       else
-        reply({ content: [{ type: "text", text: JSON.stringify(samples[name]) }], structuredContent: samples[name] });
+        reply({ content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });
     } else
       process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "Method not found" } })}
 `);

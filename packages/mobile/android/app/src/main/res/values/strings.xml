@@ -8,4 +8,12 @@
     <string name="tile_new_session">New session</string>
     <string name="tile_new_session_subtitle">OpenChamber</string>
     <string name="tile_new_session_description">Start a new OpenChamber session</string>
+    <string name="widget_usage_label">Usage</string>
+    <string name="widget_sessions_label">Sessions</string>
+    <string name="widget_usage_description">Usage quotas from connected providers</string>
+    <string name="widget_sessions_description">Recent sessions and new chat shortcut</string>
+    <!-- Shown until the app sends its first snapshot; the app sends the rest in its own language. -->
+    <string name="widget_open_to_sync">Open OpenChamber to sync</string>
+    <string name="widget_refresh">Refresh</string>
+    <string name="widget_new_session">New session</string>
 </resources>

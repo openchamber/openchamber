@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fetchOpenCodeGoUsage, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
+import { fetchMistralUsage } from '../../web/server/lib/quota/providers/mistral-billing.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
@@ -944,6 +945,10 @@ export const listConfiguredQuotaProviders = async () => {
     configured.add('deepseek');
   }
 
+  if (getMistralApiKey(auth)) {
+    configured.add('mistral');
+  }
+
   const deepinfraAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepinfra', 'deep-infra', 'deep_infra']));
   if (deepinfraAuth && ((deepinfraAuth as Record<string, unknown>).key || (deepinfraAuth as Record<string, unknown>).token)) {
     configured.add('deepinfra');
@@ -1595,7 +1600,8 @@ let claudeCooldownUntil = 0;
 const claudeCooldownFromResponse = (response: Response): number => {
   const raw = response.headers.get('retry-after');
   const seconds = raw ? Number(raw) : Number.NaN;
-  if (Number.isFinite(seconds) && seconds > 0) {
+  // `Retry-After: 0` asks for an immediate retry, so it ends the cooldown.
+  if (Number.isFinite(seconds) && seconds >= 0) {
     return Math.min(seconds * 1000, CLAUDE_MAX_COOLDOWN_MS);
   }
   if (raw) {
@@ -1742,13 +1748,24 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
       return buildClaudeRateLimitResult();
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return buildResult({
         providerId: 'claude',
         providerName: 'Claude',
         ok: false,
         configured: true,
         error: 'Claude session expired. Open Claude Code to sign in again.',
+      });
+    }
+
+    // A valid token without the `user:profile` scope (every `claude setup-token` token) gets 403.
+    if (response.status === 403) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.',
       });
     }
 
@@ -3900,6 +3917,30 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const getMistralApiKey = (auth: AuthFile): string | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['mistral']));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+const fetchMistralQuota = async (): Promise<ProviderResult> => {
+  const apiKey = getMistralApiKey(await readOpenCodeCredentials());
+  if (!apiKey) {
+    return buildResult({ providerId: 'mistral', providerName: 'Mistral', ok: false, configured: false, error: 'Not configured' });
+  }
+  try {
+    const { windows, planLabel } = await fetchMistralUsage(apiKey);
+    return buildResult({ providerId: 'mistral', providerName: 'Mistral', ok: true, configured: true, usage: { windows }, planLabel });
+  } catch (error) {
+    return buildResult({
+      providerId: 'mistral',
+      providerName: 'Mistral',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const HYPER_CREDIT_TO_USD = 0.05;
 
@@ -4410,7 +4451,13 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         const credential = openCodeZenCredential(auth);
         if (!credential) return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: false, error: 'Not configured' });
         const usage = await fetchOpenCodeZenUsage(credential);
-        return buildResult({ providerId, providerName: 'OpenCode Zen', ok: true, configured: true, usage });
+        return buildResult({
+          providerId,
+          providerName: 'OpenCode Zen',
+          ok: true,
+          configured: true,
+          usage: { ...usage, models: Object.keys(usage.models).length ? usage.models : undefined },
+        });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
@@ -4433,6 +4480,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchZenmuxQuota();
     case 'xai':
       return fetchXaiQuota();
+    case 'mistral':
+      return fetchMistralQuota();
     default:
       return buildResult({
         providerId,

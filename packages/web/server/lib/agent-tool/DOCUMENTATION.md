@@ -71,6 +71,14 @@ the user can want independently:
   agent reads the message next. A message sent before the page appeared
   fired the hook too early; the server finds it in the inbox instead
   (`render-page.js`).
+  With `share` the page also goes to other people by link and PIN through the
+  relay, and their answers come back later as messages
+  (`../share-pages/DOCUMENTATION.md`). The `share` input and the description's
+  one sentence about it exist only while sharing is available
+  (`materializePlugin({ includeShare })`, decided in
+  `../opencode/managed-config-file.js` with `isSharingAvailable`): in
+  enterprise mode without a pinned relay the agent never hears of it, and the
+  managed config is rewritten when the policy changes.
 - `openchamber_image` — `image.generate`, images made or edited by the image
   model the user chose in Settings (`../openchamber-control/generate-image.js`).
   Off by default: enabled only while `agentImageToolEnabled` is `true`, and
@@ -232,13 +240,16 @@ default and when to set it. Field names and JSON types carry the rest.
   `html`, is that input's description.
 - The tool exposes one shared parameter object rather than repeating parameters
   in a large per-action union.
-- The action schema carries `oneOf` and no `enum`. A node combining `enum` and
+- The action schema carries `enum` and no `oneOf`. A node combining `enum` and
   `oneOf` is valid JSON Schema, but some OpenAI-compatible gateways reject it
-  and answer with an empty completion instead of an error.
+  and answer with an empty completion instead of an error. Using `enum` alone
+  avoids the gateway collision while preventing OpenAPI 3.0 / Gemini schema
+  normalizers from collapsing `oneOf` to its first element. Action descriptions
+  are folded into the property description.
 - A tool with a single action (render, notify) declares `action` as a plain,
   optional string and always runs its one action. A weaker model put the whole
   render call into `action` as a JSON string, title included, with the html
-  beside it; the strict `oneOf` refused that before the tool ran, and every
+  beside it; the strict action list refused that before the tool ran, and every
   retry sent the whole page again. Such a string is revived, and its fields
   fill only what the call did not already carry.
 - Obvious fields rely on their names and JSON types. Parameter descriptions are
@@ -372,6 +383,12 @@ past the 2048-character cut.
   called from the event dispatch in `server/index.js` when the stream reports
   `session.idle` with `aborted: true`; the abort signal then reaches the
   shared service as before. A dropped HTTP request still aborts as well.
+- A call the user stops ends as a stopped call: when `context.signal` has
+  aborted, the generated `execute` rethrows instead of returning an `ok:false`
+  envelope. Since OpenCode 2.3.0 a tool that reads its signal stops
+  cooperatively and whatever it returns is recorded as the result, so an
+  envelope would store a completed call, and the chat drops a completed page
+  or secret card that is not `ok` (`renderedPage` in `lib/opencode/tools.ts`).
 
 ## Result contract
 

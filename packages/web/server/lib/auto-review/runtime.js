@@ -240,6 +240,8 @@ export function createAutoReviewRuntime({
   const sendFailures = new Map(); // originalSessionID → consecutive failed sends
   const settleChecks = new Map(); // originalSessionID → rechecks spent waiting for the idle record
   const ticking = new Set();
+  // Ticks under way: one can still persist after `stop()`, so `flush()` waits for them.
+  const ticksInFlight = new Set();
 
   // --- persistence ---------------------------------------------------------
 
@@ -444,9 +446,12 @@ export function createAutoReviewRuntime({
     clearTimer(originalSessionID);
     const timer = setTimeout(() => {
       timers.delete(originalSessionID);
-      tick(originalSessionID).catch((error) => {
-        console.warn('[auto-review] tick failed:', error?.message ?? error);
-      });
+      const work = tick(originalSessionID)
+        .catch((error) => {
+          console.warn('[auto-review] tick failed:', error?.message ?? error);
+        })
+        .finally(() => ticksInFlight.delete(work));
+      ticksInFlight.add(work);
     }, Math.max(0, delayMs));
     timer.unref?.();
     timers.set(originalSessionID, timer);
@@ -779,8 +784,14 @@ export function createAutoReviewRuntime({
     processPayload,
     start: startRuntime,
     stop,
-    /** Drains the pending write; tests and shutdown use it. */
-    flush: () => writePromise,
+    /**
+     * Drains the ticks under way and every write they queue; after `stop()`
+     * nothing writes once it resolves. Tests use it before removing the data dir.
+     */
+    flush: async () => {
+      while (ticksInFlight.size > 0) await Promise.all(ticksInFlight);
+      await writePromise;
+    },
   };
 }
 

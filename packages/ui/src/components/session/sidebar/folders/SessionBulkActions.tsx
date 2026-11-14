@@ -6,6 +6,13 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { BulkActionBar } from './BulkActionBar';
 import { BulkSessionDeleteConfirmDialog, type BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
 import { useSidebarBulkActions } from './useSidebarBulkActions';
+import { finishBulkDoneWork, markSessionsDone } from '../works/workActions';
+import type { SessionRowOrderWork } from '../sessions/sessionRowOrder';
+
+// Archive on Done is read when the batch ends, as the row's Done reads it on click.
+const finishWorkOnBulkDone = (work: SessionRowOrderWork, doneIds: ReadonlySet<string>) => (
+  finishBulkDoneWork(work, doneIds, useUIStore.getState().worktreeArchiveOnDoneEnabled)
+);
 
 type Props = {
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
@@ -27,6 +34,7 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
   const unarchiveSessions = useSessionUIStore((state) => state.unarchiveSessions);
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const bulk = useSidebarBulkActions({
     isInlineEditing,
     showDeletionDialog,
@@ -43,6 +51,9 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
     archiveSessions,
     unarchiveSessions,
     deleteSessions,
+    markSessionsDone,
+    finishWork: finishWorkOnBulkDone,
+    sessionWorkEnabled,
     bulkDeleteConfirm,
     setBulkDeleteConfirm,
   });
@@ -59,6 +70,9 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
       canFileSelection={bulk.bulkCanMoveToFolder}
       canRemoveFromFolder={bulk.bulkCanRemoveFromFolder}
       onRestore={bulk.handleBulkRestore}
+      showMarkDone={bulk.bulkShowsMarkDone}
+      canMarkDone={bulk.bulkCanMarkDone}
+      onMarkDone={bulk.handleBulkMarkDone}
       onArchive={bulk.handleBulkArchive}
       onDelete={bulk.handleBulkHardDelete}
       onDone={bulk.handleExitSelectionMode}

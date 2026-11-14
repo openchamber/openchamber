@@ -4,7 +4,7 @@
  */
 import path from 'path';
 import { z } from 'zod';
-import { readWork } from './state.js';
+import { isPinnedMetadata, readWork } from './state.js';
 
 /**
  * Sessions that are not the user's own work: a review of another session, a
@@ -31,12 +31,14 @@ export const createWorkMembership = ({ chatRoots = [] } = {}) => {
 
   /**
    * Whether the sidebar's In work block shows the session
-   * (`orderInWorkWorks` in packages/ui): top level, not archived, not a Chat, open.
+   * (`orderInWorkWorks` in packages/ui): top level, not archived, not a Chat,
+   * not pinned, open.
    */
   const isInWork = (session) => Boolean(session)
     && !session.parentID
     && !session.time?.archived
     && !isChatDirectory(sessionDirectory(session))
+    && !isPinnedMetadata(session.metadata)
     && readWork(session.metadata)?.state === 'open';
 
   /**

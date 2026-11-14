@@ -14,7 +14,7 @@ globalThis.fetch = async (input: string | URL | Request) => {
   return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
 };
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, customElements: browser.customElements, MutationObserver: browser.MutationObserver,
@@ -222,4 +222,39 @@ test('Plan-style document assets resolve relative media while raw HTML stays ine
     if (observer) Object.defineProperty(browser, 'IntersectionObserver', observer);
     else Reflect.deleteProperty(browser, 'IntersectionObserver');
   }
+});
+
+test('an svg fence draws as an image only where the document preview asks for it', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>\n```';
+  const draw = (svgFences: boolean) => act(() => root.render(<I18nProvider><MarkdownContent content={content} svgFences={svgFences} enableFileReferences={false} directory="/project" settled /></I18nProvider>));
+  await draw(true);
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
+  await draw(false);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.textContent).toContain('xmlns');
+});
+
+test('an svg fence with a script stays an ordinary code block', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n```';
+  await act(async () => { root.render(<I18nProvider><MarkdownContent content={content} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
+});
+
+test('an svg the browser cannot draw keeps the ordinary code block, and a corrected source draws again', async () => {
+  const draw = (svg: string) => act(async () => {
+    root.render(<I18nProvider><MarkdownContent content={'```svg\n' + svg + '\n```'} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await draw('<svg><oops');
+  await act(async () => { host.querySelector('img')?.dispatchEvent(new Event('error')); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('svg');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('<svg><oops');
+  expect(host.querySelector('[data-streamdown="code-block-actions"] button[aria-label="Copy code"]')).not.toBeNull();
+  await draw('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
 });

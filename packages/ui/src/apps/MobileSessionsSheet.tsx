@@ -25,6 +25,11 @@ import type { IconName } from '@/components/icon/icons';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { SearchInMenu } from '@/components/search/SearchInMenu';
+import { SearchStatusMark } from '@/components/search/SearchStatusMark';
+import { useSearchFailureText } from '@/components/search/searchStatusText';
+import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
+import { searchScopeQuery, type SearchScope } from '@/lib/search/omniQuery';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { Button } from '@/components/ui/button';
@@ -39,11 +44,17 @@ import {
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -133,6 +144,7 @@ type ReorderProject = {
   iconBackground?: string | null;
 };
 
+const IDLE_SEARCH_STATUS: ContentSearchStatus = { kind: 'idle' };
 const renderList = (props: SessionProjectListProps): React.ReactNode => <MobileSessionList {...props} />;
 
 /** One draggable project in Reorder projects. */
@@ -188,6 +200,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
   const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
+  const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
@@ -198,7 +212,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
-  const [query, setQuery] = React.useState('');
+  const [searchText, setSearchTextState] = React.useState('');
+  const [searchScope, setSearchScope] = React.useState<SearchScope>('everything');
+  const [searchStatus, setSearchStatus] = React.useState<ContentSearchStatus>(IDLE_SEARCH_STATUS);
+  // A cleared search drops its scope too: the next one starts wide.
+  const setSearchText = React.useCallback((text: string) => {
+    setSearchTextState(text);
+    if (text === '') setSearchScope('everything');
+  }, []);
+  const clearSearchText = React.useCallback(() => setSearchText(''), [setSearchText]);
+  const searchFailure = useSearchFailureText(searchStatus, searchScopeQuery(searchScope).searchIn === 'messages');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [worktreeToDelete, setWorktreeToDelete] = React.useState<{ project: { id: string; path: string }; worktree: WorktreeMetadata } | null>(null);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
@@ -214,16 +237,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const toggleSearch = () => {
     // Closing the field clears its query: no list stays filtered by text
     // nobody can see.
-    if (searchOpen) setQuery('');
+    if (searchOpen) clearSearchText();
     setSearchOpen(!searchOpen);
   };
   React.useEffect(() => {
     if (searchOpen && variant === 'sidebar') searchInputRef.current?.focus();
   }, [searchOpen, variant]);
 
+  React.useEffect(
+    () => sessionEvents.onDirectoryRequest(() => setDirectoryDialogOpen(true)),
+    [],
+  );
+
   React.useEffect(() => {
     if (!listActive) {
-      setQuery('');
+      clearSearchText();
       setSearchOpen(false);
       setEditingOrder(false);
       setEditingProjectId(null);
@@ -241,6 +269,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [listActive]);
 
+  // Events sent while the stream was down are lost, so a list on screen when
+  // it comes back (the iPad's sidebar, a drawer left open in the background)
+  // reads again, as opening it does.
+  const connectionPhase = useConfigStore((state) => state.connectionPhase);
+  const previousConnectionPhaseRef = React.useRef(connectionPhase);
+  React.useEffect(() => {
+    const reconnected = previousConnectionPhaseRef.current === 'reconnecting' && connectionPhase === 'connected';
+    previousConnectionPhaseRef.current = connectionPhase;
+    if (!reconnected || !listActive) return;
+    void refreshGlobalSessions(liveSessions).then(() => seedGlobalSessionStatusFromHost());
+    // only on the reconnect edge
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionPhase]);
+
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
   const sidebarActions = React.useMemo<MobileSidebarActions>(() => ({
     close,
@@ -255,8 +297,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     requestWorktreeDelete: (project, worktree) => setWorktreeToDelete({ project, worktree }),
     openId,
   }), [close, openId]);
-  const clearSearch = React.useCallback(() => setQuery(''), []);
-  const phoneList = React.useMemo(() => ({ searchQuery: query, clearSearch, renderList }), [clearSearch, query]);
+  const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? searchText : '', searchScope, clearSearch: clearSearchText, onSearchStatusChange: setSearchStatus, renderList }), [clearSearchText, searchScope, searchShown, searchText]);
 
   // Projects with the label the rows show, in the order Reorder projects drags.
   const labelledProjects = React.useMemo(() => projects.map((project) => ({
@@ -314,7 +355,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   // Drag order IS the manual order: offering it under another sort would let
   // the user rearrange a list that is about to be re-sorted anyway.
-  const canEditOrder = !query && projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project';
+  const canEditOrder = !searchText && projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project';
 
   // Sorting lives in the header next to reordering — the two answer the same
   // question about the list. Reachable with a single project too: the menu
@@ -331,7 +372,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           title={t('sessions.sidebar.header.displayMode.label')}
           style={{ touchAction: 'manipulation' }}
         >
-          <Icon name="equalizer-2" className="size-4" />
+          <Icon name="list-settings" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -359,7 +400,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
-        {/* A work in In work leaves its project unless asked. */}
+        {/* A pinned work stays in its project unless asked; one in In work leaves it unless asked. */}
+        {showPinnedSection ? renderMenuChoice('pinned-in-place', 'sessions.sidebar.header.displayMode.keepPinnedInPlace', keepPinnedInPlace, toggleSetting(keepPinnedInPlace, setKeepPinnedInPlace, (next) => {
+          void updateDesktopSettings({ sidebarKeepPinnedInPlace: next });
+        })) : null}
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
         })) : null}
@@ -439,6 +483,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       </span>
     </DropdownMenuItem>
   );
+  const guestPages = useGuestPages();
   const moreMenu = footer && !editingOrder ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -459,6 +504,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
         {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
         {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
+        {/* Extension pages that opted into the phone; the shell shows the open one full screen. */}
+        {guestPages.map((guest) => (
+          <DropdownMenuItem key={guest.id} onClick={() => useUIStore.getState().setOpenGuestPage(guest.id)} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="flex min-w-0 items-center gap-2">
+              <GuestIcon
+                icon={resolveGuestIconName(guest.icon)}
+                iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)}
+                className="size-4 shrink-0"
+              />
+              <span className="truncate">{guest.pageTitle ?? guest.name}</span>
+            </span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   ) : null;
@@ -489,14 +547,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           <div className={cn('shrink-0 px-2 pb-1', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
             <SessionSearchInput
               inputRef={searchInputRef}
-              value={query}
-              onSearch={setQuery}
+              value={searchText}
+              onSearch={setSearchText}
               onClose={variant === 'sidebar' ? toggleSearch : undefined}
               active={open}
               mobile
               placeholder={t('mobile.sessions.search.placeholder')}
               clearLabel={t('mobile.sessions.clearSearchAria')}
+              trailing={searchText !== '' ? <>
+                <SearchStatusMark status={searchStatus} scope={searchScope} />
+                <SearchInMenu mobile scope={searchScope} onChange={setSearchScope} />
+              </> : undefined}
             />
+            {/* A phone has no tooltips, so a failed message search says so in words. */}
+            {searchText !== '' && searchFailure ? <p role="status" className="px-2.5 pt-1 typography-micro text-muted-foreground">{searchFailure}</p> : null}
           </div>
         ) : null}
         {empty ? (

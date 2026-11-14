@@ -81,7 +81,7 @@ interface ComposerFooterProps {
     /** Desktop only: the composer box hides its other contents while the overlay is up. */
     onDictationActiveChange?: (active: boolean) => void;
     isBtw?: boolean;
-    /** The composer's double Escape stops the run (not in the mini chat). */
+    /** Double Escape from this composer stops its run (abortShortcutReach); without it Stop stays visible beside Send. */
     escapeStops?: boolean;
     modelSessionId?: string | null;
     btwSelection: BtwSelection;
@@ -174,6 +174,15 @@ function ComposerFooterView(props: ComposerFooterProps) {
             className={cn(
                 'bg-transparent flex-shrink-0',
                 footerPaddingClass,
+                // The send disc sits concentric with the composer's corner: as
+                // far from the right edge as from the bottom one (8px).
+                !isMobile && !isVSCode && 'pe-2',
+                // On a phone the disc's right edge lines up with the agent
+                // label in the row below (its px-3.5), and the disc hugs the
+                // end of its touch slot (ComposerActionButtons). h-12 is the
+                // collapsed pill's height, fixed so its icons sit on the same
+                // line whether a button is 32px or on the 36px touch floor.
+                isMobile && 'h-12 pe-3.5',
                 isMobile ? 'flex items-center gap-x-1.5' : cn('flex items-center justify-between', footerGapClass)
             )}
             style={{
@@ -253,7 +262,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                     newSessionDraftOpen={newSessionDraftOpen}
                                     onPrimaryAction={onPrimaryAction}
                                     onAbort={onAbort}
-                                    escapeStops={escapeStops && !isBtw}
+                                    escapeStops={escapeStops}
                                 />
                             </div>
                         </div>
@@ -293,9 +302,14 @@ function ComposerFooterView(props: ComposerFooterProps) {
                         /> : null}
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                     </div>
-                    <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
+                    {/* Three groups, set apart by their gaps: the model unit and the
+                        agent (16px), then 20px to the action pair (both inside
+                        ModelControls, tighter when narrow), whose mic, bare Stop
+                        and Send disc sit 8px apart.
+                        VS Code keeps its own tighter row. */}
+                    <div className={cn('flex items-center flex-1 justify-end', isVSCode ? cn(footerGapClass, 'md:gap-x-3') : 'gap-x-2')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}
-                        {parallelRun ? <MemoModelControls className="flex-1 min-w-0" agentOnly /> : isBtw ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} modelSelectorOpen={btwModelSelectorOpen} onModelSelectorOpenChange={onBtwModelSelectorOpenChange} /> : pinnedSelection ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={currentSessionId} selection={pinnedSelection} rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
+                        {parallelRun ? <MemoModelControls className={cn('flex-1 min-w-0')} agentOnly /> : isBtw ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} modelSelectorOpen={btwModelSelectorOpen} onModelSelectorOpenChange={onBtwModelSelectorOpenChange} /> : pinnedSelection ? <ModelControls className={cn('flex-1 min-w-0 justify-end')} sessionId={currentSessionId} selection={pinnedSelection} rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
                         {!isBtw ? <MemoComposerDictation
                             radius={chatInputRadius}
                             isMobile={isMobile}
@@ -340,7 +354,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             newSessionDraftOpen={newSessionDraftOpen}
                             onPrimaryAction={onPrimaryAction}
                             onAbort={onAbort}
-                            escapeStops={escapeStops && !isBtw}
+                            escapeStops={escapeStops}
                         />}
                     </div>
                 </>

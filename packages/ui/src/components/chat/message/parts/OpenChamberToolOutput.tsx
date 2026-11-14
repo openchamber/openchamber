@@ -39,6 +39,7 @@ import {
     knowledgeListedSchema,
     knowledgeSavedSchema,
     linkedSchema,
+    unlinkedSchema,
     memoriesListedSchema,
     memorySavedSchema,
     modelPreferencesSchema,
@@ -70,15 +71,31 @@ const isOwnProject = (call: OpenChamberCallInput, directory: string): boolean =>
     !call.projectId && (!call.directory || call.directory === directory)
 );
 
+type LinkedEntry = z.infer<typeof linkedSchema>['linked'];
+
+const LinkedRow: React.FC<{ linked: LinkedEntry }> = ({ linked }) => {
+    const repository = linked.id?.includes('#') ? linked.id.slice(0, linked.id.indexOf('#')) : undefined;
+    const label = [linked.number ? `#${linked.number}` : undefined, linked.title].filter(Boolean).join(' ');
+    return <WebLinkRow url={linked.url} icon={linked.kind === 'issue' ? 'record-circle' : 'git-pull-request'} primary={label || linked.url} secondary={repository} />;
+};
+
 const LinkedBody: React.FC<{ data: unknown }> = ({ data }) => {
     const parsed = linkedSchema.safeParse(data);
     if (!parsed.success) return null;
-    const { linked } = parsed.data;
-    const repository = linked.id?.includes('#') ? linked.id.slice(0, linked.id.indexOf('#')) : undefined;
-    const label = [linked.number ? `#${linked.number}` : undefined, linked.title].filter(Boolean).join(' ');
     return (
         <>
-            <WebLinkRow url={linked.url} icon={linked.kind === 'issue' ? 'record-circle' : 'git-pull-request'} primary={label || linked.url} secondary={repository} />
+            <LinkedRow linked={parsed.data.linked} />
+            <Actions />
+        </>
+    );
+};
+
+const UnlinkedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const parsed = unlinkedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    return (
+        <>
+            {parsed.data.unlinked.map((linked) => <LinkedRow key={linked.id ?? linked.url} linked={linked} />)}
             <Actions />
         </>
     );
@@ -952,6 +969,7 @@ const OpenChamberView: React.FC<{
             return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.viewport')} target={viewportText(parsed.data.viewport, t('chat.toolPart.openchamber.browser.viewportFill'))} url={undefined} /> : null;
         }
         case 'session.link': return <LinkedBody data={data} />;
+        case 'session.unlink': return <UnlinkedBody data={data} />;
         case 'session.create':
         case 'session.send':
         case 'session.fork':

@@ -8,6 +8,7 @@ import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
 import { remarkDisclosures } from './remarkDisclosures';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
+import { rehypeTextDirection } from './rehypeTextDirection';
 import { isInvisibleText } from '@/lib/invisibleText';
 
 // Micromark merges GFM and CJK registrations, so both must disable single tildes.
@@ -127,6 +128,8 @@ function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: bo
       [rehypeSanitize, schema],
       defaultRehypePlugins.harden,
       rehypeRestoreMarkdownLinks,
+      // After sanitation, which drops `dir` from raw HTML.
+      rehypeTextDirection,
     ],
   };
 }

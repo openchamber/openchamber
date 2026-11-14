@@ -437,6 +437,13 @@ export function createGerritResourceService({
       return { ready: true };
     },
 
+    async draft({ providerTarget }) {
+      const current = await readTarget(providerTarget);
+      if (current.work_in_progress === true) return { draft: true };
+      await client.post(`${targetPath(providerTarget)}/wip`, {});
+      return { draft: true };
+    },
+
     /** Closed is abandoned; open is restored. */
     async setState({ providerTarget, state }) {
       const raw = await client.post(`${targetPath(providerTarget)}/${state === 'closed' ? 'abandon' : 'restore'}`, {});
@@ -450,6 +457,7 @@ export function createGerritResourceService({
       const raw = await readTarget(providerTarget);
       if (kind === 'change-request-merge') return raw.status === 'MERGED' ? { state: 'succeeded', result: { merged: true } } : notApplied();
       if (kind === 'change-request-ready') return raw.work_in_progress !== true ? { state: 'succeeded', result: { ready: true } } : notApplied();
+      if (kind === 'change-request-draft') return raw.work_in_progress === true ? { state: 'succeeded', result: { draft: true } } : notApplied();
       return { state: 'outcome-unknown' };
     },
 

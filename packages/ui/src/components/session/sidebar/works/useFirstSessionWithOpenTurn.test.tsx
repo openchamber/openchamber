@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { replaceGlobalSessionStatusById, setSessionParentResolver, useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
-import { applyPrWatch, resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
+import { applyPrWatches, resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
 import { setWorkflowRunningSessions } from '@/sync/workflow-activity';
 import { installHookTestDom } from '../test-utils/testDom';
 
@@ -66,10 +66,10 @@ test('an idle session waiting on a command, a workflow or a pull request is foun
   expect(found).toBe('first');
   await act(async () => setWorkflowRunningSessions([]));
 
-  await act(async () => applyPrWatch(1, 'second', {
+  await act(async () => applyPrWatches(1, 'second', [{
     sessionID: 'second', directory: '/repo', url: 'https://example.test/pr/1', number: 1, title: 'PR', status: 'pending', startedAt: 1,
-  }));
+  }]));
   expect(found).toBe('second');
-  await act(async () => applyPrWatch(2, 'second', null));
+  await act(async () => applyPrWatches(2, 'second', []));
   expect(found).toBeNull();
 });

@@ -1712,15 +1712,106 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* The action band matches the file editor's docked toolbar (40px,
-          24px buttons) so the two read as one row across the panel. */}
-      <div className="flex flex-col border-b border-edge-muted">
-        <div className="flex h-8 shrink-0 items-center border-t border-edge-muted px-2">
-        {/* New file, new folder and upload share one "+" menu, so the band
-            keeps four buttons and fits even the narrowest tree. */}
+      {/* One band: the search field leads, the tree's actions follow it. The
+          band is as tall as the file editor's docked toolbar beside it, so the
+          two read as one strip across the panel. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-t border-edge-muted px-2">
+        <div className="relative min-w-0 flex-1">
+          {canSearchContents ? (
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* The field sits in flow, so the span carries the placement the tooltip anchors to. */}
+                  <span className="absolute inset-s-0.5 top-1/2 inline-flex -translate-y-1/2">
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="relative size-6 p-0 text-muted-foreground hover:text-foreground"
+                        aria-label={t('sidebarFilesTree.search.mode.aria')}
+                      >
+                        {/* The field's usual magnifier: the button's hover fill and its
+                            tooltip say it opens the search mode menu. */}
+                        <Icon name={contentSearchActive ? 'file-search' : 'search'} className="size-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.mode.aria')}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="start" side="bottom">
+                <DropdownMenuRadioGroup
+                  value={searchMode}
+                  onValueChange={(value) => setSearchMode(value === 'contents' ? 'contents' : 'names')}
+                >
+                  <DropdownMenuRadioItem value="names" closeOnClick className="items-center">
+                    <Icon name="search" className="size-3.5" />
+                    {t('sidebarFilesTree.search.mode.names')}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="contents" closeOnClick className="items-center">
+                    <Icon name="file-search" className="size-3.5" />
+                    {t('sidebarFilesTree.search.mode.contents')}
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Icon name="search" className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          )}
+          <Input
+            ref={searchInputRef}
+            inputSize="compact"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={t(contentSearchActive ? 'sidebarFilesTree.search.contentsPlaceholder' : 'sidebarFilesTree.search.placeholder')}
+            // The clear button's room is kept only while there is a query, so
+            // the empty field's placeholder fits a narrow tree.
+            className={cn('ps-7', contentSearchActive ? 'pe-14' : searchQuery.trim().length > 0 ? 'pe-7' : 'pe-2')}
+          />
+          {contentSearchActive ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="chip"
+                  size="xs"
+                  aria-pressed={regexSearch}
+                  onClick={() => {
+                    setRegexSearch((value) => !value);
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label={t('sidebarFilesTree.search.regexTitle')}
+                  className="absolute inset-e-1 top-1/2 h-5 min-w-0 -translate-y-1/2 px-1 font-mono typography-micro"
+                >
+                  .*
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t(regexSearch ? 'contextTooltips.files.searchPlainText' : 'sidebarFilesTree.search.regexTitle')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+          {searchQuery.trim().length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('sidebarFilesTree.search.clearAria')}
+                  className={cn('absolute top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-8' : 'inset-e-2')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                >
+                  <Icon name="close" className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.clearAria')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
+        {/* New file, new folder and upload share one "+" menu; showing
+            gitignored files, refresh and collapse all are rarer and live in
+            "More actions", so the field keeps the width even in a narrow tree. */}
         <ActionToolbar
-          className="flex-1"
-          start={null}
+          className="shrink-0 gap-0.5"
           groups={[[
             (canCreateFile || canCreateFolder || canUpload) && {
               id: 'add',
@@ -1747,6 +1838,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
                 </>
               ),
             },
+          ]]}
+          menuOnly={[
             {
               id: 'gitignored',
               label: t('filesView.tree.actions.showGitignored'),
@@ -1768,100 +1861,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
                 if (root) collapseAllExpandedPaths(root);
               },
             },
-          ]]}
+          ]}
         />
-        </div>
-        <div className="relative min-w-0 px-2 py-2">
-          {canSearchContents ? (
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* The field sits in flow, so the span carries the placement the tooltip anchors to. */}
-                  <span className="absolute inset-s-3 top-3 inline-flex">
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="relative size-6 p-0 text-muted-foreground hover:text-foreground"
-                        aria-label={t('sidebarFilesTree.search.mode.aria')}
-                      >
-                        <Icon name={contentSearchActive ? 'file-search' : 'search'} className="h-4 w-4" />
-                        {/* The corner marks the icon as a menu. */}
-                        <span
-                          aria-hidden="true"
-                          className="pointer-events-none absolute bottom-0.5 end-0.5 size-0 border-[3px] border-b-current border-e-current border-s-transparent border-t-transparent opacity-70"
-                        />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.mode.aria')}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="start" side="bottom">
-                <DropdownMenuRadioGroup
-                  value={searchMode}
-                  onValueChange={(value) => setSearchMode(value === 'contents' ? 'contents' : 'names')}
-                >
-                  <DropdownMenuRadioItem value="names" closeOnClick className="items-center">
-                    <Icon name="search" className="size-3.5" />
-                    {t('sidebarFilesTree.search.mode.names')}
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="contents" closeOnClick className="items-center">
-                    <Icon name="file-search" className="size-3.5" />
-                    {t('sidebarFilesTree.search.mode.contents')}
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Icon name="search" className="pointer-events-none absolute inset-s-4 top-4 h-4 w-4 text-muted-foreground" />
-          )}
-          <Input
-            ref={searchInputRef}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={t(contentSearchActive ? 'sidebarFilesTree.search.contentsPlaceholder' : 'sidebarFilesTree.search.placeholder')}
-            className={cn('h-8 ps-8 typography-meta', contentSearchActive ? 'pe-16' : 'pe-8')}
-          />
-          {contentSearchActive ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="chip"
-                  size="xs"
-                  aria-pressed={regexSearch}
-                  onClick={() => {
-                    setRegexSearch((value) => !value);
-                    searchInputRef.current?.focus();
-                  }}
-                  aria-label={t('sidebarFilesTree.search.regexTitle')}
-                  className="absolute inset-e-3 top-3.5 h-5 min-w-0 px-1 font-mono typography-micro"
-                >
-                  .*
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>{t(regexSearch ? 'contextTooltips.files.searchPlainText' : 'sidebarFilesTree.search.regexTitle')}</TooltipContent>
-            </Tooltip>
-          ) : null}
-          {searchQuery.trim().length > 0 ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={t('sidebarFilesTree.search.clearAria')}
-                  className={cn('absolute top-4 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-10' : 'inset-e-4')}
-                  onClick={() => {
-                    setSearchQuery('');
-                    searchInputRef.current?.focus();
-                  }}
-                >
-                  <Icon name="close" className="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.clearAria')}</TooltipContent>
-            </Tooltip>
-          ) : null}
-        </div>
       </div>
 
       <div className="relative flex-1 min-h-0">

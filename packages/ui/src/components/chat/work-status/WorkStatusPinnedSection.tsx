@@ -144,7 +144,7 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
   if (pinned.length === 0) return null;
 
   return (
-    <WorkStatusSection title={t('chat.workStatus.section.pinned')}>
+    <WorkStatusSection title={t('chat.workStatus.section.pinned')} icon="pushpin">
       {pinned.map((entry) => (
         <WorkStatusRow
           key={entry.id}
@@ -163,7 +163,7 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
                     }}
                     className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
                   >
-                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                    <Icon name="pushpin-2-fill" className="size-[13px]" style={{ color: 'var(--primary)' }} />
                   </button>
                 </span>
               </TooltipTrigger>
@@ -174,7 +174,7 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
           label={entry.text ?? t('chat.workStatus.pinned.unavailable')}
           labelDir={entry.text ? 'auto' : undefined}
           value={inFlightId === entry.id
-            ? <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
+            ? <Icon name="loader-4" className="size-[13px] animate-spin text-muted-foreground" aria-hidden />
             : undefined}
           onClick={() => handleReveal(entry.id)}
           ariaLabel={t('chat.workStatus.pinned.reveal')}

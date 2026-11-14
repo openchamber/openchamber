@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
-  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolvePageMobile, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
+  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, toPublicWaits, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -228,6 +228,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.size !== undefined) {
     guest.entrySize = panel.size;
   }
+  // The phone shows the panel page (and what reuses it) only on this opt-in.
+  if (panel.entry && panel.mobile === true) {
+    guest.entryMobile = true;
+  }
   const backgroundEntry = parsed.manifest.contributes.background?.entry;
   if (backgroundEntry) {
     if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
@@ -271,6 +275,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     guest.pageEntry = pageEntry;
     const page = parsed.manifest.contributes.page;
     if (page !== true && page?.title) guest.pageTitle = page.title;
+    if (resolvePageMobile(parsed.manifest.contributes)) guest.pageMobile = true;
   }
   // The Work Status section is checked like any other entry, and may be the
   // package's only frame. A source section has no frame: the host reads it
@@ -364,6 +369,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.sessionEvents) {
     guest.sessionEvents = parsed.manifest.contributes.sessionEvents;
   }
+  // The waits agents may start on the service; the parse requires a service with them.
+  if (parsed.manifest.contributes.waits) {
+    guest.waits = parsed.manifest.contributes.waits;
+  }
   // The notification channel a `notifications` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.notifications) {
     guest.notifications = parsed.manifest.contributes.notifications;
@@ -382,6 +391,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   if (parsed.manifest.contributes.instructions) {
     guest.instructions = true;
+  }
+  if (parsed.manifest.contributes.marks) {
+    guest.marks = true;
   }
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
@@ -440,8 +452,13 @@ export const setGuestConfigurationNote = (guestId, message) => {
   return true;
 };
 
-/** Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest. */
-export const toPublicGuest = (guest) => {
+/**
+ * Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest.
+ * `toolLinkSettings` are the setting values the guest's card links read
+ * (`toolLinkSettingsOf`); only the catalog route passes them, since the chat
+ * draws from the catalog alone.
+ */
+export const toPublicGuest = (guest, toolLinkSettings = null) => {
   const row = {
     id: guest.id,
     name: guest.name,
@@ -461,6 +478,9 @@ export const toPublicGuest = (guest) => {
   }
   if (typeof guest.entrySize === 'number') {
     row.entrySize = guest.entrySize;
+  }
+  if (guest.entryMobile === true) {
+    row.entryMobile = true;
   }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
@@ -484,6 +504,7 @@ export const toPublicGuest = (guest) => {
   const attach = resolveAttachMode(guest.attach);
   if (guest.pageEntry) row.pageEntry = guest.pageEntry;
   if (guest.pageTitle) row.pageTitle = guest.pageTitle;
+  if (guest.pageMobile === true) row.pageMobile = true;
   if (guest.statusEntry) row.statusEntry = guest.statusEntry;
   if (guest.statusSource) row.statusSource = { path: guest.statusSource.path, interval: guest.statusSource.interval };
   if (guest.statusTitle) row.statusTitle = guest.statusTitle;
@@ -523,6 +544,9 @@ export const toPublicGuest = (guest) => {
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
   }
+  if (toolLinkSettings && Object.keys(toolLinkSettings).length > 0) {
+    row.toolLinkSettings = { ...toolLinkSettings };
+  }
   if (guest.providerLogos) {
     row.providerLogos = { ...guest.providerLogos };
   }
@@ -550,6 +574,10 @@ export const toPublicGuest = (guest) => {
   if (guest.sessionEvents) {
     row.sessionEvents = toPublicSessionEvents(guest.sessionEvents);
   }
+  // What the approval dialog names: the waits whose text may wake a session.
+  if (guest.waits) {
+    row.waits = toPublicWaits(guest.waits);
+  }
   // What the approval dialog and the Integrations card name: the channel and where its account lives.
   if (guest.notifications) {
     row.notifications = toPublicNotifications(guest.notifications);
@@ -568,6 +596,9 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.instructions) {
     row.instructions = true;
+  }
+  if (guest.marks) {
+    row.marks = true;
   }
   if (guest.skills) {
     row.skills = true;

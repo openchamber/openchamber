@@ -663,7 +663,6 @@ export const ProvidersPage: React.FC = () => {
           ) : (
             <SettingsSection
               title={t('settings.providers.page.auth.title')}
-              divider={false}
               settingsItem="providers.auth"
               contentClassName="space-y-4"
             >
@@ -835,7 +834,6 @@ export const ProvidersPage: React.FC = () => {
       <SettingsSection
         title={t('settings.providers.accounts.title')}
         info={t('settings.providers.accounts.info')}
-        divider={false}
         headerAction={(
           <div className="flex items-center gap-1">
             {isEditableCustomProvider && !enterpriseLocked ? (

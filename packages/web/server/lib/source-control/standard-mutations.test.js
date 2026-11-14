@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { giteaDescriptor } from '../gitea/descriptor.js';
 import { digestMutationInput } from './mutation-executor.js';
+import { SOURCE_CONTROL_MUTATION_KINDS } from './mutation-storage.js';
 import { createStandardMutations } from './standard-mutations.js';
 
 const giteaOrigin = 'https://gitea.example.com';
@@ -28,12 +29,12 @@ describe('standard mutations', () => {
     const mutations = createStandardMutations(descriptor);
     const prepare = prepareWith(mutations);
     expect(mutations.routes).toEqual([
-      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
+      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
       '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment',
       '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
     ]);
     const inputs = {
-      '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {},
+      '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
       '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
       '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
       '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
@@ -42,11 +43,29 @@ describe('standard mutations', () => {
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
-      'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-review',
+      'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-draft', 'change-request-review',
       'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
       'change-request-comment', 'issue-comment', 'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
       'change-request-reviewers',
     ]);
+  });
+
+  it('names only kinds the mutation and audit stores accept', () => {
+    const inputs = {
+      '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
+      '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
+      '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
+      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
+      '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+    };
+    for (const entry of [descriptor, giteaDescriptor]) {
+      const mutations = createStandardMutations(entry);
+      const prepare = prepareWith(mutations);
+      for (const route of mutations.routes) {
+        expect(SOURCE_CONTROL_MUTATION_KINDS).toContain(prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
+      }
+    }
   });
 
   it('digests the frozen fields Gitea records replay by', () => {
@@ -57,6 +76,8 @@ describe('standard mutations', () => {
       .toBe('77bebc0991b4c34029b850ae251f8bbcd80f9821d734c02b447d7fb4aac63ed4');
     expect(prepare('/issues/labels', { labels: ['bug', 'a', 'bug'] }).digest(numbered))
       .toBe('ad9ec5b59683686e705b85b5f6866b1835a6306c81a73fb920bc0724d8890455');
+    // The two directions are different mutations under one target.
+    expect(prepare('/pr/draft', {}).digest(numbered)).not.toBe(prepare('/pr/ready', {}).digest(numbered));
   });
 
   it('digests the same input the same way whatever the descriptor, so the host owns the digest', () => {

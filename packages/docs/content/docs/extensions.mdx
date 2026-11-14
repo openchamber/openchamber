@@ -7,7 +7,7 @@ description: Install third-party extensions in OpenChamber, approve what they ma
 
 Use **Settings → Extensions** to add panels made by other people to OpenChamber. An extension is a small page that sits on the right-hand rail, next to the built-in panels. It can show you data from another service, attach a task to the chat, and, if you allow it, start sessions, send prompts, or read files.
 
-Extensions run on OpenChamber web and desktop. VS Code and the mobile app do not load them yet. They are not the same thing as OpenCode plugins.
+Extensions run on OpenChamber web, desktop, and the mobile app; the phone shows a part of each, see [On the phone](#on-the-phone). VS Code does not load them. They are not the same thing as OpenCode plugins.
 
 ## Install one
 
@@ -52,6 +52,7 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
 - **Add a plugin to OpenCode**: the package's plugin is loaded into your OpenCode while the extension is on. Plugin code runs inside OpenCode with your full access, like a local service, so allow it only if you trust the author.
 - **Recognise its links in chats**: identifiers like `DEMO-12` and links to the extension's site become clickable in your chat messages. The dialog lists which ones and says whether a click opens them in the extension or attaches them to your message. Links OpenChamber already knows, such as GitHub pull requests and Linear issues, keep their usual behavior.
+- **Show marks in the sidebar**: small icons with a tooltip on the sessions and worktrees the extension names, such as a failed check on a branch. The dialog says whether a click opens the extension's panel or a link the extension gives.
 
 A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
 
@@ -61,13 +62,48 @@ When a newer version asks for more than you allowed, the card shows **Needs appr
 
 ## Where it shows up
 
-An extension can also offer a full-screen page, such as a task board. Open it from **Extension pages** above the session list. The menu appears only when an enabled, approved extension offers a page. Selecting a chat brings you back; reload, pause, removal, or switching servers closes the page too. An extension cannot open a full-screen page on its own.
+The website has [a map of every place an extension can add something](https://openchamber.dev/extensions/build/).
+
+An extension can also offer a full-screen page, such as a task board. Open it from its row in the **Pages** section of the sidebar. The row appears only when an enabled, approved extension offers a page. Selecting a chat or pressing the row again brings you back; reload, pause, removal, or switching servers closes the page too. An extension cannot open a full-screen page on its own.
 
 Extensions can save their own data on the connected OpenChamber server without putting files in your project. The data survives reloads and is deleted when you remove the extension. A board can track agents working in different projects or worktrees, while deciding its own task statuses.
 
-Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. It can also give its own tools a proper icon, title, and output layout in the chat, the way OpenChamber's built-in tools have. The extension decides which of these it offers; all of them are off until you allow the extension.
+Besides its panel on the rail, an extension can add to places you already use:
 
-Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
+- **Menus**: the actions on a chat message, the menu of a session, text you select in a message, a file in Files, and lines you select in a diff.
+- **The chat box**: the **+** menu, slash commands like `/task ABC-12` that attach something without opening anything, and its own rows in the `@` menu.
+- **The chat**: blocks an agent draws in its reply, such as a chart or a ticket card, and its own icon, title, and output layout for its tools, the way OpenChamber's built-in tools have.
+- **Work Status**: a section of its own in the panel next to the chat.
+- **Files**: its own editor for a file type, such as a drawing or a spreadsheet.
+- **The sidebar**: small marks on session and worktree rows.
+
+The extension decides which of these it offers; all of them are off until you allow the extension. Session actions and slash commands also turn up in the command palette (⌘P or Ctrl+P) when you search for their name or the extension's.
+
+Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, or tap it on a touch screen, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
+
+## On the phone
+
+The mobile app, and OpenChamber opened in a phone's browser, load the extensions installed on the server they connect to. **Settings → Extensions** is there too, to add, approve, pause, and remove them.
+
+What OpenChamber draws itself from an extension shows on every phone: links in chat messages, its tools' layout in the chat, provider logos, its rows in the `@` menu, marks on sidebar rows, and its account cards in **Settings → Integrations**. A tap on a mark opens that row and the extension's tab when its panel is made for a phone (below); otherwise it shows the mark's text and opens its link, when the mark has one.
+
+These parts of an extension also show without anything more from its author:
+
+- blocks in agent replies
+- its section in the **Work status** tab of the workspace
+- its file editor, when you open a matching file in the **Files** tab
+- slash commands in the chat box
+- menu actions that run in the background and open nothing: in a message's **More actions**, the sheet for selected text, a session's long-press menu in the sessions list, a long press on a row in **Files**, and under the comment field of selected diff lines
+
+A panel needs more room than a phone has, so it shows only when the extension's author says it is laid out for a phone. Such an extension gets:
+
+- its own tab in the workspace, after Work status, Git, Files, Terminal, and Project knowledge. **Settings → General → Workspace panel tabs** orders and hides it with the others.
+- its entry in the composer's **+** menu
+- its menu actions that open the panel or the attach window
+
+For any other extension these stay off the phone, and its menus list only the actions that run in the background. A chip it attached says the extension does not open on the phone, and its links keep their usual meaning.
+
+A full-screen page has its own say: it shows under **More** in the sessions list when its author marks the page itself as laid out for a phone, or when the page reuses a panel that is.
 
 ## An extension with an OpenCode plugin
 
@@ -75,7 +111,7 @@ An extension can ship an OpenCode plugin, so you install one thing instead of tw
 
 When OpenChamber did not start the OpenCode it talks to, or your environment sets its own `OPENCODE_CONFIG`, OpenChamber's config does not reach that OpenCode. The extension's screen says so and offers **Add to global config**. That writes the plugin's folder into your global OpenCode config: it then runs in every OpenCode on this computer, including the terminal, stays on while the extension is off, and is yours to manage on **Settings → Plugins**. If you remove the extension, OpenCode lists that entry as a failed plugin and keeps running until you delete the entry there. An OpenCode on another machine cannot load a folder from this one; the screen says so.
 
-VS Code and the mobile app load no extensions. A session inside an isolated space runs its own OpenCode, which never receives the plugin. In enterprise mode the plugin counts like a local service: the extension installs only from a repository your administrator listed.
+VS Code loads no extensions, so the OpenCode it runs never receives the plugin. The phone connects to an OpenChamber server, and the plugin runs in that server's OpenCode. A session inside an isolated space runs its own OpenCode, which never receives the plugin. In enterprise mode the plugin counts like a local service: the extension installs only from a repository your administrator listed.
 
 ## An extension as a git host
 

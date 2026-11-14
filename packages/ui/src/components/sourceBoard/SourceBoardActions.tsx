@@ -24,7 +24,7 @@ import type { RepositoryChangeRequestReference, RepositoryDiscussionReference, P
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
+import type { ChangeRequestSubmitRequirement, DiscussionCloseReason, DraftChangeRequestInput, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -144,7 +144,7 @@ export const SourceBoardActions: React.FC<{
     const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
     const { triggerFireworks } = useFireworksCelebration();
-    const [busy, setBusy] = React.useState<'merge' | 'ready' | null>(null);
+    const [busy, setBusy] = React.useState<'merge' | null>(null);
 
     const pull: RepositoryChangeRequestReference | null = item.source === 'repository' && item.reference.kind === 'pull' ? item.reference : null;
     const descriptor = useSourceControlProvider(pull?.provider);
@@ -300,24 +300,6 @@ export const SourceBoardActions: React.FC<{
         } finally { setBusy(null); onChanged(); }
     };
 
-    const markReady = async () => {
-        if (!openPull || !context) return;
-        setBusy('ready');
-        try {
-            await sourceControl.changeRequestReady({
-                ...context,
-                idempotencyKey: newMutationKey(),
-                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number, head: openPull.head, base: openPull.base, headSha: openPull.headSha },
-            });
-            toast.success(t('sourceBoard.toast.markedReady', { reference }));
-        } catch (error) {
-            toast.error(t('sourceBoard.toast.markReadyFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
-        } finally {
-            setBusy(null);
-            onChanged();
-        }
-    };
-
     const maintenance = (
         <>
             {waitingMerge ? (
@@ -385,9 +367,6 @@ export const SourceBoardActions: React.FC<{
                 <span className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground" title={submitsBelow}>
                     {submitsBelow}
                 </span>
-            ) : null}
-            {openPull?.draft && capabilities?.draftChangeRequests ? (
-                <ActionButton icon="git-pull-request" label={t('sourceBoard.actions.markReady')} tooltip={t('contextTooltips.tracker.markReady')} busy={busy === 'ready'} onClick={() => void markReady()} />
             ) : null}
             {stackOnTop && !project ? <ActionButton icon="stack" label={stackOnTopLabel} tooltip={t('contextTooltips.tracker.startOnTop')} onClick={stackOnTop} /> : null}
         </>
@@ -682,6 +661,10 @@ const ItemStateMenuItems: React.FC<{
     const repositoryItem = item.source === 'repository' && item.reference.kind !== 'discussion' ? item.reference : null;
     const descriptor = useSourceControlProvider(repositoryItem?.provider);
     const nextState = !repositoryItem || repositoryItem.state === 'merged' ? null : repositoryItem.state === 'open' ? 'closed' : 'open';
+    // A draft is a state of an open change request too: the host that can move
+    // it either way is asked, and none is read for anything else.
+    const openPull = repositoryItem?.kind === 'pull' && repositoryItem.state === 'open' ? repositoryItem : null;
+    const capabilities = useCapabilities(openPull ? context : null);
     const stateLabel = (() => {
         if (!repositoryItem || !nextState) return '';
         if (repositoryItem.kind === 'issue') return t(nextState === 'closed' ? 'sourceBoard.actions.closeIssue' : 'sourceBoard.actions.reopenIssue');
@@ -712,11 +695,47 @@ const ItemStateMenuItems: React.FC<{
         }
     };
 
-    if (!repositoryItem || !nextState) return null;
+    const markDraft = async (draft: boolean) => {
+        if (!openPull) return;
+        const label = referenceNumberLabel(openPull, descriptor);
+        try {
+            const payload: DraftChangeRequestInput = {
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number },
+            };
+            if (draft) await sourceControl.changeRequestDraft(payload);
+            else await sourceControl.changeRequestReady(payload);
+            toast.success(t(draft ? 'sourceBoard.toast.markedDraft' : 'sourceBoard.toast.markedReady', { reference: label }));
+        } catch (error) {
+            toast.error(t(draft ? 'sourceBoard.toast.markDraftFailed' : 'sourceBoard.toast.markReadyFailed', { reference: label }), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            onChanged();
+        }
+    };
+
+    if (!repositoryItem) return null;
     return (
-        <DropdownMenuItem onSelect={() => void changeState()}>
-            <Icon name={nextState === 'open' ? 'arrow-go-back' : repositoryItem.kind === 'pull' ? 'git-close-pull-request' : 'checkbox-circle'} className="size-4 shrink-0" />
-            {stateLabel}
-        </DropdownMenuItem>
+        <>
+            {/* The state pill says draft or open, so its menu offers the other one. */}
+            {openPull?.draft && capabilities?.draftChangeRequests ? (
+                <DropdownMenuItem onSelect={() => void markDraft(false)}>
+                    <Icon name="git-pull-request" className="size-4 shrink-0" />
+                    {t('sourceBoard.actions.markReady')}
+                </DropdownMenuItem>
+            ) : null}
+            {openPull && !openPull.draft && capabilities?.draftConversion ? (
+                <DropdownMenuItem onSelect={() => void markDraft(true)}>
+                    <Icon name="git-pr-draft" className="size-4 shrink-0" />
+                    {t('sourceBoard.actions.convertToDraft')}
+                </DropdownMenuItem>
+            ) : null}
+            {nextState ? (
+                <DropdownMenuItem onSelect={() => void changeState()}>
+                    <Icon name={nextState === 'open' ? 'arrow-go-back' : repositoryItem.kind === 'pull' ? 'git-close-pull-request' : 'checkbox-circle'} className="size-4 shrink-0" />
+                    {stateLabel}
+                </DropdownMenuItem>
+            ) : null}
+        </>
     );
 };

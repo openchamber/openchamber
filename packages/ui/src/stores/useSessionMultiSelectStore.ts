@@ -77,7 +77,9 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
     let nextAnchor = state.anchorId;
     let nextAnchorRowKey = state.anchorRowKey;
 
-    const scopeChanged = scope !== null && state.scopeKey !== null && scope !== state.scopeKey;
+    // A selected session shown again in another scope (its In work row and its
+    // project row) unchecks there; only an unselected row starts a new selection.
+    const scopeChanged = !state.selectedIds.has(id) && scope !== null && state.scopeKey !== null && scope !== state.scopeKey;
     if (scopeChanged) {
       nextIds.clear();
       nextScope = scope;
@@ -114,7 +116,8 @@ export const useSessionMultiSelectStore = create<SessionMultiSelectStore>()((set
 
   setRange: (fromRowKey, toRowKey, entries, descendantIds, scope, descendantsById) => {
     const state = get();
-    const scopedEntries = scope ? entries.filter((entry) => entry.scopeKey === scope) : [...entries];
+    // A range spans rows: the sessions of a folded work have none.
+    const scopedEntries = entries.filter((entry) => entry.rowKey !== null && (!scope || entry.scopeKey === scope));
     if (scopedEntries.length === 0) return;
     const effectiveFrom = fromRowKey && scopedEntries.some((entry) => entry.rowKey === fromRowKey)
       ? fromRowKey

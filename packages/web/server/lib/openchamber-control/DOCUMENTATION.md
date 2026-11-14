@@ -92,7 +92,11 @@ other.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool. It takes `html` or `ui` (a program in the UI block language, which the chat draws with its own components; the server cannot parse it, so a client that cannot draw it answers the wait with `notDrawn` errors, and the agent gets them in its result). Only one of them is required: a page sent without a title is named after its own `<title>`, else its first h1 to h3, else "Page", with the same rule the chat uses (`renderedPage` in `packages/ui/src/lib/opencode/tools.ts`). Weaker models sent title and html in separate calls, each refused call costing the whole page again; a missing html now also asks for both in one call.
   The chat draws the page from the call's own input, so the action stores
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
-  120) and answers `403` while `agentRenderToolEnabled` is `false`. With
+  120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
+  with `share` is refused first when sharing is unavailable (`403`,
+  `code: 'enterprise_mode'`) and with `awaitAnswer` (`400`), then makes its
+  group through `sharePages` (`../share-pages/`) and returns at once without
+  any link or PIN. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
   call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most
@@ -370,8 +374,11 @@ other.
   `session.messages`) resolve `projectId` through the session service's
   `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
   404 and a missing project folder a 400, never a read of the current or every
-  directory. Every `session.*` action refuses `projectId` and `directory`
-  together with a 400, so neither silently wins.
+  directory. An action that names a session ID resolves its directory by
+  reading that session by ID (unscoped) first: a moved session can leave a
+  stale copy under the directory the call came from, which the global list can
+  return first. The list is the fallback. Every `session.*` action refuses
+  `projectId` and `directory` together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - `session.list` returns top-level sessions newest first (OpenCode's
@@ -447,10 +454,15 @@ other.
   `by: 'user'` makes the carried title user-owned. Explicit creation titles and
   UI renames still record that marker; no metadata migration runs.
 - `pr.watch` and `pr.unwatch` let the calling session wait on its pull
-  request without polling: `pr.watch` takes the address in the control tool's
+  requests without polling: `pr.watch` takes the address in the control tool's
   own `url` input and hands it to `prWatch` (`../pr-watch/DOCUMENTATION.md`),
-  which reads it, follows it and wakes the session once when it changes. Both
-  act only on the calling session, never one the input names.
+  which reads it, follows it and wakes the session once when it changes.
+  `pr.unwatch` stops the one at `url`, or every one without it. Both act only
+  on the calling session, never one the input names.
+- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for what
+  an extension's service follows (`../extension-waits/DOCUMENTATION.md`):
+  `wait.start` takes `source` (`<extension>/<wait>`) and `args`, `wait.stop`
+  an optional `waitId`, all three only for the calling session.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
@@ -473,9 +485,21 @@ other.
   A change request or issue address that a source-control provider's
   `urls.thread` names (GitLab's `/-/merge_requests/N` shape on any host) is
   keyed by the thread, so linking it again from a tab like `/diffs` or with a
-  query refreshes the one entry. It only adds or refreshes links, never removes
-  one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
-  nothing is written.
+  query refreshes the one entry. A missing field or a non-http(s) URL is a 400
+  and nothing is written.
+- `session.unlink` removes a link from a session, defaulting to the calling
+  session, whoever made the link. The agent names it the way it linked it: the
+  control tool's `url` or `identifier` input (also read beside the action), or
+  the same complete `link` it linked with; the tool schema requires `title` and
+  `kind` in `link`, so a bare identifier goes in `identifier`. A url removes
+  every entry that linking the address would key the same (a `/files` or `/diffs` tab names its thread) or that is
+  stored under the same address; an identifier matches an entry's
+  `identifier`, its id, or a github.com entry's `#N`, in any case. The removal is
+  the Work Status unlink's own transform (`buildLinkedIssuesPatch` in
+  `../openchamber-sessions/session-linked-issues.js`), decided inside the
+  session's metadata write turn. No match is a 404 that lists the session's
+  links; an identifier that names more than one is a 409 that removes nothing
+  and asks for the url.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a
   relative path against the session directory (an explicit `directory` wins),
   refuses a relative path with no directory at all, checks the target is an
@@ -514,8 +538,8 @@ dropping slots or ignoring the requested time.
 
 ### Why a background message waits behind a page and does not end it
 
-A dispatched session's result, a pull request wake, a workflow report or a
-restart resume can arrive while a page or a secret card waits. OpenCode keeps it
+A dispatched session's result, a pull request or extension wait's wake, a
+workflow report or a restart resume can arrive while a page or a secret card waits. OpenCode keeps it
 in the session's inbox until the waiting call returns, and the agent reads it at
 the next step, right after the user's answer. The alternative, ending the wait
 so the agent reads the message at once and asks again, loses the question the
@@ -578,6 +602,15 @@ used.
 Session titles belong to OpenCode or the user. A metadata ownership marker
 cannot distinguish a generated title from a user rename made in another
 client or an older release, so `work.name` has no session-title write path.
+
+### Why session.unlink names a link by url or identifier and not by entry id
+
+The agent knows the address and label it linked, while the stored id depends
+on how the server keyed it (`acme/app#7`, `linear:ENG-12`,
+`link:<thread address>`) and on who linked it. Matching what the agent can name
+lets it remove links the user or the UI made too. An identifier such as `#7`
+can name links in two repositories, so an ambiguous one removes nothing and
+the url decides.
 
 ### Why selection is checked before creating a session
 

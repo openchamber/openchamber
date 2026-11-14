@@ -17,7 +17,6 @@ import { Spinner } from "@/components/ui/spinner";
 import { useUIStore } from '@/stores/useUIStore';
 import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettings';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
-import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { SourceControlAccountControl } from '@/components/sourceControl/SourceControlAccountControl';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -1130,7 +1129,7 @@ export const PullRequestSection: React.FC<{
                 <Button
                   variant="outline"
                   size="sm"
-                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                  className="pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2"
                   onClick={() => {
                     requestWalkthroughTarget(directory, {
                       source: {

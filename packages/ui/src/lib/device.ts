@@ -66,27 +66,18 @@ const setRootDeviceAttributes = (
   }
 
   const root = document.documentElement;
+  // Runs on every resize, including each soft-keyboard show and hide. Removing
+  // and re-adding a root class restyles the whole page even when the class
+  // list ends up the same, so only classes whose state changes are written.
+  const setClass = (name: string, on: boolean) => {
+    if (root.classList.contains(name) !== on) root.classList.toggle(name, on);
+  };
 
-  root.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
-  root.classList.add(
-    deviceType === 'mobile'
-      ? 'device-mobile'
-      : deviceType === 'tablet'
-        ? 'device-tablet'
-        : 'device-desktop'
-  );
-
-  if (isDesktopShellRuntime) {
-    root.classList.add('desktop-runtime');
-    root.classList.remove('mobile-pointer');
-  } else {
-    root.classList.remove('desktop-runtime');
-    if (hasTouchInput) {
-      root.classList.add('mobile-pointer');
-    } else {
-      root.classList.remove('mobile-pointer');
-    }
-  }
+  setClass('device-mobile', deviceType === 'mobile');
+  setClass('device-tablet', deviceType === 'tablet');
+  setClass('device-desktop', deviceType === 'desktop');
+  setClass('desktop-runtime', isDesktopShellRuntime);
+  setClass('mobile-pointer', !isDesktopShellRuntime && hasTouchInput);
 };
 
 export function getDeviceInfo(): DeviceInfo {
