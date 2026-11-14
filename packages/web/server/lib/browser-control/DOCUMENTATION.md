@@ -262,8 +262,9 @@ in a world the next session reuses.
 Chromium draws a PDF in a viewer frame of its own: pointer and key input over
 it never reaches the document the overlay lives in, so marks could not be
 drawn. A transparent layer over the viewer takes the input for the session.
-It also takes the wheel, so the PDF holds still while it is marked; a PDF has
-no elements to pick, so the overlay offers Region and Draw only.
+The wheel still scrolls the PDF: Chromium routes it to the viewer past the
+layer. A PDF has no elements to pick, so the overlay offers Region and Draw
+only.
 
 ### Why a stroke is drawn as short paths
 

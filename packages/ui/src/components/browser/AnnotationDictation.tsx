@@ -16,6 +16,9 @@ import { useDictation } from '@/hooks/useDictation';
 import type { AnnotationAppMessage, AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
 import { useI18n } from '@/lib/i18n';
 
+/** How often the overlay's wave moves; the composer's wave takes a sample every 60 ms. */
+const LEVEL_INTERVAL_MS = 80;
+
 /** The error of a recording that waits on its speech model, which the overlay shows instead. */
 const modelDownloadSchema = z.object({ reasonCode: z.literal('model_download_in_progress') });
 
@@ -37,6 +40,7 @@ export const AnnotationDictation: React.FC<{ channel: AnnotationVoiceChannel }> 
     status,
     errorReason,
     partialTranscript,
+    subscribeLevel,
     startDictation,
     confirmDictation,
     cancelDictation,
@@ -82,6 +86,26 @@ export const AnnotationDictation: React.FC<{ channel: AnnotationVoiceChannel }> 
     }
     post(note ? { type: 'voice', phase, note } : { type: 'voice', phase });
   }, [note, phase, post]);
+
+  // The microphone level for the overlay's wave, at the composer's pace. A
+  // level still on its way is not queued behind: the next one replaces it.
+  React.useEffect(() => {
+    if (status !== 'recording') return;
+    let peak = 0;
+    let sending = false;
+    const unsubscribe = subscribeLevel((level) => { peak = Math.max(peak, level); });
+    const timer = setInterval(() => {
+      if (sending) return;
+      const level = peak;
+      peak = 0;
+      sending = true;
+      void channel.send({ type: 'level', level }).catch(() => undefined).finally(() => { sending = false; });
+    }, LEVEL_INTERVAL_MS);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [channel, status, subscribeLevel]);
 
   return null;
 };

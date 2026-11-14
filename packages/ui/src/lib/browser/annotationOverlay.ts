@@ -74,10 +74,14 @@ export type BrowserAnnotationVoice = {
 /** What the overlay sends the app, as JSON through the binding. */
 export type AnnotationOverlayMessage = { type: 'voice'; action: 'start' | 'finish' | 'cancel' };
 
-/** What the app sends the overlay. `failed` keeps a submit that waited on the recording from going out. */
+/**
+ * What the app sends the overlay. `failed` keeps a submit that waited on the
+ * recording from going out; `level` is the microphone's, 0 to 1.
+ */
 export type AnnotationAppMessage =
   | { type: 'voice'; phase: 'idle' | 'recording' | 'processing'; note?: string; failed?: boolean }
-  | { type: 'insert'; text: string };
+  | { type: 'insert'; text: string }
+  | { type: 'level'; level: number };
 
 /** The shell's binding into the overlay's world; `browser-panel-driver.mjs` names it the same. */
 const ANNOTATION_BINDING = '__openchamberAnnotationSend';
@@ -144,8 +148,8 @@ export const buildAnnotationOverlayScript = (
    * Chromium draws a PDF in a viewer frame of its own, so the pointer and keys
    * over it never reach this document. A transparent layer over the viewer
    * takes them instead, and takes focus for Escape. A PDF has no elements to
-   * pick, so it offers Region and Draw only. The layer also takes the wheel:
-   * the PDF holds still while it is being marked.
+   * pick, so it offers Region and Draw only. The wheel still reaches the
+   * viewer: Chromium routes it past the layer, so the PDF scrolls as usual.
    */
   var isPdf = document.contentType === 'application/pdf';
   var inputLayer = null;
@@ -305,6 +309,7 @@ export const buildAnnotationOverlayScript = (
     '.rec{display:flex;align-items:center;gap:6px;padding:0 4px;font-size:12px;line-height:18px;color:' + THEME.mutedText + ';white-space:nowrap;font-variant-numeric:tabular-nums}',
     // A status such as a model download is cut short, so the comment keeps its room.
     '.rec span:last-child{max-width:120px;overflow:hidden;text-overflow:ellipsis}',
+    '.wave{display:block;width:48px;height:16px}',
     '.dot{width:6px;height:6px;border-radius:50%;background:' + THEME.danger + ';animation:oc-blink 1s steps(2,start) infinite}',
     '.spin{display:flex;width:28px;height:28px;align-items:center;justify-content:center;color:' + THEME.mutedText + '}',
     '.spin svg{width:16px;height:16px;animation:oc-spin 1s linear infinite}',
@@ -394,6 +399,7 @@ export const buildAnnotationOverlayScript = (
   };
 
   var voiceBox = null, micButton = null, voiceStatus = null, voiceText = null, voiceCancel = null, voiceFinish = null, voiceBusy = null;
+  var wave = null;
   if (sendToApp) {
     voiceBox = document.createElement('div');
     voiceBox.className = 'voice';
@@ -404,8 +410,11 @@ export const buildAnnotationOverlayScript = (
     voiceStatus.setAttribute('aria-label', VOICE.labels.listening);
     var dot = document.createElement('span');
     dot.className = 'dot';
+    wave = document.createElement('canvas');
+    wave.className = 'wave';
+    wave.setAttribute('aria-hidden', 'true');
     voiceText = document.createElement('span');
-    voiceStatus.append(dot, voiceText);
+    voiceStatus.append(dot, wave, voiceText);
     voiceBusy = document.createElement('span');
     voiceBusy.className = 'spin';
     voiceBusy.setAttribute('role', 'status');
@@ -428,6 +437,44 @@ export const buildAnnotationOverlayScript = (
     try { sendToApp(JSON.stringify({ type: 'voice', action: action })); } catch (error) { /* shell went away */ }
   };
 
+  // The microphone level as the composer draws it: newest bar on the right,
+  // silence a dot, speech a rounded bar, quiet speech raised to use the height.
+  var waveBars = [];
+  var WAVE_BAR = 2, WAVE_PITCH = 5, WAVE_CURVE = 0.65;
+  var drawWave = function (level) {
+    if (!wave) return;
+    var width = 48, height = 16, ratio = window.devicePixelRatio || 1;
+    if (wave.width !== width * ratio) {
+      wave.width = width * ratio;
+      wave.height = height * ratio;
+    }
+    waveBars.push(Math.max(0, Math.min(1, level)));
+    var capacity = Math.floor(width / WAVE_PITCH);
+    while (waveBars.length > capacity) waveBars.shift();
+    var context = wave.getContext('2d');
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = THEME.mutedText;
+    context.fillStyle = THEME.mutedText;
+    context.lineWidth = WAVE_BAR;
+    context.lineCap = 'round';
+    var right = width - WAVE_BAR / 2;
+    for (var i = 0; i < waveBars.length; i += 1) {
+      var x = right - (waveBars.length - 1 - i) * WAVE_PITCH;
+      var half = (WAVE_BAR + (height - WAVE_BAR) * Math.pow(waveBars[i], WAVE_CURVE) - WAVE_BAR) / 2;
+      context.beginPath();
+      if (half < 0.25) {
+        context.arc(x, height / 2, WAVE_BAR / 2, 0, Math.PI * 2);
+        context.fill();
+      } else {
+        context.moveTo(x, height / 2 - half);
+        context.lineTo(x, height / 2 + half);
+        context.stroke();
+      }
+    }
+  };
+
   var renderVoiceTime = function () {
     if (!voiceText) return;
     if (voiceNote) {
@@ -440,6 +487,8 @@ export const buildAnnotationOverlayScript = (
 
   var renderVoice = function () {
     if (!voiceBox) return;
+    // A status such as a model download takes the wave's place.
+    wave.hidden = Boolean(voiceNote);
     micButton.hidden = voicePhase !== 'idle';
     voiceStatus.hidden = voicePhase !== 'recording';
     voiceBusy.hidden = voicePhase !== 'processing';
@@ -466,6 +515,8 @@ export const buildAnnotationOverlayScript = (
     voiceNote = typeof message.note === 'string' ? message.note : '';
     if (voicePhase === 'recording' && was !== 'recording') {
       voiceStartedAt = Date.now();
+      waveBars = [];
+      drawWave(0);
       voiceTimer = setInterval(renderVoiceTime, 1000);
     }
     if (voicePhase !== 'recording' && voiceTimer) {
@@ -491,6 +542,7 @@ export const buildAnnotationOverlayScript = (
       if (settled || !message) return;
       if (message.type === 'insert' && typeof message.text === 'string') insertTranscript(message.text);
       else if (message.type === 'voice') applyVoice(message);
+      else if (message.type === 'level' && typeof message.level === 'number' && voicePhase === 'recording') drawWave(message.level);
     };
     renderVoice();
   }
