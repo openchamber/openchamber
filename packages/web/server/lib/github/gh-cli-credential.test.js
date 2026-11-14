@@ -155,6 +155,22 @@ describe('gh CLI credential lookup', () => {
     expect(execFileMock).toHaveBeenCalledTimes(2);
   });
 
+  test('names the login on --user exactly as stored, and one login is one cache entry', async () => {
+    execFileMock
+      .mockImplementationOnce(answerWith('octocat-token\n'))
+      .mockImplementationOnce(answerWith('work-token\n'));
+
+    expect(await getGhCliToken('github.com', 'octocat')).toBe('octocat-token');
+    // gh decides whose token answers, so it is handed the login as stored, not a
+    // folded copy of it.
+    expect(await getGhCliToken('github.com', 'Work-User')).toBe('work-token');
+    const [, args] = execFileMock.mock.calls[1];
+    expect(args).toEqual(['auth', 'token', '--user', 'Work-User']);
+    // The reuse key still folds case: a GitHub handle is one account in any case.
+    expect(await getGhCliToken('github.com', 'work-user')).toBe('work-token');
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
   test('never reuses a run that failed to give an answer', async () => {
     execFileMock
       .mockImplementationOnce(failWith({ code: 'ENOENT' }))

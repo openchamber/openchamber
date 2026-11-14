@@ -39,6 +39,57 @@ describe('GitHub auth credentials', () => {
     expect(await auth.isGhCliDisabledForHost('github.com')).toBe(true);
     expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
   });
+  it('remembers the gh login an instance uses, and forgets it with the switch', async () => {
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+    // Switching off drops the choice; switching back on without naming a login
+    // keeps gh's own active account, the behavior earlier releases had.
+    await auth.setGhCliActiveForHost('github.com', false);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    await auth.setGhCliActiveForHost('github.com', true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    // Activating a stored credential instead of gh ends the instance's gh use.
+    await auth.setGhCliActiveForHost('github.com', true, 'octocat');
+    await auth.setGitHubAuth({ accessToken: 'pat-secret', user: { id: 7, login: 'user' }, source: 'pat' });
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(false);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+  });
+  it('keeps a pinned gh login when the switch is turned on again without naming one', async () => {
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    // A legacy client's activate names no login; it must not drop the pin the
+    // instance already made, the way the shared store keeps it.
+    await auth.setGhCliActiveForHost('github.com', true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+    // A repeated activate of the same login is idempotent too.
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+  });
+  it('writes cliLogin to github-auth.json only while a login is pinned', async () => {
+    // A store of its own: the pinned login is a per-instance field of the file,
+    // and the property under test is what the serializer emits.
+    const filePath = path.join(directory, 'github-auth-instances.json');
+    const store = auth.createGitHubAuthStore({ filePath });
+    await store.setCliActiveForHost('github.com', true);
+    const unpinned = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    // An older release's strict parser rejects unknown keys, so a switch with no
+    // pinned login leaves the key out rather than writing `cliLogin: null`.
+    expect(Object.hasOwn(unpinned.instances['github.com'], 'cliLogin')).toBe(false);
+    expect(unpinned.instances['github.com'].cliActive).toBe(true);
+
+    await store.setCliActiveForHost('github.com', true, 'work-user');
+    const pinned = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(pinned.instances['github.com'].cliLogin).toBe('work-user');
+  });
+  it('pins a gh login per enterprise instance without touching github.com', async () => {
+    await auth.setGhCliActiveForHost('github.example.com', true, 'work-user');
+    expect(await auth.isGhCliActiveForHost('github.example.com')).toBe(true);
+    expect(await auth.getGhCliLoginForHost('github.example.com')).toBe('work-user');
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    // Disabling the instance drops the pin with the switch.
+    await auth.setGhCliDisabledForHost('github.example.com', true);
+    expect(await auth.getGhCliLoginForHost('github.example.com')).toBeNull();
+  });
   it('migrates the shipped array once while preserving the exact legacy credential ID and secret', async () => {
     const filePath = path.join(directory, 'github-auth.json');
     await fs.writeFile(filePath, JSON.stringify([

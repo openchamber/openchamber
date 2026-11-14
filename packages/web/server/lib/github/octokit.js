@@ -3,10 +3,12 @@ import { Octokit } from '@octokit/rest';
 import {
   getGitHubAuth,
   getGitHubAuthByAccountId,
+  getGhCliLoginForHost,
   isGhCliActiveForHost,
   isGhCliDisabledForHost,
 } from './auth.js';
 import { forgetGhCliToken, getGhCliToken } from './gh-cli-credential.js';
+import { findGhCliLogin } from './gh-cli-logins.js';
 import { isTrustedGitHubHostOrStored } from './host-trust.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
@@ -145,8 +147,13 @@ export function selectTokenForHost(host, { ghToken, storedToken, ghCliActive }) 
 async function resolveHostCredential(host) {
   const stored = await getGitHubAuth(host);
   const ghCliActive = await isGhCliActiveForHost(host);
-  const ghToken = ghCliActive && !(await isGhCliDisabledForHost(host)) ? await getGhCliToken(host) : null;
-  return { stored, ghCliActive, ghToken };
+  // The login the instance's switch is on for. Null keeps gh's own active
+  // login, which is what earlier releases always used.
+  const ghCliLogin = ghCliActive ? await getGhCliLoginForHost(host) : null;
+  const ghToken = ghCliActive && !(await isGhCliDisabledForHost(host))
+    ? await getGhCliToken(host, ghCliLogin)
+    : null;
+  return { stored, ghCliActive, ghCliLogin, ghToken };
 }
 
 export async function getOctokitOrNull(host) {
@@ -180,8 +187,10 @@ export async function getOctokitOrNull(host) {
  * Git transport. Same consent rule as getOctokitForAccountId: a
  * `github.com#cli:` account resolves only while the user has switched to gh in
  * Settings, while a trusted enterprise host's `<host>#cli:` account uses that
- * host's gh login only after the instance itself was activated. gh must still be
- * signed in as that same user. The CLI credential has no revisions beyond 1.
+ * host's gh login only after the instance itself was activated. The id names the
+ * exact login, so a host with several gh accounts hands out the one asked for;
+ * gh must still hold that account's token. The CLI credential has no revisions
+ * beyond 1.
  */
 export async function getGitHubCliCredential(accountId, revision) {
   const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId ?? '');
@@ -191,25 +200,19 @@ export async function getGitHubCliCredential(accountId, revision) {
   if (await isGhCliDisabledForHost(host)) return null;
   if (!(await isGhCliActiveForHost(host))) return null;
   if (revision !== undefined && revision !== 1) return null;
-  const token = await getGhCliToken(host);
+  const login = await findGhCliLogin(host, accountId, { createOctokit });
+  if (!login) return null;
+  const token = await getGhCliToken(host, login.login);
   if (!token) return null;
-  let response;
-  try {
-    response = await createOctokit(token, accountId, host).rest.users.getAuthenticated();
-  } catch (error) {
-    if (error?.status === 401) return null;
-    throw error;
-  }
-  if (`${host}#cli:${response.data.id}` !== accountId) return null;
   return {
     credentialId: accountId,
     accountId,
     credentialRevision: 1,
-    providerUserId: `${host}#${response.data.id}`,
+    providerUserId: `${host}#${login.id}`,
     accessToken: token,
     source: 'cli',
     status: 'valid',
-    user: response.data,
+    user: login.profile,
   };
 }
 
@@ -281,51 +284,37 @@ export async function getOctokitForAccountId(accountId, options = {}) {
   }
   // An exact CLI account id is not consent on its own: a `<host>#cli:<id>` id
   // uses that host's gh token only while the instance's gh login is active and
-  // signed in as that user. Otherwise it resolves to nothing, never to another
-  // account stored for the host, which may be a different person (as on
-  // GitLab). An untrusted host never resolves at all.
+  // gh holds a login whose account is that id. Otherwise it resolves to nothing,
+  // never to another account stored for the host, which may be a different
+  // person (as on GitLab). An untrusted host never resolves at all.
   const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId);
   if (!cliMatch) return null;
   const host = cliMatch[1].toLowerCase();
   if (host !== 'github.com' && !(await isTrustedGitHubHostOrStored(host))) return null;
-  const { ghCliActive, ghToken } = await resolveHostCredential(host);
-  if (ghCliActive && ghToken) {
-    const octokit = createOctokit(ghToken, accountId, host);
-    let response;
-    try {
-      response = await octokit.rest.users.getAuthenticated();
-    } catch (error) {
-      if (error?.status === 401) {
-        const identity = { provider: 'github', instance: host, accountId };
-        await options.onUnauthorized?.(identity, false);
-        error.sourceControlIdentity = identity;
-        error.sourceControlPersistedAccount = false;
-        error.sourceControlInvalidated = true;
-      }
-      throw error;
+  if (!(await isGhCliActiveForHost(host)) || (await isGhCliDisabledForHost(host))) return null;
+  // The login this id names, which is not necessarily the host's active gh
+  // account: each gh account is a credential of its own. A token GitHub refuses
+  // is reported on the first request through the returned client, below.
+  const login = await findGhCliLogin(host, accountId, { createOctokit });
+  const token = login ? await getGhCliToken(host, login.login) : null;
+  if (!login || !token) return null;
+  const octokit = createOctokit(token, accountId, host);
+  octokit.hook.error('request', async (error) => {
+    const identity = { provider: 'github', instance: host, accountId };
+    error.sourceControlIdentity = identity;
+    error.sourceControlPersistedAccount = false;
+    if (error.status === 401) {
+      await options.onUnauthorized?.(identity, false);
+      error.sourceControlInvalidated = true;
     }
-    if (`${host}#cli:${response.data.id}` !== accountId) {
-      await options.onUnauthorized?.({ provider: 'github', instance: host, accountId }, false);
-      return null;
-    }
-    octokit.hook.error('request', async (error) => {
-      const identity = { provider: 'github', instance: host, accountId };
-      error.sourceControlIdentity = identity;
-      error.sourceControlPersistedAccount = false;
-      if (error.status === 401) {
-        await options.onUnauthorized?.(identity, false);
-        error.sourceControlInvalidated = true;
-      }
-      throw error;
-    });
-    return {
-      accountId,
-      credentialRevision: 1,
-      providerUserId: `${host}#${response.data.id}`,
-      source: 'cli',
-      user: response.data,
-      octokit,
-    };
-  }
-  return null;
+    throw error;
+  });
+  return {
+    accountId,
+    credentialRevision: 1,
+    providerUserId: `${host}#${login.id}`,
+    source: 'cli',
+    user: login.profile,
+    octokit,
+  };
 }

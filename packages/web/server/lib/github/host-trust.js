@@ -121,6 +121,26 @@ export function hasStoredGhLogin(host) {
 }
 
 /**
+ * Every gh login stored for `host`, from hosts.yml alone, with gh's active one
+ * first. gh keeps the active login in the entry's `user` and every login in its
+ * `users` map (also when the tokens live in the OS keyring), so the list costs
+ * no gh run and no request to the host. Logins are handles: a repeat in another
+ * case is the same account and is listed once. Empty when gh has no login.
+ */
+export function storedGhLogins(host) {
+  const parsed = hostEntrySchema.safeParse(loadHostsYaml()?.[normalizeHost(host)]);
+  if (!parsed.success || !parsed.data) return { active: null, logins: [] };
+  const logins = [];
+  const add = (login) => {
+    const value = typeof login === 'string' ? login.trim() : '';
+    if (value && !logins.some((existing) => existing.toLowerCase() === value.toLowerCase())) logins.push(value);
+  };
+  add(parsed.data.user);
+  for (const login of Object.keys(parsed.data.users ?? {})) add(login);
+  return { active: logins[0] ?? null, logins };
+}
+
+/**
  * The gh login's user record for `host`, read from hosts.yml alone: the entry's
  * `user` login (or the first `users` key when the token lives in the OS keyring).
  * The auth-status route builds a stored login's account row from it, so the row
@@ -130,9 +150,8 @@ export function hasStoredGhLogin(host) {
  * host.
  */
 export function storedGhLoginUser(host) {
-  const parsed = hostEntrySchema.safeParse(loadHostsYaml()?.[normalizeHost(host)]);
-  if (!parsed.success || !parsed.data) return null;
-  return { id: 0, login: parsed.data.user ?? Object.keys(parsed.data.users ?? {})[0] };
+  const { active } = storedGhLogins(host);
+  return active === null ? null : { id: 0, login: active };
 }
 
 /**

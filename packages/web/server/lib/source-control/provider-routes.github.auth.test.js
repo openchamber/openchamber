@@ -1326,7 +1326,7 @@ describe('gh CLI account consent', () => {
       // through gh once the user switches that host on.
       expect(before.body).toMatchObject({
         connected: false,
-        accounts: [{ id: 'github.example.com#cli:0', current: false, status: 'valid', user: { id: '0', username: 'ghe-user' } }],
+        accounts: [{ id: 'github.example.com#cli:0', current: false, status: 'valid', usable: false, user: { id: '0', username: 'ghe-user' } }],
       });
       expect(before.body.cli).toMatchObject({ available: true, active: false, user: { id: '0', username: 'ghe-user' } });
       expect(await fs.access(ghInvokedFile).then(() => true, () => false)).toBe(false);
@@ -1339,7 +1339,7 @@ describe('gh CLI account consent', () => {
       expect(response.body).toMatchObject({
         connected: true,
         user: { id: '42', username: 'ghe-user' },
-        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid', usable: true }],
       });
       expect(response.body.cli).toMatchObject({ available: true, active: true });
       // The activation belongs to that instance: its own switch is on, and
@@ -1402,7 +1402,7 @@ describe('gh CLI account consent', () => {
       expect(response.body).toMatchObject({
         connected: true,
         user: { id: '42', username: 'ghe-user' },
-        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid', usable: true }],
       });
       expect(response.body.cli).toMatchObject({ available: true, active: true });
     } finally {
@@ -1472,6 +1472,10 @@ describe('gh CLI account consent', () => {
 
     const before = await request(makeApp()).get('/api/source-control/github/auth/status').expect(200);
     expect(before.body).toMatchObject({ connected: false, cli: { available: true, active: false } });
+    // While the switch is off no gh row is usable: the server would refuse an
+    // exact lookup, so a binding offer must not be made from this listing.
+    const beforeCliRows = (before.body.accounts ?? []).filter((account) => account.source === 'cli');
+    expect(beforeCliRows.every((account) => account.usable === false)).toBe(true);
 
     const response = await request(makeApp()).post('/api/source-control/github/auth/activate')
       .send({ accountId: 'github.com#cli:9' }).expect(200);

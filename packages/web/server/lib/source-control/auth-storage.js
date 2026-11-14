@@ -103,11 +103,12 @@ function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentia
   for (const [rawKey, rawInstance] of Object.entries(rawInstances)) {
     const key = parseInstanceKey(rawKey);
     if (key !== rawKey || !isPlainObject(rawInstance)
-      || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'], allowSshUrl ? ['sshUrl'] : [])
+      || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'], [...(allowSshUrl ? ['sshUrl'] : []), 'cliLogin'])
       || (rawInstance.activeCredentialId !== null && !validText(rawInstance.activeCredentialId))
       || !Array.isArray(rawInstance.credentials)
       || Object.prototype.toString.call(rawInstance.cliDisabled) !== '[object Boolean]'
       || Object.prototype.toString.call(rawInstance.cliActive) !== '[object Boolean]'
+      || (rawInstance.cliLogin !== undefined && rawInstance.cliLogin !== null && !validText(rawInstance.cliLogin))
       || (rawInstance.cliDisabled && rawInstance.cliActive)) throw invalidState();
     if (rawInstance.sshUrl !== undefined) {
       let normalized;
@@ -124,6 +125,7 @@ function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentia
       credentials,
       cliDisabled: rawInstance.cliDisabled,
       cliActive: rawInstance.cliActive,
+      cliLogin: rawInstance.cliLogin ?? null,
     };
     if (rawInstance.sshUrl !== undefined) instances[key].sshUrl = rawInstance.sshUrl;
   }
@@ -264,6 +266,7 @@ function serializeState(state) {
       cliDisabled: instance.cliDisabled,
       cliActive: instance.cliActive,
     };
+    if (instance.cliLogin) githubInstances[host].cliLogin = instance.cliLogin;
     if (instance.sshUrl) githubInstances[host].sshUrl = instance.sshUrl;
   }
   const extras = {};
@@ -297,6 +300,7 @@ function publicInstance(instance) {
     cliActive: instance.cliActive,
   };
   if (instance.sshUrl) result.sshUrl = instance.sshUrl;
+  if (instance.cliLogin) result.cliLogin = instance.cliLogin;
   return result;
 }
 
@@ -640,6 +644,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         instance.credentials.push(credential);
         instance.activeCredentialId = credentialId;
         instance.cliActive = false;
+        instance.cliLogin = null;
         instances[host] = instance;
         return { changed: true, value: credential };
       }),
@@ -651,6 +656,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         const changed = instance.activeCredentialId !== credentialId || instance.cliActive;
         instance.activeCredentialId = credentialId;
         instance.cliActive = false;
+        instance.cliLogin = null;
         state.providers.github.instances[host] = instance;
         return { changed, value: true };
       }),
@@ -680,18 +686,26 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         const instance = instances[host] ?? emptyInstance();
         const nextDisabled = Boolean(disabled);
         const nextActive = nextDisabled ? false : instance.cliActive;
-        const changed = instance.cliDisabled !== nextDisabled || instance.cliActive !== nextActive;
+        const nextLogin = nextDisabled ? null : instance.cliLogin ?? null;
+        const changed = instance.cliDisabled !== nextDisabled || instance.cliActive !== nextActive
+          || (instance.cliLogin ?? null) !== nextLogin;
         instance.cliDisabled = nextDisabled;
         instance.cliActive = nextActive;
+        instance.cliLogin = nextLogin;
         retainInstance(instances, host, instance);
         return { changed, value: instance.cliDisabled };
       }),
-      setCliActive: (host, active) => mutate((state) => {
+      setCliActive: (host, active, login = null) => mutate((state) => {
         const instances = state.providers.github.instances;
         const instance = instances[host] ?? emptyInstance();
         const nextActive = Boolean(active) && !instance.cliDisabled;
-        const changed = instance.cliActive !== nextActive;
+        const requested = nextActive && validText(login) ? login : null;
+        // Without a named login the instance keeps the account it already had,
+        // or gh's active login (null), exactly as earlier releases behaved.
+        const nextLogin = nextActive ? (requested ?? instance.cliLogin ?? null) : null;
+        const changed = instance.cliActive !== nextActive || (instance.cliLogin ?? null) !== nextLogin;
         instance.cliActive = nextActive;
+        instance.cliLogin = nextLogin;
         retainInstance(instances, host, instance);
         return { changed, value: instance.cliActive };
       }),
