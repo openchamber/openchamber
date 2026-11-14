@@ -102,6 +102,35 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Secure storage** — `@aparajita/capacitor-secure-storage` for connection tokens.
 - **Deep links** — `openchamber://` URL scheme; a reusable intent vocabulary (`apps/deepLinks.ts`)
   used by notification taps, widgets, and Control Center. Cold-launch intents are stashed.
+- **Share intake (text, links, files)** — iOS: the `OpenChamberShare` extension accepts text, links, files, images and movies from the share sheet, stages them in the App Group inbox and opens the app. Android: `ACTION_SEND`/`ACTION_SEND_MULTIPLE` start `MainActivity`, which reads the intent off the UI thread (`SharedIntentReader`) into `SharedPayloadStore`; a share that arrives while the app runs goes through `onNewIntent`. The app's `SharedFiles` plugin hands the payload to the page, which opens a new session draft with the files attached and unsent and the text typed into the composer. More than eight files, a file over 24 MB, a batch over 32 MB, or a file the provider cannot open is reported by name instead of attached. Text or a link shared on its own is not an attachment: a provider that carries only text or a URL becomes composer text, and a provider that offers both is read as its link so a shared article arrives as one line.
+- **Native tests** — `OpenChamberShareTests` (a unit-test target with no host app) runs the real
+  `FileManager`/`NSItemProvider` paths of `Shared/ShareInbox.swift` and `Shared/ShareStaging.swift`
+  in the simulator: the copy inside the load callback, the manifest round-trip, the three
+  limits, the take-once claim. `xcodebuild test -project ios/App/App.xcodeproj -scheme
+  OpenChamberShareTests -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO`.
+  The tests pass a temporary container instead of the App Group, because the test runner has no
+  entitlement for it.
+- **Android device tests** — `SharedIntentReaderTest` runs on an emulator (`./gradlew
+  :app:connectedDebugAndroidTest`): the reader is handed intents shaped the way another app builds
+  one, and a real provider serves the `content://` URI — a display name, a declared size or none,
+  a MIME type and the bytes, from a file or a pipe. It covers text, text with a file, file order,
+  the eight-file cap, a 26 MB stream refused before it is stored, an empty file, and that the
+  package manager really lists the app for `SEND` and `SEND_MULTIPLE`. The fixture provider lives
+  in `app/src/debug` with a debug-only manifest entry, so no release APK carries it.
+- **Share-sheet end-to-end** — `OpenChamberShareUITests` drives the real panel (Photos → share →
+  OpenChamber) and then asserts the app came forward and the draft carries an image attachment,
+  with screenshots attached to the result bundle. It needs a server
+  (`node packages/web/bin/cli.js serve --foreground --port 4123 --host 127.0.0.1`) and a photo in
+  the simulator (`xcrun simctl addmedia <udid> photo.png`). It must run against the MLKit-less
+  simulator Pods, so build once with `IOS_SIM_BUILD_KEEP_PODS=1 bun run
+  mobile:build:ios:simulator`, then `xcodebuild test -workspace ios/App/App.xcworkspace -scheme
+  OpenChamberE2E -destination 'id=<udid>' CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`.
+  **The ad-hoc identity is required**: without it nothing is signed, no entitlements are embedded,
+  `containerURL(forSecurityApplicationGroupIdentifier:)` returns nil, and the extension refuses the
+  file before staging it (`[ShareInbox] failed`). No developer account or provisioning profile is
+  involved; the simulator does not verify entitlements, it only needs them present. `codesign -d
+  --entitlements - App.app` and `simctl get_app_container <udid> com.openchamber.app groups` are the
+  two commands that tell whether the hand-off can work at all.
 - **Push notifications** — iOS APNs + Android FCM (see below). Presence-aware routing suppresses a
   device's push when an interactive (desktop/web) client is visible.
 - **iOS widgets + Control Center + Notification Service Extension** — WidgetKit extension
@@ -129,9 +158,11 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 
 ### iOS (`ios/App`)
 
-- Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0) and `OpenChamberNotificationService`
-  (NSE, 15.5), both hand-wired into `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
-- App Group `group.com.openchamber.app` in all three targets' entitlements (app + widget + NSE).
+- Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0), `OpenChamberNotificationService`
+  (NSE, 15.5) and `OpenChamberShare` (share services, 15.5), all hand-wired into
+  `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
+- App Group `group.com.openchamber.app` in all four targets' entitlements (app + widget + NSE +
+  share extension).
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.
 - Push entitlement (aps-environment) required.
 - APNs `mutable-content: 1` (set server/relay side) wakes the NSE to refresh widgets.
@@ -143,7 +174,9 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   brings `firebase-messaging`.
 - Manifest: permissions `INTERNET`, `CAMERA` (+ optional camera feature), `POST_NOTIFICATIONS`
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
-  FCM `default_notification_icon=@drawable/ic_stat_notify`.
+  `MainActivity` also declares `ACTION_SEND` and `ACTION_SEND_MULTIPLE` with `mimeType="*/*"`, so
+  the app appears in the system share sheet for any type; the page's attachment rules decide what
+  can actually be attached. FCM `default_notification_icon=@drawable/ic_stat_notify`.
 - Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground`, plus the
   `<monochrome>` layer (`ic_launcher_monochrome.png`). All of them, and `assets/icon-*.png`, are written
   by `bun run brand:generate` (`scripts/brand`); `@capacitor/assets` would rewrite `ic_launcher.xml`
@@ -174,6 +207,20 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **User scripts go in `capacitorDidLoad()`.** Capacitor replaces the `userContentController` after
   `webViewConfiguration(for:)`, silently dropping scripts added there (`BridgeViewController` in
   `AppDelegate.swift`).
+- **A shared item lands one commit later than its draft.** `newSessionDraft.draftId` reaches the
+  store before the chat column shows the draft: `ChatInput`'s `currentSessionId` comes from
+  `chatColumnSession` and trails by a frame. Anything a native share hands to the draft (files and
+  text alike, `pendingDraftContent`) must wait until `currentSessionId` is null, otherwise it is
+  filed under the session the user is leaving, and the draft's own restore — an empty draft — wipes
+  it when the column switches. Symptom: the share opens a new session with nothing in it, but only
+  when the share started from an existing session. Confirmed on device with a 43 ms gap between the
+  two store updates.
+- **A share extension cannot reliably open its host app.** `UIApplication.shared` is unavailable
+  there and `extensionContext.open` only works for the Today extension point, so
+  `ShareViewController` tries `extensionContext.open` first and then walks the responder chain
+  for a `UIApplication` (the same fallback AFFiNE and others ship). On the simulator with ad-hoc
+  signing the app does come forward, but do not rely on it on a device: when both fail the staged
+  file stays in the App Group inbox and the plugin takes it the next time the app becomes active.
 - **`embedded.mobileprovision` decodes as `.isoLatin1`.** It is a binary CMS envelope around a plist;
   `.ascii`/`.utf8` return nil and the APNs environment silently falls back. APNs delivery is grouped
   per token by the environment it registered with (Xcode build → sandbox, TestFlight/App Store →
@@ -213,10 +260,13 @@ TestFlight / Play internal testing:
 
 ### iOS
 
-- Apple Developer account; App IDs for the app **and** both extensions
-  (`com.openchamber.app`, `.OpenChamberWidget`, `.OpenChamberNotificationService`), each enabled for
-  the **App Group** and (app) **Push**.
-- Signing certificate + provisioning profiles for all three targets (extensions need their own).
+- Apple Developer account; App IDs for the app **and** all three extensions
+  (`com.openchamber.app`, `.OpenChamberWidget`, `.OpenChamberNotificationService`,
+  `.OpenChamberShare`), each enabled for the **App Group** and (app) **Push**.
+- Signing certificate + provisioning profiles for all four targets (extensions need their own).
+  `mobile-release.yml` installs them as `IOS_APP_PROFILE_*`, `IOS_WIDGET_PROFILE_*`,
+  `IOS_NSE_PROFILE_*` and `IOS_SHARE_PROFILE_*` (`_BASE64` + `_NAME` pairs); the archive fails
+  when one target's profile is missing.
 - App Store Connect API key for non-interactive TestFlight upload (`xcodebuild archive` +
   `notarytool`/`altool`, or fastlane `gym`+`pilot`).
 - Runner: macOS with the same Xcode as `DEVELOPER_DIR`.

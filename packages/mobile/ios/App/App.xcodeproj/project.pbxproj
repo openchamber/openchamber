@@ -27,10 +27,21 @@
 		D0B2000000000000000000B3 /* PushClearing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A4 /* PushClearing.swift */; };
 		D0B2000000000000000000B5 /* OpenChamberNotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0C2000000000000000000B1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */; };
+		D0D2000000000000000000B1 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D1000000000000000000A1 /* ShareViewController.swift */; };
+		D0D2000000000000000000B5 /* OpenChamberShare.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0D1000000000000000000A7 /* OpenChamberShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0E2000000000000000000B1 /* OpenChamberAppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A1 /* OpenChamberAppShortcuts.swift */; };
 		D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A2 /* ShortcutRequests.swift */; };
 		D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A1 /* RuntimeWebSocket.swift */; };
 		D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */; };
+		D0E2000000000000000000B3 /* SharedFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A3 /* SharedFiles.swift */; };
+		D0H2000000000000000000B1 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0H1000000000000000000A1 /* ShareInbox.swift */; };
+		D0H2000000000000000000B2 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0H1000000000000000000A1 /* ShareInbox.swift */; };
+		D0G2000000000000000000B1 /* ShareStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0G1000000000000000000A1 /* ShareStaging.swift */; };
+		D0G2000000000000000000B2 /* ShareStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0G1000000000000000000A1 /* ShareStaging.swift */; };
+		D0G2000000000000000000B3 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0H1000000000000000000A1 /* ShareInbox.swift */; };
+		D0G2000000000000000000B4 /* ShareInboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0G1000000000000000000A2 /* ShareInboxTests.swift */; };
+		D0G2000000000000000000B5 /* ShareStagingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0G1000000000000000000A3 /* ShareStagingTests.swift */; };
+		D0U2000000000000000000B1 /* ShareSheetE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0U1000000000000000000A1 /* ShareSheetE2ETests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +59,20 @@
 			remoteGlobalIDString = D0B4000000000000000000D1;
 			remoteInfo = OpenChamberNotificationService;
 		};
+		D0D4000000000000000000D3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0D4000000000000000000D1;
+			remoteInfo = OpenChamberShare;
+		};
+		D0U4000000000000000000D3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 504EC3031FED79650016851F;
+			remoteInfo = App;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -59,6 +84,7 @@
 			files = (
 				D0A2000000000000000000B5 /* OpenChamberWidget.appex in Embed App Extensions */,
 				D0B2000000000000000000B5 /* OpenChamberNotificationService.appex in Embed App Extensions */,
+				D0D2000000000000000000B5 /* OpenChamberShare.appex in Embed App Extensions */,
 			);
 			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -91,10 +117,22 @@
 		D0B1000000000000000000A3 /* OpenChamberNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenChamberNotificationService.entitlements; sourceTree = "<group>"; };
 		D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OpenChamberNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		D0D1000000000000000000A1 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		D0D1000000000000000000A2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D0D1000000000000000000A3 /* OpenChamberShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenChamberShare.entitlements; sourceTree = "<group>"; };
+		D0D1000000000000000000A7 /* OpenChamberShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OpenChamberShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0E1000000000000000000A1 /* OpenChamberAppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenChamberAppShortcuts.swift; sourceTree = "<group>"; };
 		D0E1000000000000000000A2 /* ShortcutRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRequests.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A1 /* RuntimeWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocket.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocketTask.swift; sourceTree = "<group>"; };
+		D0E1000000000000000000A3 /* SharedFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFiles.swift; sourceTree = "<group>"; };
+		D0H1000000000000000000A1 /* ShareInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInbox.swift; sourceTree = "<group>"; };
+		D0G1000000000000000000A1 /* ShareStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareStaging.swift; sourceTree = "<group>"; };
+		D0G1000000000000000000A2 /* ShareInboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInboxTests.swift; sourceTree = "<group>"; };
+		D0G1000000000000000000A3 /* ShareStagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareStagingTests.swift; sourceTree = "<group>"; };
+		D0G1000000000000000000A4 /* OpenChamberShareTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenChamberShareTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0U1000000000000000000A1 /* ShareSheetE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheetE2ETests.swift; sourceTree = "<group>"; };
+		D0U1000000000000000000A4 /* OpenChamberShareUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenChamberShareUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -121,6 +159,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0D3000000000000000000C2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0G3000000000000000000C2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0U3000000000000000000C2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -138,6 +197,10 @@
 				504EC3061FED79650016851F /* App */,
 				D0A6000000000000000000F1 /* OpenChamberWidget */,
 				D0B6000000000000000000F1 /* OpenChamberNotificationService */,
+				D0D6000000000000000000F1 /* OpenChamberShare */,
+				D0F6000000000000000000F1 /* Shared */,
+				D0G6000000000000000000F1 /* OpenChamberShareTests */,
+				D0U6000000000000000000F1 /* OpenChamberShareUITests */,
 				504EC3051FED79650016851F /* Products */,
 				7F8756D8B27F46E3366F6CEA /* Pods */,
 				27E2DDA53C4D2A4D1A88CE4A /* Frameworks */,
@@ -150,6 +213,9 @@
 				504EC3041FED79650016851F /* App.app */,
 				D0A1000000000000000000A7 /* OpenChamberWidget.appex */,
 				D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */,
+				D0D1000000000000000000A7 /* OpenChamberShare.appex */,
+				D0G1000000000000000000A4 /* OpenChamberShareTests.xctest */,
+				D0U1000000000000000000A4 /* OpenChamberShareUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -163,6 +229,7 @@
 				D0E1000000000000000000A2 /* ShortcutRequests.swift */,
 				D0F1000000000000000000A1 /* RuntimeWebSocket.swift */,
 				D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */,
+				D0E1000000000000000000A3 /* SharedFiles.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */,
@@ -208,6 +275,42 @@
 			path = OpenChamberNotificationService;
 			sourceTree = "<group>";
 		};
+		D0D6000000000000000000F1 /* OpenChamberShare */ = {
+			isa = PBXGroup;
+			children = (
+				D0D1000000000000000000A1 /* ShareViewController.swift */,
+				D0D1000000000000000000A2 /* Info.plist */,
+				D0D1000000000000000000A3 /* OpenChamberShare.entitlements */,
+			);
+			path = OpenChamberShare;
+			sourceTree = "<group>";
+		};
+		D0F6000000000000000000F1 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				D0H1000000000000000000A1 /* ShareInbox.swift */,
+				D0G1000000000000000000A1 /* ShareStaging.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		D0G6000000000000000000F1 /* OpenChamberShareTests */ = {
+			isa = PBXGroup;
+			children = (
+				D0G1000000000000000000A2 /* ShareInboxTests.swift */,
+				D0G1000000000000000000A3 /* ShareStagingTests.swift */,
+			);
+			path = OpenChamberShareTests;
+			sourceTree = "<group>";
+		};
+		D0U6000000000000000000F1 /* OpenChamberShareUITests */ = {
+			isa = PBXGroup;
+			children = (
+				D0U1000000000000000000A1 /* ShareSheetE2ETests.swift */,
+			);
+			path = OpenChamberShareUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -224,10 +327,11 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-				D0A4000000000000000000D2 /* PBXTargetDependency */,
-				D0B4000000000000000000D2 /* PBXTargetDependency */,
-			);
+				dependencies = (
+					D0A4000000000000000000D2 /* PBXTargetDependency */,
+					D0B4000000000000000000D2 /* PBXTargetDependency */,
+					D0D4000000000000000000D2 /* PBXTargetDependency */,
+				);
 			name = App;
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -266,6 +370,55 @@
 			productReference = D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		D0D4000000000000000000D1 /* OpenChamberShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0D5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShare" */;
+			buildPhases = (
+				D0D3000000000000000000C1 /* Sources */,
+				D0D3000000000000000000C2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenChamberShare;
+			productName = OpenChamberShare;
+			productReference = D0D1000000000000000000A7 /* OpenChamberShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		D0G4000000000000000000D1 /* OpenChamberShareTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0G5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShareTests" */;
+			buildPhases = (
+				D0G3000000000000000000C1 /* Sources */,
+				D0G3000000000000000000C2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenChamberShareTests;
+			productName = OpenChamberShareTests;
+			productReference = D0G1000000000000000000A4 /* OpenChamberShareTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D0U4000000000000000000D1 /* OpenChamberShareUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0U5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShareUITests" */;
+			buildPhases = (
+				D0U3000000000000000000C1 /* Sources */,
+				D0U3000000000000000000C2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0U4000000000000000000D2 /* PBXTargetDependency */,
+			);
+			name = OpenChamberShareUITests;
+			productName = OpenChamberShareUITests;
+			productReference = D0U1000000000000000000A4 /* OpenChamberShareUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -289,6 +442,19 @@
 						CreatedOnToolsVersion = 16.0;
 						ProvisioningStyle = Automatic;
 					};
+					D0D4000000000000000000D1 = {
+						CreatedOnToolsVersion = 16.0;
+						ProvisioningStyle = Automatic;
+					};
+					D0G4000000000000000000D1 = {
+						CreatedOnToolsVersion = 16.0;
+						ProvisioningStyle = Automatic;
+					};
+					D0U4000000000000000000D1 = {
+						CreatedOnToolsVersion = 16.0;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 504EC3031FED79650016851F;
+					};
 				};
 			};
 			buildConfigurationList = 504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */;
@@ -305,11 +471,14 @@
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (
-				504EC3031FED79650016851F /* App */,
-				D0A4000000000000000000D1 /* OpenChamberWidget */,
-				D0B4000000000000000000D1 /* OpenChamberNotificationService */,
-			);
+				targets = (
+					504EC3031FED79650016851F /* App */,
+					D0A4000000000000000000D1 /* OpenChamberWidget */,
+					D0B4000000000000000000D1 /* OpenChamberNotificationService */,
+					D0D4000000000000000000D1 /* OpenChamberShare */,
+					D0G4000000000000000000D1 /* OpenChamberShareTests */,
+					D0U4000000000000000000D1 /* OpenChamberShareUITests */,
+				);
 		};
 /* End PBXProject section */
 
@@ -386,6 +555,8 @@
 				D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */,
 				D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */,
 				D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */,
+				D0E2000000000000000000B3 /* SharedFiles.swift in Sources */,
+				D0H2000000000000000000B1 /* ShareInbox.swift in Sources */,
 				D0B2000000000000000000B3 /* PushClearing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -409,6 +580,35 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0D3000000000000000000C1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D0D2000000000000000000B1 /* ShareViewController.swift in Sources */,
+				D0H2000000000000000000B2 /* ShareInbox.swift in Sources */,
+				D0G2000000000000000000B1 /* ShareStaging.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0G3000000000000000000C1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D0G2000000000000000000B2 /* ShareStaging.swift in Sources */,
+				D0G2000000000000000000B3 /* ShareInbox.swift in Sources */,
+				D0G2000000000000000000B4 /* ShareInboxTests.swift in Sources */,
+				D0G2000000000000000000B5 /* ShareStagingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0U3000000000000000000C1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D0U2000000000000000000B1 /* ShareSheetE2ETests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -421,6 +621,16 @@
 			isa = PBXTargetDependency;
 			target = D0B4000000000000000000D1 /* OpenChamberNotificationService */;
 			targetProxy = D0B4000000000000000000D3 /* PBXContainerItemProxy */;
+		};
+		D0D4000000000000000000D2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0D4000000000000000000D1 /* OpenChamberShare */;
+			targetProxy = D0D4000000000000000000D3 /* PBXContainerItemProxy */;
+		};
+		D0U4000000000000000000D2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 504EC3031FED79650016851F /* App */;
+			targetProxy = D0U4000000000000000000D3 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -715,6 +925,135 @@
 			};
 			name = Release;
 		};
+		D0D5000000000000000000E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenChamberShare/OpenChamberShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenChamberShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D0D5000000000000000000E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = OpenChamberShare/OpenChamberShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenChamberShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D0G5000000000000000000E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShareTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D0G5000000000000000000E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShareTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D0U5000000000000000000E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShareUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = App;
+			};
+			name = Debug;
+		};
+		D0U5000000000000000000E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5J7WJGPA2Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.openchamber.app.OpenChamberShareUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = App;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -750,6 +1089,33 @@
 			buildConfigurations = (
 				D0B5000000000000000000E2 /* Debug */,
 				D0B5000000000000000000E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0D5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0D5000000000000000000E2 /* Debug */,
+				D0D5000000000000000000E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0G5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShareTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0G5000000000000000000E2 /* Debug */,
+				D0G5000000000000000000E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0U5000000000000000000E1 /* Build configuration list for PBXNativeTarget "OpenChamberShareUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0U5000000000000000000E2 /* Debug */,
+				D0U5000000000000000000E3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

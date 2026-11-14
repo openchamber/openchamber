@@ -4365,6 +4365,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [addAttachedFile, imageSaveMode, saveImagesWithPathCitation, t]);
 
+    // What a native share left for this draft (files to attach, text to type) is applied once
+    // the draft's composer is the one on screen. Files take the picked-file path, so the same
+    // type and size checks and the same attachment chips apply; the text is appended to what
+    // the user already typed and is never sent. A request for another draft is left for that
+    // draft, never applied to whatever the user is looking at.
+    const pendingDraftContent = useInputStore((state) => state.pendingDraftContent);
+    React.useEffect(() => {
+        if (pendingDraftContent == null || columnPinned) return;
+        // The draft's id is in the store one commit before the column actually shows it:
+        // `currentSessionId` comes from the column and trails the switch. Applying the share
+        // into that commit files it under the session the user is leaving, which the column
+        // then overwrites when it loads the draft — the share looks like it vanished.
+        if (currentSessionId !== null) return;
+        if (draftSubmitDraftId === null || pendingDraftContent.draftId !== draftSubmitDraftId) return;
+        const content = useInputStore.getState().consumePendingDraftContent(draftSubmitDraftId);
+        if (content === null) return;
+        if (content.text) {
+            const text = content.text;
+            const current = composerText.get();
+            setMessage(current.trim().length > 0 ? appendWithLineBreaks(current, text) : text);
+        }
+        if (content.files.length > 0) void attachFiles(content.files);
+    }, [attachFiles, columnPinned, composerText, currentSessionId, draftSubmitDraftId, pendingDraftContent]);
+
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
             const data = (await vscodeApi?.pickFiles?.({ extensions: ACCEPTED_ATTACHMENT_EXTENSIONS })) as {
