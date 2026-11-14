@@ -94,7 +94,7 @@ other.
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
   120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
   with `share` is refused first when sharing is unavailable (`403`,
-  `code: 'enterprise_mode'`) and with `awaitAnswer` (`400`), then makes its
+  `code: 'enterprise_mode'`) and with `awaitAnswer` or `answerLater` (`400`), then makes its
   group through `sharePages` (`../share-pages/`) and returns at once without
   any link or PIN. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
