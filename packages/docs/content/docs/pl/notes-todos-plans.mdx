@@ -33,6 +33,12 @@ Powinieneś wrócić do zakładki Context z zapisaną notatką, odhaczonym zadan
 
 Agent może powiązać notatkę lub zadanie z planem i uzależnić zadanie od innych zadań tego samego planu; zadanie bez planu nie ma zależności. Może poprosić o gotowe zadania, czyli niezakończone zadania, których wszystkie zależności są ukończone. Usunięte zadanie znika z zależności innych zadań, a usunięcie planu odłącza od niego notatki i zadania. Agent może też ustawić lub wyczyścić sesję powiązaną z planem.
 
+## Notatki i zadania w repozytorium
+
+Notatki i zadania są zapisywane we własnych danych OpenChamber na tym komputerze. Aby synchronizować je przez Git, otwórz **Settings → Projects**, wybierz projekt i na karcie General włącz **Przechowuj notatki i zadania w repozytorium**. Od tej pory trafiają do `.openchamber/notes-todos.json`; zatwierdź ten plik jak każdy inny. Opcja dotyczy tylko tego komputera, więc włącz ją na każdym komputerze, który ma korzystać z pliku.
+
+Przełączenie niczego nie kopiuje. Wcześniejsze notatki i zadania wracają po wyłączeniu opcji, a plik zostaje w repozytorium. Plany nie są częścią pliku; aby udostępnić plan, przenieś go do folderu planów w repozytorium. Jeśli plik ma konflikt Git, panel nie wczyta ani nie zapisze notatek i zadań, dopóki nie naprawisz pliku.
+
 ## Powiązane
 
 - [Sesje worktree](/pl/worktrees/) — uruchom zadanie w jego własnej gałęzi

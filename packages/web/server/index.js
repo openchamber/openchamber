@@ -749,10 +749,17 @@ if (movedUserDirs.length > 0) {
   console.log(`[data-dir] Copied ${movedUserDirs.join(', ')} into ${OPENCHAMBER_USER_CONFIG_ROOT}`);
 }
 
+const broadcastProjectContextChanged = (projectId) => broadcastOpenChamberUiEvent({
+  type: 'openchamber:project-context-changed',
+  properties: { projectId },
+});
+
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  // Switching where notes and todos live changes what the panels show.
+  onNotesTodosStorageChanged: broadcastProjectContextChanged,
 });
 
 const projectContextRuntime = createProjectContextRuntime({
@@ -760,10 +767,8 @@ const projectContextRuntime = createProjectContextRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
   resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
-  onChanged: (projectId) => broadcastOpenChamberUiEvent({
-    type: 'openchamber:project-context-changed',
-    properties: { projectId },
-  }),
+  resolveNotesTodosFile: (projectId) => projectConfigRuntime.resolveNotesTodosFile(projectId),
+  onChanged: broadcastProjectContextChanged,
 });
 
 const agentMemoryRuntime = createAgentMemoryRuntime({

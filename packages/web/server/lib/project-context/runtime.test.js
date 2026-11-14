@@ -1225,3 +1225,151 @@ describe('plan links and todo dependencies', () => {
     expect(await linked.setPlanSession(PROJECT_ID, 'missing', { sessionId: null })).toBeNull();
   });
 });
+
+describe('notes and todos in the repository', () => {
+  const repoFile = () => path.join(projectsDirPath, 'checkout', '.openchamber', 'notes-todos.json');
+  const repoRuntime = (overrides = {}) => {
+    const options = { inRepository: true, ...overrides };
+    return createProjectContextRuntime({
+      fsPromises: options.fsPromises ?? fsPromises,
+      path,
+      projectsDirPath: options.projectsDirPath ?? projectsDirPath,
+      createId: () => `id-${++idCounter}`,
+      resolveNotesTodosFile: options.resolveNotesTodosFile ?? (async () => (options.inRepository ? repoFile() : null)),
+      onChanged: options.onChanged,
+    });
+  };
+
+  test('the option chooses the store and leaves the other one as it was', async () => {
+    await writeJson(contextPath(), { version: 2, notes: 'old local note', todos: [{ id: 'local', text: 'Local', createdAt: 1 }], plans: [] });
+    const localBefore = readFileSync(contextPath(), 'utf8');
+    const repo = repoRuntime();
+
+    expect(await repo.readContext(PROJECT_ID)).toMatchObject({ notes: [], todos: [] });
+    const { plan } = await repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    // A plan change alone writes no repository file.
+    await expect(fsPromises.access(repoFile())).rejects.toThrow();
+    const { todo: first } = await repo.createTodo(PROJECT_ID, { text: 'First', planId: plan.id });
+    await repo.createTodo(PROJECT_ID, { text: 'Second', planId: plan.id, dependsOn: [first.id] });
+    await repo.createNote(PROJECT_ID, { body: 'Shared note' });
+
+    const stored = await readJson(repoFile());
+    expect(Object.keys(stored)).toEqual(['version', 'notes', 'todos']);
+    expect(stored.todos.map((todo) => todo.text)).toEqual(['First', 'Second']);
+    expect(stored.todos[1].dependsOn).toEqual([first.id]);
+    expect(stored.notes.map((note) => note.body)).toEqual(['Shared note']);
+    const local = await readJson(contextPath());
+    expect(local.notes).toBe('old local note');
+    expect(local.todos).toEqual(JSON.parse(localBefore).todos);
+    expect(local.plans.map((entry) => entry.id)).toEqual([plan.id]);
+
+    const back = await repoRuntime({ inRepository: false }).readContext(PROJECT_ID);
+    expect(back.todos.map((todo) => todo.id)).toEqual(['local']);
+    expect(back.notes.map((note) => note.body)).toEqual(['old local note']);
+    expect((await readJson(repoFile())).todos).toHaveLength(2);
+  });
+
+  test('another checkout with its own app data reads the same entries', async () => {
+    const repo = repoRuntime();
+    const { todo: first } = await repo.createTodo(PROJECT_ID, { text: 'First' });
+    await repo.createNote(PROJECT_ID, { body: 'Note' });
+    const written = await repo.readContext(PROJECT_ID);
+
+    const otherDataDir = path.join(projectsDirPath, 'other-machine');
+    const elsewhere = await repoRuntime({ projectsDirPath: otherDataDir }).readContext(PROJECT_ID);
+    expect(elsewhere.todos).toEqual(written.todos);
+    expect(elsewhere.notes).toEqual(written.notes);
+    expect(elsewhere.todos[0].id).toBe(first.id);
+  });
+
+  test.each([
+    ['a Git conflict', '{\n<<<<<<< HEAD\n  "todos": []\n=======\n  "todos": [{"id":"a","text":"A"}]\n>>>>>>> theirs\n}\n'],
+    ['lists of the wrong shape', JSON.stringify({ version: 1, notes: { body: 'secret' }, todos: 'nope' })],
+  ])('a file with %s fails reads and writes and keeps its bytes', async (_label, broken) => {
+    await fsPromises.mkdir(path.dirname(repoFile()), { recursive: true });
+    await fsPromises.writeFile(repoFile(), broken, 'utf8');
+    const changes = [];
+    const repo = repoRuntime({ onChanged: (id) => changes.push(id) });
+
+    await expect(repo.readContext(PROJECT_ID)).rejects.toThrow('malformed');
+    await expect(repo.createTodo(PROJECT_ID, { text: 'New' })).rejects.toThrow('malformed');
+    await expect(repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' })).rejects.toThrow('malformed');
+    expect(readFileSync(repoFile(), 'utf8')).toBe(broken);
+    expect(changes).toEqual([]);
+  });
+
+  test('a note or todo write commits to the repository file alone', async () => {
+    await writeJson(contextPath(), { version: 2, notes: [], todos: [{ id: 'local', text: 'Local', createdAt: 1 }], plans: [] });
+    const localBefore = readFileSync(contextPath(), 'utf8');
+    // context.json cannot be replaced: a write that needed it would fail.
+    const repo = repoRuntime({
+      fsPromises: { ...fsPromises, rename: async (from, to) => {
+        if (to === contextPath()) throw new Error('context.json commit failed');
+        return fsPromises.rename(from, to);
+      } },
+    });
+    await repo.createTodo(PROJECT_ID, { text: 'Team' });
+    await repo.createNote(PROJECT_ID, { body: 'Note' });
+    expect((await readJson(repoFile())).todos.map((todo) => todo.text)).toEqual(['Team']);
+    expect(readFileSync(contextPath(), 'utf8')).toBe(localBefore);
+  });
+
+  test('deleting a linked plan survives a failure at either step and can be repeated', async () => {
+    const repo = repoRuntime();
+    const { plan } = await repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    const { todo } = await repo.createTodo(PROJECT_ID, { text: 'Linked', planId: plan.id });
+    const planFile = path.join(plansDir(), (await readJson(contextPath())).plans[0].file);
+    const failingOn = (target, changes) => repoRuntime({
+      fsPromises: { ...fsPromises, rename: async (from, to) => {
+        if (to === target) throw new Error('commit failed');
+        return fsPromises.rename(from, to);
+      } },
+      onChanged: (id) => changes.push(id),
+    });
+    const listed = async () => (await repo.readContext(PROJECT_ID)).plans.map((entry) => entry.id);
+
+    // The unlink fails: nothing changed and nothing is announced.
+    const repoBefore = readFileSync(repoFile(), 'utf8');
+    const first = [];
+    await expect(failingOn(repoFile(), first).deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('commit failed');
+    expect(readFileSync(repoFile(), 'utf8')).toBe(repoBefore);
+    expect(await listed()).toEqual([plan.id]);
+    expect(first).toEqual([]);
+
+    // The unlink lands and is announced; the plan stays listed with its file.
+    const second = [];
+    await expect(failingOn(contextPath(), second).deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('commit failed');
+    expect((await readJson(repoFile())).todos).toEqual([{ id: todo.id, text: 'Linked', completed: false, createdAt: todo.createdAt }]);
+    expect(await listed()).toEqual([plan.id]);
+    expect(readFileSync(planFile, 'utf8')).toContain('# Plan');
+    expect(second).toEqual([PROJECT_ID]);
+
+    // Deleting again completes it.
+    expect((await repo.deletePlan(PROJECT_ID, plan.id)).deleted).toBe(true);
+    expect(await listed()).toEqual([]);
+    await expect(fsPromises.access(planFile)).rejects.toThrow();
+  });
+
+  test('a failed repository write keeps the file and announces nothing', async () => {
+    await repoRuntime().createTodo(PROJECT_ID, { text: 'Kept' });
+    const before = readFileSync(repoFile(), 'utf8');
+    const changes = [];
+    const failing = repoRuntime({
+      fsPromises: { ...fsPromises, rename: async () => { throw new Error('disk full'); } },
+      onChanged: (id) => changes.push(id),
+    });
+    await expect(failing.createTodo(PROJECT_ID, { text: 'Lost' })).rejects.toThrow('disk full');
+    expect(readFileSync(repoFile(), 'utf8')).toBe(before);
+    expect(changes).toEqual([]);
+  });
+
+  test('a write keeps the store it read from when the option changes meanwhile', async () => {
+    await writeJson(contextPath(), { version: 2, notes: [], todos: [{ id: 'private', text: 'Private', createdAt: 1 }], plans: [] });
+    let answers = 0;
+    // On for the first lookup, off for every later one.
+    const repo = repoRuntime({ resolveNotesTodosFile: async () => (answers++ === 0 ? repoFile() : null) });
+    await repo.createTodo(PROJECT_ID, { text: 'Team' });
+    expect((await readJson(repoFile())).todos.map((todo) => todo.text)).toEqual(['Team']);
+    expect((await readJson(contextPath())).todos.map((todo) => todo.id)).toEqual(['private']);
+  });
+});

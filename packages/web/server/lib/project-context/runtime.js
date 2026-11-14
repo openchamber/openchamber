@@ -335,12 +335,15 @@ const assertTodoGraph = (previous, next) => {
 };
 
 export const createProjectContextRuntime = (deps) => {
-  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, onChanged } = deps;
+  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, resolveNotesTodosFile, onChanged } = deps;
   // The team's shared plans folder for a project (absolute path) or null; the
   // project config runtime owns that answer (`plansDir` in the shared file).
   const sharedPlansDirFor = typeof resolveSharedPlansDir === 'function'
     ? resolveSharedPlansDir
     : async () => null;
+  // The repository file holding notes and todos (absolute path) or null when
+  // they stay in `context.json`; the project config runtime owns that answer.
+  const resolveNotesTodosFileFor = resolveNotesTodosFile ?? (async () => null);
 
   const planSummaries = createPlanSummaryCache({ fsPromises, parseTitle: (raw) => parsePlanMarkdown(raw).title });
 
@@ -351,6 +354,9 @@ export const createProjectContextRuntime = (deps) => {
       : `plan_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
   const writeLocks = new Map();
+  // The notes and todos file each locked write resolved once, so a read and
+  // the write after it use the same store while the option changes under them.
+  const lockedNotesTodosFiles = new Map();
 
   const sanitizeProjectId = (projectId) => {
     const value = asNonEmptyString(projectId);
@@ -410,8 +416,10 @@ export const createProjectContextRuntime = (deps) => {
 
     await previous;
     try {
+      lockedNotesTodosFiles.set(key, await resolveNotesTodosFileFor(key));
       return await mutate();
     } finally {
+      lockedNotesTodosFiles.delete(key);
       release();
       if (writeLocks.get(key) === chained) {
         writeLocks.delete(key);
@@ -502,8 +510,29 @@ export const createProjectContextRuntime = (deps) => {
     return migrated;
   };
 
+  const notesTodosFileFor = async (projectId) => {
+    const key = sanitizeProjectId(projectId);
+    return lockedNotesTodosFiles.has(key) ? lockedNotesTodosFiles.get(key) : resolveNotesTodosFileFor(key);
+  };
+
   /**
-   * Read the stored context.
+   * Notes and todos from the repository file. A missing file or key is an
+   * empty list; unparsable content (a Git conflict, a bad hand edit) or a
+   * `notes` / `todos` that is not a list fails the read, so no write can
+   * replace it.
+   */
+  const readNotesTodosFile = async (filePath, now) => {
+    const stored = await readJson(filePath);
+    if (stored.missing) return { notes: [], todos: [] };
+    const isList = (value) => value === undefined || Array.isArray(value);
+    if (!stored.value || !isList(stored.value.notes) || !isList(stored.value.todos)) {
+      throw new Error(`Notes and todos file ${filePath} is malformed`);
+    }
+    return { notes: sanitizeNotes(stored.value.notes, now), todos: sanitizeTodos(stored.value.todos, now) };
+  };
+
+  /**
+   * Read `context.json`.
    *
    * Distinguishes the three states the caller must not conflate: a missing
    * file is authoritative empty, malformed JSON is a failure, and an I/O
@@ -516,7 +545,7 @@ export const createProjectContextRuntime = (deps) => {
    * of identical content, so concurrent migrations converge instead of
    * interleaving.
    */
-  const readStoredContext = async (projectId) => {
+  const readLocalContext = async (projectId) => {
     const now = Date.now();
     const stored = await readJson(contextPathFor(projectId));
 
@@ -545,6 +574,18 @@ export const createProjectContextRuntime = (deps) => {
       plans: sanitizePlanLinks(stored.value.plans, now),
       planSessions: sanitizePlanSessions(stored.value.planSessions),
     };
+  };
+
+  /**
+   * The stored context. With the repository option on, notes and todos come
+   * from the repository file and everything else from `context.json`, whose
+   * own notes and todos wait there untouched until the option is off again.
+   */
+  const readStoredContext = async (projectId) => {
+    const local = await readLocalContext(projectId);
+    const notesTodosFile = await notesTodosFileFor(projectId);
+    if (!notesTodosFile) return local;
+    return { ...local, ...(await readNotesTodosFile(notesTodosFile, Date.now())) };
   };
 
   /** The file name behind a shared plan id, or null when the id is not one. */
@@ -638,14 +679,38 @@ export const createProjectContextRuntime = (deps) => {
   /** The folder a manifest plan's file lives in; null for a moved plan when the project lost its shared folder. */
   const folderOfLink = async (projectId, link) => (link.shared ? sharedPlansDirFor(projectId) : plansDirFor(projectId));
 
+  /**
+   * With the repository option on, notes and todos go to the repository
+   * file and plans to `context.json`, each written only when its part
+   * changed: a note or todo write commits to one file, a plan edit leaves Git
+   * clean, and `context.json` keeps its own notes and todos byte for byte.
+   * A write that still changes both (a `shared:` plan that is unshared or
+   * deleted while entries link to it) commits `context.json` first.
+   */
   const writeContext = async (projectId, context) => {
-    await writeJsonAtomic(contextPathFor(projectId), {
+    const local = {
       version: PROJECT_CONTEXT_VERSION,
       notes: context.notes,
       todos: context.todos,
       plans: context.plans,
       planSessions: context.planSessions ?? {},
-    });
+    };
+    const notesTodosFile = await notesTodosFileFor(projectId);
+    if (!notesTodosFile) {
+      await writeJsonAtomic(contextPathFor(projectId), local);
+      onChanged?.(sanitizeProjectId(projectId));
+      return;
+    }
+    const now = Date.now();
+    const kept = (await readJson(contextPathFor(projectId))).value ?? {};
+    const keptPlans = { plans: sanitizePlanLinks(kept.plans, now), planSessions: sanitizePlanSessions(kept.planSessions) };
+    if (JSON.stringify(keptPlans) !== JSON.stringify({ plans: local.plans, planSessions: local.planSessions })) {
+      await writeJsonAtomic(contextPathFor(projectId), { ...local, notes: kept.notes ?? [], todos: kept.todos ?? [] });
+    }
+    const next = { notes: context.notes, todos: context.todos };
+    if (JSON.stringify(await readNotesTodosFile(notesTodosFile, now)) !== JSON.stringify(next)) {
+      await writeJsonAtomic(notesTodosFile, { version: 1, ...next });
+    }
     onChanged?.(sanitizeProjectId(projectId));
   };
 
@@ -1113,8 +1178,15 @@ export const createProjectContextRuntime = (deps) => {
       if (!link) {
         return { deleted: false, context: await readContext(projectId) };
       }
+      const unlinked = withPlanUnlinked(current, id);
+      // With notes and todos in the repository, the unlink is its own write
+      // and lands first: a failure after it still lists the plan, so deleting
+      // again finishes the job.
+      if (unlinked !== current && await notesTodosFileFor(projectId)) {
+        await writeContext(projectId, unlinked);
+      }
       const next = {
-        ...withPlanUnlinked(current, id),
+        ...unlinked,
         plans: current.plans.filter((entry) => entry.id !== id),
         planSessions: withoutKey(current.planSessions, id),
       };

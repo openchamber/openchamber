@@ -33,6 +33,12 @@ Du solltest danach wieder im Kontext-Tab landen — mit gespeicherter Notiz, abg
 
 Ein Agent kann eine Notiz oder ein Todo mit einem Plan verknüpfen und ein Todo von anderen Todos desselben Plans abhängig machen; ein Todo ohne Plan hat keine Abhängigkeiten. Er kann die bereiten Todos abfragen, also die unerledigten, deren Abhängigkeiten alle erledigt sind. Wird ein Todo gelöscht, verschwindet es aus den Abhängigkeiten der anderen Todos; wird ein Plan gelöscht, werden seine Notizen und Todos von ihm gelöst. Ein Agent kann außerdem die mit einem Plan verknüpfte Session setzen oder entfernen.
 
+## Notizen und Todos im Repository
+
+Notizen und Todos werden in den eigenen Daten von OpenChamber auf diesem Gerät gespeichert. Um sie über Git zu synchronisieren, öffne **Settings → Projects**, wähle das Projekt und schalte im Tab „General“ **Notizen und Aufgaben im Repository speichern** ein. Danach landen sie in `.openchamber/notes-todos.json`; committe die Datei wie jede andere. Die Option gilt nur für dieses Gerät, schalte sie also auf jedem Gerät ein, das die Datei nutzen soll.
+
+Beim Umschalten wird nichts kopiert. Die Notizen und Todos von vorher sind wieder da, wenn du die Option ausschaltest, und die Datei bleibt im Repository. Pläne gehören nicht in die Datei; um einen Plan zu teilen, verschiebe ihn in den Ordner für Pläne im Repository. Hat die Datei einen Git-Konflikt, kann das Panel Notizen und Todos erst wieder laden oder speichern, wenn du die Datei reparierst.
+
 ## Verwandtes
 
 - [Worktree-Sessions](/worktrees/) — eine Todo in einem eigenen Branch ausführen

@@ -33,6 +33,12 @@ Você deve voltar à aba Context com sua nota salva, sua tarefa marcada ou seu p
 
 Um agente pode vincular uma nota ou tarefa a um plano e fazer uma tarefa depender de outras tarefas do mesmo plano; uma tarefa sem plano não tem dependências. Ele pode pedir as tarefas prontas, ou seja, as não concluídas cujas dependências estão todas concluídas. Excluir uma tarefa a remove das dependências das outras tarefas, e excluir um plano desvincula suas notas e tarefas. Um agente também pode definir ou remover a sessão vinculada a um plano.
 
+## Notas e tarefas no repositório
+
+Notas e tarefas são salvas nos dados do próprio OpenChamber nesta máquina. Para sincronizá-las pelo Git, abra **Settings → Projects**, escolha o projeto e ative **Manter notas e tarefas pendentes no repositório** na aba General. A partir daí elas são salvas em `.openchamber/notes-todos.json`; faça commit do arquivo como de qualquer outro. A opção vale só para esta máquina, então ative-a em cada máquina que deve usar o arquivo.
+
+Alternar não copia nada. As notas e tarefas de antes voltam quando você desativa a opção, e o arquivo continua no repositório. Planos não fazem parte do arquivo; para compartilhar um plano, mova-o para a pasta de planos do repositório. Se o arquivo tiver um conflito do Git, o painel não consegue carregar nem salvar notas e tarefas até você corrigir o arquivo.
+
 ## Relacionado
 
 - [Sessões de Worktree](/pt-br/worktrees/) — execute uma tarefa em seu próprio branch

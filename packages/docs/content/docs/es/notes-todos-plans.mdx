@@ -33,6 +33,12 @@ Deberías volver a la pestaña Context con tu nota guardada, tu tarea marcada o 
 
 Un agente puede vincular una nota o una tarea a un plan y hacer que una tarea dependa de otras tareas del mismo plan; una tarea sin plan no tiene dependencias. Puede pedir las tareas listas, es decir, las no terminadas cuyas dependencias están todas completadas. Al eliminar una tarea, desaparece de las dependencias de las demás tareas, y al eliminar un plan, sus notas y tareas quedan desvinculadas. Un agente también puede establecer o quitar la sesión vinculada a un plan.
 
+## Notas y tareas en el repositorio
+
+Las notas y las tareas se guardan en los datos propios de OpenChamber en este equipo. Para sincronizarlas con Git, abre **Settings → Projects**, elige el proyecto y activa **Guardar notas y tareas pendientes en el repositorio** en la pestaña General. A partir de ahí se guardan en `.openchamber/notes-todos.json`; haz commit del archivo como de cualquier otro. La opción solo vale para este equipo, así que actívala en cada equipo que deba usar el archivo.
+
+Al cambiar no se copia nada. Las notas y tareas que tenías vuelven cuando desactivas la opción, y el archivo sigue en el repositorio. Los planes no forman parte del archivo; para compartir un plan, muévelo a la carpeta de planes del repositorio. Si el archivo tiene un conflicto de Git, el panel no puede cargar ni guardar notas y tareas hasta que lo arregles.
+
 ## Relacionado
 
 - [Sesiones de worktree](/es/worktrees/) — ejecuta una tarea en su propia rama
