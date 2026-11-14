@@ -6,7 +6,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { openExternalUrl } from '@/lib/url';
 import { formatFileSize } from '@/lib/fileSize';
 import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -687,7 +686,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                     {issueLinkKind && openTarget ? (
                       <button
                         type="button"
-                        onClick={() => openAttachment(openTarget)}
+                        onClick={(event) => openAttachment(openTarget, event)}
                         className="inline-flex items-center bg-muted/30 border border-edge-muted typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
                         <IssueLinkIcon file={file} kind={issueLinkKind} className="text-muted-foreground h-3.5 w-3.5" />
@@ -811,14 +810,13 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
         }
 
         if (issueLinkKind && file.url) {
+          const issueUrl = file.url;
           return (
             <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => {
-                    void openExternalUrl(file.url || '');
-                  }}
+                  onClick={(event) => openAttachment({ kind: 'external', url: issueUrl }, event)}
                   className={cn(
                     "flex items-center gap-2 p-2 rounded-lg oc-tile oc-tile-hover text-start",
                     compact ? "text-xs" : "text-sm"

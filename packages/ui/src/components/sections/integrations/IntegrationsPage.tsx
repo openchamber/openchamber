@@ -32,7 +32,7 @@ export const IntegrationsPage: React.FC = () => {
   const servedTrackers = getRegisteredRuntimeAPIs()?.trackers ? trackerDescriptors.filter((descriptor) => !isExtensionTrackerId(descriptor.id)) : [];
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
-  const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+  const builtInGuests = !isVSCodeRuntime()
     ? guests.filter((guest) => guest.source === 'bundled' && guest.integration && isGuestActive(guest))
     : [];
   const hasBuiltIn = servedSourceControl.length > 0 || servedTrackers.length > 0 || builtInGuests.length > 0;

@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -32,6 +33,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -203,6 +205,7 @@ export const dict = {
   ...updateCheckErrorsI18n.en,
   ...secretRequestI18n.en,
   ...sessionNoticesI18n.en,
+  ...settingsHintsI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
@@ -216,6 +219,7 @@ export const dict = {
   ...openchamberToolOutputI18n.en,
   ...opencodeToolOutputI18n.en,
   ...agentStatusI18n.en,
+  ...androidWidgetsI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
@@ -2404,6 +2408,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'from {source}',
   'session.newWorktree.actions.cancel': 'Cancel',
   'session.newWorktree.actions.creating': 'Creating...',
+  'session.newWorktree.creatingWithCommand': 'Running your create command…',
   'session.newWorktree.actions.createWorktree': 'Create worktree',
   'session.newWorktree.actions.reset': 'Reset',
   'session.newWorktree.actions.unlink': 'Unlink',
@@ -2904,6 +2909,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Add new provider',
   'chat.modelControls.noAgentSelected': 'No agent selected.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" isn\'t available in this session\'s folder. Pick another agent.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" isn\'t available anymore. Its provider was removed or switched off. Pick another model.',
   'chat.modelControls.searchModels': 'Search models',
   'chat.modelControls.modelListAria': 'Models',
   'chat.modelControls.searchAgents': 'Search agents',
@@ -3434,6 +3440,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Cancel',
   'vscodeLayout.actions.newSessionAria': 'New session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Resize sessions sidebar',
+  'vscodeLayout.actions.showSessionsAria': 'Show sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Hide sessions',
   'vscodeLayout.actions.settingsAria': 'Settings',
   'updateDialog.header.updateAvailable': 'Update Available',
   'updateDialog.header.updating': 'Updating OpenChamber...',

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+import type { HostDevice } from './contract.ts';
 import {
   clampAttachRequest,
   clampPromptRequest,
@@ -154,6 +155,23 @@ describe('parseHostMessage', () => {
     expect(message?.type).toBe('ready');
     if (message?.type !== 'ready') throw new Error('Expected ready snapshot');
     expect(message.payload.features).toEqual({ statusControls: true });
+  });
+
+  test('keeps the device a ready describes and strips keys it does not know', () => {
+    const device: HostDevice = { formFactor: 'phone', pointer: 'coarse', insets: { top: 47, right: 0, bottom: 34, left: 0 }, keyboard: 291 };
+    const message = parseHostMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'ready',
+      payload: { ...readyPayload, device: { ...device, notch: true }, futureField: 1 },
+    });
+    if (message?.type !== 'ready') throw new Error('Expected ready snapshot');
+    expect(message.payload.device).toEqual(device);
+    expect('futureField' in message.payload).toBe(false);
+    // A host before the field sends none, and the ready still parses.
+    const older = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'ready', payload: readyPayload });
+    if (older?.type !== 'ready') throw new Error('Expected ready snapshot');
+    expect(older.payload.device).toBeUndefined();
   });
 
   test('accepts a null directory', () => {

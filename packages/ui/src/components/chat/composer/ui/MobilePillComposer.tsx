@@ -113,21 +113,26 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             >
             {topRow}
             {attachments}
-            {/* ps-1 puts the attach icon at the same inset the expanded
-                footer gives it, and h-12 is the expanded footer's height
-                (its buttons sit on the mobile 36px touch floor), so the icons
-                do not shift across the swap. */}
-            <div className="flex h-12 min-w-0 items-center gap-x-0.5 ps-1 pe-1">
-                <ComposerAttachmentControls
-                    isVSCode={isVSCode}
-                    footerIconButtonClass={footerIconButtonClass}
-                    iconSizeClass={iconSizeClass}
-                    handlePickLocalFiles={onPickLocalFiles}
-                    openGitHubPicker={onOpenGitHubPicker}
-                    repositoryProvider={repositoryProvider}
-                    trackerPickers={trackerPickers}
-                    onOpenMobileSheet={onOpenAttachSheet}
-                />
+            {/* Built like the expanded footer (ComposerFooter's mobile
+                branch) so no icon shifts across the swap, whatever size the
+                runtime gives a button: the same h-12, the attach button in
+                `composer-mobile-actions` (24px wide) at the footer's 10px
+                inset, mic and Send in a gap-x-1 group, and pe-3.5 with the
+                disc at the end of its slot, so the disc's right edge lines up
+                with the agent label below. */}
+            <div className="flex h-12 min-w-0 items-center gap-x-0.5 ps-2.5 pe-3.5">
+                <div className="composer-mobile-actions flex flex-shrink-0 items-center">
+                    <ComposerAttachmentControls
+                        isVSCode={isVSCode}
+                        footerIconButtonClass={footerIconButtonClass}
+                        iconSizeClass={iconSizeClass}
+                        handlePickLocalFiles={onPickLocalFiles}
+                        openGitHubPicker={onOpenGitHubPicker}
+                        repositoryProvider={repositoryProvider}
+                        trackerPickers={trackerPickers}
+                        onOpenMobileSheet={onOpenAttachSheet}
+                    />
+                </div>
                 <button
                     type="button"
                     // The morph moves the editor block to and from this line.
@@ -148,6 +153,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                                 : t('chat.chatInput.placeholder.selectSession')}
                     </span>
                 </button>
+                <div className="flex flex-shrink-0 items-center gap-x-1">
                 {showDictation ? (
                     <Tooltip>
                     <TooltipTrigger asChild>
@@ -175,7 +181,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 {canAbort ? (
                     <button
                         type="button"
-                        className={footerIconButtonClass}
+                        className={cn(footerIconButtonClass, !hasContent && 'justify-end')}
                         // The pill shows only while the keyboard is down — the
                         // tap must abort in place, never focus/expand the
                         // composer or raise the keyboard.
@@ -204,7 +210,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 {canPrimaryAction ? (
                     <button
                         type="button"
-                        className={footerIconButtonClass}
+                        className={cn(footerIconButtonClass, 'justify-end')}
                         onClick={onPrimaryAction}
                         title={sendLabel}
                         aria-label={sendLabel}
@@ -214,6 +220,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         </span>
                     </button>
                 ) : null}
+                </div>
             </div>
             {bottomRow}
             </div>

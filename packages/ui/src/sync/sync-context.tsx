@@ -2234,6 +2234,13 @@ export function handleEvent(
     }
   }
 
+  // Read before the global list takes the move: a session no loaded store
+  // lists is followed from the directory its global record had.
+  const globalMoveSource = payload.type === "session.patched" && payload.properties.patch.directory !== undefined
+    && expectedRuntimeKey === getRuntimeKey()
+    ? resolveCachedSessionDirectory(payload.properties.sessionID)
+    : null
+
   if (!globalEffectsAlreadyApplied) {
     // A request the server may answer on its own stays out of the
     // cross-directory index as well, or collapsed rows, the tray and run
@@ -2350,6 +2357,7 @@ export function handleEvent(
     } else if (result?.type === "catalog") {
       scheduleCatalogReload(result.kind, childStores, directory)
     }
+    deliverSessionMove(globalSessionMove(payload, globalMoveSource), batch)
     return
   }
 
@@ -2701,10 +2709,27 @@ export function handleEvent(
 
   // After the routing index update above, which still files the session under
   // the source; the move re-registers it under the destination.
-  if (sessionMove) {
-    if (batch) batch.sessionMoves.push(sessionMove)
-    else adoptSessionMove(sessionMove.sessionID, sessionMove.from, sessionMove.to)
-  }
+  deliverSessionMove(sessionMove ?? globalSessionMove(payload, globalMoveSource), batch)
+}
+
+/**
+ * The move of a session that no store lists (or not the store the event came
+ * to), told by its global record: the directory it had before this event.
+ * Nothing when the record already holds the destination, as after this
+ * client's own move.
+ */
+function globalSessionMove(payload: SyncEvent, from: string | null): SessionMove | null {
+  if (payload.type !== "session.patched" || !from) return null
+  const to = payload.properties.patch.directory
+  if (!to || normalizeEventDirectory(to) === normalizeEventDirectory(from)) return null
+  return { sessionID: payload.properties.sessionID, from, to }
+}
+
+/** In a flushed batch the move runs after the stores publish, so the batch cannot write the session back. */
+function deliverSessionMove(move: SessionMove | null, batch: DirectoryEventBatch | undefined): void {
+  if (!move) return
+  if (batch) batch.sessionMoves.push(move)
+  else adoptSessionMove(move.sessionID, move.from, move.to)
 }
 
 // ---------------------------------------------------------------------------

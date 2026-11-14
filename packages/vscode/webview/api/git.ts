@@ -318,11 +318,12 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   createGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
     if (payload.changeRequestSource || payload.ensureRemoteUrl) return unsupportedNetworkOperation();
-    return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees', {
+    // The host waits for a project's create command, which may run for minutes.
+    return sendBridgeMessageWithOptions<GitWorktreeCreateResult>('api:git/worktrees', {
       directory,
       method: 'POST',
       ...(payload || {}),
-    });
+    }, payload.createCommand ? { timeoutMs: 0 } : undefined);
   },
 
   deleteGitWorktree: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => removeWorktreeThroughBridge(directory, payload),

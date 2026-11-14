@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -214,6 +216,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.es,
   ...secretRequestI18n.es,
   ...sessionNoticesI18n.es,
+  ...settingsHintsI18n.es,
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
   ...sessionWarmingI18n.es,
@@ -227,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.es,
   ...opencodeToolOutputI18n.es,
   ...agentStatusI18n.es,
+  ...androidWidgetsI18n.es,
   ...snippetsI18n.es,
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
@@ -2372,6 +2376,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "desde {source}",
   "session.newWorktree.actions.cancel": "Cancelar",
   "session.newWorktree.actions.creating": "Creando...",
+  "session.newWorktree.creatingWithCommand": "Ejecutando tu comando de creación…",
   "session.newWorktree.actions.createWorktree": "Crear worktree",
   "session.newWorktree.actions.reset": "Restablecer",
   "session.newWorktree.actions.unlink": "Desvincular",
@@ -2860,6 +2865,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Añadir nuevo proveedor",
   "chat.modelControls.noAgentSelected": "No se seleccionó ningún agente.",
   "chat.modelControls.agentUnavailable": "El agente \"{agent}\" no está disponible en la carpeta de esta sesión. Elige otro agente.",
+  "chat.modelControls.modelUnavailable": "El modelo \"{model}\" ya no está disponible. Su proveedor se eliminó o se desactivó. Elige otro modelo.",
   "chat.modelControls.searchModels": "Buscar modelos",
   "chat.modelControls.modelListAria": "Modelos",
   "chat.modelControls.searchAgents": "Buscar agentes",
@@ -3390,6 +3396,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.archiveAllError": "Error al archivar {count} sesión(es)",
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamaño del panel de sesiones",
+  "vscodeLayout.actions.showSessionsAria": "Mostrar sesiones",
+  "vscodeLayout.actions.hideSessionsAria": "Ocultar sesiones",
   "vscodeLayout.actions.settingsAria": "Configuración",
   "updateDialog.header.updateAvailable": "Actualización disponible",
   "updateDialog.header.updating": "Actualizando OpenChamber...",

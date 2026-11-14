@@ -1308,6 +1308,31 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('lists an instance with its aliases and saves them through the instances route', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      instances: [{ provider: 'gitlab', instance: 'https://code.internal.net', instanceAliases: ['https://domain-a.internal-a.net'] }],
+    }));
+    await expect(api.authInstances()).resolves.toEqual([
+      { provider: 'gitlab', instance: 'https://code.internal.net', instanceAliases: ['https://domain-a.internal-a.net'] },
+    ]);
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ aliases: ['https://domain-a.internal-a.net'] }));
+    await expect(api.setInstanceAliases({ provider: 'gitlab', instance: 'code.internal.net' }, ['domain-a.internal-a.net']))
+      .resolves.toEqual({ aliases: ['https://domain-a.internal-a.net'] });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/instances/aliases', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ provider: 'gitlab', instance: 'https://code.internal.net', aliases: ['domain-a.internal-a.net'] }),
+    }));
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'taken', code: 'INSTANCE_ALIAS_TAKEN', alias: 'https://other.internal.net' },
+      { status: 409 },
+    ));
+    await expect(api.setInstanceAliases({ provider: 'gitlab', instance: 'https://code.internal.net' }, ['other.internal.net']))
+      .rejects.toMatchObject({ name: 'SourceControlInstanceAliasError', reason: 'taken', alias: 'https://other.internal.net' });
+  });
+
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {
     const gitlab: SourceControlIdentity = { provider: 'gitlab', instance: 'gitlab.example.com' };
     runtimeFetchMock.mockResolvedValueOnce(Response.json({

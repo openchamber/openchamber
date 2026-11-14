@@ -18,9 +18,13 @@ const substituteProjectPath = (command, projectPath) => command
  * user skips them: running commands from a pull nobody looked at is what the
  * trust prompt exists to prevent, and a caller without a client cannot ask.
  *
- * @param {{ setupWorktree: string[], trust: { trusted: boolean }, shared: { setupWorktree: string[] }, personal: { setupWorktree: string[], setupWorktreeMode: string } }} setup
+ * `createCommand` is the user's own command that creates the worktree in
+ * place of `git worktree add` (personal only, so nothing to trust), `''` for
+ * the built-in creation.
+ *
+ * @param {{ setupWorktree: string[], trust: { trusted: boolean }, shared: { setupWorktree: string[] }, personal: { setupWorktree: string[], setupWorktreeMode: string, createWorktreeCommand?: string } }} setup
  * @param {string} projectPath
- * @returns {{ startCommand: string, untrustedSkipped: string[] }}
+ * @returns {{ startCommand: string, createCommand: string, untrustedSkipped: string[] }}
  */
 export const worktreeSetupOf = (setup, projectPath) => {
   const skipsShared = setup.shared.setupWorktree.length > 0
@@ -29,6 +33,7 @@ export const worktreeSetupOf = (setup, projectPath) => {
   const commands = skipsShared ? setup.personal.setupWorktree : setup.setupWorktree;
   return {
     startCommand: commands.map((command) => substituteProjectPath(command, projectPath)).join(' && '),
+    createCommand: setup.personal.createWorktreeCommand ?? '',
     untrustedSkipped: skipsShared ? setup.shared.setupWorktree : [],
   };
 };

@@ -260,6 +260,25 @@ export type HostReadyContext = {
     /** The host keeps `generate` answers that arrive after their frame is gone (`onLateGenerateResult`). */
     lateGenerateResults?: true;
   };
+  /**
+   * The device the frame is drawn on, re-sent with `ready` when it changes
+   * (rotation, a keyboard opening). Hosts before this field leave it out.
+   */
+  device?: HostDevice;
+};
+
+export const DEVICE_FORM_FACTORS = ['phone', 'tablet', 'desktop'] as const;
+export const DEVICE_POINTERS = ['coarse', 'fine'] as const;
+
+export type HostDevice = {
+  /** `phone` and `tablet` are the app's touch layouts; `desktop` is everything else. */
+  formFactor: (typeof DEVICE_FORM_FACTORS)[number];
+  /** `coarse` for a finger: make hit targets at least 44px tall. */
+  pointer: (typeof DEVICE_POINTERS)[number];
+  /** Safe-area insets of the screen in CSS pixels: the notch, the home indicator, rounded corners. */
+  insets: { top: number; right: number; bottom: number; left: number };
+  /** Height in CSS pixels the on-screen keyboard covers at the bottom; 0 while it is closed. */
+  keyboard: number;
 };
 
 export type GuestItemRole = 'user' | 'assistant';

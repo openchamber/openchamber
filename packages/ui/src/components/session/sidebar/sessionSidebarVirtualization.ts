@@ -307,6 +307,6 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
     if (row.kind === 'caption') return undefined;
     return row.kind === 'project-header' ? 'pb-0.5' : 'pb-3';
   }
-  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-4';
+  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption' || nextRow?.kind === 'search-archived-caption') return 'pb-4';
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

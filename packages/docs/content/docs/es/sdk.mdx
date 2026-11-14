@@ -7,7 +7,9 @@ description: Añade tu propio panel a OpenChamber con @openchamber/sdk, instála
 
 Usa `@openchamber/sdk` para añadir tu propio panel a OpenChamber. Una extensión es una pequeña página web que OpenChamber muestra en la barra lateral derecha. Habla con la app a través de `connectHost()`: puede leer el proyecto y la sesión actuales, mostrar avisos, poner texto en el cuadro de chat, adjuntar una tarea a una sesión y, con la aprobación del usuario, iniciar sesiones y enviar prompts.
 
-Las extensiones funcionan en OpenChamber web y de escritorio. VS Code y móvil todavía no las cargan.
+Las extensiones funcionan en OpenChamber web, de escritorio y en la app móvil. En el teléfono tu panel y tu página solo aparecen cuando indicas que caben en un teléfono; consulta [En el teléfono](#en-el-teléfono). VS Code no carga extensiones.
+
+La web muestra en un mapa [todos los lugares donde una extensión puede añadir algo](https://openchamber.dev/es/extensions/build/).
 
 ## Qué es una extensión
 
@@ -89,7 +91,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 
 `ctx.surface` es `panel`, `dialog`, `page`, `status` o `block`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
 
-`contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. `true` reutiliza `panel.entry`; una página con su propio `entry` no necesita panel en la barra lateral, así que una extensión puede ser solo una página a pantalla completa. Usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
+`contributes.page: true` ofrece el panel a pantalla completa como una fila en la sección Páginas de la barra lateral. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. `true` reutiliza `panel.entry`; una página con su propio `entry` no necesita panel en la barra lateral, así que una extensión puede ser solo una página a pantalla completa. Usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
 
 Para un tablero, usa `host.storage` y las listas de proyectos, worktrees y sesiones con estados en directo. `startSession` puede apuntar a otro proyecto sin cerrar el tablero. Consulta [Host API](/sdk/host/).
 
@@ -129,7 +131,7 @@ El diálogo de aprobación recibe una fila más, **Añadir un plugin a OpenCode*
 
 Cuando ese archivo no llega a OpenCode, la pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**, que escribe tu carpeta en la configuración global de OpenCode del usuario como una entrada que desde entonces es suya. Eso ocurre cuando OpenChamber no inició el OpenCode con el que habla, o cuando el entorno del servidor define su propio `OPENCODE_CONFIG` (el plugin se carga entonces en el siguiente arranque de OpenCode). Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice y no ofrece nada. Un plugin que no carga lo informa OpenCode en Ajustes → Plugins cuando tiene una entrada allí; tu extensión sigue funcionando en cualquier caso. La instalación rechaza un paquete cuya carpeta del plugin falta o cuyo `package.json` no indica un archivo de entrada.
 
-VS Code y las apps móviles no cargan extensiones, así que ningún plugin llega a ellas. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca lee la configuración del host. El modo empresa trata el plugin como un servicio local: solo se instala desde un repositorio aprobado por el administrador. El SDK tiene un ejemplo funcional, `examples/opencode-plugin`.
+VS Code no carga extensiones, así que ningún plugin llega al OpenCode que ejecuta. El teléfono se conecta a un servidor de OpenChamber, y el plugin se ejecuta en el OpenCode de ese servidor. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca lee la configuración del host. El modo empresa trata el plugin como un servicio local: solo se instala desde un repositorio aprobado por el administrador. El SDK tiene un ejemplo funcional, `examples/opencode-plugin`.
 
 ## Enlaces en los mensajes del chat
 
@@ -228,7 +230,7 @@ Las escrituras son atómicas: OpenChamber escribe un archivo temporal y lo renom
 - `title` sustituye el nombre del panel en el encabezado de la sección, hasta 60 caracteres.
 - `height` es la altura inicial en píxeles, de 24 a 480 (120 por defecto). Llama a [`host.setHeight()`](/sdk/host/) cuando cambie el tamaño de tu contenido.
 
-Tu página ve `ctx.surface` como `status`. OpenChamber la carga solo mientras el panel Work Status está visible y tu sección está desplegada, y la descarga cuando el usuario la pliega, así que no guardes ahí nada que no puedas reconstruir. Una extensión que solo tiene la sección puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `git-graph-status` es una sección completa.
+Tu página ve `ctx.surface` como `status`. OpenChamber la carga solo mientras el panel Work Status está visible y tu sección está desplegada, y la descarga cuando el usuario la pliega, así que no guardes ahí nada que no puedas reconstruir. Una extensión que solo tiene la sección puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. La sección aparece en web, en escritorio y en la pestaña Estado del trabajo del teléfono, donde no necesita activación y toma el ancho del teléfono. El ejemplo `git-graph-status` es una sección completa.
 
 ## Un editor para tu tipo de archivo
 
@@ -285,7 +287,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Un editor binario puede quedarse con cualquier archivo que coincida con sus patrones, incluidos los que OpenChamber previsualiza por sí mismo, como imágenes y PDF. No tiene vista de código fuente, y cuando el usuario lo lleva a pantalla completa o lo saca de ella con cambios sin guardar, OpenChamber los guarda primero. Leer y escribir el formato le toca a tu editor: OpenChamber escribe exactamente los bytes que devuelves.
 
-Tu página ve `ctx.surface` como `file`. OpenChamber la recarga, volviendo a pasarle el archivo, cuando el archivo cambia en disco, el usuario descarta los cambios o el editor entra o sale de pantalla completa. Gana la primera extensión activada cuyo patrón coincida, por delante de las vistas previas propias de OpenChamber. Una extensión que solo tiene el editor puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `checklist-editor` es un editor completo.
+Tu página ve `ctx.surface` como `file`. OpenChamber la recarga, volviendo a pasarle el archivo, cuando el archivo cambia en disco, el usuario descarta los cambios o el editor entra o sale de pantalla completa. Gana la primera extensión activada cuyo patrón coincida, por delante de las vistas previas propias de OpenChamber. Una extensión que solo tiene el editor puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. El editor se abre en web, en escritorio y en la pestaña Archivos del teléfono, donde ocupa toda la pantalla y no necesita activación. El ejemplo `checklist-editor` es un editor completo.
 
 ## Acciones, comandos y la insignia
 
@@ -395,7 +397,51 @@ Cuando tu plugin de OpenCode registra un proveedor de modelos, los selectores de
 }
 ```
 
-La clave es el ID del proveedor tal como lo informa OpenCode. El valor es un `.svg` o `.png` de tu paquete, de hasta 1 MB. Si el archivo falta, está vacío o pesa más, la instalación falla. Un paquete nombra hasta 256 proveedores, y dos ID pueden apuntar al mismo archivo. El logo conserva sus colores, y `currentColor` en un SVG sigue el tema claro u oscuro. Reemplaza el logo que la app ya incluye para ese ID. Lo que el usuario haya configurado para ese proveedor va primero, y en un empate gana la extensión instalada primero. No hace falta ningún permiso. VS Code y el teléfono no cargan extensiones, así que no muestran estos logos.
+La clave es el ID del proveedor tal como lo informa OpenCode. El valor es un `.svg` o `.png` de tu paquete, de hasta 1 MB. Si el archivo falta, está vacío o pesa más, la instalación falla. Un paquete nombra hasta 256 proveedores, y dos ID pueden apuntar al mismo archivo. El logo conserva sus colores, y `currentColor` en un SVG sigue el tema claro u oscuro. Reemplaza el logo que la app ya incluye para ese ID. Lo que el usuario haya configurado para ese proveedor va primero, y en un empate gana la extensión instalada primero. No hace falta ningún permiso. El teléfono también muestra estos logos; VS Code no carga extensiones, así que no los muestra.
+
+## En el teléfono
+
+La app móvil, y OpenChamber abierto en el navegador de un teléfono, cargan las extensiones instaladas en el servidor al que se conectan. Lo que OpenChamber dibuja a partir de tu manifiesto funciona ahí sin cambios: enlaces en los mensajes del chat, el diseño de tus herramientas, logotipos de proveedores, filas del menú `@`, marcas en las filas de la barra lateral y tarjetas de cuenta. Tocar una marca abre tu pestaña del espacio de trabajo en la sesión de esa fila cuando defines `panel.mobile`, igual que un clic en escritorio abre tu panel; sin él, el toque muestra el texto de la marca y abre su `url`, cuando la tiene.
+
+Los marcos estrechos aparecen en el teléfono sin que hagas nada más, con el ancho del teléfono:
+
+- bloques en el chat
+- tu sección de Work Status, en la pestaña Estado del trabajo del espacio de trabajo
+- tu editor de archivos, que ocupa la pestaña Archivos
+- popovers, en una hoja inferior (abajo)
+
+Los comandos de barra funcionan ahí, y también las acciones con `"mode": "background"`. Las acciones en segundo plano aparecen en los propios menús del teléfono: la hoja Más acciones de un mensaje, la hoja del texto seleccionado, el menú de una fila de sesión al mantenerla pulsada, al mantener pulsada una fila de Archivos y como botones con texto bajo el campo de comentario de las líneas seleccionadas de un diff.
+
+Tu panel y tu página necesitan una activación, porque una página pensada para un panel de escritorio suele romperse a 390px:
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` convierte tu panel en una pestaña del espacio de trabajo del teléfono, con tu insignia. También cubre la imagen en vivo acoplada al panel, tu entrada en el menú + (`attach: "dialog"` se abre a pantalla completa ahí), las acciones sin `"mode": "background"`, los enlaces con `action: "open"`, los toques en chips y `openSurface("plugin:<id>")`.
+- `page: true` reutiliza el HTML del panel, así que sigue a `panel.mobile`. Un objeto de página con su propio `entry` solo sigue su propio `mobile: true`: `panel.mobile` no lo activa, y no necesita un panel apto para teléfono, así que un paquete puede ser solo una página apta para teléfono. La página aparece en Más de la lista de sesiones del teléfono y se abre a pantalla completa con una flecha para volver.
+
+Sin la activación, nada de eso se abre en el teléfono: los menús omiten tus acciones que abrirían el panel, tocar un chip dice que tu extensión no se abre en el teléfono, un enlace mantiene su comportamiento habitual y `openSurface` se rechaza con `UNSUPPORTED`.
+
+Diseña una página activada para unos 360px de ancho y para pantalla táctil. `ready.device` dice dónde está el marco:
+
+| Campo | Qué es |
+| --- | --- |
+| `formFactor` | `phone`, `tablet` o `desktop` |
+| `pointer` | `coarse` para un dedo, `fine` para un ratón |
+| `insets` | `{ top, right, bottom, left }` en px: el área segura con la que la app rellena su propia pantalla en un teléfono con notch, ceros en otros casos |
+| `keyboard` | px de la pantalla que cubre el teclado en pantalla, `0` mientras está oculto |
+
+OpenChamber envía un nuevo `ready` cuando cambia uno de estos valores, como al girar el teléfono o al aparecer el teclado, así que léelo en `onReady` junto con el tema.
+
+El [kit de UI](/sdk/ui/) agranda sus controles a tamaños táctiles con `pointer: coarse`: filas de lista y opciones de selección de al menos 44px de alto, botones y campos de 40px, botones pequeños, disparadores y pestañas de 36px. Los campos mantienen al menos 16px de texto, porque iOS amplía un campo enfocado más pequeño. Los tamaños escalan con el tamaño de interfaz del usuario y llegan a tu extensión cuando la vuelves a compilar con el SDK actual.
+
+En el teléfono, un popover se abre en la hoja inferior de la app, con el ancho de la hoja y la altura que pides, hasta el límite de la hoja. Se queda hasta que el usuario lo cierra, lo que recibes como `outside`. `mountPopoverAnchor` lo abre con un toque de dedo o lápiz, y ese toque sustituye al clic propio del elemento: tu manejador de clic no se ejecuta para él. Pon en el popover lo que hacía el clic cuando un usuario táctil lo necesite. Un clic de ratón o de teclado no cambia. `API.md` en el paquete del SDK tiene las llamadas de popover.
+
+Las versiones anteriores de OpenChamber ignoran `mobile` e instalan el paquete como antes, y omiten `device` en `ready`, así que trata un `device` ausente como un escritorio con ratón.
 
 ## Primeras líneas en el panel
 

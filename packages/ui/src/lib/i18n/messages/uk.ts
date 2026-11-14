@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -214,6 +216,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.uk,
   ...secretRequestI18n.uk,
   ...sessionNoticesI18n.uk,
+  ...settingsHintsI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...sessionWarmingI18n.uk,
@@ -227,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.uk,
   ...opencodeToolOutputI18n.uk,
   ...agentStatusI18n.uk,
+  ...androidWidgetsI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,
@@ -2372,6 +2376,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "з {source}",
   "session.newWorktree.actions.cancel": "Скасувати",
   "session.newWorktree.actions.creating": "Створення...",
+  "session.newWorktree.creatingWithCommand": "Виконується ваша команда створення…",
   "session.newWorktree.actions.createWorktree": "Створити worktree",
   "session.newWorktree.actions.reset": "Скинути",
   "session.newWorktree.actions.unlink": "Відʼєднати",
@@ -2860,6 +2865,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Додати нового провайдера",
   "chat.modelControls.noAgentSelected": "Агент не вибрано.",
   "chat.modelControls.agentUnavailable": "Агента \"{agent}\" немає в теці цієї сесії. Виберіть іншого агента.",
+  "chat.modelControls.modelUnavailable": "Модель \"{model}\" більше недоступна. Її провайдера видалено або вимкнено. Виберіть іншу модель.",
   "chat.modelControls.searchModels": "Пошук моделей",
   "chat.modelControls.modelListAria": "Моделі",
   "chat.modelControls.searchAgents": "Пошук агентів",
@@ -3390,6 +3396,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Скасувати",
   "vscodeLayout.actions.newSessionAria": "Нова сесія",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Змінити розмір бічної панелі сесій",
+  "vscodeLayout.actions.showSessionsAria": "Показати сесії",
+  "vscodeLayout.actions.hideSessionsAria": "Сховати сесії",
   "vscodeLayout.actions.settingsAria": "Налаштування",
   "updateDialog.header.updateAvailable": "Оновлення доступне",
   "updateDialog.header.updating": "Оновлення OpenChamber...",

@@ -15,6 +15,7 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
 
 const CAPABILITY_ROWS = {
   prompt: { icon: 'chat-1', titleKey: 'settings.extensions.capability.prompt', detailKey: 'settings.extensions.capability.prompt.detail' },
@@ -208,7 +209,9 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         {guest.links.urls ? <li className="break-all font-mono">{`${guest.links.urls.origin}/…`}</li> : null}
                       </ul>
                       <p className="mt-0.5 text-muted-foreground">
-                        {t(guest.links.action === 'open' ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.attach')}
+                        {/* The phone opens the panel only of an extension that opted into it; for any other a clicked link keeps its usual meaning there (`runGuestLink`). */}
+                        {t(guest.links.action === 'attach' ? 'settings.extensions.capability.links.attach'
+                          : guestPanelOpensHere(guest) ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.open.phone')}
                       </p>
                     </div>
                   ) : null}

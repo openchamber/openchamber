@@ -89,6 +89,11 @@ const descriptorSchema = z.object({
     /** `host`: a bare lowercase host (github.com). `origin`: a full origin (https://gitlab.com). */
     format: z.enum(['host', 'origin']),
     defaultInstance: z.string().min(1).max(256).nullable(),
+    /**
+     * Every instance the provider serves by default, `defaultInstance` first.
+     * Absent from servers before instance aliases; read `defaultInstance` alone then.
+     */
+    defaultInstances: z.array(z.string().min(1).max(256)).max(16).optional().catch(undefined),
     multiple: z.boolean(),
     allowLoopbackHttp: z.boolean(),
     allowPort: z.boolean(),

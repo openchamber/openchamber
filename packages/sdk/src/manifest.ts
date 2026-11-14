@@ -27,6 +27,12 @@ export type PanelContribution = {
    */
   dock?: GuestSurfaceDock;
   size?: number;
+  /**
+   * The panel page is drawn for a phone: the mobile app shows it (with the
+   * live screen it docks to, and the attach panel or dialog). Without it the
+   * phone shows none of these. Hosts before this key ignore it.
+   */
+  mobile?: true;
 };
 
 export const GUEST_SURFACE_DOCKS = ['top', 'bottom', 'left', 'right'] as const;
@@ -56,8 +62,12 @@ export type AttachContributionObject = {
 
 export type AttachContribution = boolean | AttachMode | AttachContributionObject;
 
-/** A user-opened full-screen page, optionally with its own HTML and title. */
-export type PageContribution = true | { entry: string; title?: string };
+/**
+ * A user-opened full-screen page, optionally with its own HTML and title.
+ * `true` reuses `panel.entry` and shows on a phone when `panel.mobile` does;
+ * the object form opts in with its own `mobile`.
+ */
+export type PageContribution = true | { entry: string; title?: string; mobile?: true };
 
 /**
  * A section inside the chat's Work Status panel. `true` reuses `panel.entry`;
@@ -1198,6 +1208,12 @@ export const resolveAttachEntry = (
 export const resolvePageEntry = (contributes: Pick<OpenChamberContributes, 'panel' | 'page'>): string | null => {
   if (!contributes.page) return null;
   return contributes.page === true ? contributes.panel.entry ?? null : contributes.page.entry;
+};
+
+/** Whether the full-screen page shows on a phone: `true` follows `panel.mobile`, the object form has its own. */
+export const resolvePageMobile = (contributes: Pick<OpenChamberContributes, 'panel' | 'page'>): boolean => {
+  if (!contributes.page) return false;
+  return (contributes.page === true ? contributes.panel.mobile : contributes.page.mobile) === true;
 };
 
 /**

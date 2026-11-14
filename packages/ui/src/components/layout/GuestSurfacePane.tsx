@@ -5,6 +5,7 @@ import type { SurfaceInputEvent, SurfaceModifiers } from '@openchamber/sdk';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -70,6 +71,9 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const [agentActive, setAgentActive] = React.useState(false);
   const [hasFrame, setHasFrame] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
+  // A finger has no hover and no keyboard until a field asks for one: the status says a tap.
+  const { isMobile, hasTouchOnlyPointer } = useDeviceInfo();
+  const touch = isMobile || hasTouchOnlyPointer;
 
   const drawFrame = React.useCallback(async (frame: SurfaceFrame) => {
     const canvas = canvasRef.current;
@@ -253,12 +257,14 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     if (connection.status === 'ended') return `contextPanel.surface.ended.${connection.reason}` as const;
     if (control.controller === 'user') return control.mine ? 'contextPanel.surface.status.youControl' : 'contextPanel.surface.status.otherControls';
     if (control.controller === 'agent' || agentActive) return 'contextPanel.surface.status.agentWorking';
+    if (touch) return 'contextPanel.surface.status.readyTouch';
     return focused ? 'contextPanel.surface.status.readyFocused' : 'contextPanel.surface.status.ready';
   })();
 
   return (
     <div className="flex h-full flex-col bg-[var(--surface-background)]">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
+      {/* A touch screen's buttons are 36px (mobile.css), so the row grows to hold them. */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3 pointer-coarse:h-11">
         <span className="typography-meta min-w-0 flex-1 truncate text-foreground" title={title || guest.name}>
           {title || guest.name}
         </span>
@@ -310,10 +316,14 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       >
         <canvas
           ref={canvasRef}
-          className={cn('max-h-full max-w-full', hasFrame ? 'block' : 'hidden', control.controller === 'user' && !control.mine ? 'cursor-not-allowed' : 'cursor-default')}
+          // touch-none: a finger on the picture drives the page under it; the
+          // browser must not take the drag as a scroll or the drawer's swipe.
+          className={cn('max-h-full max-w-full touch-none', hasFrame ? 'block' : 'hidden', control.controller === 'user' && !control.mine ? 'cursor-not-allowed' : 'cursor-default')}
           onPointerDown={onPointer('down')}
           onPointerMove={onPointer('move')}
           onPointerUp={onPointer('up')}
+          // A touch the system takes back still lets go of the page's button.
+          onPointerCancel={onPointer('up')}
           onWheel={onWheel}
           onContextMenu={(event) => event.preventDefault()}
         />

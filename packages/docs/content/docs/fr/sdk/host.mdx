@@ -32,6 +32,7 @@ Ce n'est pas un callback de montage unique. Montez l'interface et inscrivez les 
 | `item` | ce pour quoi cette surface a été ouverte, ou `null` : l'élément attaché sur lequel l'utilisateur a cliqué (les mêmes champs que vous avez passés à `attach`, y compris `data`), un message (`kind: "message"`) ou une session (`kind: "session"`) venant d'une de vos actions déclarées. Voir [Actions](/sdk/#actions-commandes-et-le-badge). |
 | `connection` | `{ connected, account }` pour votre intégration |
 | `settings` | les valeurs des champs déclarés dans `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }` : `phone`, `tablet` ou `desktop` ; `coarse` ou `fine` ; les marges de la zone sûre en px ; les px que couvre le clavier virtuel. Renvoyé quand l'un change, par exemple lors d'une rotation ou avec le clavier. Les hôtes plus anciens l'omettent. Voir [Sur le téléphone](/sdk/#sur-le-téléphone). |
 
 Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 
@@ -45,7 +46,7 @@ Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 | --- | --- |
 | `toast({ kind, message })` | affiche un toast dans l'application. `kind` est `info`, `success` ou `error`. |
 | `openUrl(url)` | ouvre une URL dans le navigateur de l'utilisateur |
-| `openSurface(surfaceId)` | bascule l'application sur cet écran |
+| `openSurface(surfaceId)` | bascule l'application sur cet écran. Sur le téléphone, votre panneau s'ouvre comme son onglet de l'espace de travail quand le manifeste définit `panel.mobile`, et l'appel est rejeté avec `UNSUPPORTED` sinon. |
 | `writeClipboard(text)` | copie du texte. 1 à 32000 caractères. |
 | `compose({ text, mode? })` | insère du texte dans la zone de chat sans l'envoyer. `mode` est `append` (par défaut) ou `replace`. 1 à 16000 caractères après trim. |
 | `attach({ ... })` | pose une puce sur la zone de chat, au même endroit que les éléments GitHub et Linear. Une seule puce à la fois. |
@@ -272,7 +273,7 @@ await host.setMark({ sessionId }, null);
 | `{ directory, branch }` | chaque session sur cette branche et la ligne du worktree de la branche ; `directory` est n'importe quel dossier du dépôt |
 | `{ directory }` | les sessions dans ce dossier et le worktree qui s'y trouve |
 
-`icon` est un nom Remixicon, `tone` vaut `neutral`, `info`, `success`, `warning` ou `error`, et `text` (jusqu'à 200 caractères) est l'infobulle, affichée après le nom de l'extension. Un clic ouvre votre panneau dans la session de cette ligne. Une extension sans panneau peut ajouter une adresse `https` dans `url`, et le clic ouvre cette adresse.
+`icon` est un nom Remixicon, `tone` vaut `neutral`, `info`, `success`, `warning` ou `error`, et `text` (jusqu'à 200 caractères) est l'infobulle, affichée après le nom de l'extension. Un clic ouvre votre panneau dans la session de cette ligne. Une extension sans panneau peut ajouter une adresse `https` dans `url`, et le clic ouvre cette adresse. Sur le téléphone, un toucher ouvre l'onglet de votre panneau dans l'espace de travail, dans la session de cette ligne, quand le manifeste définit `panel.mobile` ; sinon il affiche le `text` de la marque et ouvre son `url`, quand elle en a une.
 
 Définir à nouveau une cible remplace sa marque, et `null` la retire. Une ligne dessine deux marques au plus, une par extension, et les liste toutes dans son infobulle. Sur une ligne à une seule ligne de texte, les boutons de la ligne recouvrent les marques tant que le pointeur est dessus. Un clic atteint donc une marque sur les lignes à deux lignes de texte et sur les écrans tactiles.
 

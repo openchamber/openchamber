@@ -29,6 +29,7 @@ import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
+import { getWorktreeCreateCommand } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
@@ -164,6 +165,20 @@ export function NewWorktreeDialog({
     () => (projectId && projectDirectory ? { id: projectId, path: projectDirectory } : null),
     [projectDirectory, projectId],
   );
+
+  // A project's own create command can take a while; the footer says what runs.
+  const [usesCreateCommand, setUsesCreateCommand] = React.useState(false);
+  React.useEffect(() => {
+    setUsesCreateCommand(false);
+    if (!open || !projectRef) return;
+    let cancelled = false;
+    void getWorktreeCreateCommand(projectRef).then((command) => {
+      if (!cancelled) setUsesCreateCommand(Boolean(command));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectRef]);
 
   // Each tab keeps its own fields while the user switches between them.
   const [mode, setMode] = React.useState<Mode>('new-branch');
@@ -887,15 +902,20 @@ export function NewWorktreeDialog({
   );
 
   const validationText = validation.touched ? (validation.branchError || validation.worktreeError) : null;
+  const creatingText = !validationText && isCreating && usesCreateCommand ? t('session.newWorktree.creatingWithCommand') : null;
   const footer = (
     <div className={cn('flex w-full gap-2', isMobile ? 'flex-col' : 'flex-row items-center')}>
       {/* One line that never grows the dialog; the full message is its tooltip. */}
       <p
-        className={cn('flex min-h-4 min-w-0 items-center gap-1.5 typography-micro text-destructive', isMobile ? 'order-first w-full' : 'flex-1')}
-        title={validationText ?? undefined}
+        className={cn(
+          'flex min-h-4 min-w-0 items-center gap-1.5 typography-micro',
+          creatingText ? 'text-muted-foreground' : 'text-destructive',
+          isMobile ? 'order-first w-full' : 'flex-1',
+        )}
+        title={validationText ?? creatingText ?? undefined}
       >
         {validationText ? <Icon name="error-warning" className="h-3.5 w-3.5 shrink-0" /> : null}
-        <span className="truncate">{validationText}</span>
+        <span className="truncate">{validationText ?? creatingText}</span>
       </p>
       <div className={cn('flex shrink-0 gap-2', isMobile && 'w-full')}>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isCreating} className={cn(isMobile && 'flex-1')}>
