@@ -19,7 +19,8 @@ import { repositoryBindingOwner } from '@/lib/source-control/repository-binding'
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import type { SourceControlReadContext } from '@/lib/api/types';
-import { limitSourceControlDiscoveryCandidates, sourceControlDiscoverySignature } from '../sourceControlDiscovery';
+import { limitSourceControlDiscoveryCandidates, readWithConcurrency, RELAY_BINDING_READ_CONCURRENCY, sourceControlDiscoverySignature } from '../sourceControlDiscovery';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { reconcileRegisteredContextDirectories, type RegisteredContextDirectories } from './registeredContextDirectories';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getLinkedSidebarChanges, getLinkedSidebarIssues, type RepositoryThreadRef } from '@/lib/linkedIssues';
@@ -993,6 +994,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       if (cancelled || !isCurrent()) return;
       const now = Date.now();
       const contextsByDirectory = new Map<string, Promise<SourceControlReadContext[] | null>>();
+      const readBinding = (directory: string) => repositoryBindingOwner.read(repositoryBindingOwner.scope(directory), sourceControl);
+      // One gate slot at a time, twenty worktrees took seconds of round trips
+      // over the relay before their branch markers could tint. There the
+      // bindings are read together in one slot; see `readWithConcurrency`.
+      const relayBindings = isRelayModeActive()
+        ? runBackgroundNetworkTask(() => readWithConcurrency(
+          candidates.filter((candidate) => !changedDirectory || candidate.directory === changedDirectory).map((candidate) => candidate.directory),
+          RELAY_BINDING_READ_CONCURRENCY,
+          readBinding,
+        ))
+        : null;
       const loadContexts = (directory: string): Promise<SourceControlReadContext[] | null> => {
         const pending = contextsByDirectory.get(directory);
         if (pending) return pending;
@@ -1001,8 +1013,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
           directory,
           sourceControlContextsOwnerId,
         );
-        const scope = repositoryBindingOwner.scope(directory);
-        const loading = runBackgroundNetworkTask(() => repositoryBindingOwner.read(scope, sourceControl)).then((load) => {
+        // After the shared read each binding is answered from the owner.
+        const loading = (relayBindings
+          ? relayBindings.then(() => readBinding(directory))
+          : runBackgroundNetworkTask(() => readBinding(directory))
+        ).then((load) => {
           if (!load || cancelled || !isCurrent()) return null;
           const primaryContext = load.contexts[0];
           const contexts = primaryContext && getSourceControlReadContextAuthState(
