@@ -275,6 +275,10 @@ bun run electron:dev
 
 `bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/entry.mjs`. An in-app restart under this script skips `app.relaunch()`: Electron exits with the code the script passes in `OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE`, and the script starts Electron again while the HMR server keeps running. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
 
+Unpackaged desktop and its HMR server default to `~/.config/openchamber-dev` for OpenChamber data. An explicit `OPENCHAMBER_DATA_DIR` takes precedence. OpenCode's own data is unchanged. The existing custom-data-directory migration copies projects, themes and speech models when they are absent from the new directory; it does not copy `settings.json`.
+
+The HMR launcher starts the Electron splash while it resolves the login-shell environment and starts the dev server. It passes the resolved data directory through a temporary start file after the API is healthy. Electron waits for that file before loading main, so its settings and the HMR server use the same directory without racing an in-process fallback server.
+
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
 Electron's postinstall (`node install.js`) is run by `bun install` with the system Node. Older Electron releases bundled `extract-zip@2.0.1`, which under Node 24 silently unpacked only the first entry of the Electron zip, leaving `dist/` without the binary and `path.txt` missing. Electron 43+ ships its own fixed extractor (`@electron-internal/extract-zip`), but to keep interrupted or wrong-architecture installs from blocking desktop work:
