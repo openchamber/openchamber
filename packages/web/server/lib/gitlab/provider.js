@@ -65,6 +65,13 @@ const threadIdOf = (value) => {
   return value;
 };
 
+// A GitLab note id; the request path keeps it on the target issue or merge request.
+const noteIdOf = (value) => {
+  const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
+  if (!/^[1-9]\d{0,19}$/.test(id)) throw invalidMutationContext('commentId is invalid');
+  return id;
+};
+
 /**
  * Each mutation route's persisted kind, input normalization (with the fields
  * its digest covers), provider call and restart reconciliation. Kind names and
@@ -244,6 +251,64 @@ function mutationTable(descriptor) {
         return {};
       },
       reconcile: unknownOutcome,
+    },
+    '/pr/comment/update': {
+      kind: 'change-request-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateChangeRequestComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/pr/comment/delete': {
+      kind: 'change-request-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteChangeRequestComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'delete', normalized),
+    },
+    '/issues/comment/update': {
+      kind: 'issue-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateIssueComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/issues/comment/delete': {
+      kind: 'issue-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteIssueComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'delete', normalized),
     },
     '/pr/review': {
       kind: 'change-request-review',
@@ -560,6 +625,7 @@ export function createProvider({
       client: createClient({ origin: session.instance, token, tokenType }),
       download: createDownloader({ origin: session.instance, token, tokenType }),
       canonicalReads,
+      providerUserId: session.providerUserId,
     };
     if (resolveProjects) resourceOptions.resolveProjects = resolveProjects;
     const service = createResourceService(resourceOptions);

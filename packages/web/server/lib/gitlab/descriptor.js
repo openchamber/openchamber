@@ -27,6 +27,7 @@ export const gitlabDescriptor = Object.freeze({
     merge: Object.freeze({ methods: Object.freeze(['merge', 'squash']) }),
     ci: true,
     comments: true,
+    commentEdit: true,
     reviews: true,
     state: true,
     labels: true,
@@ -88,6 +89,7 @@ export const gitlabDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: true, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: true, issueCloseReason: false,
+      commentEdit: true,
       changeRequestTemplates: Object.freeze(['.gitlab/merge_request_templates/Default.md']),
     }),
   }),

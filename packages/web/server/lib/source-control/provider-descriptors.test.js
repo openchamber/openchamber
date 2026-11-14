@@ -124,6 +124,8 @@ describe('source control provider descriptors', () => {
       // A server old enough for the fallback has no review draft routes.
       delete features.reviewDrafts;
       delete features.reviewDraftFileComments;
+      // Neither the comment edit and delete routes of the comment work.
+      delete features.commentEdit;
       delete urls.discussion;
       return { ...descriptor, features, urls };
     };

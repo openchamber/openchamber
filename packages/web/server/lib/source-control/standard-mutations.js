@@ -66,6 +66,10 @@ export function createStandardMutations(descriptor) {
   const requireNumber = (context) => {
     if (!context.target.number) throw invalidMutationContext('target number is required');
   };
+  const commentId = (value) => {
+    if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
+    return value;
+  };
   /**
    * A votes host's review: votes on its labels, a message, or both, on the
    * revision `target.headSha` names. A verdict is refused rather than mapped
@@ -170,6 +174,34 @@ export function createStandardMutations(descriptor) {
         requireNumber(context);
         const text = commentText(input.body, true);
         return { body: text, digest: { body: text } };
+      },
+    };
+  }
+  // Replace or remove one conversation comment, named by its id on the target item.
+  for (const [route, kind] of [
+    ['/pr/comment/update', 'change-request-comment-update'],
+    ['/issues/comment/update', 'issue-comment-update'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        const text = commentText(input.body, true);
+        return { commentId: id, body: text, digest: { commentId: id, body: text } };
+      },
+    };
+  }
+  for (const [route, kind] of [
+    ['/pr/comment/delete', 'change-request-comment-delete'],
+    ['/issues/comment/delete', 'issue-comment-delete'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        return { commentId: id, digest: { commentId: id } };
       },
     };
   }

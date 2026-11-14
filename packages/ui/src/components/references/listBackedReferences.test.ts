@@ -132,6 +132,31 @@ describe('list-backed references', () => {
     expect(detail.pull).toMatchObject({ commits: [{ sha: 'aaa', headline: 'first', author: null, authorName: 'Sam' }], commitTotal: null });
   });
 
+  test('a GitLab note carries its id and write capabilities into the preview', async () => {
+    const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');
+    const detail = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({
+        identity, project, changeRequest: mergeRequest,
+        issueComments: [{ ...identity, id: 'n1', url: 'u1', body: 'Nice', createdAt: '2026-01-01', canUpdate: true, canDelete: false }],
+        reviewComments: [], files: [],
+      }),
+    }), context, page.items[0]);
+    expect(detail.comments[0]).toMatchObject({ id: 'n1', canUpdate: true, canDelete: false });
+
+    // A note the host says nothing about keeps its id and no capabilities, so the buttons stay.
+    const silent = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({
+        identity, project, changeRequest: mergeRequest,
+        issueComments: [{ ...identity, id: 'n2', url: 'u2', body: 'Older', createdAt: '2026-01-02' }],
+        reviewComments: [], files: [],
+      }),
+    }), context, page.items[0]);
+    expect(silent.comments[0]).toMatchObject({ id: 'n2' });
+    expect('canUpdate' in (silent.comments[0] ?? {})).toBe(false);
+    expect('canDelete' in (silent.comments[0] ?? {})).toBe(false);
+  });
+
   test('a thread reads as its first note with the answers under it', async () => {
     const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (page.kind !== 'page' || !page.items[0]) throw new Error('expected a page');

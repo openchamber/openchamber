@@ -341,6 +341,10 @@ export interface IssueComment extends SourceControlIdentity {
   author?: SourceControlUser | null;
   createdAt?: string;
   updatedAt?: string;
+  /** Whether this account may replace this comment; absent when the host does not say. */
+  canUpdate?: boolean;
+  /** Whether this account may remove this comment; absent when the host does not say. */
+  canDelete?: boolean;
   /** The thread the comment is in, when read for the preview's timeline (GitLab merge requests). */
   thread?: CommentThreadRef;
 }
@@ -755,6 +759,17 @@ export type DraftChangeRequestInput = SourceControlMutationContext<SourceControl
 /** A comment on a change request, or on an issue (the target names its number). */
 export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   body: string;
+}
+
+/** Replace a conversation comment's text (an issue's, a change request's or a discussion's). */
+export interface CommentUpdateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+  body: string;
+}
+
+/** Remove a conversation comment. */
+export interface CommentDeleteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
 }
 
 /** A reply in a change request's review thread; `threadId` is the host's id for it. */

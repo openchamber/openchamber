@@ -163,6 +163,8 @@ const descriptorSchema = z.object({
     branchHeads: z.boolean().default(true).catch(true),
     /** The host keeps repository discussions, listed beside issues and change requests. */
     discussions: z.boolean().default(false).catch(false),
+    /** A comment may be edited or removed by the account that wrote it. */
+    commentEdit: z.boolean().default(false),
   }),
   /**
    * The installed extension that serves this provider; absent for a built-in.
@@ -230,7 +232,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, commentEdit: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

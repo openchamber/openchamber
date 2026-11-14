@@ -123,6 +123,40 @@ export function createGiteaResourceService({
       throw Object.assign(new Error('Review comment is not a draft of yours on this pull request'), { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
     }
   };
+  /**
+   * The issue or pull request an HTML comment URL names:
+   * `<origin>/<owner>/<name>/(issues|pulls)/<number>`. Gitea answers the HTML
+   * address in `issue_url`, and leaves it empty on a pull request comment,
+   * where `pull_request_url` carries that address instead.
+   */
+  const commentIssue = (comment) => {
+    const href = isString(comment?.issue_url) && comment.issue_url !== '' ? comment.issue_url : comment?.pull_request_url;
+    if (!isString(href)) return null;
+    let url;
+    try { url = new URL(href); } catch { return null; }
+    if (url.origin !== origin) return null;
+    const match = /^\/([^/]+)\/([^/]+)\/(?:issues|pulls)\/(\d+)\/?$/.exec(url.pathname);
+    if (!match) return null;
+    try {
+      return { owner: decodeURIComponent(match[1]), name: decodeURIComponent(match[2]), number: Number(match[3]) };
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * The comment, once its `issue_url` names the target issue. A comment id
+   * from one repository must not edit or remove another item's comment.
+   */
+  const requireIssueComment = async (providerTarget, expectedTarget, commentId) => {
+    const comment = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`);
+    const issue = commentIssue(comment);
+    if (!issue || issue.number !== expectedTarget.number || !sameName(issue, targetRepo(providerTarget))) {
+      throw Object.assign(new Error(`Comment is not on this ${providerLabel} issue`), {
+        code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409,
+      });
+    }
+    return comment;
+  };
   const reviewPerson = (user) => (isString(user?.login) ? { login: user.login, avatarUrl: isString(user.avatar_url) ? user.avatar_url : undefined } : null);
   /** A comment on the new side reads `position`; one on the old side only `original_position`. */
   const reviewCommentAt = (comment) => (Number(comment?.position) > 0
@@ -376,7 +410,7 @@ export function createGiteaResourceService({
     async changeRequestContext(directory, number, options = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits] = await Promise.all([
+      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, viewer] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -386,6 +420,8 @@ export function createGiteaResourceService({
         readCI(target.project, request.headSha),
         headProjectOf(raw, target, net.targets),
         options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null),
+        // Only the viewer's own comments may be changed; an unread login just hides both actions.
+        readCurrentLogin().catch(() => null),
       ]);
       const reviewsWithComments = reviews.filter((review) => isPlainObject(review) && Number.isInteger(review.id) && review.comments_count > 0);
       const reviewComments = (await mapLimited(reviewsWithComments, LIST_DETAIL_CONCURRENCY, (review) => client.get(`${repo}/pulls/${number}/reviews/${review.id}/comments`)))
@@ -396,7 +432,7 @@ export function createGiteaResourceService({
         });
       const issueComments = [
         ...comments.flatMap((comment) => {
-          const mapped = mapGiteaComment(comment, identity, request.url);
+          const mapped = mapGiteaComment(comment, identity, request.url, viewer);
           if (!mapped) throw malformed(`${providerLabel} returned an invalid pull request comment`);
           return [mapped];
         }),
@@ -458,8 +494,11 @@ export function createGiteaResourceService({
     async issueComments(directory, number, selector, remote, { linked } = {}) {
       const { target } = await network(directory, selector, remote, { linked });
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
-      const comments = await readIssueComments(target.project, number);
-      return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url), `${providerLabel} returned an invalid issue comment`));
+      const [comments, viewer] = await Promise.all([
+        readIssueComments(target.project, number),
+        readCurrentLogin().catch(() => null),
+      ]);
+      return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url, viewer), `${providerLabel} returned an invalid issue comment`));
     },
 
     async projectUpstream(directory, remote) {
@@ -709,6 +748,21 @@ export function createGiteaResourceService({
       return { state: 'outcome-unknown' };
     },
 
+    async reconcileIssueCommentUpdate(providerTarget, commentId, body) {
+      const comment = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`)
+        .then((value) => value, () => null);
+      // An edit made since reads exactly like one that never landed.
+      return isPlainObject(comment) && comment.body === body
+        ? { state: 'succeeded', result: {} }
+        : { state: 'outcome-unknown' };
+    },
+
+    async reconcileIssueCommentDelete(providerTarget, commentId) {
+      const gone = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`)
+        .then(() => false, (error) => statusOf(error) === 404);
+      return gone ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
     async reconcileChangeRequestMutation(providerTarget, kind) {
       if (kind === 'change-request-update') return { state: 'outcome-unknown' };
       const request = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
@@ -791,6 +845,27 @@ export function createGiteaResourceService({
     async comment({ providerTarget, body }) {
       const raw = await client.post(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/comments`, { body });
       if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw malformed(`${providerLabel} returned an invalid comment`);
+      return {};
+    },
+
+    async updateIssueComment({ providerTarget, expectedTarget, commentId, body }) {
+      await requireIssueComment(providerTarget, expectedTarget, commentId);
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`, { body });
+      if (!isPlainObject(raw) || raw.body !== body) throw malformed(`${providerLabel} returned an unexpected comment body`);
+      return {};
+    },
+
+    async deleteIssueComment({ providerTarget, expectedTarget, commentId }) {
+      await requireIssueComment(providerTarget, expectedTarget, commentId);
+      const path = `${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`;
+      await client.delete(path);
+      const gone = await client.get(path).then(() => false, (error) => {
+        if (statusOf(error) === 404) return true;
+        throw error;
+      });
+      // Still readable right after a 2xx delete is ambiguous, not a failure: a stale read and a
+      // delete that never landed look the same, so the record stays outcome-unknown.
+      if (!gone) throw new Error(`${providerLabel} kept a comment it was asked to delete`);
       return {};
     },
 

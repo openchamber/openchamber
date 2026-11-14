@@ -204,7 +204,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
     }
   }
 }
-fragment DetailComment on IssueComment { author { login avatarUrl } body createdAt url }
+fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
 `;
 
 // A discussion's comments each open a thread of replies; a comment in a
@@ -230,7 +230,11 @@ query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
           isAnswer
           viewerCanMarkAsAnswer
           viewerCanUnmarkAsAnswer
-          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) { nodes { author { login avatarUrl } body createdAt url } }
+          viewerCanUpdate
+          viewerCanDelete
+          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
+            nodes { id author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
+          }
         }
       }
     }
@@ -318,10 +322,15 @@ const discussionNodeSchema = z.object({
 });
 
 const detailCommentSchema = z.object({
+  // An issue comment's REST id; a discussion comment and a review comment are named by their node id.
+  databaseId: z.number().int().nullable().optional(),
   author: userSchema,
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+  // What this account may do with the comment; older hosts may not answer.
+  viewerCanUpdate: z.boolean().optional(),
+  viewerCanDelete: z.boolean().optional(),
 });
 
 const discussionDetailSchema = z.object({
@@ -340,7 +349,7 @@ const discussionDetailSchema = z.object({
           isAnswer: z.boolean(),
           viewerCanMarkAsAnswer: z.boolean(),
           viewerCanUnmarkAsAnswer: z.boolean(),
-          replies: z.object({ nodes: z.array(detailCommentSchema) }),
+          replies: z.object({ nodes: z.array(detailCommentSchema.extend({ id: z.string().min(1) })) }),
         })),
       }),
     }).nullable(),
@@ -608,6 +617,15 @@ const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_reques
 
 const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
+// What this account may do with one comment, only when the host answered. A
+// review thread comment carries none: these routes do not change it.
+const commentPermissions = (comment) => {
+  const permissions = {};
+  if (comment.viewerCanUpdate !== undefined) permissions.canUpdate = comment.viewerCanUpdate;
+  if (comment.viewerCanDelete !== undefined) permissions.canDelete = comment.viewerCanDelete;
+  return permissions;
+};
+
 const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
 
 /**
@@ -628,15 +646,21 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
   if (!item) return null;
-  const comments = item.comments.nodes.map((comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
-  }));
+  const comments = item.comments.nodes.map((comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    // The REST id an edit or delete names, which is not the node id.
+    if (Number.isSafeInteger(comment.databaseId)) entry.id = String(comment.databaseId);
+    return entry;
+  });
   if (item.__typename === 'Issue') {
     return { number: item.number, comments, commentTotal: item.comments.totalCount, pull: null };
   }
@@ -727,15 +751,20 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   if (!discussion) return null;
   const answerable = discussion.category.isAnswerable;
   const canReply = !discussion.locked || discussion.viewerCanUpdate;
-  const plain = (comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
-  });
+  const plain = (comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    if (comment.id !== undefined) entry.id = comment.id;
+    return entry;
+  };
   const commentOf = (comment) => {
     const entry = {
       ...plain(comment),

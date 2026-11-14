@@ -30,7 +30,7 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
     referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
     startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
     changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
-    submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,
+    submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, commentEdit: true,
   },
   ...overrides,
 });

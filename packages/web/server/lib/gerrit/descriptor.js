@@ -52,6 +52,8 @@ export const gerritDescriptor = Object.freeze({
     // A Verified label is a vote, not a CI run.
     ci: false,
     comments: true,
+    // Gerrit publishes posted comments; this board offers no edit or delete of one.
+    commentEdit: false,
     reviews: true,
     reviewModel: 'votes',
     revisions: true,
@@ -118,6 +120,7 @@ export const gerritDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: false, issueCloseReason: false,
+      commentEdit: false,
       // The commit message is the description; there is no template.
       changeRequestTemplates: Object.freeze([]),
       // A change's head is a patchset ref, not a branch to stack on.

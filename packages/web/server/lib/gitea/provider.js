@@ -112,6 +112,19 @@ function mutationOperations() {
       reconcile: unknownOutcome,
     };
   }
+  // A pull request comment is an issue comment to Gitea, so one method serves both.
+  for (const route of ['/pr/comment/update', '/issues/comment/update']) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.updateIssueComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueCommentUpdate(resolved.providerTarget, normalized.commentId, normalized.body),
+    };
+  }
+  for (const route of ['/pr/comment/delete', '/issues/comment/delete']) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.deleteIssueComment(call(resolved, { commentId: normalized.commentId })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueCommentDelete(resolved.providerTarget, normalized.commentId),
+    };
+  }
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     operations[route] = {
       perform: (service, normalized, resolved) => service.setState(call(resolved, { state: normalized.state, kind })),
