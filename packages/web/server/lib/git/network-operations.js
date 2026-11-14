@@ -1248,60 +1248,130 @@ export function createNetworkOperations({
     const configOutput = await localGit(directory, [
       'config', '--blob', 'HEAD:.gitmodules', '--null', '--get-regexp', '^submodule\\..*\\.(path|url|update)$',
     ], controls, deadline, { allowedCodes: [0, 1, 128] });
-    // One listing serves both: gitlinks for submodules, and object sizes for the LFS scan.
-    const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
-      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
-    const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: 0 });
-    const children = manifest.modules.map((module) => {
-      if (!parentEndpoint || !parentRemoteName) return { path: module.path, gitlink: module.gitlink };
-      const resolved = resolveGitRelativeEndpoint(module.url, parentEndpoint);
-      return { path: module.path, gitlink: module.gitlink, endpoint: resolved.endpoint };
-    });
-    const requirements = [];
-    let sourceRequired = children.some((child) => !child.endpoint);
-    const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
-      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
-    const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
-      { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
-    if ((scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete)
-      && (!parentEndpoint || !parentRemoteName)) {
-      sourceRequired = true;
-    } else if (scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete) {
-      const lfsConfigOutput = await localGit(directory, [
-        'config', '--blob', 'HEAD:.lfsconfig', '--null', '--get-regexp', '^(lfs\\.url|remote\\..*\\.lfsurl)$',
-      ], controls, deadline, { allowedCodes: [0, 1, 128] });
-      const effectiveConfigOutput = await localGit(directory, [
-        'config', '--includes', '--null', '--get-regexp', '^(lfs\\.|filter\\.lfs\\.|remote\\..*\\.lfsurl$)',
+    /**
+     * Whether this checkout can need hydration at all, answered without
+     * listing every tracked file.
+     *
+     * `git check-attr` reads attribute files from three places: the
+     * `.gitattributes` files in the tree, `core.attributesfile`, and the
+     * repository's own `info/attributes`. LFS needs one of them to name its
+     * filter, and a submodule needs a `.gitmodules` entry, so when none of
+     * those exist nothing can be hydrated. An answer that cannot be trusted --
+     * a query that fails, a path that cannot be read -- counts as "maybe",
+     * which keeps the full inspection and its byte limit.
+     */
+    const findHydrationSources = async () => {
+      if (configOutput.length > 0) return true;
+      // LFS is only needed where an attribute file names its filter, and those
+      // files are few and small even in a repository of 281k files. `git grep`
+      // reads only the attribute files, so a very large checkout with a plain
+      // `* text=auto` `.gitattributes` answers this without the full listing.
+      const lfsFilterMatch = await localGit(directory, [
+        'grep', '-l', '-z', '-e', 'filter=lfs', 'HEAD', '--', '.gitattributes', '**/.gitattributes', '.lfsconfig',
+      ], controls, deadline, { allowedCodes: [0, 1], maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes });
+      if (String(lfsFilterMatch ?? '').split('\0').some(Boolean)) return true;
+      // `.lfsconfig` names the storage endpoint, and Git LFS also replaces
+      // pointer files on a checkout even where no attribute selects the filter,
+      // so its presence keeps LFS possible.
+      const lfsConfigPath = await localGit(directory, [
+        'ls-tree', '-z', '--name-only', 'HEAD', '--', '.lfsconfig',
+      ], controls, deadline, { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes });
+      if (String(lfsConfigPath ?? '').length > 0) return true;
+      // `git check-attr` reads attribute files the tree does not hold either, so
+      // a configured or local one keeps LFS possible without a tracked
+      // `.gitattributes`.
+      const attributeConfig = await localGit(directory, [
+        'config', '--includes', '--null', '--get-regexp', '^core\\.attributesfile$',
       ], controls, deadline, { allowedCodes: [0, 1] });
-      const remoteLfsUrls = nullConfigRecords(effectiveConfigOutput, /^remote\..*\.lfsurl$/i).map((record) => ({
-        remote: record.key.slice('remote.'.length, -'.lfsurl'.length), url: record.value,
-      }));
-      const binaryResult = await localGit(directory, ['lfs', 'version'], controls, deadline, { allowedCodes: [0, 1, 128] });
-      const discovery = discoverLfs({
-        ...scan,
-        lfsConfigOutput,
-        effectiveConfigOutput,
-        gitRemoteName: parentRemoteName,
-        gitRemoteUrl: parentEndpoint,
-        remoteLfsUrls,
-        lfsBinaryAvailable: Boolean(binaryResult.trim()),
-      });
-      if (discovery.needed) {
-        requirements.push({
-          kind: 'lfs',
-          path: '.',
-          rawEndpoint: discovery.endpoint.candidate.endpoint,
-          transferReady: discovery.client.status !== 'missing',
-          endpoint: {
-            displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
-            fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
-          },
-        });
+      if ((attributeConfig ?? '').length > 0) return true;
+      try {
+        // `--git-path` answers the common directory's `info/attributes` for a
+        // worktree too, where `.git` is a file pointing at a per-worktree dir.
+        const attributesFile = (await localGit(directory, ['rev-parse', '--git-path', 'info/attributes'], controls, deadline)).trim();
+        if (!attributesFile) return true;
+        const stats = await fsImpl.stat(pathImpl.resolve(directory, attributesFile));
+        return stats.size > 0;
+      } catch (error) {
+        return error?.code !== 'ENOENT';
       }
+    };
+    /**
+     * The full inspection, kept apart so a checkout too large to list can be
+     * answered without it (see the catch below).
+     *
+     * One listing serves both: gitlinks for submodules, and object sizes for
+     * the LFS scan.
+     */
+    const inspectTrackedFiles = async () => {
+      const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
+        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
+      const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: 0 });
+      const children = manifest.modules.map((module) => {
+        if (!parentEndpoint || !parentRemoteName) return { path: module.path, gitlink: module.gitlink };
+        const resolved = resolveGitRelativeEndpoint(module.url, parentEndpoint);
+        return { path: module.path, gitlink: module.gitlink, endpoint: resolved.endpoint };
+      });
+      const requirements = [];
+      let sourceRequired = children.some((child) => !child.endpoint);
+      const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
+        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
+      const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
+        { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
+      if ((scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete)
+        && (!parentEndpoint || !parentRemoteName)) {
+        sourceRequired = true;
+      } else if (scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete) {
+        const lfsConfigOutput = await localGit(directory, [
+          'config', '--blob', 'HEAD:.lfsconfig', '--null', '--get-regexp', '^(lfs\\.url|remote\\..*\\.lfsurl)$',
+        ], controls, deadline, { allowedCodes: [0, 1, 128] });
+        const effectiveConfigOutput = await localGit(directory, [
+          'config', '--includes', '--null', '--get-regexp', '^(lfs\\.|filter\\.lfs\\.|remote\\..*\\.lfsurl$)',
+        ], controls, deadline, { allowedCodes: [0, 1] });
+        const remoteLfsUrls = nullConfigRecords(effectiveConfigOutput, /^remote\..*\.lfsurl$/i).map((record) => ({
+          remote: record.key.slice('remote.'.length, -'.lfsurl'.length), url: record.value,
+        }));
+        const binaryResult = await localGit(directory, ['lfs', 'version'], controls, deadline, { allowedCodes: [0, 1, 128] });
+        const discovery = discoverLfs({
+          ...scan,
+          lfsConfigOutput,
+          effectiveConfigOutput,
+          gitRemoteName: parentRemoteName,
+          gitRemoteUrl: parentEndpoint,
+          remoteLfsUrls,
+          lfsBinaryAvailable: Boolean(binaryResult.trim()),
+        });
+        if (discovery.needed) {
+          requirements.push({
+            kind: 'lfs',
+            path: '.',
+            rawEndpoint: discovery.endpoint.candidate.endpoint,
+            transferReady: discovery.client.status !== 'missing',
+            endpoint: {
+              displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
+              fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
+            },
+          });
+        }
+      }
+      return { requirements, children, sourceRequired };
+    };
+    let hydration;
+    try {
+      hydration = await inspectTrackedFiles();
+    } catch (error) {
+      // Every tracked file is listed just to find gitlinks and LFS attributes,
+      // and in a repository of 281k files that listing is 25 MiB -- over the
+      // limit -- so the inspection gave up and every worktree in it stayed
+      // blocked, for a check with nothing to find (#6798). Only a checkout too
+      // large to list takes the cheap answer below; a normal repository is
+      // inspected exactly as before, pointer files included.
+      if (error?.code !== 'LFS_DISCOVERY_LIMIT_EXCEEDED') throw error;
+      if (await findHydrationSources()) throw error;
+      hydration = { requirements: [], children: [], sourceRequired: false };
     }
     const currentHead = (await localGit(directory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
     if (currentHead !== headSha) throw operationError('STALE_CONFIG', 'Checkout changed during hydration inspection', 409);
-    return Object.freeze({ headSha, requirements, children, sourceRequired });
+    return Object.freeze({ headSha, ...hydration });
   };
 
   const inspectCheckoutHydration = async (input) => {
