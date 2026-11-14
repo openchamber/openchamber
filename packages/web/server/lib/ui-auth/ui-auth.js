@@ -677,7 +677,13 @@ export const createUiAuth = ({
   }
 
   const salt = crypto.randomBytes(16);
-  const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
+  // Hashed on the first sign-in attempt: at creation it held the embedding
+  // host's main thread for about 35 ms of every start.
+  let expectedHash = null;
+  const readExpectedHash = () => {
+    expectedHash ??= crypto.scryptSync(normalizedPassword, salt, 64);
+    return expectedHash;
+  };
   let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
   const resolveSessionTtlMs = (trustDevice) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
@@ -744,7 +750,7 @@ export const createUiAuth = ({
     }
     try {
       const candidateHash = crypto.scryptSync(normalizedCandidate, salt, 64);
-      return crypto.timingSafeEqual(candidateHash, expectedHash);
+      return crypto.timingSafeEqual(candidateHash, readExpectedHash());
     } catch {
       return false;
     }
