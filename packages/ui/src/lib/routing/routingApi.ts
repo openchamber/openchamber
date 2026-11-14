@@ -40,7 +40,7 @@ const builtinCategorySchema = z.object({ id: z.string().min(1), name: z.string()
 const jevSourceSchema = z.enum(['typesafe', 'zen-free']);
 
 /** A classification provider: which service answers Jev requests, or `off` for none. */
-const classifierSourceSchema = z.enum(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'typesafe', 'custom']);
+const classifierSourceSchema = z.enum(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom']);
 
 /** The custom System One endpoint as the server shows it: the key stays on the server. */
 // `pinned`: set by the server environment (OPENCHAMBER_JEV_URL), read-only here.
@@ -63,7 +63,7 @@ const classifierSchema = z.object({
  * `/api/routing` as this build reads it, from any server version. Servers from
  * before the classifier pick send neither `jevAvailable` nor `classifier`; Jev
  * always answered there, through the free zen model. `classifier` is the
- * three-source view kept for v2.0.2 clients (null once OpenRouter, Vercel or a
+ * three-source view kept for v2.0.2 clients (null once OpenRouter, Vercel, Gemini or a
  * custom endpoint is involved); `classification` is the full picture and wins
  * when present.
  */
@@ -72,6 +72,8 @@ export const routingStateSchema = z.object({
   autoReady: z.boolean(),
   jevAvailable: z.boolean().default(true),
   tokenPresent: z.boolean(),
+  // The Gemini key saved in OpenChamber; servers before the Gemini source never send it.
+  geminiKeyPresent: z.boolean().default(false),
   // Servers before the custom source never send it.
   customEndpoint: customEndpointSchema.nullable().default(null),
   // An administrator turned Jev off for this server; servers before it never did.
@@ -106,6 +108,7 @@ export const ROUTING_UNAVAILABLE: RoutingState = {
   autoReady: false,
   jevAvailable: false,
   tokenPresent: false,
+  geminiKeyPresent: false,
   customEndpoint: null,
   enterpriseMode: false,
   jevSource: 'zen-free',
@@ -145,6 +148,16 @@ export const saveRoutingToken = async (token: string): Promise<RoutingState> =>
 
 export const clearRoutingToken = async (): Promise<RoutingState> =>
   readState(await runtimeFetch('/api/routing/token', { method: 'DELETE' }));
+
+export const saveGeminiKey = async (key: string): Promise<RoutingState> =>
+  readState(await runtimeFetch('/api/routing/classifier/gemini', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key }),
+  }));
+
+export const clearGeminiKey = async (): Promise<RoutingState> =>
+  readState(await runtimeFetch('/api/routing/classifier/gemini', { method: 'DELETE' }));
 
 export const saveClassifierSource = async (source: ClassifierSource): Promise<RoutingState> =>
   readState(await runtimeFetch('/api/routing/classifier', {
