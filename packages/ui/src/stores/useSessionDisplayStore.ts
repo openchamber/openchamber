@@ -25,6 +25,13 @@ type SidebarViewMode = 'projects' | 'timeline';
 // 'time' lists every project's sessions together, newest activity first.
 type ListSessionGrouping = 'project' | 'time';
 type ProjectDisplayMode = 'all' | 'single';
+type SidebarRowDisplayMode = 'sessions' | 'worktrees' | 'branches';
+
+/** Preserve the old naming preference until a display mode is explicitly chosen. */
+export const resolveSidebarRowDisplayMode = (state: {
+  rowDisplayMode: SidebarRowDisplayMode | null;
+  worktreeNameByBranch: boolean;
+}): SidebarRowDisplayMode => state.rowDisplayMode ?? (state.worktreeNameByBranch ? 'branches' : 'worktrees');
 
 type SessionDisplayStore = {
   projectDisplayMode: ProjectDisplayMode;
@@ -68,6 +75,8 @@ type SessionDisplayStore = {
    * their task; the other name goes under it. Off by default.
    */
   worktreeNameByBranch: boolean;
+  rowDisplayMode: SidebarRowDisplayMode | null;
+  setRowDisplayMode: (mode: SidebarRowDisplayMode) => void;
   /**
    * The sidebar's sections in order, the built-in ones included
    * (`lib/sidebarSections.ts`). Shared by every surface.
@@ -189,6 +198,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showPinnedSection: true,
       detailedZoneRows: getSettingsSurface() === 'mobile',
       worktreeNameByBranch: false,
+      rowDisplayMode: null,
+      setRowDisplayMode: (mode) => set({ rowDisplayMode: mode }),
       sections: [...DEFAULT_SIDEBAR_SECTIONS],
       pinLists: [],
       hiddenSections: [],
@@ -231,7 +242,9 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
         // SAFETY: `migrate` has already brought the stored state to this version's shape.
         const state = (persisted ?? {}) as Partial<SessionDisplayStore>;
         const sections = sidebarSectionsSchema.safeParse(state.sections ?? current.sections);
-        return { ...current, ...state, sections: sections.success ? sections.data : [...DEFAULT_SIDEBAR_SECTIONS] };
+        const rowDisplayMode = state.rowDisplayMode === 'sessions' || state.rowDisplayMode === 'worktrees' || state.rowDisplayMode === 'branches'
+          ? state.rowDisplayMode : null;
+        return { ...current, ...state, rowDisplayMode, sections: sections.success ? sections.data : [...DEFAULT_SIDEBAR_SECTIONS] };
       },
     },
   ),

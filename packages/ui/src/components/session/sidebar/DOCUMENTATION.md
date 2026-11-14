@@ -550,10 +550,13 @@ of forks and reviews. A user-given worktree task name wins over an agent name.
 A worktree's row is named by its task, and by its branch until the task has a
 name; never by one of its sessions (maintainer decision 2026-10-27: a row
 named after its latest session read as a session and changed name with each
-one). "Name worktrees by branch" in the display menu
-(`worktreeNameByBranch`, `sidebarWorktreeNameByBranch`, off by default, one
-value for every surface) swaps them: the branch is the row's name, the task's
-under it. The name the row does not show goes on a detailed row's second line;
+one). "Display as" selects Sessions, Worktrees, or Branches
+(`rowDisplayMode`, `sidebarRowDisplayMode`, one value for every surface).
+Sessions renders individual conversation rows with their own navigation and
+actions, including in In work and project lists. Worktrees keeps task-first
+group rows; Branches puts the branch first. Until explicitly chosen, the old
+`sidebarWorktreeNameByBranch` preference selects Worktrees or Branches.
+Detailed rows is independent. The name a group row does not show goes on its second line;
 the tooltip leads with the task's name. A space follows the same rule with its
 own name in the branch's place. A session moved into a new worktree takes its
 current session title along (the sidebar's Quick worktree move,

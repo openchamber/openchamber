@@ -11,6 +11,7 @@ import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
+import { selectFinishedWorks } from './works/workActions';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
   node: { session: session(id), children: [], worktree: null },
@@ -83,6 +84,70 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
 });
 
 describe('buildSessionSidebarRowModel', () => {
+  test('session display finishes a whole work consistently in expanded, collapsed and time views', () => {
+    const work = group([node('first'), node('second')], {
+      id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt',
+      worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt' },
+    });
+    for (const node of work.sessions) {
+      node.session = { ...node.session, metadata: { openchamber: { work: { state: 'open' } } } };
+    }
+    for (const layout of ['expanded', 'collapsed', 'time'] as const) {
+      const input = args([project([group([]), work])]);
+      input.sessionRows = true;
+      input.workEntries = sessionWorks(work.sessions.map((node) => timelineItem(node.session.id, { node })));
+      input.movedSessionIds = new Set(['first', 'second']);
+      if (layout === 'collapsed') input.collapsedProjects = new Set(['project-a']);
+      if (layout === 'time') input.timeEntries = [];
+      const model = buildSessionSidebarRowModel(input);
+      expect(selectFinishedWorks(model.selectionWorks, new Set(['first', 'second'])).map((entry) => entry.group.id)).toEqual(['worktree:/wt']);
+      expect(selectFinishedWorks(model.selectionWorks, new Set(['first']))).toEqual([]);
+    }
+  });
+  test('Sessions keeps worktree-local folders in the timeline without duplicate sessions', () => {
+    const wt = group([node('filed')], {
+      id: 'wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+      worktree: { path: '/wt', projectDirectory: '/repo', branch: 'topic', label: 'topic' },
+    });
+    const input = args([project([group([]), wt])]);
+    input.sessionRows = true;
+    input.timeEntries = sessionWorks([timelineItem('filed', { groupDirectory: '/wt' })]);
+    input.foldersMap = { '/wt': [{ id: 'f', name: 'Local folder', createdAt: 1, sessionIds: ['filed'] }] };
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'folder-header').map((row) => row.folder.id)).toEqual(['f']);
+    expect(model.rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id)).toEqual(['filed']);
+    input.collapsedFolders = new Set(['f']);
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session')).toHaveLength(0);
+  });
+  test('Sessions shows conversations even when their worktree was collapsed and gives them conversation actions', () => {
+    const wt = group([node('owner'), node('other')], {
+      id: 'wt', label: 'topic', branch: 'topic', isMain: false,
+      worktree: { path: '/wt', projectDirectory: '/repo', branch: 'topic', label: 'topic' }, directory: '/wt',
+    });
+    const input = args([project([wt])]);
+    input.collapsedGroups = new Set(['wt']);
+    input.sessionRows = true;
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'group-header')).toHaveLength(0);
+    const sessions = model.rows.filter((row) => row.kind === 'session');
+    expect(sessions.map((row) => row.node.session.id).sort()).toEqual(['other', 'owner']);
+    expect(sessions.every((row) => row.ownsWork)).toBe(true);
+    input.sessionRows = false;
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'group-header')).toBe(true);
+  });
+  test('Sessions projects an empty worktree folder only through its group entry', () => {
+    const wt = group([], {
+      id: 'wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+      worktree: { path: '/wt', projectDirectory: '/repo', branch: 'topic', label: 'topic' },
+    });
+    const input = args([project([group([]), wt])]);
+    input.sessionRows = true;
+    input.timeEntries = [{ kind: 'group', groupKey: 'project-a:wt', projectId: 'project-a', group: wt }];
+    input.foldersMap = { '/wt': [{ id: 'f', name: 'Local folder', createdAt: 1, sessionIds: [] }] };
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'folder-header')).toHaveLength(1);
+    expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+  });
   test('a Chats-only sidebar exposes an archived bucket with restore semantics and distinct row keys', () => {
     const active = node('active-chat');
     const archived = node('archived-chat');

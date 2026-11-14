@@ -19,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
-import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, resolveSidebarRowDisplayMode, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -113,8 +113,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
-  const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
+  const rowDisplayMode = useSessionDisplayStore(resolveSidebarRowDisplayMode);
+  const setRowDisplayMode = useSessionDisplayStore((state) => state.setRowDisplayMode);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
@@ -215,9 +215,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
       })}
-      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.worktreeNameByBranch', icon: 'git-branch' }, worktreeNameByBranch, () => {
-        setWorktreeNameByBranch(!worktreeNameByBranch);
-        void updateDesktopSettings({ sidebarWorktreeNameByBranch: !worktreeNameByBranch });
+      {choiceSubmenu({ labelKey: 'sessions.sidebar.header.displayMode.displayAs', icon: 'list-check-2' }, [
+        ['sessions', 'sessions.sidebar.header.displayMode.sessions'],
+        ['worktrees', 'sessions.sidebar.header.displayMode.worktrees'],
+        ['branches', 'sessions.sidebar.header.displayMode.branches'],
+      ] as const, rowDisplayMode, (mode) => {
+        setRowDisplayMode(mode);
+        void updateDesktopSettings({ sidebarRowDisplayMode: mode });
       })}
     </>);
   }

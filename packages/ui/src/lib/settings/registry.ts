@@ -410,6 +410,7 @@ export const SETTINGS_REGISTRY = {
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
   sidebarWorktreeNameByBranch: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('worktreeNameByBranch') }),
+  sidebarRowDisplayMode: field({ scope: 'profile', parse: parseOneOf(['sessions', 'worktrees', 'branches']), ui: sessionDisplayField('rowDisplayMode') }),
   // The sections and pin lists are one arrangement for every surface; which of
   // the user's sections a surface shows is its own. They are written through
   // the store's setters, which record the instance they came from.

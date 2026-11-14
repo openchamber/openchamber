@@ -539,6 +539,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
       result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
     }
+    if (['sessions', 'worktrees', 'branches'].includes(candidate.sidebarRowDisplayMode)) {
+      result.sidebarRowDisplayMode = candidate.sidebarRowDisplayMode;
+    }
     if (Array.isArray(candidate.sidebarSections)) {
       result.sidebarSections = sanitizeSidebarSections(candidate.sidebarSections);
     }
