@@ -32,7 +32,7 @@ const reader = (overrides = {}) => subscriber({
 const idle = (sessionID = 'ses_1', extra = {}) => ({ type: 'session.idle', id: 'evt_idle', created: 1_000, properties: { sessionID, directory: '/repo', ...extra } });
 
 /** The fakes one runtime needs: a catalog, a service proxy, OpenCode reads and manual timers. */
-const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, children = {}, metadata = {}, reply = 'Done.', autoAccept = async () => false, inAutoReview = () => false, answer, beforeFetch = async () => {}, metadataRead } = {}) => {
+const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, metadata = {}, reply = 'Done.', autoAccept = async () => false, inAutoReview = () => false, answer, beforeFetch = async () => {}, metadataRead } = {}) => {
   const calls = [];
   const warnings = [];
   const fetched = [];
@@ -46,12 +46,8 @@ const harness = ({ catalog = [subscriber()], sessions = {}, active = {}, childre
   const fetchImpl = async (url) => {
     fetched.push(url);
     await beforeFetch(url);
-    const { pathname, searchParams } = new URL(url);
+    const { pathname } = new URL(url);
     if (pathname === '/api/session/active') return Response.json({ data: active });
-    if (pathname === '/api/session') {
-      const parent = searchParams.get('parentID');
-      return Response.json({ data: (children[parent] ?? []).map((id) => ({ id })), cursor: {} });
-    }
     const match = pathname.match(/^\/api\/session\/([^/]+)$/);
     if (match) {
       const record = sessions[decodeURIComponent(match[1])];
@@ -216,7 +212,7 @@ describe('turn-finished', () => {
   });
 
   test('a stopped turn, a second idle of the same turn, a child still working, a goal step and an auto-review step announce nothing', async () => {
-    const h = harness({ active: { ses_child: { type: 'busy' } }, children: { ses_1: ['ses_child'] } });
+    const h = harness({ active: { ses_child: { type: 'busy' } }, sessions: { ses_child: { id: 'ses_child', parentID: 'ses_1' } } });
     h.runtime.processPayload(idle('ses_1', { aborted: true }));
     h.runtime.processPayload(idle('ses_1'));
     await settle();
