@@ -5,7 +5,7 @@ import os from 'node:os';
 import { constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { isProviderId } from '../source-control/provider-id.js';
+import { isExtensionProviderId, isProviderId, isProviderUserId } from '../source-control/provider-id.js';
 import { descriptorAllowsLoopbackHttp, isLoopbackHost } from './loopback-http.js';
 
 const REFERENCE_PREFIX = 'ocgit:v1';
@@ -21,11 +21,17 @@ const requiredString = (value, name) => {
   return value;
 };
 
-const encodePart = (value) => Buffer.from(requiredString(value, 'reference value'), 'utf8').toString('base64url');
-const decodePart = (value) => {
+const requiredProviderUserId = (value, provider, instance) => {
+  if (!isExtensionProviderId(provider)) return requiredString(value, 'reference value');
+  if (!isProviderUserId(provider, instance, value)) throw new Error('Invalid Git credential provider user');
+  return value;
+};
+
+const encodePart = (value, validate = requiredString) => Buffer.from(validate(value, 'reference value'), 'utf8').toString('base64url');
+const decodePart = (value, validate = requiredString) => {
   if (!isString(value) || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('Invalid Git credential reference');
   const decoded = Buffer.from(value, 'base64url').toString('utf8');
-  if (!decoded || encodePart(decoded) !== value) throw new Error('Invalid Git credential reference');
+  if (!decoded || encodePart(decoded, validate) !== value) throw new Error('Invalid Git credential reference');
   return decoded;
 };
 
@@ -38,7 +44,7 @@ export function createHttpsCredentialReference({
 }) {
   if (!isProviderId(provider)) throw new Error('Invalid Git credential provider');
   if (!Number.isSafeInteger(credentialRevision) || credentialRevision < 1) throw new Error('Invalid Git credential revision');
-  return `${VERSIONED_REFERENCE_PREFIX}:https:${provider}:${encodePart(instance)}:${encodePart(credentialId)}:${credentialRevision}:${encodePart(providerUserId)}`;
+  return `${VERSIONED_REFERENCE_PREFIX}:https:${provider}:${encodePart(instance)}:${encodePart(credentialId)}:${credentialRevision}:${encodePart(providerUserId, (value) => requiredProviderUserId(value, provider, instance))}`;
 }
 
 export function createSshCredentialReference(keyId) {
@@ -53,14 +59,15 @@ export function parseGitCredentialReference(reference) {
     if (!/^[1-9]\d*$/.test(parts[6]) || !Number.isSafeInteger(credentialRevision)) {
       throw new Error('Invalid Git credential reference');
     }
+    const instance = decodePart(parts[4]);
     return Object.freeze({
       version: 2,
       transport: 'https',
       provider: parts[3],
-      instance: decodePart(parts[4]),
+      instance,
       credentialId: decodePart(parts[5]),
       credentialRevision,
-      providerUserId: decodePart(parts[7]),
+      providerUserId: decodePart(parts[7], (value) => requiredProviderUserId(value, parts[3], instance)),
     });
   }
   if (parts.length === 4 && parts[1] === 'v1' && parts[2] === 'ssh') {

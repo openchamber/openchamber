@@ -1,7 +1,8 @@
 /**
  * One session notice (`@/lib/opencode/session-notices`): a folded line with an
  * info icon and what happened, opening to the text the model received. A pull
- * request wake is one line that opens the pull request. Both draw the same
+ * request wake is one line that opens the pull request; an extension wait's
+ * wake names the wait and opens to the extension's report. All draw the same
  * inside a turn's Activity and between turns.
  */
 
@@ -11,7 +12,7 @@ import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { Icon } from '@/components/icon/Icon';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import type { PullRequestNotice, SessionNotice } from '@/lib/opencode/session-notices';
+import type { ExtensionWaitNotice, PullRequestNotice, SessionNotice } from '@/lib/opencode/session-notices';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { changeRequestTermOfUrl, useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { cn } from '@/lib/utils';
@@ -20,7 +21,7 @@ import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 // A worktree reads by its folder name; the full path is in the expanded text.
 const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
-const useNoticeTitle = (notice: Exclude<SessionNotice, PullRequestNotice>): string => {
+const useNoticeTitle = (notice: Exclude<SessionNotice, PullRequestNotice | ExtensionWaitNotice>): string => {
     const { t } = useI18n();
     switch (notice.kind) {
         case 'plugin':
@@ -79,8 +80,10 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
                 />
             </span>
             <span
-                className={cn(ROW_TEXT_CLASS, 'flex-shrink-0 font-medium group-hover/notice:underline group-focus-visible/notice:underline')}
-                style={{ color: 'var(--tools-title)' }}
+                // The row's name, muted as every activity row's; the change
+                // list after it is prose, muted too.
+                className={cn(ROW_TEXT_CLASS, 'flex-shrink-0 font-normal group-hover/notice:underline group-focus-visible/notice:underline')}
+                style={{ color: 'var(--tools-description)' }}
             >
                 {t(changeRequestCopy('chat.sessionNotice.pullRequest.title', term), { number: notice.number })}
             </span>
@@ -91,7 +94,28 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
     );
 };
 
-const FoldedNotice: React.FC<{ notice: Exclude<SessionNotice, PullRequestNotice>; blockId: string }> = ({ notice, blockId }) => {
+// The wait's name, with the extension's report as the preview; it opens to the
+// whole report, which the agent read inside an envelope of OpenChamber's own text.
+const ExtensionWaitNoticeRow: React.FC<{ notice: ExtensionWaitNotice; blockId: string }> = ({ notice, blockId }) => {
+    const { t } = useI18n();
+    return (
+        <ReasoningTimelineBlock
+            text={notice.summary}
+            blockId={blockId}
+            presentation={{
+                icon: 'timer',
+                iconClassName: notice.outcome === 'ended' ? 'text-[var(--status-warning)]' : undefined,
+                title: notice.subject,
+                expandLabel: t('chat.sessionNotice.showDetails'),
+                collapseLabel: t('chat.sessionNotice.hideDetails'),
+                markdownVariant: 'assistant',
+                maxHeightClassName: 'max-h-[60vh]',
+            }}
+        />
+    );
+};
+
+const FoldedNotice: React.FC<{ notice: Exclude<SessionNotice, PullRequestNotice | ExtensionWaitNotice>; blockId: string }> = ({ notice, blockId }) => {
     const { t } = useI18n();
     const title = useNoticeTitle(notice);
     const failed = notice.kind === 'command-failed';
@@ -112,8 +136,8 @@ const FoldedNotice: React.FC<{ notice: Exclude<SessionNotice, PullRequestNotice>
     );
 };
 
-export const SessionNoticeBlock: React.FC<{ notice: SessionNotice; blockId: string }> = ({ notice, blockId }) => (
-    notice.kind === 'pull-request'
-        ? <PullRequestNoticeRow notice={notice} />
-        : <FoldedNotice notice={notice} blockId={blockId} />
-);
+export const SessionNoticeBlock: React.FC<{ notice: SessionNotice; blockId: string }> = ({ notice, blockId }) => {
+    if (notice.kind === 'pull-request') return <PullRequestNoticeRow notice={notice} />;
+    if (notice.kind === 'extension-wait') return <ExtensionWaitNoticeRow notice={notice} blockId={blockId} />;
+    return <FoldedNotice notice={notice} blockId={blockId} />;
+};

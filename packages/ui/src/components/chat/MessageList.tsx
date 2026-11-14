@@ -36,6 +36,7 @@ import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
 import { estimateTimelineRowSize, type RowSizeMetrics } from './lib/turns/rowSizeEstimate';
 import { onNavigationRelease } from './lib/scroll/timelineScrollIntent';
+import { useSelectionRowHold } from './lib/scroll/selectionRowHold';
 import { isReasoningRevealTarget } from './search/reasoningReveal';
 import {
     ANCHOR_HOLD_MAX_FRAMES,
@@ -854,6 +855,8 @@ const TimelineList = React.memo(({
     const header = React.useMemo(() => (listHeader ? <>{listHeader}</> : undefined), [listHeader]);
     const footer = React.useMemo(() => (listFooter ? <>{listFooter}</> : undefined), [listFooter]);
 
+    const alwaysRender = useSelectionRowHold(listRef);
+
     return (
         <TimelineRowContext.Provider value={rowContext}>
             <LegendList<RenderRow>
@@ -886,6 +889,8 @@ const TimelineList = React.memo(({
                 // waits until the scroll stops (the scroll documentation, "A
                 // row is placed at an estimate").
                 maintainVisibleContentPosition={{ data: true, size: endPinningReleased, deferSizeWhileScrolling: touchLayout }}
+                // The rows a selection spans stay mounted while it lasts.
+                alwaysRender={alwaysRender}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}
                 stickyHeaderIndices={stickyRowIndices}

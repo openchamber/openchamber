@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { startExampleService } from './fixtures/example-service';
 import { startUsageServer, type UsageServer } from '../examples/quota-provider/usage-server';
 import { quotaProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import { QUOTA_PROVIDER_PATH, type QuotaProviderCredential } from '../src/service-providers';
@@ -15,15 +15,6 @@ import { QUOTA_PROVIDER_PATH, type QuotaProviderCredential } from '../src/servic
 const serviceEntry = fileURLToPath(new URL('../examples/quota-provider/service/main.js', import.meta.url));
 const PROVIDER = 'ext-quota-provider';
 
-const freePort = () => new Promise<number>((resolve, reject) => {
-  const server = net.createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const { port } = Object(server.address());
-    server.close(() => resolve(Number(port)));
-  });
-});
-
 let usage: UsageServer;
 let service: ChildProcess;
 let servicePort: number;
@@ -32,24 +23,13 @@ const NOW = 1_800_000_000_000;
 
 beforeAll(async () => {
   usage = await startUsageServer({ token: 'demo', now: () => NOW });
-  servicePort = await freePort();
-  service = spawn('node', [serviceEntry], {
+  ({ service, port: servicePort } = await startExampleService({
+    entry: serviceEntry,
+    token: serviceToken,
     env: {
-      PATH: process.env.PATH,
-      OPENCHAMBER_SERVICE_PORT: String(servicePort),
-      OPENCHAMBER_SERVICE_TOKEN: serviceToken,
       TEAPOT_USAGE_URL: usage.origin,
     },
-    stdio: 'ignore',
-  });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const ready = await fetch(`http://127.0.0.1:${servicePort}/health`, { headers: { authorization: `Bearer ${serviceToken}` } })
-      .then((response) => response.ok)
-      .catch(() => false);
-    if (ready) return;
-    await new Promise((resolve) => { setTimeout(resolve, 50); });
-  }
-  throw new Error('the usage provider service did not become ready');
+  }));
 });
 
 afterAll(async () => {

@@ -429,7 +429,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
 
         <SettingsSection
           title={t('settings.skills.catalog.page.section.sources')}
-          divider={false}
           settingsItem="skills.catalog.source"
           contentClassName="space-y-0"
         >

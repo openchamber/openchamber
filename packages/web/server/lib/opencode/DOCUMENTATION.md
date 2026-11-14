@@ -81,6 +81,11 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
+- `packages/web/server/lib/opencode/provider-logo-routes.js`: a provider's uploaded logo, `GET/PUT/DELETE /api/provider/:providerId/logo`. PUT takes `{ dataUrl }` (PNG, JPEG, WebP or SVG, at most 1 MB decoded; anything else is 400) and writes `<data-dir>/provider-logos/provider-<sha1 of id>-<updatedAt>.<ext>`; the profile setting `customProviderLogos` holds only `{ mime, updatedAt }` per provider ID, written through `persistResolvedSettings`, and that pair names the file. The new file is written first, then the setting, then the provider's other files are removed. A settings write that fails, or resolves without the key because `preferences.json` is unreadable, removes the new file and answers 500, and the previous logo stays served: its file is never rewritten. DELETE drops the setting first, then the files, and answers 200 when nothing was stored. Uploads and removals for one provider run one at a time, so two clients saving at once cannot delete the file the other's setting names. GET serves the file the setting names with the same inert-image headers as project icons (`INERT_IMAGE_CSP`, `nosniff`, an immutable cache the client versions with `v=<updatedAt>`); for an SVG, `theme=light|dark` sets its CSS colour so `currentColor` reads on either background. The routes sit under `/api/provider`, which isolated spaces treat as host-only. Enterprise mode does not gate them: the bytes stay on this machine and no provider, key or endpoint is added.
+
+  ### Why the logo is kept by provider ID and not removed with the provider
+
+  The logo is keyed by provider ID like a chosen icon (`customProviderIcons`), and OpenChamber has no "remove provider" flow: a provider leaves when someone edits the OpenCode config, which OpenChamber does not watch for this. Deleting logos from a config diff would need a complete, authoritative provider list per directory; keeping them costs one small file, and a provider added again under the same ID gets its logo back. The logo goes when the user removes it, on the provider's page or with Remove in the custom-provider form before Save; an untouched form keeps it.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
@@ -259,7 +264,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `getProjectConfigCandidates(workingDirectory)`, `getLayerError(layers, filePath)`: The project folder's own config files, and the parse error `readConfigLayers` recorded for one file.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
-- `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
+- `walkSkillMdFiles(rootDir)`: Async. Recursively finds SKILL.md files, following links and skipping a link back to its own ancestor. It applies these of OpenCode's discovery rules: hidden directories and `node_modules` are skipped, and a directory holding its own SKILL.md (a file, or a link that resolves to one) is one skill that is not searched further, so a dependency's bundled skills never list as ones the user installed (#6708). A dangling SKILL.md link is skipped and does not stop the search. Two OpenCode rules are not applied here: this walk has no six-directory depth limit, and it does not discover root-level `*.md` skills. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
 - `pathExists(target)`: Async existence probe shared by the skill walk and source lookup. Returns false when access fails.
 - `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file; `parsed` null (unreadable file) adds nothing.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
@@ -369,7 +374,7 @@ Installer output is discarded, not forwarded to clients or logs.
 - `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent?, readTurnStart?, buildOpenCodeUrl?, getOpenCodeAuthHeaders?, fetchImpl? })`: creates runtime-owned state machine and APIs for session status. `readTurnStart(sessionId)` resolves the running turn's start from history (`turn-start.js`), or null. OpenCode URL and auth dependencies enable restart recovery.
 - Returned API:
   - `processOpenCodeSsePayload(payload, { spaceId? }?)`: the watcher supplies the event's space identity so host restart recovery never posts a space's continuation to the host OpenCode.
-  - `adoptRunningSessions(sessionIds, readAt)`: sessions OpenCode lists as running when the event stream (re)connects, as read from `readAt` on. Marks them busy and reads back the starts of turns this server did not see begin. A session whose status changed after `readAt` is skipped: its turn may have ended while the list was read.
+  - `adoptRunningSessions(sessionIds, readAt)`: sessions OpenCode lists as running when the event stream (re)connects, as read from `readAt` on. Marks them busy and reads back the starts of turns this server did not see begin. A host session held busy that the list leaves out lost its idle in the stream gap and settles idle, announced like any status change, and its pending permission is dropped as the idle event would; clients seed rows from this map, so without it a missed idle showed the session running on every client started in the seed's 30-minute window. A session that reported any status after `readAt`, a repeat the 5 s dedupe swallows included (`lastEventAt`), is skipped either way, and sessions of isolated spaces are never settled, because the host's list does not name them.
   - `getRunningTurnStart(sessionId)`: the running turn's start, or null.
   - `getSessionActivitySnapshot()`
   - `getActiveSessionCount()`
@@ -568,7 +573,7 @@ ConPTY or Console Window Host behavior.
   - `sanitizeSkillCatalogs(input)`
   - `sanitizeProjects(input)`
 
-Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character.
+Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character. Every settings read runs `sanitizeProjects` three times, so one pass over the project list reads each directory at most once: projects share their ancestors, and reading `/`, `/Users` and the rest again per project made a 71-project settings read about 1,280 synchronous readdirs (#6084). The listings live only for that one synchronous pass, so a later read always sees the disk as it is; a longer-lived cache would need invalidation on a case rename and was not needed once a pass reads each folder once.
 
 ## Public exports (theme-runtime.js)
 - `createThemeRuntime(dependencies)`: creates custom theme runtime for on-disk theme discovery and JSON normalization/validation.
@@ -666,8 +671,9 @@ OpenCode's MCP client listens on `127.0.0.1` and, without configuration, registe
 a loopback redirect. That is correct when the browser runs on the OpenCode
 machine, and wrong when OpenChamber is opened from another one: the provider
 sends the browser to the viewer's own `127.0.0.1`, and nothing reaches the
-listener. A browser with a direct connection to OpenChamber, with an OpenCode
-on the same machine as OpenChamber, finishes on its own. Everywhere else the
+listener. A browser on loopback or with a direct https connection to
+OpenChamber, with an OpenCode on the same machine as OpenChamber, finishes on
+its own. Everywhere else the
 user pastes the address the browser landed on into the waiting sign-in, which
 OpenCode accepts since 2.2.6 (an attempt marked `paste`).
 
@@ -684,13 +690,21 @@ name from OpenCode's integration and then takes one of these paths:
 | Relay client, nothing configured | Started on OpenCode's own redirect, unbound, for the user to paste. |
 | Either of the two above, OpenCode without `paste` | The attempt is cancelled and the start answers 400 naming the problem, before consent. |
 | Browser on loopback, nothing generated | Forwarded untouched, so CIMD and the ephemeral listener stay. This includes an SSH-forwarded address. |
-| Browser on another machine | `oauth.redirect_uri` becomes `<origin>/api/mcp/oauth/<name>/callback` and `oauth.callback_port` a free loopback port. The attempt is then bound. |
+| Browser on another machine over plain http, nothing generated | Started on OpenCode's own redirect, unbound and with the config unchanged, for the user to paste. OpenCode without `paste` gets the generated redirect of the next row instead, which works with a provider that accepts http. |
+| Browser on another machine over https | `oauth.redirect_uri` becomes `<origin>/api/mcp/oauth/<name>/callback` and `oauth.callback_port` a free loopback port. The attempt is then bound. |
 | Generated redirect already in place, any browser | The attempt is bound, so a loopback or relay browser follows the address generated last. |
 
 Same-machine is decided from the address OpenChamber connects to: loopback or
 one of this machine's interface addresses. A hostname that resolves here counts
 as another machine, because the mistake then is a clear error and the other way
 round is a callback sent to the wrong listener.
+
+A plain-http origin on another machine gets no generated redirect. The MCP
+authorization spec allows http redirects only on loopback, and Linear rejects
+`http://192.168.x.x/...` at client registration, before consent. OpenCode's
+own redirect is loopback, which those providers accept, so the browser lands
+on a page that does not open and the user pastes its address. A redirect
+generated earlier for that entry stays bound, as for the relay.
 
 The relay is detected by `x-openchamber-relay-connection`, which the dispatcher
 sets on every request it forwards. Its requests arrive with a loopback `host`,
@@ -1216,6 +1230,18 @@ within a ten-minute overall deadline.
       alone. An empty list means the changelog has no notes for it; 502 means
       no source could be read, so the page never shows an outage as "no notes".
   - `POST /api/openchamber/update-install`
+    - A release that needs a newer OpenCode than this server runs answers 409
+      `OPENCODE_TOO_OLD` before any command runs, and the update check marks
+      it `installBlocked: 'opencode-version'` with `requiredOpenCodeVersion`
+      and `openCodeVersion`, ahead of the other blocks; clients keep the Update
+      button disabled with the reason under it. The new build would refuse to
+      start against that OpenCode, and an external one cannot be updated from
+      the app. The requirement is `engines.opencode` (`>=2.2.4`) in the
+      release's published `package.json`, which repeats
+      `MINIMUM_OPENCODE_VERSION` (a test keeps the two equal). A release
+      without the field, a registry that cannot be read, or an OpenCode
+      version that cannot be read blocks nothing. Desktop-managed hosts update
+      through `electron-updater`, whose feed carries no requirement.
     - A copy no package manager installed answers 409 before any command
       runs: a global install would add a second copy and leave the running
       one as it is. Detection reports such a copy as `unmanaged-install` when
@@ -1254,6 +1280,15 @@ within a ten-minute overall deadline.
       in use" and the update ended with no server.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
+
+### Why the OpenCode requirement rides in `package.json` and not in the update check's answer
+
+The running build cannot know what a later release needs, so the release has to
+say it. The npm server installs that release from the registry, so
+`engines.opencode` in the published `package.json` reaches the check through
+`bun publish`, with no change to the website API, the R2 mirror or the release
+workflows. npm (even with `engine-strict`) and bun install a package whose
+`engines` names OpenCode.
 
 ## Public exports (pwa-manifest-routes.js)
 - `registerPwaManifestRoute(app, dependencies)`: registers PWA manifest endpoint with dynamic app-name resolution and recent-session shortcuts:

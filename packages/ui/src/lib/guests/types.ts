@@ -5,6 +5,7 @@ import type {
   GuestBlockContribution,
   GuestCapability,
   GuestCommandContribution,
+  GuestLinkAction,
   GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
@@ -15,6 +16,7 @@ import type {
   PublicTracker,
   PublicSessionEvents,
   PublicSourceControl,
+  PublicWait,
 } from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
@@ -30,6 +32,8 @@ export type InstalledGuest = {
   /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
   entryDock?: GuestSurfaceDock;
   entrySize?: number;
+  /** `panel.mobile`: the phone may show `entry` (panel, its live-screen dock, attach). */
+  entryMobile?: true;
   /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
@@ -41,6 +45,8 @@ export type InstalledGuest = {
   attachEntry?: string;
   pageEntry?: string;
   pageTitle?: string;
+  /** The phone may show the page; the server already resolved `page: true` against `panel.mobile`. */
+  pageMobile?: true;
   /** HTML of the extension's Work Status section (`contributes.statusSection`); may exist without `entry`. */
   statusEntry?: string;
   /** Service path the host reads and draws the section from, without a frame; wins over `statusEntry`. */
@@ -63,6 +69,8 @@ export type InstalledGuest = {
   sourceControl?: PublicSourceControl;
   /** The session events the service subscribed to (`contributes.sessionEvents`), for the approval dialog and the card. */
   sessionEvents?: PublicSessionEvents;
+  /** The waits agents may start on the service (`contributes.waits`), named on the approval dialog. */
+  waits?: Array<Pick<PublicWait, 'id' | 'title'>>;
   /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
   notifications?: PublicNotifications;
   /** The tracker from `contributes.tracker`, when the service provides `tracker`. */
@@ -73,12 +81,18 @@ export type InstalledGuest = {
   sessionControl?: { content: boolean };
   /** The service adds to what agents read. */
   instructions?: true;
+  /** The service puts marks on sidebar rows (`contributes.marks`). */
+  marks?: true;
   /** The package ships skills for every agent. */
   skills?: true;
   /** The package ships an OpenCode plugin, listed in the managed OpenCode config while the extension is on. */
   opencodePlugin?: true;
+  /** `contributes.providerLogos`: OpenCode provider id to a package image, drawn in place of a logo the app ships. */
+  providerLogos?: Record<string, string>;
   /** The section the extension adds to the composer's `@` menu. */
   mentions?: { label: string };
+  /** Identifiers and links in chat messages a click hands to the extension (`contributes.links`, compiled by the server). */
+  links?: PublicGuestLinks;
   /** What the running service says is missing; shown on its card. */
   needsConfiguration?: string;
   /** Declared `contributes.blocks`; agents write them only for an active guest. */
@@ -89,6 +103,8 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** The integration setting values this guest's card links read as `{settings.<id>}`. Only the catalog carries them. */
+  toolLinkSettings?: Record<string, string>;
   /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
   fileEditors?: FileEditorContribution[];
   /** What the package asks for and what the user approved at install. */
@@ -124,6 +140,20 @@ export type OpenCodePlugins = {
   delivery: OpenCodePluginDeliveryState;
   globalConfigPath: string | null;
   inGlobalConfig: string[];
+};
+
+/** `contributes.links` as the catalog serves it: literal keys and compiled link patterns. */
+export type PublicGuestLinks = {
+  action: GuestLinkAction;
+  keys: string[];
+  urls: {
+    origin: string;
+    /** Anchored; the identifier a query template carries is checked against it. */
+    identifierPattern: string;
+    patterns: Array<{ path: string; query?: { name: string } }>;
+    /** A template the host fills from an identifier alone, or null. */
+    itemTemplate: string | null;
+  } | null;
 };
 
 export type GuestCatalog = { guests: InstalledGuest[]; unreadable: UnreadableGuest[]; opencodePlugins: OpenCodePlugins | null };

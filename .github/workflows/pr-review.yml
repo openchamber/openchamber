@@ -458,6 +458,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
         run: |
           if ! role="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${PR_AUTHOR}/permission" --jq '.role_name')"; then
             echo "::warning::Could not read the role of ${PR_AUTHOR}; reviewing under the contributor rules."
@@ -465,6 +466,17 @@ jobs:
           fi
           echo "Author role: $role"
           echo "role=$role" >> "$GITHUB_OUTPUT"
+          # The list the contribution gate reads (pr-checks.cjs), from the base
+          # branch: a review_comment run checks out the PR's merge ref, where a PR
+          # could add its own author. A failed read leaves the author untrusted.
+          trusted="no"
+          if list="$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/trusted-contributors?ref=${PR_BASE_REF}" \
+              -H 'Accept: application/vnd.github.raw')" \
+            && printf '%s\n' "$list" | sed 's/#.*//' | tr -d '[:blank:]\r' | grep -qixF -- "$PR_AUTHOR"; then
+            trusted="yes"
+          fi
+          echo "Trusted contributor: $trusted"
+          echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
 
       - name: Record review start
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
@@ -481,6 +493,7 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
           AUTHOR_ROLE: ${{ steps.author.outputs.role }}
+          AUTHOR_TRUSTED: ${{ steps.author.outputs.trusted }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
           PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
@@ -513,6 +526,7 @@ jobs:
           Number: $PR_NUMBER
           Author: $PR_AUTHOR
           Author repository role: $AUTHOR_ROLE
+          Author on the trusted-contributor list: $AUTHOR_TRUSTED
           Base: $PR_BASE_REF
           Head: $PR_HEAD_REPO_OWNER:$PR_HEAD_REF
           Required reviewed HEAD: $REVIEW_HEAD_SHA" | tee "$output"
@@ -544,7 +558,15 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          message="$(cat "$RUNNER_TEMP/review-message.md")"
+          # The review model sometimes closes the final marker line with stray
+          # characters, mostly `} */ -->`, and the strict check in the verdict
+          # step then fails the run. Rewrite that line from the JSON it holds;
+          # a message whose last line is not a marker stays as it is.
+          message="$(jq -Rrs '
+            (sub("\\s+$"; "") | split("\n")) as $lines
+            | ([$lines[-1] | capture("^\\s*<!-- oc-review-meta (?<json>\\{[^{}\\n]*\\})")? | .json | fromjson? | objects | {head, verdict}] | first) as $meta
+            | if $meta then $lines[:-1] + ["<!-- oc-review-meta \($meta | tojson) -->"] else $lines end
+            | join("\n")' "$RUNNER_TEMP/review-message.md")"
           heading='<h3>Code Review Summary</h3>'
 
           # Without the metadata marker there is no review to post; the verdict

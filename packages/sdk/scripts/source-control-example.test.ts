@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
-import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { startExampleService } from './fixtures/example-service';
 import { FAKE_FORGE_FORK, FAKE_FORGE_STRANGER, startFakeForge, type FakeForge } from '../examples/source-control-provider/fake-forge';
 import { sourceControlProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import {
@@ -25,15 +25,6 @@ import {
 
 const serviceEntry = fileURLToPath(new URL('../examples/source-control-provider/service/main.js', import.meta.url));
 const PROVIDER = 'ext-source-control-provider';
-
-const freePort = () => new Promise<number>((resolve, reject) => {
-  const server = net.createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const { port } = Object(server.address());
-    server.close(() => resolve(Number(port)));
-  });
-});
 
 let forge: FakeForge;
 let repository: string;
@@ -76,23 +67,13 @@ beforeAll(async () => {
     },
   });
 
-  servicePort = await freePort();
-  service = spawn('node', [serviceEntry], {
+  ({ service, port: servicePort } = await startExampleService({
+    entry: serviceEntry,
+    token: serviceToken,
     env: {
-      PATH: process.env.PATH,
-      OPENCHAMBER_SERVICE_PORT: String(servicePort),
-      OPENCHAMBER_SERVICE_TOKEN: serviceToken,
       [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${callback.port}`,
     },
-    stdio: 'ignore',
-  });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const ready = await fetch(`http://127.0.0.1:${servicePort}/health`, { headers: { authorization: `Bearer ${serviceToken}` } })
-      .then((response) => response.ok, () => false);
-    if (ready) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('The example service never became ready');
+  }));
 });
 
 afterAll(async () => {

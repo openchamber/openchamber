@@ -170,6 +170,28 @@ test('a finished subagent is one row with its duration and an open action, never
   });
 });
 
+test('an expanded subagent row draws a UI block from the reply, its buttons disabled', async () => {
+  const withBlock: ToolPartData = {
+    ...parent,
+    state: {
+      status: 'completed', input: { description: 'Update files', agent: 'explore' },
+      // The library's name as the fence tag: recovered as replies recover it.
+      output: '<subagent sessionID="child" state="completed">\nPick one:\n\n```openui\nroot = Stack([c])\nc = Card("Next step", [Button("Fix", "primary", "next")])\n```\n</subagent>',
+      metadata: { sessionID: 'child' }, time: { start: 1_000, end: 63_000 },
+    },
+  };
+  await withHarness(withBlock, true, async (_store, container) => {
+    let button: Element | undefined;
+    for (let attempt = 0; attempt < 50 && !button; attempt += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      button = [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Fix');
+    }
+    expect(container.textContent).toContain('Next step');
+    expect(button?.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).not.toContain('root = Stack');
+  });
+});
+
 test('a running subagent without the progress join resolves its child session from the store', async () => {
   const running: ToolPartData = {
     ...parent,

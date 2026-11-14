@@ -23,6 +23,9 @@
       "instances": {
         "format": "host",
         "defaultInstance": "github.com",
+        "defaultInstances": [
+          "github.com"
+        ],
         "multiple": true,
         "allowLoopbackHttp": false,
         "allowPort": false,
@@ -123,6 +126,9 @@
       "instances": {
         "format": "origin",
         "defaultInstance": "https://gitlab.com",
+        "defaultInstances": [
+          "https://gitlab.com"
+        ],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -212,6 +218,7 @@
       "instances": {
         "format": "origin",
         "defaultInstance": null,
+        "defaultInstances": [],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -304,6 +311,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -328,6 +336,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -351,6 +360,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -384,6 +394,7 @@
       "instances": {
         "format": "origin",
         "defaultInstance": null,
+        "defaultInstances": [],
         "multiple": true,
         "allowLoopbackHttp": true,
         "allowPort": true,
@@ -461,6 +472,7 @@
       "issues": false,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "submit"

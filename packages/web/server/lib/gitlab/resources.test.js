@@ -599,6 +599,27 @@ describe('GitLab resource service', () => {
     expect(client.MergeRequests.edit).not.toHaveBeenCalled();
   });
 
+  it('converts a merge request to a draft by adding the title prefix, and does nothing when it already is one', async () => {
+    const mergeRequests = {
+      ...setup().client.MergeRequests,
+      show: vi.fn(async () => ({ ...openMR, draft: false, title: 'Feature' })),
+      edit: vi.fn(async (_id, _iid, options) => ({ ...openMR, draft: true, title: options.title })),
+    };
+    const { service, client } = setup({ MergeRequests: mergeRequests }, { canonicalReads: true });
+    const payload = {
+      providerTarget: { projectId: '2', number: 5 },
+      targetProject: { id: '2', owner: 'team', name: 'repo' },
+      expectedTarget: { project: { id: '2', owner: 'team', name: 'repo' }, number: 5, head: 'feature', base: 'main' },
+    };
+    await expect(service.draftChangeRequest(payload)).resolves.toEqual({ draft: true });
+    expect(client.MergeRequests.edit).toHaveBeenCalledWith('2', 5, { title: 'Draft: Feature' });
+
+    mergeRequests.show.mockResolvedValue({ ...openMR, draft: true, title: 'Draft: Feature' });
+    client.MergeRequests.edit.mockClear();
+    await expect(service.draftChangeRequest(payload)).resolves.toEqual({ draft: true });
+    expect(client.MergeRequests.edit).not.toHaveBeenCalled();
+  });
+
   it('rejects a malformed ready mutation response', async () => {
     const malformed = { ...openMR, draft: undefined, work_in_progress: undefined };
     const { service } = setup({
@@ -654,9 +675,12 @@ describe('GitLab resource service', () => {
     mergeRequests.show.mockResolvedValue({ ...openMR, draft: false });
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))
       .resolves.toEqual({ state: 'succeeded', result: { ready: true } });
+    mergeRequests.show.mockResolvedValue({ ...openMR, draft: true });
+    await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toEqual({ state: 'succeeded', result: { draft: true } });
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-update'))
       .resolves.toEqual({ state: 'outcome-unknown' });
-    expect(mergeRequests.show).toHaveBeenCalledTimes(3);
+    expect(mergeRequests.show).toHaveBeenCalledTimes(4);
   });
 
   it('keeps ready reconciliation unknown when provider draft state is malformed', async () => {

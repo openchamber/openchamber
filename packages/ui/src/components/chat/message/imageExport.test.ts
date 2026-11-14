@@ -7,7 +7,7 @@ const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
 Object.assign(globalThis, {
     window: browser,
-    document: browser.document,
+    document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent,
     navigator: browser.navigator,
     localStorage: browser.localStorage,
     sessionStorage: browser.sessionStorage,

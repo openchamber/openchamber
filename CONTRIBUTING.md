@@ -161,7 +161,11 @@ file directly while iterating (`bun test <file>`).
 
 UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
 it removed: test each malicious payload in its own call, or a combined payload
-passes or fails for the wrong reason. The UI's `bun:test` type shim is trimmed
+passes or fails for the wrong reason. happy-dom refuses an event built by another
+realm, so a test that installs a `Window` as `window` also installs that window's
+`Event` and `CustomEvent`: app code dispatches `new CustomEvent(...)` on `window`
+when stores load. `src/test/preload.ts` turns off Base UI's animation waits,
+since nothing animates in happy-dom. The UI's `bun:test` type shim is trimmed
 (no `test.each`, no `toMatch`): use loops and `regex.test()` with `toBe`.
 
 For docs-only changes, validation may be enough:

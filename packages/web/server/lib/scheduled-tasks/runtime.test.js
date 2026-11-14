@@ -446,6 +446,64 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[2].body.resume).toBeUndefined();
   });
 
+  it('routes a run on the Auto default before its first send', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      if (/\/(model|agent)$/.test(pathname)) return new Response(null, { status: 204 });
+      const data = pathname === '/api/session' ? { id: 'ses_auto' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', useDefaults: true },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const routings = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      readSessionDefaults: async () => ({ providerID: 'openchamber', modelID: 'auto', variant: null, agent: 'build' }),
+      resolveAutoSelection: async (input) => {
+        routings.push(input);
+        return { model: { providerID: 'openai', id: 'gpt-5', variant: 'high' }, agent: 'plan' };
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({ ok: true, status: 'sent' });
+    const create = posts.find((post) => post.pathname === '/api/session')?.body;
+    expect(create.model).toBeUndefined();
+    expect(create.agent).toBe('build');
+    expect(routings).toEqual([{
+      sessionId: 'ses_auto',
+      directory: '/repo',
+      model: { providerID: 'openchamber', id: 'auto' },
+      agent: 'build',
+      requestText: 'Review open issues',
+    }]);
+    const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_auto/'));
+    expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['model', 'agent', 'prompt']);
+    expect(dispatch[0].body.model).toEqual({ providerID: 'openai', id: 'gpt-5', variant: 'high' });
+    expect(dispatch[1].body.agent).toBe('plan');
+  });
+
   it('points a run that fails after creating its session at that session', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));

@@ -143,6 +143,14 @@ Ultra `.nemo`. Its transcripts match an independent export word for word on
 all 600 clips. A pre-release keeps the desktop updater, which reads the latest
 full release, away from it.
 
+To export another model of the Parakeet v3 architecture, run sherpa-onnx's
+`scripts/nemo/parakeet-tdt-0.6b-v3/export_onnx.py` on its `.nemo` in a Python
+3.11 venv with `nemo_toolkit[asr]`, `numpy<2`, `pyarrow<20`, `onnx==1.17.0`
+and `onnxruntime==1.17.1`. The encoder's `url` metadata must contain `tdt`,
+or sherpa-onnx 1.13 refuses the model. Pack it as a `.tar.bz2`, upload it to
+the `asr-models` pre-release, and point the entry's `archiveUrl` in
+`local/model-catalog.js` at it.
+
 The default applies only while the user has not picked a model (the client
 sends an empty `localModel`). Someone who already has v2 installed keeps v2:
 v2 was the default before, so an installed copy means they dictate with it,

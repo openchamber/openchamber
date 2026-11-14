@@ -104,13 +104,13 @@ test('edit and patch headers render v2 file diff counts as results arrive', asyn
       await render(tool, {});
       expect(container.textContent).not.toContain('+7');
       await render(tool, { files: [{ file: 'src/example.ts', additions: 7, deletions: 3, status: 'modified' }] });
-      expect(container.textContent).toContain('+7/-3');
+      expect(container.textContent).toContain('+7 −3');
       // Canonical counts win even when a legacy diff is also present.
       await render(tool, { files: [{ file: 'src/example.ts', additions: 0, deletions: 4, status: 'deleted' }], diff: '+wrong' });
-      expect(container.textContent).toContain('+0/-4');
-      expect(container.textContent).not.toContain('+7/-3');
+      expect(container.textContent).toContain('+0 −4');
+      expect(container.textContent).not.toContain('+7 −3');
       await render(tool, { files: [{ file: 'src/example.ts', additions: 0, deletions: 0, status: 'modified' }] });
-      expect(container.textContent).toContain('+0/-0');
+      expect(container.textContent).toContain('+0 −0');
       await render(tool, { files: [{ file: 'src/example.ts', additions: 7 }] });
       expect(container.textContent).not.toContain('+7');
     }
@@ -119,11 +119,11 @@ test('edit and patch headers render v2 file diff counts as results arrive', asyn
       { file: 'src/two.ts', additions: 2, deletions: 0 },
     ] });
     expect(container.textContent).toContain('+7');
-    expect(container.textContent).toContain('-3');
+    expect(container.textContent).toContain('−3');
     expect(container.textContent).toContain('+2');
 
     await render('edit', { diff: '@@ -1 +1 @@\n-old\n+new\n+another' });
-    expect(container.textContent).toContain('+2/-1');
+    expect(container.textContent).toContain('+2 −1');
     await render('write', {}, { path: 'new.ts', content: 'one\ntwo' });
     expect(container.textContent).toContain('+2');
   } finally {

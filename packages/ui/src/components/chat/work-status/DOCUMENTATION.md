@@ -93,8 +93,8 @@ overlay.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code (the phone shows the sections in its own
-  tab, see below);
+- the runtime is mobile. The phone shows the sections in its own tab, see
+  below;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel. Only the threshold decisions are state
   (`roomy`, `roomyBesidePanel`); the width itself is not, because it changes
@@ -121,7 +121,7 @@ and usage readouts before a session exists.
 Managed Chats never render or warm the Project repository section. A Chat draft
 passes no fallback directory to the panel, so an active project's branch cannot
 leak into it. The MCP section prepares the draft's own directory through
-`prepareChatDraftDirectory`, shared with the header dropdown and first send.
+`prepareChatDraftDirectory`, shared with the first send.
 MCP reads and toggles wait for that directory; they never use the previous
 Chat's connections or the shared Chats root for a draft.
 
@@ -188,6 +188,23 @@ Subagents are off on the phone unless the user turns them on, while on desktop
 every section is on. One shared list could not hold both defaults, and a phone
 and a laptop are set up apart anyway, as the drawer's tabs already are.
 
+## In VS Code
+
+VS Code mounts no `ContextPanel`, so `VSCodeChatArea` (`VSCodeLayout.tsx`)
+hosts the inline card's column itself, beside the chat, and carries the
+`data-chat-area` the visibility test measures. A wide editor tab or sidebar
+gets the inline card, a narrow one the overlay. The width test there ignores
+the context panel's store state: a skill citation still opens the right zone in
+the store, and a panel nobody sees must not hide the card. The chat header's button is the
+desktop header's toggle: `workStatusPanelEnabled` where the card fits, the
+overlay where it does not. The run overview covers the chat there, so it hides
+the card through `setChatCovered`, as a full-page surface does on desktop.
+
+Rows that would open the context panel are readouts there, because VS Code
+mounts no `ContextPanel`. A pull request row opens its URL in the browser, the
+only surface VS Code has for one; a summary without a URL leaves the row a
+readout (`prRowTarget.ts`).
+
 ## Data sources
 
 Everything is read from already-warm caches. The panel adds no aggregated
@@ -204,15 +221,15 @@ which requests only providers enabled for this panel.
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
-| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
+| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
 | Linked plans | `useProjectContextStore` plans of the session's project whose `session.sessionId` is this session | refreshed through `observeProjectContext` |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
-| MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
+| MCP | `useMcpStore` | the switch reuses `useMcpStore.setEnabled`; a failed toggle shows its error in a toast and leaves the switch usable |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
+| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown. VS Code has no such route, so the loader never reads there and Tasks stays unlisted |
 
 ### Subagent rows
 
@@ -254,7 +271,13 @@ tooltip. Model-only session updates invalidate the live-session comparison.
 ### Turn stats
 
 The section follows Usage by default and reuses the panel's existing rows. Only its header
-has an icon; metric rows use labels and values without leading icons. It
+has an icon; metric rows use labels and values without leading icons. It starts
+folded: its rows took more height than the rest of the card, and the header
+line carries two of the figures people scan, joined with ` · `, folded and
+open alike, so it fits the card: elapsed time plus cost when the turn cost
+something, response speed plus elapsed time when its cost is absent or zero
+(a subscription, a local model). Once the user opens or folds it,
+`workStatusExpandedSections` keeps that choice. It
 reads already-loaded records without fetching history. The newest turn needs a
 preceding user message and completed assistant steps. A truncated or unfinished
 turn has no whole-turn result; later materialization can supply it. A newest
@@ -268,8 +291,8 @@ message's output tokens divided by the union of its nonempty text intervals.
 It excludes initial waiting, reasoning tokens and reasoning time, and earlier
 tool steps. It requires complete, valid text timing and a final message without
 tools, errors, synthetic text or ignored text. This measures text delivery from
-the live text timestamps, not provider-side decode speed. The header shows only
-this rate; unavailable response timing never falls back to whole-turn speed.
+the live text timestamps, not provider-side decode speed. The header's rate is
+only this one; unavailable response timing never falls back to whole-turn speed.
 OpenCode stores no timing for text, so a reloaded or never-watched turn has
 text stamped with its step's `created` and `completed`. A text start equal to
 `created` is that stamp, so Response speed is unknown after a reload.
@@ -304,12 +327,12 @@ input excludes cached tokens and output includes reasoning across all steps.
 
 Records subscriptions stop while busy, retrying, or awaiting
 status authority. Explicit idle events or a successful directory status snapshot
-allow computation even when collapsed: the response-speed headline remains visible
+allow computation even when collapsed: the headline remains visible
 and updates when a turn completes, after a remount, or when idle records change.
 The collapsed body stays unmounted. One component-owned committed result keeps the
 headline and rows stable during the next active turn. Whenever the shown numbers
 belong to an earlier turn (a pending prompt, or a busy or retrying session), the
-header says "Previous turn", followed by the response speed when there is one.
+header says "Previous turn", followed by the same two figures.
 Opening or reopening the section mid-run reads already-loaded, revert-filtered
 records once per scope, without fetching history or subscribing to streaming
 updates. It excludes the entire newest user-bounded turn, even if some of its
@@ -490,14 +513,14 @@ The default order is by durability:
    long as the session is open. Usage sits here rather than lower down because a
    spent quota stops the work outright, and Context sources because it holds the
    linked issue and PR, which tell what the session is about;
-2. **Subagents** and **Workflows** — what is happening right now;
+2. **Subagents**, **Tasks** and **Workflows** — what is happening right now;
 3. **MCP** and **Pinned messages** — supporting material.
 
 The sections dialog has drag handles for changing this order, including hidden
 sections. A drop updates the panel immediately. `workStatusSectionOrder` is a
 profile preference persisted through the settings registry and the local UI
 store. Missing or empty order uses the default; duplicate and obsolete ids are
-discarded, and newly introduced sections append in default order. Visibility
+discarded, and newly introduced sections append in default order, except those listed in `PLACED_AFTER` (`sections.ts`), which go right after their default neighbour: Tasks lands after Subagents in every saved list, where the default puts it. Visibility
 changes never alter positions.
 
 Clients saved the default as their order without the user choosing it, so a
@@ -540,7 +563,7 @@ mounted, the section is visible, and the section is expanded; the collapsible
 drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
 without extension sections never loads it. The frame's height starts at the
 manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
-to 24..320px; taller content scrolls inside the frame, never the host. The last
+to 24..480px; taller content scrolls inside the frame, never the host. The last
 requested height is remembered per extension id and version for the app
 session (a module-level map, one number per installed extension), so folding
 and reopening a section does not jump back to the manifest default.
@@ -561,7 +584,7 @@ with `surface: 'popover'`. Folding or hiding the section removes the card with
 its owner; project/runtime and authorization changes also dismiss it. Pointer
 travel into the card and keyboard dismissal are handled by the SDK anchor
 helper and the host overlay controller. This does not increase the status
-frame's 320px height limit. The public contract is in `packages/sdk/API.md`,
+frame's 480px height limit. The public contract is in `packages/sdk/API.md`,
 under Anchored popovers.
 
 ### Sections the app draws
@@ -583,10 +606,14 @@ The section sits among the app's own sections and follows the theme, light and d
 `createGuestStatusViewReader` returns the previous view untouched when the answer's body is byte-identical, and otherwise reuses each row object, and the header controls, whose JSON did not change. Rows are memoized by identity and the header binding follows the controls' identity, so a sample that moves one number redraws one row instead of the section and its header.
 
 `useWorkStatusExtensionSections` lists active guests with a `statusEntry` or `statusSource` from
-the catalog store (`useGuestStatusSections`). It is empty on VS Code and
-mobile, which load no guests; the panel is hidden there anyway, but the empty
-list is explicit rather than an accident of visibility. The rail owns loading
-the catalog.
+the catalog store (`useGuestStatusSections`), for the desktop panel and the
+phone's Status tab alike: a section is a narrow frame or the app's own rows,
+so it needs no phone opt-in. It is empty on VS Code, which loads no guests;
+the panel is hidden there anyway, but the empty list is explicit rather than
+an accident of visibility. The rail, or the mobile shell, owns loading the
+catalog. On the phone an extension's controls (header buttons and selects,
+row actions in a `source` section) keep the desktop's `xs` button grown to the
+36px touch floor (`TOUCH_CONTROL_CLASS`).
 
 Section ids are `ext:<extension id>` and share the persisted order and hidden
 lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that
@@ -690,10 +717,45 @@ Rows that name something the app can already show are buttons:
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
-| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`) |
-| MCP status | the state doubles as the button that reconnects |
+| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`); switching on a `needs_auth` server signs in instead |
+| MCP status | the state doubles as the button: "Sign in" starts the server's OAuth sign-in under the row, "Failed" reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |
+
+### Why the MCP sign-in runs under its row
+
+A `needs_auth` server cannot be connected into working order: `connect`
+repeats the attempt that produced `needs_auth`. The row's Sign in, and its
+switch turned on, mount the sign-in Settings uses (`McpOAuthSignIn` with
+`autoStart` and no start button) under that row, in the section's directory.
+Pointing at Settings instead was the alternative; it sent the user through
+four screens for one button. The attempt's progress stays visible because the
+browser tab can be blocked (it opens after an await), and a `code` attempt
+needs a field to paste into.
+
+The press is held as a request with its server, directory and a run number.
+The request is live only while the section is unfolded and shows the
+request's directory. Until its attempt starts, and once it fails, the server
+must also still report `needs_auth`; a started attempt (`onActiveChange`)
+keeps the request live whatever the status says until it completes or fails.
+A sign-in from another machine writes the server's redirect first
+(`packages/web/server/lib/opencode/mcp-oauth.js`) and OpenCode reports the
+server `pending` while it reconnects; dropping the request then unmounted the
+sign-in and cancelled the attempt the user was in. A request that stops being
+live is dropped for good, and nothing starts again without a press. That
+covers folding (which unmounts the sign-in and cancels an unfinished
+attempt), a project switch, and a server that leaves `needs_auth` after the
+attempt ended, so a later `needs_auth` never starts a sign-in on its own.
+OpenCode's own reconnect once the credential is stored can move the server
+out of `needs_auth` before the attempt reports back; the attempt still
+finishes and reconnects its directory. One sign-in runs
+at a time: a new press remounts it with a new run, which cancels the previous
+attempt upstream, and an attempt that finishes late cannot end a newer one.
+Unmounting the panel mid-attempt cancels the attempt, as leaving Settings
+does; a sign-in already finished in the browser keeps its credential. When
+the integration lookup gives up (its retries run out, or the server has no
+OAuth method), the request is dropped and a toast points at Settings → MCP,
+so a press never ends in silence.
 
 ### Project actions
 
@@ -802,9 +864,9 @@ disabled styling; those pins are the behavioural precedent — the panel that
 shows what is attached can detach it — not the visual one. Pressing it sends
 the removal through the same server operation (`setLinkedIssue(…, false)`) the
 attach flows use — one writer for the list, so a link cannot be dropped by a
-path that does not know the others. The write
-is deliberately user-initiated: an agent links but never removes, so it cannot
-drop a link the user set (`packages/web/server/lib/openchamber-sessions/session-link.js`).
+path that does not know the others. An agent removes a link with the
+`openchamber` tool's `session.unlink`, which runs the same list transform on
+the server (`packages/web/server/lib/openchamber-sessions/session-link.js`).
 A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
 leaving the row looking removed.
 
@@ -849,10 +911,11 @@ per repository.
 
 ## Loading data the header used to own
 
-Two readouts had no loader of their own and appeared only after the user opened
-the matching header dropdown:
+These readouts had no loader of their own and appeared only after the user
+opened the header's MCP or rate-limit dropdown (both since removed):
 
-- **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
+- **MCP** — the panel's MCP section calls `ensureFresh` on mount, so it no
+  longer depends on that dropdown.
 - **Usage** — `useQuotaAutoRefresh` owns the initial fetch and the shared
   three-minute refresh while a quota readout is shown. The panel passes its
   visibility through the section list, so retained closing content does no work.

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-import { holdMarkdownBlocks, MarkdownWindow } from './markdownWindow';
+import { hasMarkdownWindow, holdMarkdownBlocks, MarkdownWindow } from './markdownWindow';
 
 // Twenty blocks of 100 px in a 100 px scroller; a block's box follows the
 // scroll offset.
@@ -90,6 +90,14 @@ describe('markdown window', () => {
     expect(rendered()).toEqual([0, 1, 2, 15]);
     one();
     expect(rendered()).toEqual([0, 1, 2]);
+  });
+
+  test('reports a window only once one is attached to the document', () => {
+    expect(hasMarkdownWindow(scroller)).toBe(false);
+    expect(holdMarkdownBlocks(scroller)).toBeInstanceOf(Function);
+    blockWindow.attach(container);
+    expect(hasMarkdownWindow(scroller)).toBe(true);
+    expect(hasMarkdownWindow(wrappers[3])).toBe(true);
   });
 
   test('keeps a block whose disclosure the reader toggled mounted', () => {

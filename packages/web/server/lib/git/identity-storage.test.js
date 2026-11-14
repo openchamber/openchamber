@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGitIdentityStore } from './identity-storage.js';
+import { createGitIdentityStore, toPublicGitIdentityProfile } from './identity-storage.js';
 import { gitStorageProcess } from './storage-process.test-support.js';
 
 const roots = [];
@@ -50,7 +50,7 @@ describe('git identity storage', () => {
   });
 
   it('stores an identity as an account, a transport and a signature', async () => {
-    const { store } = await setup();
+    const { store, filePath } = await setup();
     const created = store.createProfile({ ...profile('work'), account, transport: 'account' });
     expect(created).toMatchObject({ account, transport: 'account' });
 
@@ -64,8 +64,12 @@ describe('git identity storage', () => {
     // A signature that pushes with the machine's own Git needs no account,
     // and may still name one so it answers for issues and change requests.
     expect(store.createProfile(profile('personal'))).toMatchObject({ account: null, transport: 'system' });
-    expect(store.createProfile({ ...profile('personal-with-account'), account, transport: 'system' }))
-      .toMatchObject({ account, transport: 'system' });
+    const externalAccount = { provider: 'ext-forge', instance: 'https://forge.example', accountId: 'https://forge.example#cli:alice ' };
+    expect(store.createProfile({ ...profile('personal-with-account'), account: externalAccount, transport: 'system' }))
+      .toMatchObject({ account: externalAccount, transport: 'system' });
+    const reopened = createGitIdentityStore({ filePath }).getProfile('personal-with-account');
+    expect(reopened.account).toEqual(externalAccount);
+    expect(toPublicGitIdentityProfile(reopened).account).toEqual(externalAccount);
   });
 
   it('refuses an identity whose transport and credentials disagree', async () => {

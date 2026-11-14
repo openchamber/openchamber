@@ -3,6 +3,7 @@ import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 
 const REVEAL_LABEL = /Finder|File Explorer|file manager/i;
+const COPY_PATH_LABEL = /^Copy path$/;
 const SOURCE_BOARD_LABEL = /^Issues and PRs$/;
 
 type ProjectMenuOptions = { onOpenFolder?: () => void; isRepo?: boolean; onOpenSourceBoard?: () => void };
@@ -37,6 +38,11 @@ const renderOpenProjectMenu = async (options: ProjectMenuOptions = {}) => {
   const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver, Node: win.Node, Element: win.Element, HTMLElement: win.HTMLElement, Event: win.Event, MouseEvent: win.MouseEvent, PointerEvent: win.PointerEvent, KeyboardEvent: win.KeyboardEvent, getComputedStyle: win.getComputedStyle.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
   const previous = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  const copied: string[] = [];
+  Object.defineProperty(win.navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText: async (text: string) => { copied.push(text); } },
+  });
   // These modules read the DOM when they load, so they come after the globals.
   const { createRoot } = await import('react-dom/client');
   const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
@@ -57,6 +63,7 @@ const renderOpenProjectMenu = async (options: ProjectMenuOptions = {}) => {
   const menuItem = (label: RegExp) => Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
     .find((item) => label.test(item.textContent?.trim() ?? '')) ?? null;
   const revealItem = () => menuItem(REVEAL_LABEL);
+  const copyPathItem = () => menuItem(COPY_PATH_LABEL);
   const sourceBoardItem = () => menuItem(SOURCE_BOARD_LABEL);
   const cleanup = async () => {
     await act(async () => root.unmount());
@@ -66,7 +73,7 @@ const renderOpenProjectMenu = async (options: ProjectMenuOptions = {}) => {
     }
     await win.happyDOM.close();
   };
-  return { revealItem, sourceBoardItem, cleanup };
+  return { revealItem, copyPathItem, sourceBoardItem, copied, cleanup };
 };
 
 test('the project menu reveals the project folder when the runtime can', async () => {
@@ -87,6 +94,21 @@ test('the project menu has no reveal entry without a reveal action', async () =>
   try {
     expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
     expect(menu.revealItem()).toBeNull();
+  } finally {
+    await menu.cleanup();
+  }
+});
+
+test('the project menu copies the project path', async () => {
+  const menu = await renderOpenProjectMenu();
+  try {
+    const item = menu.copyPathItem();
+    expect(item).not.toBeNull();
+    await act(async () => {
+      item?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(menu.copied).toEqual(['/repo']);
   } finally {
     await menu.cleanup();
   }

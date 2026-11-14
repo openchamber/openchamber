@@ -111,7 +111,7 @@ const Stat = defineComponent({ name: 'Stat', description: 'a key number; delta l
 const Progress = defineComponent({ name: 'Progress', description: 'max defaults to 100', props: blockProps.Progress, component: null });
 const Steps = defineComponent({
   name: 'Steps',
-  description: 'flow joined by arrows',
+  description: 'steps joined by a line; status marks execution progress',
   props: blockProps.Steps,
   component: null,
 });

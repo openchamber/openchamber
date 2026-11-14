@@ -12,15 +12,20 @@ drawer.
 | `KnowledgeSearchBar.tsx` | the floating search bar |
 | `NotesSection.tsx` | note list, per-note title/preview, the open note, pin, delete |
 | `NoteEditor.tsx` | the note editor: Markdown that reads formatted while you type |
-| `TodosSection.tsx` | todo list, add/toggle/delete/clear, drag reorder |
-| `PlansSection.tsx` | plan list, create, import, pin, share, delete, open |
+| `TodosSection.tsx` | todo list, add/toggle/edit/delete/clear, drag reorder, the plan a todo belongs to |
+| `todoList.ts` | todo list order: completed last, check and uncheck, what a todo waits for |
+| `PlansSection.tsx` | plan list, create, import, pin, open; the progress mark |
+| `usePlanActions.ts` | a plan's menu actions, shared by its row and the open plan: open session, share, delete |
+| `PlanTodos.tsx` | the todos filed under a plan, under the open plan's text |
+| `openPlanViews.ts` | the plans open in a `PlanView`, held and saved before a move |
+| `useSessionKnowledgePins.ts` | the current session's pins, one store for the lists and the open plan |
 | `MemorySection.tsx` | agent memory list, project/global scope switch, new/changed badges, edit, forget, the Tidy up button |
 | `memoryTidy.ts` | starting the tidy-up session: the store as prompt text, the default model, the send |
 | `KnowledgeCard.tsx` | the list card for notes and memory: fixed height, opens on click |
 | `KnowledgeSplit.tsx` | the wide layout: list column and open entry side by side |
 | `KnowledgeEntryView.tsx` | the shell an opened note or memory renders in, in place of the list |
 | `KnowledgeComposer.tsx` | the add field every section except memory uses |
-| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, hover reveal |
+| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, the row's right-click menu, hover reveal |
 | `pendingKnowledgeDeletes.ts` | deletes that wait out an undo window |
 | `knowledgeFormat.ts` | note title from the first line, entry dates |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
@@ -64,7 +69,7 @@ changed since the user last looked, as a separate `+N` next to the total.
 
 ## Wide panel: list and entry side by side
 
-From 900px of panel width (measured on the panel itself, so an expanded panel
+From 1040px of panel width (the 380px list plus about 640px for the entry) (measured on the panel itself, so an expanded panel
 and a dragged-wide one behave the same) notes, plans and memory switch to
 `KnowledgeSplit`: the list in a 380px column on the start side, the open entry
 beside it, the selected card marked. Nothing replaces the list, so there is no
@@ -83,9 +88,11 @@ still swapped the whole list away to open one entry.
 ## Adding entries
 
 Notes, todos and plans add through the same `KnowledgeComposer`: one line that
-grows with its text, Enter to add, the add button at its end. Notes follow the
+grows with its text, Enter to add, an Add button at its end. The button is a
+word: a plus read as "attach a file", and the chat's send glyph as "send to the
+agent", which is what the same glyph on a todo row does. Notes follow the
 chat composer: Shift+Enter starts a new line on desktop, and on a phone, whose
-keyboard has no Shift+Enter, Return starts a new line and the add button adds.
+keyboard has no Shift+Enter, Return starts a new line and Add adds.
 Todos and plan titles are one line, and pasted line breaks become spaces. The length counter appears
 only near the limit. An empty, always-open 3000-character box used to take a
 third of the panel above notes that are read far more often than written.
@@ -94,6 +101,20 @@ The field clears as soon as an entry is sent and stays enabled while it saves,
 so the next entry can be typed right away; a failed add puts the text back if
 nothing new was typed. Disabling the field during the save dropped its focus,
 and an entry typed straight after the first one went nowhere.
+
+### Why the field's text is a stored draft
+
+An entry exists only once it is added, so until then the field's text is the
+whole draft. The sections render only while their tab and the Project knowledge
+surface are on screen, and that text used to live in the field's state alone: a
+tab switch, another rail surface or a reload threw it away. The field now keeps
+its text the way the chat composer keeps its own, in the same store
+(`lib/chatDraftPersistence`), one draft per runtime, project and section under
+the composer key `knowledge:<note|todo|plan>`, which no session id takes. It
+saves after a 500 ms pause in typing and at once when the field unmounts or the
+page hides or unloads, and an added entry clears it. A store of its own would
+have repeated the chat composer's storage, size limit and eviction for the same
+kind of text.
 
 With no notes yet, the notes tab shows only the field: its placeholder already
 says what goes there, and a second line repeating it was noise.
@@ -104,13 +125,46 @@ from a file is a button inside the same field.
 ## Row actions
 
 Every row has the same actions in the same place: at most one direct control
-(pin for notes and plans, send for todos), then a ⋯ menu with the rest (share,
-delete). On desktop they appear on hover or keyboard focus; touch layouts show
-them always. A pinned entry keeps its filled pin visible.
+(pin for notes and plans, send for todos), then a menu with the rest (share,
+delete). With a mouse the menu is the row's right click (Shift+F10 from the
+keyboard, `KnowledgeRowContextMenu`), and the direct control appears on hover
+or keyboard focus; touch screens show it always, with a ⋯ button for the menu.
+An opened entry keeps its ⋯ in the toolbar.
 
-The pin attaches a note or plan to the current session's context, and a pinned
-note says so in its footer. The icon alone read as "pin to the top of the
-list".
+The pin attaches a note or plan to the current session's context. At rest a
+pinned note says so in its footer and a pinned plan carries a small filled pin
+before its date; the toggle itself shows with the other actions. Both are muted:
+a pin is not a state that needs colour. The icon alone read as "pin to the top
+of the list".
+
+A plan row keeps its date in place and shows its actions over it on hover, the
+date fading out underneath (`useKnowledgeYieldClass`). Reserving a column for
+actions that show only on hover left an empty, highlighted slot at the end of
+every row, and a row whose plan had a session got one more button that pushed
+its date sideways. The session button is a menu item now. The actions take
+clicks only while they show, so a plain click on the date opens the plan.
+
+Lists are flat: todos and plans are rows with no frame, notes and memories are
+tiles set off by tone (`oc-tile`). The bordered table and bordered cards they
+replaced boxed a list inside a panel that is already a surface.
+
+## Editing a todo
+
+A click on a todo's text edits it in place: the whole text shows in a field,
+Enter or leaving the field saves, Escape puts the old text back, and an emptied
+field is a cancel rather than a delete. The menu has Edit too, the way in on a
+phone. The click used to expand a long todo, which spent the main click on the
+least needed action and left no way to edit at all. An edit sends that one todo
+(`ProjectTodoChange` `edit`, a `PATCH` of its text).
+
+Clear completed lives in the menu of a completed todo, the only rows it acts on.
+
+A todo an agent filed under a plan (`planId`) names that plan at the end of its
+row, and the name opens the plan; one that waits for unfinished todos
+(`dependsOn`) carries a lock with their text in its tooltip. The same todos show
+under the open plan's text (`PlanTodos`), with their checkboxes, so the plan
+shows what is left of it. They stay in the Todos list as well: what to do next
+should not have to be looked for plan by plan.
 
 ## Delete with undo
 
@@ -168,6 +222,28 @@ delete from the open entry's menu closes it before the undo toast appears.
 
 ## Plans open in place
 
+An open plan reads first: `PlanView` opens on the rendered preview, without the
+`# Title` line the toolbar already shows. A plan with nothing under its title
+opens in the editor, since there is nothing to read yet. The toolbar has the
+title and progress, Implement as a worded button with its menu (new session or
+worktree), the preview toggle, and ⋯ with the rest: Improve, Read aloud, Copy,
+the pin, the session and Delete.
+
+Moving a plan to or from the team's folder lives in the list row. The move
+takes the file away from under an open view and can give the plan a new id (a
+team-only `shared:<file>` plan made personal), so it first holds the open view
+(`openPlanViews`): the editor turns read-only and writes its typing. Only a
+successful write lets the move run; a failed one keeps the plan where it is,
+with the text on screen and an error saying so. After the move the panel opens
+the view again on the plan as it is now, provided the panel still shows that
+project and that plan. Offering the move inside the view would have it
+saving to the plan it just moved away. Improve and Implement were two icons
+that each opened the same menu, and neither said what it did without a hover.
+Pins come from `useSessionKnowledgePins`, so pinning in the open plan and in the
+list beside it shows in both at once. It keeps pins per session with a count of
+toggles: a read that started before a toggle is dropped, and a toggle that ends
+after a session switch lands on its own session.
+
 Clicking a plan replaces the list with its editor, and the back control starts
 PlanView's own title row, as for every entry. A plan belongs to the project this
 panel is about, and sending the reader to another tab to read it made them leave
@@ -197,15 +273,16 @@ of text it was handed, so opening a plan no longer writes it back.
 
 ### Progress and the session working on a plan
 
-A plan row shows how many steps of its `## Steps` checklist are ticked ("2/4"),
-and Done once all are; the server counts them (`project-context`, *Plan
-progress*). Done is a label only: finished plans are deleted from the row menu,
+A plan row and the open plan's title show how many steps of its `## Steps`
+checklist are ticked ("2/4"), and a check once all are; the server counts them (`project-context`, *Plan
+progress*). The check is a mark only: finished plans are deleted from the row menu,
 not archived. Agents tick steps with their own file tools, which announce
 nothing, so `PlansSection` re-reads the list every 10 seconds while it is
 mounted and the window is visible. The answer carries counts, never plan text.
 
 Implement and Improve in `PlanView` record the session they create on the plan
-(`linkPlanSession`), and the row gets a button that opens that session. A
+(`linkPlanSession`), and the row's menu and the open plan's menu get an item
+that opens that session. A
 failed link costs only the button and never holds up the send. A plan an agent
 picked up on its own has no session to show.
 
@@ -313,6 +390,24 @@ restores it from the text it was given.
 The button is disabled until both scopes are loaded for this project and hold at
 least one entry. A scope that failed to load would reach the agent as an empty
 list, and it would tidy against half the store.
+
+### Dreaming
+
+With Organize memory on (Settings, under the memory tool), the server tidies the store
+on its own in a session nobody sees (`packages/web/server/lib/agent-memory/DOCUMENTATION.md`).
+The panel shows only the last pass of the scope on show, one line under the
+chips: when it ran, how many entries it merged, removed and rewrote, and Undo.
+There is no review and no notification: checking memories by hand is the chore
+dreaming removes. Undo puts back the store as the pass found it and keeps what
+was written after the pass. When the pass found project entries that belong in
+the project's agent docs, a second line counts the ones still in memory and
+offers Move: it starts a visible session (`memoryTidy.ts`, the `memory.toDocs`
+magic prompt) that adds each entry to the right AGENTS.md, skill or module doc,
+deletes it from memory and leaves the edits uncommitted. The pass itself never
+writes to the repository; moving is the user's click, in a session they watch
+and a diff they review. The lines come with `/api/agent-memory/all`, so they are
+as fresh as the list, and a pass that ends announces itself with the same
+`openchamber:agent-memory-changed` event a tool write does.
 
 ## Data flow
 

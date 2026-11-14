@@ -21,6 +21,25 @@ OpenChamber makes the branch, sets up the folder, and opens a new session there,
 
 To skip the questions, pick **Quick worktree** in the same branch menu: OpenChamber gives the branch a placeholder name and points the new session at it. Once the agent names the task, it renames the branch after it too, such as `fix/login-timeout`, as long as the branch hasn't been pushed yet.
 
+## Create worktrees with your own tool
+
+Every new worktree is a fresh checkout, so a large project can spend minutes installing dependencies before anything runs. A copy-on-write tool makes the worktree as a clone of a checkout you already have instead: `node_modules`, `.venv` and build output come along and take no extra disk space until they change.
+
+To use one, open the project's settings, go to **Worktrees**, and enter your tool's command under **Worktree creation**. OpenChamber makes the branch first, then runs the command in the project root with two environment variables:
+
+- `$WORKTREE_PATH` is the folder to create the worktree in. It doesn't exist yet.
+- `$WORKTREE_BRANCH` is the branch to check out there. It already exists.
+
+This command does what OpenChamber does without one; put your tool's command in place of `git worktree add`:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+The worktree then shows up in the sidebar like any other, and the project's setup commands run in it. If the tool keeps the checkout somewhere else and leaves a link at `$WORKTREE_PATH`, OpenChamber works in the real folder. If the command fails, OpenChamber shows its output and deletes the branch it made. Deleting the worktree later works even when the tool locked it.
+
+The command is only yours: it isn't saved in the repository, so teammates without the tool keep the usual creation. Leave the field empty to go back to git. Worktrees for a pull request from someone's fork always use git.
+
 ## In the sidebar
 
 A worktree is one row in the sidebar, with every session in it underneath. Under its project it's listed among the project's other sessions by its latest activity, so a worktree you just worked in sits near the top. The row shows the task's name once the agent has named it (until then, its branch), the pull request or issue it follows as a coloured mark, and whether a session there is running or has news for you. A worktree made for a pull request or an issue starts with that item's title until the agent picks a shorter name. Hover it to see the branch. If you'd rather read worktrees by their branches, turn on **Name worktrees by branch** in the sidebar's display menu: the branch becomes the row's name and the task's name moves under it on detailed rows. A session you move into a new worktree brings its task's name along. Click it to open the session you last worked in there; hover the branch icon on its left and click the arrow that takes its place to open the list. Its menu renames the task, files the worktree into a folder of the project, archives it, or deletes it. On the phone, tap the arrow on the row to open the list, and swipe the row to the side to mark it done, rename the task, archive the worktree or delete it. See [Sessions in Work](/sessions-in-work/) for how works move in and out of the In work block.

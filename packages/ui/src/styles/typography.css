@@ -118,6 +118,17 @@
     width: 100%;
   }
 
+  /* The prompt navigator's end edge is the message column's, so its
+     indicator stands in the column's side padding; a chat narrower than the
+     column, or the wide layout, keeps the 12px inset. */
+  .oc-prompt-navigator {
+    inset-inline-end: max(0.75rem, calc((100% - 48rem) / 2));
+  }
+
+  .wide-chat-layout .oc-prompt-navigator {
+    inset-inline-end: 0.75rem;
+  }
+
   /* On a wide window the side padding follows the chat's own width (a
      percentage padding resolves against the parent's width), so a chat
      squeezed beside an expanded context panel takes 1rem instead of the

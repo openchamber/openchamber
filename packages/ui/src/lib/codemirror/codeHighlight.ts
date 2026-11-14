@@ -3,6 +3,7 @@ import type { Extension, Transaction } from '@codemirror/state';
 import { Compartment, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
+import { isHighlightsLanguage } from '@/components/chat/markdown/highlightsEngine';
 import { highlightTokensInWorker } from '@/components/chat/markdown/markdown-worker';
 import type { CodeTokenTheme, MarkdownTokenRun } from '@/components/chat/markdown/markdown-worker-protocol';
 
@@ -225,7 +226,7 @@ export const codeHighlightExtension = (options: CodeHighlightOptions): Extension
       highlightsModule ??= import('@pierre/highlights').catch(() => null);
       void highlightsModule.then((highlights) => {
         if (!this.active) return;
-        const live = highlights && highlights.isSupportedLanguage(lang)
+        const live = highlights && isHighlightsLanguage(highlights, lang)
           ? liveHighlightPlugin((code) => new highlights.LiveTokenizer({ code, lang, theme: options.theme.zed, renderRange: visibleLines(view) }))
           : null;
         view.dispatch({ effects: engine.reconfigure(live ?? [workerDecorationsField, workerHighlightPlugin(options)]) });

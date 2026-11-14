@@ -27,7 +27,8 @@
 // before the swap gets a 404 for the old file and retries on GitHub
 // (packages/electron, pickUpdaterSource). A version older than one already on
 // the mirror is refused, so a re-run for an old build cannot turn the
-// manifests back.
+// manifests back. Each upload is tried 3 times: R2 now and then fails a
+// multipart upload as a whole, and one lost file used to stop the release.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -93,6 +94,24 @@ export const planMirror = (keys, version, channel = 'stable', keep = []) => {
   };
 };
 
+/**
+ * Runs `run` up to `attempts` times, pausing `pauseMs` between tries, and
+ * rethrows the last failure. R2 sometimes fails a multipart upload as a whole
+ * (`InvalidPart` on CompleteMultipartUpload, which the AWS CLI does not retry
+ * itself); uploading the same file again under the same key is safe.
+ */
+export const retrying = (run, { attempts = 3, pauseMs = 10_000, onRetry = () => {} } = {}) => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return run();
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      onRetry(attempt, error);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pauseMs);
+    }
+  }
+};
+
 const parseArgs = (argv) => {
   const args = {};
   for (let index = 0; index < argv.length; index += 2) args[argv[index].replace(/^--/, '')] = argv[index + 1];
@@ -112,7 +131,10 @@ const main = () => {
   const upload = (name, ...options) => uploadFrom(dir, name, ...options);
   const uploadFrom = (from, name, ...options) => {
     console.log(`upload ${name}`);
-    aws('s3', 'cp', path.join(from, name), `s3://${BUCKET}/${config.prefix}${name}`, '--only-show-errors', ...options);
+    retrying(
+      () => aws('s3', 'cp', path.join(from, name), `s3://${BUCKET}/${config.prefix}${name}`, '--only-show-errors', ...options),
+      { onRetry: (attempt) => console.log(`upload ${name} failed (attempt ${attempt}), retrying`) },
+    );
   };
 
   const names = readdirSync(dir);

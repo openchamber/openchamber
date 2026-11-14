@@ -616,7 +616,6 @@ const SkillsInstalledPage: React.FC = () => {
 
         <SettingsSection
           title={t('settings.skills.page.section.basicInformation')}
-          divider={false}
           settingsItem="skills.basic-information"
           contentClassName="space-y-0"
         >

@@ -28,11 +28,15 @@ import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
+import { createMessageQueueTarget, useMessageQueueStore } from "@/stores/messageQueueStore"
+import { followSessionTabMove } from "@/lib/sessionTabs"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
-import { getAllSyncSessions, getDirectoryState, registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessionMap, getDirectoryState, registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
@@ -50,17 +54,19 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
-import { withSessionPinned } from "@/lib/sessionPins"
+import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { markSessionUnreadSeen } from "./session-unread"
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
+import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { isFormRequestNotFoundError } from "./form-request-error"
+import { ConnectionLostError } from "./connection-lost-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -345,16 +351,16 @@ export async function moveSessionToDirectory(
   session: Session,
   sourceDirectory: string,
   destinationDirectory: string,
-  expectedRuntimeKey?: string,
+  /** The caller's runtime instance (`captureRuntimeInstance`); false once the app talks to another server. */
+  isCurrent?: () => boolean,
 ): Promise<void> {
   await opencodeClient.moveSession(session.id, destinationDirectory)
 
   // If the runtime changed during the move request, the server move
   // already happened, but we must not publish stale local state to the UI/stores.
-  if (isStaleRuntime(expectedRuntimeKey)) return
+  if (isCurrent && !isCurrent()) return
 
-  const moved = relocateSession(session, sourceDirectory, destinationDirectory)
-  useGlobalSessionsStore.getState().upsertSession(moved)
+  relocateSession(session, sourceDirectory, destinationDirectory)
 }
 
 /**
@@ -367,8 +373,11 @@ export async function moveSessionToDirectory(
 export function adoptSessionMove(sessionId: string, sourceDirectory: string, destinationDirectory: string): void {
   // A session created under a path the server then canonicalized has its
   // record in the destination already and only its first message at the source.
+  // A session no open folder lists still has its worktree attachment, folders
+  // and tabs here; the global list's record, which took the move, stands in.
   const session = _childStores?.getChild(sourceDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
     ?? _childStores?.getChild(destinationDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
   if (!session) return
   relocateSession(session, sourceDirectory, destinationDirectory)
 }
@@ -425,7 +434,28 @@ function relocateSession(session: Session, sourceDirectory: string, destinationD
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
   dropSessionLiveStateOutside(session.id, destinationDirectory)
   registerSessionDirectory(session.id, destinationDirectory)
-  useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
+  const ui = useSessionUIStore.getState()
+  ui.setSessionDirectory(session.id, destinationDirectory)
+  // The attachment is this client's own idea of the session's worktree. A
+  // move can leave that worktree (or enter another one), and grouping reads
+  // the attachment before the session's directory, so it must follow the move.
+  const destinationWorktree = findWorktreeHoldingDirectory(
+    [...ui.availableWorktreesByProject.values()].flat(),
+    destinationDirectory,
+  )
+  ui.setWorktreeMetadata(session.id, destinationWorktree ?? null, destinationDirectory)
+  // Sidebar folders belong to a project root, worktree or space; a folder of
+  // the place the session left would keep listing it there.
+  useSessionFoldersStore.getState().followSessionMove(session.id, destinationDirectory, destinationWorktree?.path ?? null)
+  // The sidebar and the session switcher read the global list; a move from an
+  // agent or another client arrives only as an event, so waiting for the next
+  // poll would leave the old directory in place until it runs.
+  useGlobalSessionsStore.getState().upsertSession(moved)
+  // The local (VS Code) queue is keyed by directory too; a queued message
+  // follows its session instead of waiting under the directory it left.
+  const queueTarget = createMessageQueueTarget(session.id, destinationDirectory)
+  if (queueTarget) useMessageQueueStore.getState().followSessionMove(queueTarget)
+  followSessionTabMove(session.id, destinationDirectory)
   return moved
 }
 
@@ -433,14 +463,9 @@ function dir() {
   return _getDirectory() || undefined
 }
 
-function connectionLostError(): Error {
+function connectionLostError(): ConnectionLostError {
   const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState()
-  const suffix = lastDisconnectReason
-    ? ` (${lastDisconnectReason})`
-    : hasEverConnected
-      ? ""
-      : " (never connected)"
-  return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
+  return new ConnectionLostError({ reason: lastDisconnectReason || null, everConnected: hasEverConnected })
 }
 
 // Wait briefly for the pipeline to re-establish connection before failing a
@@ -1073,6 +1098,53 @@ function getRequestReplyDirectory(
     ?? getSessionReplyDirectory(sessionId)
 }
 
+/**
+ * A session's record wherever the client holds it: the given directory's
+ * slice, then every initialized store, then the global cache. The directory
+ * may not be the store that holds the record (a project holds its worktrees'
+ * sessions too), so a miss at one level widens to the next before counting as
+ * unknown.
+ */
+function findSessionRecordAnywhere(sessionId: string, directory: string | undefined): Session | undefined {
+  return getDirectoryState(directory)?.session.find((session) => session.id === sessionId)
+    ?? getAllSyncSessionMap().get(sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
+}
+
+/**
+ * The record and owning directory a blocking-request reply is addressed to.
+ * Ownership beats containment, and a guessed directory is only good for
+ * finding the record: when no store holds it, the record is read from the
+ * server first, so a worktree request is never answered by its parent's
+ * instance and dismissed on the resulting not-found (#6555). A failed read, or
+ * a runtime change during it, throws an error with no status and no not-found
+ * wording, so the request stays pending for a retry and nothing is sent. A
+ * location-scoped form has no session record and keeps its directory.
+ */
+async function resolveBlockingRequestTarget(
+  sessionId: string,
+  guessedDirectory: string | undefined,
+): Promise<{ record: Session | undefined; directory: string | undefined }> {
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return { record: undefined, directory: guessedDirectory }
+  let record = findSessionRecordAnywhere(sessionId, guessedDirectory)
+  if (record === undefined) {
+    const readIsCurrent = captureRuntimeInstance()
+    let fetched: Session
+    try {
+      fetched = await opencodeClient.getSession(sessionId, guessedDirectory)
+    } catch (error) {
+      // Nothing has left yet, so a failed read needs no send confirmation.
+      if (error instanceof Error) markDefiniteTransportFailure(error)
+      throw new Error("The reply was not sent because its session record could not be read.", { cause: error })
+    }
+    if (!readIsCurrent()) throw new Error("The reply was cancelled because the runtime changed.")
+    // A record an SSE event inserted during the read is newer than this
+    // snapshot, so it wins and the snapshot touches no store.
+    record = findSessionRecordAnywhere(sessionId, guessedDirectory) ?? fetched
+  }
+  return { record, directory: resolveSessionOwnedDirectory(record) ?? guessedDirectory }
+}
+
 // ---------------------------------------------------------------------------
 // Session CRUD
 // ---------------------------------------------------------------------------
@@ -1307,8 +1379,9 @@ export async function setSessionWorkState(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
+    // A pinned session is never in work: Track on one writes nothing.
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1318,7 +1391,8 @@ export async function setSessionWorkState(
 /**
  * Pin or unpin a session for every client of the server. Bound to the server
  * it was clicked on, like the work state: a runtime switch mid-request writes
- * nothing to the new server and resolves null.
+ * nothing to the new server and resolves null. A pinned session is never in
+ * work, so pinning one that is closes its work in the same write.
  */
 export async function setSessionPinned(
   sessionId: string,
@@ -1328,8 +1402,11 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
+    return await patchSessionMetadata(sessionId, directory, (metadata) => {
+      const now = Date.now()
+      const next = withSessionPinned(metadata, pinned, now, list)
+      return pinned ? withSessionWorkClosed(next, now) : next
+    }, runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -2469,10 +2546,11 @@ export async function respondToPermission(
   directoryOverride?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = directoryOverride
-    || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  // An explicit directory comes from the event that raised the request.
+  const directory = directoryOverride || (await resolveBlockingRequestTarget(
+    sessionId,
+    resolveDirectoryForBlockingRequest("permission", sessionId, requestId) || getSessionDirectory(sessionId),
+  )).directory
   try {
     if (await opencodeClient.replyToPermission(sessionId, requestId, response, { directory }) !== true) {
       throw new Error("Permission reply failed")
@@ -2491,9 +2569,10 @@ export async function dismissPermission(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const { directory } = await resolveBlockingRequestTarget(
+    sessionId,
+    resolveDirectoryForBlockingRequest("permission", sessionId, requestId) || getSessionDirectory(sessionId),
+  )
   try {
     if (await opencodeClient.replyToPermission(sessionId, requestId, "reject", { directory }) !== true) {
       throw new Error("Permission dismissal failed")
@@ -2587,15 +2666,28 @@ type FormSelection = {
 
 /**
  * The selection of the composer that belongs to a form's session. The main
- * chat's composer lives in the app-wide config. Any other session, a pinned
- * chat or a `/btw` fork, holds its picks per session, and a child session
- * answered from its parent has none: its record, a workflow's binding included,
- * stays. A reply never copies another chat's model, agent or effort.
+ * chat's composer lives in the app-wide config, which follows the open chat's
+ * own session, so an open root session answers with what that composer shows.
+ * A review session answers the same way: the codebase treats it as an
+ * independent conversation even when an older record still carries
+ * `parentID`. Any other session, a pinned chat or a `/btw` fork, holds its
+ * picks per session, and a child session keeps its record whichever chat
+ * shows it, a workflow's binding included: the app-wide config can still
+ * hold the previous chat's selection when the child was just opened. The
+ * session's own unsent picks and saved effort always apply; a form reply
+ * reads a record no store holds from the server before this runs (#6555). A reply
+ * never copies another chat's model, agent or effort.
  */
-function resolveFormSelection(sessionId: string, directory: string | undefined): FormSelection {
+function resolveFormSelection(record: Session | undefined, sessionId: string): FormSelection {
   const picks = useSelectionStore.getState()
   const agentPick = picks.getSessionAgentPick(sessionId) ?? undefined
-  if (useSessionUIStore.getState().currentSessionId === sessionId) {
+  // Only a record marking a non-review child diverts the open chat from the
+  // composer; a record read from the server classifies the same way (#6555).
+  if (
+    record
+    && (isReviewSession(record) || !record.parentID)
+    && useSessionUIStore.getState().currentSessionId === sessionId
+  ) {
     const config = useConfigStore.getState()
     return {
       agent: agentPick ?? config.currentAgentName ?? undefined,
@@ -2608,7 +2700,6 @@ function resolveFormSelection(sessionId: string, directory: string | undefined):
         : undefined,
     }
   }
-  const record = (getDirectoryState(directory)?.session ?? getAllSyncSessions()).find((session) => session.id === sessionId)
   const recordModel = record?.model
   const modelPick = picks.getSessionModelPick(sessionId)
   const model = modelPick ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
@@ -2637,10 +2728,10 @@ function resolveFormSelection(sessionId: string, directory: string | undefined):
  * model before it forwards the answer. Returns what to settle once the answer
  * is accepted.
  */
-async function applyFormSelection(sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
+async function applyFormSelection(record: Session | undefined, sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
   // No session owns a location-scoped form, so nothing can be switched for it.
   if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
-  const { model, agent } = resolveFormSelection(sessionId, directory)
+  const { model, agent } = resolveFormSelection(record, sessionId)
   if (!model && !agent) return () => {}
   const settleModelPick = model
     ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID, runtimeKey)
@@ -2661,6 +2752,29 @@ async function applyFormSelection(sessionId: string, directory: string | undefin
   return () => settleModelPick?.()
 }
 
+/**
+ * Puts a model picked in a session's composer, and not sent yet, on the session
+ * while its turn waits for an automatic retry. OpenCode reloads the session's
+ * model before every attempt, so the next attempt runs on the pick and the turn
+ * goes on, as when the limit-failover plugin switches from its retry hook. A
+ * pick made while the turn generates waits for the next send, or for this, if
+ * the turn falls into a retry wait first. Auto has no prompt to route here, so
+ * it waits for the next send too.
+ *
+ * The switch is sent without comparing the pick with the synced record: a pick
+ * reverted before the previous switch reached the record would read as
+ * unchanged. OpenCode ignores a switch to the model the session already runs.
+ */
+export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
+  const pick = useSelectionStore.getState().getSessionModelPick(sessionId)
+  if (!pick || isAutoModel(pick.providerId, pick.modelId)) return
+  const { model } = resolveFormSelection(findSessionRecordAnywhere(sessionId, directory), sessionId)
+  if (model?.providerID !== pick.providerId || model.modelID !== pick.modelId) return
+  const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID)
+  await opencodeClient.switchSessionModel(sessionId, { providerID: model.providerID, id: model.modelID, variant: model.variant }, directory)
+  settleModelPick()
+}
+
 export async function replyToForm(
   sessionId: string,
   formId: string,
@@ -2675,11 +2789,17 @@ export async function replyToForm(
   }
   await waitForConnectionOrThrow()
   assertRuntimeCurrent()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
-    const settleSelection = await applyFormSelection(sessionId, directory, runtimeKey)
+    // Classification, the switches and the reply's owning instance all come
+    // from the form session's record, read from the server when no store
+    // holds it; a failed read leaves the answer unsent (#6555).
+    const { record, directory: replyDirectory } = await resolveBlockingRequestTarget(
+      sessionId,
+      getRequestReplyDirectory("form", sessionId, formId),
+    )
+    const settleSelection = await applyFormSelection(record, sessionId, replyDirectory, runtimeKey)
     assertRuntimeCurrent()
-    if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
+    if (await opencodeClient.replyToForm(sessionId, formId, answer, replyDirectory) !== true) {
       throw new Error("Form reply failed")
     }
     // The stores belong to another server now, and this form is not on it.
@@ -2707,7 +2827,9 @@ export async function replyToForm(
 
 export async function cancelForm(sessionId: string, formId: string): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
+  // A failed record read throws before the try: nothing was sent, so the form
+  // stays pending for a retry.
+  const { directory } = await resolveBlockingRequestTarget(sessionId, getRequestReplyDirectory("form", sessionId, formId))
   try {
     if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
       throw new Error("Form cancellation failed")

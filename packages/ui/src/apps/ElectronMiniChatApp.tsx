@@ -356,7 +356,6 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   }, [apis]);
 
   useAppFontEffects();
-  useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
   useRoutingSync();
@@ -386,11 +385,20 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   );
 }
 
+// Under SyncProvider: the shortcuts read the session's activity (double Escape
+// stops a running turn), which needs the sync runtime. Called in the app root
+// above the provider, opening Mini Chat threw.
+const MiniChatKeyboardShortcuts: React.FC = () => {
+  useMiniChatKeyboardShortcuts();
+  return null;
+};
+
 const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config }) => {
   const sessionUnavailable = useSessionUnavailable(config);
 
   return (
     <>
+      <MiniChatKeyboardShortcuts />
       <MiniChatBootstrap config={config} />
       <MiniChatPresencePublisher />
       <SyncRuntimeEffects backgroundWorkEnabled={true} />

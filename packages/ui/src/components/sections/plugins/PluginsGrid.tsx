@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import {
@@ -41,7 +42,7 @@ import { pluginDisplayName } from './pluginDisplayName';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
 /** How a plugin spec is loaded, as the card shows it. */
-const PARSED_KIND_ICON: Record<PluginParsedKind, 'equalizer-2' | 'code-box' | 'folder' | 'git-branch'> = {
+const PARSED_KIND_ICON: Record<PluginParsedKind, IconName> = {
   control: 'equalizer-2',
   npm: 'code-box',
   path: 'folder',

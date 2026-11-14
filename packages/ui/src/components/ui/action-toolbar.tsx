@@ -41,10 +41,12 @@ export interface ToolbarAction {
   menu?: React.ReactNode;
   /** Never moves into "More actions". */
   pinned?: boolean;
-  /** Attributes on the button, for code that recognises it (outside-click checks). */
+  /** Attributes on the button and on its "More actions" menu item, for code that recognises either (outside-click checks). */
   buttonAttributes?: Record<`data-${string}`, string>;
   /** The action's keyboard shortcut as the shortcuts dialog writes it (`formatShortcutForDisplay`), shown in its tooltip and menu item. */
   shortcut?: string;
+  /** Deletes or discards: drawn as a destructive item in "More actions". */
+  destructive?: boolean;
 }
 
 /** Actions that belong together, set apart from the next group by space. */
@@ -286,11 +288,13 @@ export function ActionToolbar({
     <DropdownMenuItem
       key={action.id}
       className="flex items-center gap-2"
+      variant={action.destructive ? 'destructive' : 'default'}
       disabled={action.disabled}
       onClick={action.onMenuSelect ?? action.onSelect}
+      {...action.buttonAttributes}
     >
       <Icon name={action.icon} className={cn('size-4', action.iconClassName)} />
-      <span className="min-w-0 truncate typography-ui-label text-foreground">{action.label}</span>
+      <span className={cn('min-w-0 truncate typography-ui-label', !action.destructive && 'text-foreground')}>{action.label}</span>
       {action.shortcut ? <span className="ms-auto shrink-0 ps-3 typography-meta text-muted-foreground">{action.shortcut}</span> : null}
       {action.pressed ? <Icon name="check" className={cn('size-4 shrink-0 text-foreground', !action.shortcut && 'ms-auto')} /> : null}
     </DropdownMenuItem>

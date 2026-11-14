@@ -9,7 +9,8 @@ import { ProjectEnvironmentSection } from '@/components/sections/projects/Projec
 import { ProjectGeneralTab } from '@/components/sections/projects/ProjectGeneralTab';
 import { ProjectSettingsHeader } from '@/components/sections/projects/ProjectSettingsHeader';
 import { ProjectWorktreesTab } from '@/components/sections/projects/ProjectWorktreesTab';
-import type { ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { projectSettingsTabAnchors, type ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { SettingsNewBadge } from '@/components/sections/shared/SettingsSection';
 import { useProjectSetup } from '@/components/sections/projects/useProjectSetup';
 import {
   useProjectIdentityForm,
@@ -61,12 +62,14 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   const hasEnvironment = !isVSCodeRuntime();
   const activeTab = tab === 'environment' && !hasEnvironment ? 'general' : tab;
 
-  const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
-    { id: 'general', label: t('settings.projects.tab.general') },
-    { id: 'actions', label: t('settings.projects.tab.actions') },
-    { id: 'worktrees', label: t('settings.projects.tab.worktrees') },
-    ...(hasEnvironment ? [{ id: 'environment', label: t('settings.projects.tab.environment') }] : []),
-  ], [hasEnvironment, t]);
+  const tabs = React.useMemo<SortableTabsStripItem[]>(() => {
+    const ids: ProjectSettingsTab[] = ['general', 'actions', 'worktrees', ...(hasEnvironment ? ['environment' as const] : [])];
+    return ids.map((id) => ({
+      id,
+      label: t(`settings.projects.tab.${id}`),
+      accessory: <SettingsNewBadge items={projectSettingsTabAnchors(id)} />,
+    }));
+  }, [hasEnvironment, t]);
 
   const header = <ProjectSettingsHeader form={form} />;
   const tabStrip = (

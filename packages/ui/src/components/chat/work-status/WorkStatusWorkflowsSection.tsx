@@ -21,8 +21,8 @@ type Props = {
 const SECTION_ID = 'workflows';
 
 const StateGlyph: React.FC<{ icon: React.ComponentProps<typeof Icon>['name']; color?: string }> = ({ icon, color }) => (
-  // Centred in the panel's 14px icon slot, like the Subagents rows.
-  <span className="flex size-3.5 shrink-0 items-center justify-center">
+  // Centred in the panel's 13px icon slot, like the Subagents rows.
+  <span className="flex size-[13px] shrink-0 items-center justify-center">
     <Icon name={icon} className="size-3" style={color ? { color } : undefined} />
   </span>
 );

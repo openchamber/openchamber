@@ -5,6 +5,7 @@ import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from '@code
 import { classHighlighter, tags as t } from '@lezer/highlight';
 
 import type { Theme } from '@/types/theme';
+import { editorCodeLineHeight } from '@/lib/editorCodeMetrics';
 import { resolveSyntaxTokens } from '../theme/syntax';
 
 export function createFlexokiCodeMirrorTheme(
@@ -21,6 +22,7 @@ export function createFlexokiCodeMirrorTheme(
   const tokens = resolveSyntaxTokens(theme.colors.syntax);
 
   const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
+  const contentLineHeight = options?.fontSize ? `${editorCodeLineHeight(options.fontSize)}px` : '1.5';
   const backgroundColor = theme.colors.syntax.base.background;
 
   const ui = EditorView.theme({
@@ -28,11 +30,13 @@ export function createFlexokiCodeMirrorTheme(
       backgroundColor,
       color: theme.colors.syntax.base.foreground,
       fontSize: contentFontSize,
-      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {
       fontFamily: `var(--font-mono, ${monoFont})`,
+      // On the scroller: CodeMirror's base theme sets its 1.4 line height
+      // there, which beats one set on the editor root.
+      lineHeight: contentLineHeight,
       backgroundColor,
     },
 
@@ -503,16 +507,18 @@ export function createFlexokiCodeMirrorTheme(
       color: theme.colors.interactive.selectionForeground,
       boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.borderFocus}`,
     },
-    /* Other occurrences of the word at the cursor or of the selected text */
+    /* Other occurrences of the word at the cursor or of the selected text: a
+       neutral tone step of the text colour. The warm selection tint under a
+       red keyword read as an error box; red stays for diagnostics. */
     '.cm-selectionMatch': {
-      backgroundColor: theme.colors.interactive.selection,
-      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
+      backgroundColor: `color-mix(in srgb, ${theme.colors.surface.foreground} 9%, transparent)`,
       borderRadius: '2px',
     },
     // The word at the cursor (or the selection itself) is outlined only, so it
     // stays distinguishable from the other occurrences.
     '.cm-selectionMatch-main': {
       backgroundColor: 'transparent',
+      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
     },
     '&.cm-focused': {
       outline: 'none',

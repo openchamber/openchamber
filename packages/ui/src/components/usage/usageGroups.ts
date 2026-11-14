@@ -4,6 +4,7 @@ import { formatWindowLabel } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import type { QuotaProviderId, UsageWindow } from '@/types';
+import { selectVisibleModelEntries } from './usageModelSelection';
 
 export type UsageLimitRow = {
   key: string;
@@ -58,9 +59,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
 
         const modelEntries = Object.entries(result?.usage?.models ?? {});
         const providerSelectedModels = selectedQuotaModels[providerMeta.id] ?? [];
-        const visibleModelEntries = providerSelectedModels.length > 0
-          ? modelEntries.filter(([modelName]) => providerSelectedModels.includes(modelName))
-          : modelEntries;
+        const visibleModelEntries = selectVisibleModelEntries(providerMeta.id, modelEntries, providerSelectedModels);
         for (const [modelName, modelUsage] of visibleModelEntries) {
           const entries = Object.entries(modelUsage.windows ?? {});
           if (entries.length === 0) continue;

@@ -11,38 +11,49 @@ type ResolvedSendSelection = {
 }
 
 /**
- * The model and agent a send has to switch the session to. Models use the
- * sync record, as `/compact` does. Agents are checked against a fresh server
- * record: a stale sync copy must not suppress the switch the user requested.
+ * The model and agent a send has to switch the session to, checked against a
+ * fresh server record: a stale sync copy that already matches the picker must
+ * not suppress the switch the user requested, since the turn runs on what the
+ * server holds. The model also has to match the sync record read afterwards,
+ * so a switch event received during the read still counts.
  *
- * OpenCode records every switch in the transcript, so a send leaves the agent
- * unset when the server already runs on the desired agent.
+ * OpenCode records every switch in the transcript, so a send leaves the model
+ * and agent unset when the session already runs on them.
+ *
+ * The read is a check, never a gate for a model-only selection: when it fails,
+ * the picked model is stated explicitly and the action goes ahead. With an
+ * agent the failed read stops the send, since the agent cannot be compared.
  */
 export async function resolveSendSelection(
   sessionId: string,
   directory: string | undefined,
   desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
 ): Promise<ResolvedSendSelection> {
-  let agentChanged = false
-  if (desired.agent) {
-    const isCurrentRuntime = captureRuntimeInstance()
-    let currentSession: Session
-    try {
-      currentSession = await opencodeClient.getSession(sessionId, directory)
-    } catch (error) {
+  // Compared in wire form: an explicit `Default` (null) switches the session
+  // off an effort once, then matches the `"default"` OpenCode records for it.
+  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
+  const isCurrentRuntime = captureRuntimeInstance()
+  let serverSession: Session
+  try {
+    serverSession = await opencodeClient.getSession(sessionId, directory)
+  } catch (error) {
+    if (desired.agent) {
       // The prompt has not left, so a failed read needs no send confirmation.
       if (error instanceof Error) markDefiniteTransportFailure(error)
       throw error
     }
     if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-    agentChanged = currentSession.agent !== desired.agent
+    return { model }
   }
-  const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
-  const session = sessions.find((candidate) => candidate.id === sessionId)
-  // Compared in wire form: an explicit `Default` (null) switches the session
-  // off an effort once, then matches the `"default"` OpenCode records for it.
-  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
-  const modelChanged = !session?.model || !isSameModelRef(session.model, model)
+  if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
+  // A directory store without the record falls through to every store: a
+  // project holds its worktrees' sessions too, and a missed record would turn
+  // an unchanged model into a switch record in the transcript.
+  const syncSession = getDirectoryState(directory)?.session.find((candidate) => candidate.id === sessionId)
+    ?? getAllSyncSessions().find((candidate) => candidate.id === sessionId)
+  const runsOn = (session: Session | undefined) => Boolean(session?.model && isSameModelRef(session.model, model))
+  const modelChanged = !runsOn(serverSession) || !runsOn(syncSession)
+  const agentChanged = Boolean(desired.agent) && serverSession.agent !== desired.agent
   return {
     model: modelChanged ? model : undefined,
     agent: agentChanged ? desired.agent : undefined,

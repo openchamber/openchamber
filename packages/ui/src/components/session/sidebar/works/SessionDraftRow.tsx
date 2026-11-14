@@ -7,7 +7,8 @@ import type { SessionDraft } from '@/stores/useSessionDraftsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { formatProjectLabel } from '../utils';
-import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
+import { TimelineProjectIcon, TimelineProjectName } from '../sessions/SessionTimelineRowBody';
+import { useZoneProjectNames } from '../sessions/useZoneProjectNames';
 import { isRowBoxClick } from '../sessions/rowBoxClick';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import { useSessionDraftRow } from './useSessionDraftRow';
@@ -41,6 +42,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
     (state) => (detailedRequested && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
     [detailedRequested, mixed, draft.projectId],
   ));
+  const projectNamed = useZoneProjectNames();
   const branch = useGitBranchLabel(detailedRequested ? draft.directory : null);
   const detailed = detailedRequested && Boolean(project || branch || (firstLine && attachmentCount > 0));
   const discard = (event: React.MouseEvent): void => {
@@ -59,7 +61,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
         'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
         detailed ? 'py-1.5' : 'py-[5px]',
         detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
-        isOpen ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
+        isOpen ? 'oc-selected text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
     >
       <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>
@@ -106,7 +108,8 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
         // Fixed 16px, as a detailed session row's second line: the project
         // where projects mix, the pen, then the branch it will go to.
         <div className="flex h-4 w-full min-w-0 items-center gap-1">
-          {project ? <TimelineProjectIcon project={project} label={formatProjectLabel(project.label?.trim() || project.path)} /> : null}
+          {project ? <TimelineProjectIcon project={project} label={projectNamed ? null : formatProjectLabel(project.label?.trim() || project.path)} /> : null}
+          {project && projectNamed ? <TimelineProjectName project={project} separated={false} /> : null}
           <Icon name="edit" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
           {branch ? <span dir="ltr" className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
           {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}

@@ -30,6 +30,7 @@ import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSy
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useGuestMarksSync } from '@/hooks/useGuestMarksSync';
 import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
@@ -674,6 +675,7 @@ function App({ apis }: AppProps) {
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
   useGuestCatalogSync();
+  useGuestMarksSync();
   useLimitFailoverNotices();
   useRoutingSync();
   useEnterprisePolicySync();

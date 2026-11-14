@@ -38,6 +38,9 @@ import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
+import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useGuestMarksSync } from '@/hooks/useGuestMarksSync';
 import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -81,7 +84,13 @@ import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { OverviewPage } from '@/components/overview/OverviewView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
-import { shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import type { MobileChangesCommitRequest } from './mobileChangesCommitRequest';
+import { connectMobileWorkspaceOpener, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { GuestHosts } from '@/components/layout/GuestHosts';
+import { useGuestPages, usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
+import { phoneGuestPanelModes } from '@/lib/guests/phone';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isPluginContextPanelMode, pluginModeFromId } from '@/lib/surfaces/modes';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useMobileWebBackButton, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
@@ -92,6 +101,7 @@ import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { useNativeWidgetSync } from './useNativeWidgetSync';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -110,6 +120,7 @@ const MOBILE_SETTINGS_PAGES = [
   'notifications',
   'sessions',
   'routing',
+  'projects',
   'git',
   'magic-prompts',
   'snippets',
@@ -125,6 +136,7 @@ const MOBILE_SETTINGS_PAGES = [
   'usage',
   'voice',
   'integrations',
+  'extensions',
   'about',
 ] as const;
 
@@ -138,6 +150,9 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Status / Changes / Files / Terminal / Notes) are separate layers. */
+// An extension's full-screen page loads with the first one the user opens.
+const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').then((module) => ({ default: module.PluginPane })));
+
 type MobileSurface = 'archive' | 'board' | 'overview' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
@@ -170,7 +185,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // tab (a changed file in the chat) sets it on its own and opens it hidden or not.
   const openWorkspace = React.useCallback(() => {
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs);
+    const extensions = phoneGuestPanelModes(useGuestsStore.getState().guests);
+    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensions);
     setWorkspaceTab((current) => (shown.includes(current) ? current : shown[0]));
     setWorkspaceOpen(true);
   }, []);
@@ -178,8 +194,34 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // layer on top of it (back returns to the notes).
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
-  // When set, the Changes surface opens directly into the per-file diff for this path.
-  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean; scope?: 'turn' } | null>(null);
+  // What Changes is asked to open: a per-file diff, or the commit an extension
+  // named (`host.openCommit`). One request at a time, so a later file tap
+  // never meets a commit request still waiting beside it.
+  const [changesRequest, setChangesRequest] = React.useState<
+    | { diff: { path: string; staged: boolean; scope?: 'turn' } }
+    | { commit: MobileChangesCommitRequest }
+    | null
+  >(null);
+  const pendingChangesDiff = changesRequest && 'diff' in changesRequest ? changesRequest.diff : null;
+  const pendingChangesCommit = changesRequest && 'commit' in changesRequest ? changesRequest.commit : null;
+  // An extension tab whose extension left the catalog (turned off, removed,
+  // another server) is gone from the strip; the drawer falls back to the
+  // user's first tab.
+  const extensionTabs = usePhoneGuestPanelModes();
+  React.useEffect(() => {
+    if (!isPluginContextPanelMode(workspaceTab) || extensionTabs.includes(workspaceTab)) return;
+    const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
+    setWorkspaceTab(shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensionTabs)[0]);
+  }, [extensionTabs, workspaceTab]);
+  // The full-screen page of an extension that opted it into the phone, opened
+  // from the sessions list's More menu.
+  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+  const guestPages = useGuestPages();
+  const guestPage = guestPages.find((guest) => guest.id === openGuestPageId) ?? null;
+  React.useEffect(() => {
+    if (openGuestPageId && !guestPage) useUIStore.getState().setOpenGuestPage(null);
+  }, [guestPage, openGuestPageId]);
+  const closeGuestPage = React.useCallback(() => useUIStore.getState().setOpenGuestPage(null), []);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
@@ -247,7 +289,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, [isTabletLayout, workspaceOpen]);
 
   const openFilesSurface = React.useCallback(() => {
-    setPendingChangesDiff(null);
+    setChangesRequest(null);
     setWorkspaceTab('files');
     setWorkspaceOpen(true);
   }, []);
@@ -314,10 +356,23 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }), []);
 
   const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean; scope?: 'turn' } | null = null) => {
-    setPendingChangesDiff(diff);
+    setChangesRequest(diff ? { diff } : null);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
   }, []);
+
+  // An extension frame or an item handed to an extension asks for a tab:
+  // its panel (`openSurface`, a chip, an `open` link, attach) or Changes on
+  // a commit (`openCommit`). A full-screen extension page steps aside so the
+  // tab it asked for is what the user sees.
+  React.useEffect(() => connectMobileWorkspaceOpener((request) => {
+    useUIStore.getState().setOpenGuestPage(null);
+    if (request.tab === 'changes' && request.commit) {
+      setChangesRequest({ commit: { scope: 'commit', directory: request.commit.directory } });
+    }
+    setWorkspaceTab(request.tab);
+    setWorkspaceOpen(true);
+  }), []);
 
   const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
   const rightResize = useIpadSidebarResize(
@@ -499,6 +554,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       setOpenPlan(null);
       return true;
     }
+    if (guestPage) {
+      closeGuestPage();
+      return true;
+    }
     if (activeSurface === 'settings' && settingsBackRef.current?.()) {
       return true;
     }
@@ -515,13 +574,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [activeSurface, closeSurface, closeWorkspace, openPlan, sessionsSheetOpen, workspaceOpen]);
+  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, sessionsSheetOpen, workspaceOpen]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
   // Mobile web has no back button event: the same ladder runs from the
   // browser's Back, off a history guard held while a layer is open.
-  useMobileWebBackButton(handleNativeBack, Boolean(openPlan || activeSurface || workspaceOpen || sessionsSheetOpen));
+  useMobileWebBackButton(handleNativeBack, Boolean(openPlan || guestPage || activeSurface || workspaceOpen || sessionsSheetOpen));
 
   // The footer update item follows the shared update store, which in the
   // Capacitor shell tracks the app build (store updates), not the server. The
@@ -713,6 +772,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 tab={workspaceTab}
                 onTabChange={setWorkspaceTab}
                 pendingChangesDiff={pendingChangesDiff}
+                pendingChangesCommit={pendingChangesCommit}
                 onOpenPlan={setOpenPlan}
                 variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
@@ -740,6 +800,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             <ErrorBoundary>
               <PlanView
                 savedProjectPlan={{ projectRef: openPlan.projectRef, planId: openPlan.id }}
+                onClose={() => setOpenPlan(null)}
                 onNavigatedToChat={() => {
                   closeSurface();
                   closeWorkspace();
@@ -748,6 +809,28 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
+
+        {guestPage ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeGuestPage}
+            ariaLabel={guestPage.pageTitle ?? guestPage.name}
+            title={guestPage.pageTitle ?? guestPage.name}
+            // Escape inside the page belongs to the page; the back arrow closes it.
+            disableEscapeDismiss
+          >
+            <ErrorBoundary>
+              <React.Suspense fallback={null}>
+                <PluginPane key={guestPage.id} mode={pluginModeFromId(guestPage.id)} surface="page" />
+              </React.Suspense>
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {/* Attach dialogs, hidden frames for slash commands and background actions. */}
+        <ErrorBoundary><GuestHosts /></ErrorBoundary>
 
         {activeSurface === 'instances' && showCapacitorOnlyFeatures ? (
           <MobileFullscreenSurface
@@ -1354,6 +1437,12 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useSettingsFileSync();
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
+  // The catalog and the sidebar marks feed what the host draws for extensions
+  // on the phone too: link rules, tool cards, provider logos, row marks.
+  useGuestCatalogSync();
+  useGuestMarksSync();
+  // The phone can pick an extension browser now, so it hears when the server drops it.
+  useBrowserProviderSync();
   // Same as App.tsx: the session's memory index and the Memory tab both read
   // this snapshot, and without it the phone showed no memory at all.
   useAgentMemorySync(currentDirectory || null);
@@ -1364,6 +1453,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
+  useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
   // Single native deep-link entry point: notification taps AND the openchamber:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until

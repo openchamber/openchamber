@@ -10,7 +10,9 @@ import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
+import { extensionWaitsUpdatedEventSchema, type ExtensionWaitsUpdatedEvent } from '@/sync/extension-waits';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
+import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSessionTodosStore';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -158,6 +160,12 @@ type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
  * nothing; listeners re-read the catalog.
  */
 type GuestsChangedEvent = { type: 'guests-changed' };
+
+/**
+ * The marks extensions put on sidebar rows changed (`marks.set`, or a service
+ * ended). Carries nothing; listeners re-read the marks.
+ */
+type GuestMarksChangedEvent = { type: 'guest-marks-changed' };
 
 /** An extension's service sent its open frames something (`emit`). */
 type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
@@ -309,10 +317,13 @@ type OpenChamberEvent =
   | MessageQueueUpdatedEvent
   | AutoReviewUpdatedEvent
   | PrWatchUpdatedEvent
+  | ExtensionWaitsUpdatedEvent
   | PermissionPolicyEvent
   | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
+  /** A session's todo list changed, or has to be read again (`todos` null); `sessionId` null for a whole directory. */
+  | { type: 'session-todos'; event: SessionTodosEvent }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
   | { type: 'space-queue-stream'; spaceId: string }
   /** The host follows this space's permission modes again; what changed in a gap is read from the space. */
@@ -328,6 +339,7 @@ type OpenChamberEvent =
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
   | GuestsChangedEvent
+  | GuestMarksChangedEvent
   | GuestServiceEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
@@ -554,6 +566,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:extension-waits.updated') {
+    const parsed = extensionWaitsUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
   if (envelope.type === 'openchamber:auto-review.updated') {
     const parsed = autoReviewUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
@@ -585,6 +605,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:session-warming') {
     const parsed = sessionWarmingSnapshotSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'session-warming', snapshot: parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-todos') {
+    const parsed = sessionTodosEventSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'session-todos', event: parsed.data });
     return;
   }
 
@@ -663,6 +689,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:guest-marks-changed') {
+    for (const listener of listeners) listener({ type: 'guest-marks-changed' });
     return;
   }
 

@@ -7,7 +7,7 @@ description: Configura Jev, el pequeño modelo de clasificación que toma decisi
 
 Algunas funciones de OpenChamber necesitan una decisión rápida antes de actuar: ¿este comando es arriesgado?, ¿qué tipo de tarea es este prompt?, ¿este trabajo parece terminado? Esas preguntas las responde Jev, un pequeño modelo de decisión de TypeSafe. Esta página explica cómo darle a OpenChamber acceso a Jev.
 
-Jev nunca escribe código ni responde en tu chat. Solo devuelve un veredicto, y OpenChamber actúa según él. OpenChamber espera la respuesta como mucho cuatro segundos.
+Jev nunca escribe código ni responde en tu chat. Solo devuelve un veredicto, y OpenChamber actúa según él. OpenChamber espera la respuesta como mucho cuatro segundos antes de enviar un mensaje o ejecutar una acción, y hasta quince segundos en las comprobaciones tras un turno, donde nada depende de ella.
 
 ## Qué usa Jev
 

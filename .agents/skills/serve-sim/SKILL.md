@@ -47,6 +47,14 @@ Coordinates are normalized `0..1`, not pixels. Prefer `tap` for simple taps; do 
 
 If accessibility lookup cannot identify a target, report the missing target instead of guessing coordinates.
 
+## iPhone Duo (foldable)
+
+- Runtime: the Duo-specific one (`xcodebuild -downloadPlatform iOS -buildVersion 27.2` gives `SimRuntime.iOS-27-2-iPhone19-4`). On the generic iOS 27.1 runtime AccessibilityUIServer crash-loops at launch and macOS shows endless crash dialogs.
+- Xcode 27 has no Simulator.app; `DeviceHub.app` in `Xcode.app/Contents/Applications` replaces it.
+- `bunx serve-sim fold <0..180>` sets the hinge; the stream shows the inner display. `simctl io <udid> screenshot --display=1` shoots the outer screen, `--display=3` the inner.
+- `tap` and `type` reach the app only when folded. Unfolded, no touches arrive, so drive the WebView through lldb: attach to the app pid, `expr -l objc -- @import WebKit`, take the WKWebView at `[[[[[UIApplication sharedApplication] connectedScenes] anyObject] keyWindow] rootViewController] view]`, `evaluateJavaScript` a script that writes its result into `document.title`, then `po [webView title]`.
+- Geometry: safe-area insets top 0, right 84 (the status bar column), bottom 34; window 466×678 folded, 951×669 unfolded, which is the tablet layout (short side ≥ 600).
+
 ## Preconditions
 
 - macOS host.
