@@ -28,8 +28,14 @@ async function createFixture({ holdMs = 5000 } = {}) {
   const asked = [];
   const upstream = express();
   upstream.use((req, res) => {
-    forwarded.push(`${req.method} ${req.path}`);
-    res.json({ data: [], cursor: {} });
+    if (req.path === '/api' || req.path.startsWith('/api/')) {
+      forwarded.push(`${req.method} ${req.path}`);
+    }
+    if (req.method === 'GET' && ['/api/mcp', '/api/config', '/api/session'].includes(req.path)) {
+      res.json({ data: [], cursor: {} });
+    } else {
+      res.sendStatus(404);
+    }
   });
   const upstreamUrl = await listen(upstream);
   const app = express();
@@ -48,10 +54,30 @@ async function createFixture({ holdMs = 5000 } = {}) {
     },
     WORKTREE_REMOVAL_HOLD_MS: holdMs,
   });
-  return { url: await listen(app), forwarded, asked, settle };
+  return { url: await listen(app), upstreamUrl, forwarded, asked, settle };
 }
 
 describe('issue #4111 requests for a worktree being removed', () => {
+  it('ignores unrelated probes while recording all API paths and methods', async () => {
+    const fixture = await createFixture();
+    const held = fetch(`${fixture.url}/api/mcp`, { headers: { 'x-opencode-directory': worktree } });
+    try {
+      await expect.poll(() => fixture.asked).toEqual([worktree]);
+      expect((await fetch(`${fixture.upstreamUrl}/`)).status).toBe(404);
+      expect((await fetch(`${fixture.upstreamUrl}/health`)).status).toBe(404);
+      expect(fixture.forwarded).toEqual([]);
+      expect((await fetch(`${fixture.upstreamUrl}/api/unexpected`)).status).toBe(404);
+      expect((await fetch(`${fixture.upstreamUrl}/api/mcp`, { method: 'POST' })).status).toBe(404);
+      expect((await fetch(`${fixture.upstreamUrl}/api/mcp`, { method: 'HEAD' })).status).toBe(404);
+      expect(fixture.forwarded).toEqual(['GET /api/unexpected', 'POST /api/mcp', 'HEAD /api/mcp']);
+    } finally {
+      fixture.settle();
+      await held;
+    }
+    expect((await held).status).toBe(200);
+    expect(fixture.forwarded.at(-1)).toBe('GET /api/mcp');
+  });
+
   it('holds a request whose percent-encoded header names the worktree until the removal settles', async () => {
     const fixture = await createFixture();
     // The UI sends the header encoded without the marker; OpenCode decodes it.
