@@ -3373,6 +3373,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     <BranchComparisonSelector
                         key={JSON.stringify([effectiveDirectory, currentBranch])}
                         branches={branches?.all ?? []}
+                        defaultBranches={branches?.defaultBranches}
                         currentBranch={currentBranch}
                         base={qualifiedBranchBase}
                         automatic={branchBaseSource !== 'chosen'}

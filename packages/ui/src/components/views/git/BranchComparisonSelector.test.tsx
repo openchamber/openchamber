@@ -121,6 +121,56 @@ for (const mobile of [false, true]) {
 }
 test('keeps the mobile branch picker anchored on tablets', () => checkBranchSelection(true, true));
 
+for (const mobile of [false, true]) test(`puts each available remote default before other branches (mobile=${mobile})`, async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  if (mobile) dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    Event: dom.Event, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom),
+    requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const { createRoot } = await import('react-dom/client');
+  const { BranchComparisonSelector } = await import('./BranchComparisonSelector');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const choices: string[] = [];
+  try {
+    await act(async () => root.render(<I18nProvider><BranchComparisonSelector
+      mobile={mobile}
+      branches={['feature', 'alpha', 'remotes/origin/main', 'remotes/upstream/main']}
+      defaultBranches={{ origin: 'main', upstream: 'main', missing: 'main' }}
+      currentBranch="feature"
+      base="refs/heads/alpha"
+      onSelect={(ref) => choices.push(ref)}
+    /></I18nProvider>));
+    await act(async () => container.querySelector('button')?.click());
+    const values = Array.from(document.querySelectorAll('[cmdk-item]'), (item) => item.getAttribute('data-value'));
+    expect(values).toEqual(['refs/remotes/origin/main', 'refs/remotes/upstream/main', 'refs/heads/alpha']);
+    const upstream = document.querySelector<HTMLElement>('[data-value="refs/remotes/upstream/main"]');
+    expect(upstream?.textContent).toContain('upstream/main');
+    await act(async () => upstream?.click());
+    expect(choices).toEqual(['refs/remotes/upstream/main']);
+  } finally {
+    await act(async () => root.unmount());
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+});
+
 test('offers going back to the detected base once one was chosen', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();

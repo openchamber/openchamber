@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveBaseBranch, hasResolvableBaseBranch, qualifyBaseRef, resolveBranchComparisonBase } from './baseBranch';
+import { comparisonBaseBranchName, deriveBaseBranch, hasResolvableBaseBranch, qualifyBaseRef, resolveBranchComparisonBase } from './baseBranch';
 
 describe('deriveBaseBranch', () => {
   test('prefers the repository default branch over conventional fallbacks', () => {
@@ -181,6 +181,33 @@ describe('resolveBranchComparisonBase', () => {
   test('passes over a chosen base that no longer exists', () => {
     expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/heads/deleted', defaultBranch: 'main' }, repository))
       .toEqual({ ref: 'origin/main', source: 'default' });
+  });
+
+  test('honors an explicit remote ref without changing automatic remote authority', () => {
+    const remotes = { ...repository, remoteBranches: [...repository.remoteBranches, 'upstream/main'], remoteNames: new Set(['origin', 'upstream']) };
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/upstream/main', defaultBranch: 'main' }, remotes))
+      .toEqual({ ref: 'refs/remotes/upstream/main', source: 'chosen' });
+    expect(resolveBranchComparisonBase({ ...none, createdFrom: 'upstream/main', defaultBranch: 'main' }, remotes))
+      .toEqual({ ref: 'origin/main', source: 'default' });
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/upstream/deleted', defaultBranch: 'main' }, remotes))
+      .toEqual({ ref: 'origin/main', source: 'default' });
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/origin/main' }, remotes))
+      .toEqual({ ref: 'origin/main', source: 'chosen' });
+    expect(comparisonBaseBranchName('origin/main', 'origin')).toBe('main');
+    expect(comparisonBaseBranchName('refs/remotes/upstream/main', 'origin')).toBeNull();
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/upstream/main' }, { ...remotes, headBranch: 'main' }))
+      .toEqual({ ref: 'refs/remotes/upstream/main', source: 'chosen' });
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/origin/main' }, { ...remotes, headBranch: 'main' })).toBeNull();
+    expect(resolveBranchComparisonBase(
+      { ...none, chosen: 'refs/remotes/team/origin/feature' },
+      { ...repository, primaryRemote: 'team/origin', remoteNames: new Set(['team/origin']), remoteBranches: ['team/origin/feature'] },
+    )).toBeNull();
+    expect(resolveBranchComparisonBase({ ...none, chosen: 'refs/remotes/upstream/main', pullRequest: 'parent', defaultBranch: 'main' }, { ...remotes, ignoreForeignChoice: true }))
+      .toEqual({ ref: 'origin/parent', source: 'pull-request' });
+    expect(resolveBranchComparisonBase(
+      { ...none, chosen: 'refs/remotes/origin/fork/main', pullRequest: 'parent' },
+      { ...remotes, remoteNames: new Set(['origin', 'origin/fork']), remoteBranches: [...remotes.remoteBranches, 'origin/fork/main'], ignoreForeignChoice: true },
+    )).toEqual({ ref: 'origin/parent', source: 'pull-request' });
   });
 
   test('never compares a branch with itself or its own remote copy', () => {

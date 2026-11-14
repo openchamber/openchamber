@@ -1,8 +1,9 @@
 export const branchRefLabel = (ref: string): string => ref.replace(/^refs\/(heads|remotes)\//, '').replace(/^remotes\//, '');
 
 /** The branch a qualified comparison base names: `origin/feat` and `refs/heads/feat` are both `feat`. */
-export const comparisonBaseBranchName = (ref: string, primaryRemote: string | null | undefined): string => {
+export const comparisonBaseBranchName = (ref: string, primaryRemote: string | null | undefined): string | null => {
   if (ref.startsWith('refs/heads/')) return ref.slice('refs/heads/'.length);
+  if (ref.startsWith('refs/remotes/')) return null;
   return primaryRemote && ref.startsWith(`${primaryRemote}/`) ? ref.slice(primaryRemote.length + 1) : ref;
 };
 
@@ -142,9 +143,8 @@ export const hasResolvableBaseBranch = (options: {
  * branch a pull request merges into, which is the bound remote's copy, so the
  * remote-tracking ref wins and the local branch answers only when the remote
  * has none (a parent branch that was never pushed). An explicit `refs/heads/`
- * choice stays local. A repository answers to the remote it is bound to, so a
- * base on any other remote is a different project's branch with a familiar
- * name. Null means exactly that: no ref here is the base.
+ * choice stays local. Detected bases use the bound remote; another remote can
+ * name a different project's branch with a familiar name.
  */
 export const qualifyBaseRef = (candidate: string | null | undefined, options: {
   localBranches: readonly string[];
@@ -191,7 +191,7 @@ export const resolveBranchComparisonBase = (candidates: {
   pullRequest: string | null;
   createdFrom: string | null;
   defaultBranch: string | null;
-}, options: Parameters<typeof qualifyBaseRef>[1] & { headBranch: string }): { ref: string; source: BranchComparisonBaseSource } | null => {
+}, options: Parameters<typeof qualifyBaseRef>[1] & { headBranch: string; ignoreForeignChoice?: boolean }): { ref: string; source: BranchComparisonBaseSource } | null => {
   const order: Array<[BranchComparisonBaseSource, string | null]> = [
     ['chosen', candidates.chosen],
     ['pull-request', candidates.pullRequest],
@@ -199,11 +199,27 @@ export const resolveBranchComparisonBase = (candidates: {
     ['default', candidates.defaultBranch],
   ];
   for (const [source, candidate] of order) {
-    const ref = qualifyBaseRef(candidate, options);
+    const explicitRemote = source === 'chosen' && candidate?.startsWith('refs/remotes/')
+      ? candidate.slice('refs/remotes/'.length)
+      : null;
+    const selectedRemote = explicitRemote
+      ? [...options.remoteNames].filter((remote) => explicitRemote.startsWith(`${remote}/`))
+        .sort((a, b) => b.length - a.length)[0]
+      : null;
+    const explicitForeign = explicitRemote && selectedRemote !== options.primaryRemote;
+    if (explicitForeign && options.ignoreForeignChoice) continue;
+    const ref = explicitRemote
+      ? options.remoteBranches.includes(explicitRemote)
+        ? !explicitForeign ? explicitRemote : candidate
+        : null
+      : qualifyBaseRef(candidate, options);
     if (!ref) continue;
     // The branch's own remote copy is not its base either.
-    const branch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref.slice(`${options.primaryRemote}/`.length);
-    if (branch !== options.headBranch) return { ref, source };
+    const remoteRef = ref.replace(/^refs\/remotes\//, '');
+    const branch = ref.startsWith('refs/heads/')
+      ? ref.slice('refs/heads/'.length)
+      : remoteRef.slice((options.primaryRemote?.length ?? 0) + 1);
+    if (branch !== options.headBranch || explicitForeign) return { ref, source };
   }
   return null;
 };
