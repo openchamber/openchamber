@@ -16,34 +16,42 @@ let shellMessageID = '';
 let continued = 0;
 let finishShell: () => void = () => undefined;
 let failShell: (error: Error) => void = () => undefined;
+let shellStarted: Promise<void>;
+let activeRun: Promise<void>;
 
 const note = spyOn(opencodeClient, 'addSessionNote');
 const shell = spyOn(opencodeClient, 'shellSession');
 const resume = spyOn(opencodeClient, 'resumeWithSyntheticInput');
 
-const start = (command: string) => runReplyCommand({ sessionId: 'ses_1', directory: '/repo', replyMessageID: 'msg_reply', command });
+const start = (command: string) => {
+  activeRun = runReplyCommand({ sessionId: 'ses_1', directory: '/repo', replyMessageID: 'msg_reply', command });
+  return activeRun;
+};
 const started = (id: string) => updated({ id, sessionID: 'ses_1', role: 'shell', shellID: 'sh_1', command: 'ls', status: 'running', time: { created: 1 } });
 
 beforeEach(() => {
   note.mockResolvedValue(undefined);
-  shell.mockImplementation((params) => new Promise<string>((resolve, reject) => {
-    shellMessageID = params.messageId ?? '';
-    finishShell = () => resolve('');
-    failShell = reject;
-  }));
+  shellStarted = new Promise<void>((started) => {
+    shell.mockImplementation((params) => new Promise<string>((resolve, reject) => {
+      shellMessageID = params.messageId ?? '';
+      finishShell = () => resolve('');
+      failShell = reject;
+      started();
+    }));
+  });
   continued = 0;
   resume.mockImplementation(async () => { continued += 1; });
 });
 
-afterEach(() => {
+afterEach(async () => {
   finishShell();
+  await Promise.allSettled([activeRun]);
 });
 
 describe('runReplyCommand', () => {
   test('continues the agent once the output reached it, once', async () => {
     void start('ls');
-    await Promise.resolve();
-    await Promise.resolve();
+    await shellStarted;
     applyReplyCommandEvents([started(shellMessageID)]);
     expect(continued).toBe(0);
     applyReplyCommandEvents([finished('completed'), finished('completed')]);
@@ -52,24 +60,21 @@ describe('runReplyCommand', () => {
 
   test('a stopped command leaves the agent alone', async () => {
     void start('stopped');
-    await Promise.resolve();
-    await Promise.resolve();
+    await shellStarted;
     applyReplyCommandEvents([started(shellMessageID), finished('cancelled')]);
     expect(continued).toBe(0);
   });
 
   test('rejects when the command did not start', async () => {
     const run = start('broken');
-    await Promise.resolve();
-    await Promise.resolve();
+    await shellStarted;
     failShell(new Error('no shell'));
     await expect(run).rejects.toThrow('no shell');
   });
 
   test('a request lost after the start is no failure', async () => {
     const run = start('long');
-    await Promise.resolve();
-    await Promise.resolve();
+    await shellStarted;
     applyReplyCommandEvents([started(shellMessageID)]);
     failShell(new Error('connection reset'));
     expect(await run).toBeUndefined();
@@ -93,19 +98,27 @@ describe('runReplyCommand', () => {
     childStores.ensureChild('/repo', { bootstrap: false }).setState({ session: [session] });
     setActionRefs(childStores, () => '/repo');
     let committed: () => void = () => undefined;
-    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation(() => new Promise<void>((resolve) => { committed = resolve; }));
+    const commit = spyOn(opencodeClient, 'commitRevert');
+    const commitStarted = new Promise<void>((started) => {
+      commit.mockImplementation(() => new Promise<void>((resolve) => {
+        committed = resolve;
+        started();
+      }));
+    });
     const notesBefore = note.mock.calls.length;
     const shellsBefore = shell.mock.calls.length;
     try {
       void start('ls');
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await commitStarted;
       expect(commit.mock.calls).toEqual([['ses_1', '/repo']]);
       expect(note.mock.calls.length).toBe(notesBefore);
       committed();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await shellStarted;
       expect(note.mock.calls.length).toBe(notesBefore + 1);
       expect(shell.mock.calls.length).toBe(shellsBefore + 1);
     } finally {
+      committed();
+      await shellStarted;
       commit.mockRestore();
       setActionRefs(new ChildStoreManager(), () => '');
     }
