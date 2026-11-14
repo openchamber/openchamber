@@ -18,7 +18,8 @@ import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { selectMcpServersForDirectory, useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionForms, useSessionStatus } from '@/sync/sync-context';
+import { formTurnHold, useRecoverableQuestionsStore } from '@/sync/recoverable-questions';
+import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionStatus } from '@/sync/sync-context';
 import { useSessionActivity } from './useSessionActivity';
 import type { AgentStatus } from '@/lib/agentStatus';
 import type { I18nKey } from '@/lib/i18n';
@@ -628,7 +629,15 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '', currentSessionDirectory ?? undefined);
-    const sessionFormRequests = useSessionForms(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    // Only a form that still holds the turn pauses the status: one whose tool
+    // call has ended leaves the turn running (#5391), as in useSessionActivity.
+    const releasedForms = useRecoverableQuestionsStore((state) => state.releasedForms);
+    const formHoldsTurn = useDirectorySync(
+        React.useCallback((state) => (
+            state.form[currentSessionId ?? '']?.some((form) => formTurnHold(form, state.part, releasedForms) !== 'released') ?? false
+        ), [currentSessionId, releasedForms]),
+        currentSessionDirectory ?? undefined,
+    );
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -743,7 +752,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const hasPendingPermission = sessionPermissionRequests.length > 0;
-        const hasPendingForm = sessionFormRequests.length > 0;
+        const hasPendingForm = formHoldsTurn;
 
         if (!hasPendingPermission && !hasPendingForm) {
             return baseWorking;
@@ -772,7 +781,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             retryInfo: null,
             canBackground: false,
         };
-    }, [baseWorking, sessionPermissionRequests, sessionFormRequests]);
+    }, [baseWorking, sessionPermissionRequests, formHoldsTurn]);
 
     return {
         activeModel: activeAssistant.model,

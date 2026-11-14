@@ -4031,14 +4031,6 @@ export function useSessionPermissions(sessionID: string, directory?: string, opt
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** Get pending forms for a specific session */
-export function useSessionForms(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.form[sessionID] ?? EMPTY_FORM_REQUESTS, [sessionID]),
-    directory,
-  )
-}
-
 type SessionBlockingRequests = {
   hasPermission: boolean
   hasForm: boolean
