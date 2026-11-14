@@ -50,7 +50,6 @@ public class SealedPushMessagingService extends MessagingService {
             }
         }
         show(remoteMessage, data, title, body);
-        applyToWidgets(data);
     }
 
     private void show(RemoteMessage remoteMessage, Map<String, String> data, String title, String body) {
@@ -102,26 +101,6 @@ public class SealedPushMessagingService extends MessagingService {
             NotificationManagerCompat.from(this).notify(tag, requestCode, builder.build());
         } catch (SecurityException error) {
             // Notification permission withdrawn; nothing to show.
-        }
-    }
-
-    /**
-     * The widgets' attention count and unread marks follow the push, as they do in the iOS
-     * notification service extension; the app overwrites the whole snapshot when it next runs.
-     */
-    private void applyToWidgets(Map<String, String> data) {
-        Integer badge = null;
-        String raw = data.get("badge");
-        if (raw != null) {
-            try {
-                badge = Integer.parseInt(raw);
-            } catch (NumberFormatException error) {
-                // No count.
-            }
-        }
-        String sessionId = data.get("sessionId");
-        if (WidgetSnapshotStore.applyPush(getApplicationContext(), data.get("runtimeKey"), badge, sessionId)) {
-            BaseWidgetProvider.refreshAll(getApplicationContext());
         }
     }
 

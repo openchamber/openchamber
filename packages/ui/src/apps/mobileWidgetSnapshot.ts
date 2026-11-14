@@ -56,12 +56,6 @@ const basename = (path: string): string => {
 const normalizeProjectPath = (path: string): string =>
   path.replace(/\\/g, '/').replace(/\/+$/, '');
 
-/**
- * A session that ran in a directory the app generated for it is labelled `session-<id>`; that is
- * not a project name, and the widget row reads better without it.
- */
-export const isSessionDirectoryName = (label: string): boolean => /^session-[0-9a-z-]{8,}$/i.test(label);
-
 /** Project label for a session directory: longest matching project's name, else the folder name. */
 const projectLabelForDirectory = (directory: string | null, projects: ProjectEntry[]): string => {
   if (!directory) return '';
@@ -97,11 +91,10 @@ const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
       attentionCount += 1;
     }
     if (parentIdOf(session) === null) {
-      const label = projectLabelForDirectory(resolveGlobalSessionDirectory(session), projects);
       topLevel.push({
         session,
         unread,
-        project: isSessionDirectoryName(label) ? '' : label,
+        project: projectLabelForDirectory(resolveGlobalSessionDirectory(session), projects),
       });
     }
   }

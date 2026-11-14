@@ -8,17 +8,4 @@
     <string name="tile_new_session">New session</string>
     <string name="tile_new_session_subtitle">OpenChamber</string>
     <string name="tile_new_session_description">Start a new OpenChamber session</string>
-    <string name="widget_untitled">Untitled</string>
-    <string name="widget_no_sessions">No sessions yet</string>
-    <string name="widget_chat">Chat</string>
-    <string name="widget_new_session">New session</string>
-    <string name="widget_attention">Attention</string>
-    <string name="widget_overview_label">OpenChamber overview</string>
-    <string name="widget_sessions_label">OpenChamber sessions</string>
-    <string name="widget_quick_actions_label">OpenChamber chat</string>
-    <string name="widget_new_session_label">OpenChamber new session</string>
-    <string name="widget_overview_description">Recent sessions and their attention count</string>
-    <string name="widget_sessions_description">Your recent sessions, newest first</string>
-    <string name="widget_quick_actions_description">Start a session or open what needs attention</string>
-    <string name="widget_new_session_description">Start a new session</string>
 </resources>
