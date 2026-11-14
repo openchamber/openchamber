@@ -604,7 +604,7 @@ and WRITES only the v2 one:
 | Agents | `.opencode/{agent,agents,mode,modes}/**/*.md` | `.opencode/agents/<name>.md` |
 | Commands | `.opencode/{command,commands}/**/*.md` | `.opencode/commands/<name>.md` |
 | Skills | `.opencode/{skill,skills}/<id>/SKILL.md`, plus `.claude/skills` and `.agents/skills` | `.opencode/skills/<id>/SKILL.md` |
-| Plugin files | `.opencode/{plugin,plugins}/` — `.ts`/`.js` files and plugin package directories | `.opencode/plugins/<file>` |
+| Plugin files | `.opencode/{plugin,plugins}/` — `.ts`/`.js` files, plugin package directories, and symlinks to either | `.opencode/plugins/<file>` |
 
 The same holds for the global config directory. Like OpenCode 2, agents,
 commands and skills are looked up in every `.opencode` from the working
@@ -612,7 +612,14 @@ directory up to the worktree root, so a definition in a parent directory of a
 monorepo package counts; a nested id (`team/reviewer`) maps onto the path.
 Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
-OpenCode loads and OpenChamber does not touch.
+OpenCode loads and OpenChamber does not touch. The listing decides what an
+entry is from its resolved target, so a symlink — a Windows directory junction
+included — is listed as the file or package it points at. A link whose target
+is missing or unreadable is skipped instead of failing the listing. Following
+the link only affects listing: a link may point outside the plugin directory,
+and the file it names is shown like OpenCode's own loader shows it. The VS Code
+bridge runs the same walk but lists files only, so it picks up a linked file
+the same way and lists no package directory, linked or not.
 
 The plugins page lists entries from every config file OpenCode takes plugins
 from: both global files (`opencode.json` and `opencode.jsonc`),

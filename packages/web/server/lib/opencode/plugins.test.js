@@ -243,6 +243,80 @@ describe('opencode plugins data layer', () => {
     expect(files).toHaveLength(4);
   });
 
+  // Windows needs admin rights or Developer Mode for a file symlink. The
+  // directory case below still runs there as a junction, and both go through
+  // the same stat, so a refused file link skips this case instead of failing.
+  const symlinkOrWarn = (target, linkPath, type, testName) => {
+    try {
+      fs.symlinkSync(target, linkPath, type);
+      return true;
+    } catch (error) {
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+        console.warn(`Skipping "${testName}": ${error.code} creating a ${type} symlink needs admin rights or Developer Mode`);
+        return false;
+      }
+      throw error;
+    }
+  };
+
+  test('lists symlinked plugin files and package directories', () => {
+    const sourceDir = fs.mkdtempSync(path.join(rootDir, 'linked-'));
+    const sourcePackage = path.join(sourceDir, 'shared-package');
+    fs.mkdirSync(sourcePackage);
+    fs.writeFileSync(path.join(sourcePackage, 'index.js'), '');
+    fs.mkdirSync(path.join(globalDir, 'plugins'), { recursive: true });
+    const linkPackage = path.join(globalDir, 'plugins', 'linked-package');
+    fs.symlinkSync(sourcePackage, linkPackage, process.platform === 'win32' ? 'junction' : 'dir');
+
+    // A junction needs no privilege on Windows, so the package row runs there.
+    const listed = plugins.listPluginDirFiles(projectDir);
+    expect(listed).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fileName: 'linked-package',
+        scope: 'user',
+        kind: 'package',
+        absolutePath: linkPackage,
+        resolvedPath: fs.realpathSync(sourcePackage),
+      }),
+    ]));
+
+    // A file link needs one. Node can make it where Developer Mode is on, so
+    // the case is offered the chance rather than declared impossible.
+    const sourceFile = path.join(sourceDir, 'shared.ts');
+    fs.writeFileSync(sourceFile, '');
+    const linkFile = path.join(globalDir, 'plugins', 'linked.ts');
+    let linked = true;
+    try {
+      fs.symlinkSync(sourceFile, linkFile, 'file');
+    } catch (error) {
+      if (error?.code !== 'EPERM' && error?.code !== 'EACCES') throw error;
+      linked = false;
+      console.warn(`Skipping the linked-file assertions: ${error.code} creating a file symlink needs admin rights or Developer Mode`);
+    }
+    if (!linked) return;
+
+    expect(plugins.listPluginDirFiles(projectDir)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fileName: 'linked.ts',
+        scope: 'user',
+        kind: 'file',
+        absolutePath: linkFile,
+        resolvedPath: fs.realpathSync(sourceFile),
+      }),
+    ]));
+  });
+
+  test('skips a plugin symlink whose target is missing', () => {
+    fs.mkdirSync(path.join(globalDir, 'plugins'), { recursive: true });
+    const brokenLink = path.join(globalDir, 'plugins', 'broken.js');
+    if (!symlinkOrWarn(path.join(globalDir, 'missing.js'), brokenLink, 'file', 'skips a plugin symlink whose target is missing')) {
+      return;
+    }
+
+    // A broken link must not take the whole listing down with it.
+    expect(plugins.listPluginDirFiles(projectDir)).toEqual([]);
+  });
+
   test('lists global and OPENCODE_CONFIG entries together and edits each in its own file', () => {
     const globalConfigPath = path.join(globalDir, 'opencode.json');
     writeJson(globalConfigPath, { plugins: ['global-plugin', 'shared-plugin'] });

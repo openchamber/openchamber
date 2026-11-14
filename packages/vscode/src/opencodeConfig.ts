@@ -1690,7 +1690,20 @@ export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: 
     }
     if (!fs.existsSync(dir)) continue;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
+      // A symlink reports as neither file nor directory, so a linked plugin
+      // file would be dropped. Stat the target instead. A link whose target
+      // cannot be stat'ed is skipped rather than failing the whole listing.
+      let isFileEntry = entry.isFile();
+      if (entry.isSymbolicLink()) {
+        let target: fs.Stats | undefined;
+        try {
+          target = fs.statSync(path.join(dir, entry.name), { throwIfNoEntry: false });
+        } catch {
+          target = undefined;
+        }
+        isFileEntry = Boolean(target?.isFile());
+      }
+      if (!isFileEntry) continue;
       try {
         const fileName = validatePluginFileName(entry.name);
         const absolutePath = path.join(dir, fileName);

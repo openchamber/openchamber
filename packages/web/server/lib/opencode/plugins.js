@@ -512,14 +512,31 @@ function listPluginDirFiles(workingDirectory, switchStore) {
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
       .flatMap((entry) => {
         const absolutePath = path.join(dir, entry.name);
-        if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
+        // A symlink's Dirent reports neither file nor directory, so a linked
+        // plugin file or package would be dropped. Stat the target instead: a
+        // junction and a real link both then count as what they point at, and
+        // a link whose target cannot be stat'ed is skipped, the way the skills
+        // scan skips one, instead of failing the whole listing.
+        let isFileEntry = entry.isFile();
+        let isDirectoryEntry = entry.isDirectory();
+        if (entry.isSymbolicLink()) {
+          let target;
+          try {
+            target = fs.statSync(absolutePath, { throwIfNoEntry: false });
+          } catch {
+            target = undefined;
+          }
+          isFileEntry = Boolean(target?.isFile());
+          isDirectoryEntry = Boolean(target?.isDirectory());
+        }
+        if (isFileEntry && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
           // Only files in the v2 `plugins/` directory are editable through
           // the file id; a v1 `plugin/` file is listed for what it is.
           return editable
             ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
             : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
-        if (entry.isDirectory()) {
+        if (isDirectoryEntry) {
           // A plugin package (a directory with its own entry point): OpenCode
           // loads it, OpenChamber only lists it.
           return [{ id: encodePluginId(editable ? 'package' : 'legacyPackage', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
