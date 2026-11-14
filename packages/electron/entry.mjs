@@ -81,6 +81,16 @@ if (shouldIgnoreLoopbackConnectionLimit({
 // that tab ran its timers at an eighth of the speed while out of sight. The
 // user's hidden tabs keep their timer throttling, so they stay cheap.
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Caps the young generation of every renderer's JS heap at 4 MB per half
+// (V8 grows it to several times that on a desktop). A streaming reply fills
+// whatever it is given with short-lived objects, and what the heap gives back
+// afterwards still counts against the process once macOS has compressed it,
+// so the window's footprint followed its peak: after an agent turn it read
+// about 300 MB with the cap and about 370 MB without, at no more CPU. A
+// `--js-flags` given on the command line wins, for measuring other values.
+if (!app.commandLine.hasSwitch('js-flags')) {
+  app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=4');
+}
 // Development only: lets a debugger or an agent attach to the dev window over
 // CDP. Chromium binds the port to loopback.
 const devRemoteDebuggingPort = String(process.env.OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT || '').trim();
