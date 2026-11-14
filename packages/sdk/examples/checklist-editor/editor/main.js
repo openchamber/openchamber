@@ -150,6 +150,17 @@ textarea.oc-sdk-input { height: auto; padding: ${n(8)} ${n(10)}; resize: vertica
 
 .oc-sdk-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .oc-sdk-text img { display: block; max-width: 100%; margin: ${n(8)} 0; }
+
+/* Under a finger the controls reach the app's touch sizes: rows and options 44px like its sheets, every other
+   control at least 36px. Inputs keep 16px text, below which iOS zooms the page on focus. */
+@media (pointer: coarse) {
+  .oc-sdk-btn, .oc-sdk-input { height: ${n(40)}; }
+  .oc-sdk-btn[data-size="sm"], .oc-sdk-btn[data-size="xs"], .oc-sdk-trigger, .oc-sdk-tab, .oc-sdk-popup-search .oc-sdk-input { height: ${n(36)}; }
+  .oc-sdk-input, .oc-sdk-popup-search .oc-sdk-input { font-size: max(16px, 0.875rem); }
+  .oc-sdk-search-clear { width: ${n(36)}; height: ${n(36)}; right: 0; }
+  .oc-sdk-row, .oc-sdk-option { min-height: ${n(44)}; }
+  .oc-sdk-check { min-height: ${n(36)}; padding: ${n(8)} 0; }
+}
 `,Do=`${nr}
 .oc-sdk { color: ${N}; font-family: ${sr}; }
 .oc-sdk :focus-visible, .oc-sdk:focus-visible { outline: none; }

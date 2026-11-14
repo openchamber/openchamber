@@ -19,8 +19,8 @@ import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
-import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
-import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { isContextPanelMode, type ContextPanelMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
+import { shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import {
   carrySurfaceToZone,
   getZoneView,
@@ -1308,7 +1308,8 @@ interface UIStore {
   setContextRailSurfaceVisible: (surfaceId: string, visible: boolean) => void;
   setContextRailHiddenSurfaces: (surfaceIds: string[]) => void;
   setMobileWorkspaceTabOrder: (order: readonly string[]) => void;
-  setMobileWorkspaceTabVisible: (tab: MobileWorkspaceTab, visible: boolean) => void;
+  /** `extensions`: the extension tabs available now, so the last tab shown is counted right. */
+  setMobileWorkspaceTabVisible: (tab: MobileWorkspaceTab, visible: boolean, extensions?: readonly PluginContextPanelMode[]) => void;
   setMobileWorkStatusSectionVisible: (sectionId: string, visible: boolean) => void;
   setMobileWorkStatusHiddenSections: (sectionIds: string[]) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
@@ -1353,6 +1354,8 @@ interface UIStore {
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setSettingsProvidersOpenRequested: (providerId: string | null) => void;
   requestSettingsJump: (page: string, itemId?: string | null) => void;
+  /** Opens Settings on `page` and reveals `itemId` there, from anywhere in the app. */
+  openSettingsAt: (page: string, itemId?: string | null) => void;
   clearSettingsJumpRequest: () => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
@@ -2479,10 +2482,10 @@ export const useUIStore = create<UIStore>()(
         },
 
         setMobileWorkspaceTabOrder: (order) => {
-          set({ mobileWorkspaceTabOrder: orderMobileWorkspaceTabs(order) });
+          set((state) => ({ mobileWorkspaceTabOrder: storedMobileWorkspaceTabOrder(order, state.mobileWorkspaceTabOrder) }));
         },
 
-        setMobileWorkspaceTabVisible: (tab, visible) => {
+        setMobileWorkspaceTabVisible: (tab, visible, extensions) => {
           set((state) => {
             const hidden = state.mobileWorkspaceHiddenTabs;
             if (visible) {
@@ -2490,7 +2493,7 @@ export const useUIStore = create<UIStore>()(
             }
             if (hidden.includes(tab)) return state;
             // The last tab the user keeps stays: the drawer would have nothing to show.
-            const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden);
+            const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden, extensions);
             if (shown.length <= 1) return state;
             return { mobileWorkspaceHiddenTabs: [...hidden, tab] };
           });
@@ -2693,6 +2696,10 @@ export const useUIStore = create<UIStore>()(
         },
         requestSettingsJump: (page, itemId = null) => {
           set({ settingsJumpRequest: { page, itemId } });
+        },
+        openSettingsAt: (page, itemId = null) => {
+          get().requestSettingsJump(page, itemId);
+          get().setSettingsDialogOpen(true);
         },
         clearSettingsJumpRequest: () => {
           set({ settingsJumpRequest: null });

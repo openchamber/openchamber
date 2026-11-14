@@ -54,6 +54,14 @@ interface SessionTabsStore {
   /** Drop ids the caller has authoritatively confirmed no longer exist, from every scope. */
   removeTabs: (sessionIds: readonly string[]) => void;
   /**
+   * A session moved to the folder of `scope`: its tab leaves the other scopes
+   * of the same instance (`scopePrefix`) and joins that scope's set, pinned.
+   * A scope never shown yet opens with `seed()`'s sessions, as `enterScope`
+   * would, with the moved one among them; a null seed (the session list is
+   * still loading) leaves it unseen. A session without a tab gets none.
+   */
+  followSessionMove: (sessionId: string, scope: string, scopePrefix: string, seed: () => readonly string[] | null) => void;
+  /**
    * Shows the working set of `scope`. A scope shown for the first time opens
    * with `seed()`'s sessions as pinned tabs (none for most scopes).
    */
@@ -201,6 +209,35 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
             tabIds: shown?.tabIds ?? tabIds,
             previewTabId: shown ? shown.previewTabId : previewTabId,
             sets: nextSets ?? sets,
+          });
+        },
+
+        followSessionMove: (sessionId, scope, scopePrefix, seed) => {
+          const { scope: shownScope, tabIds, previewTabId, sets } = get();
+          const all = { ...sets, [shownScope]: { tabIds, previewTabId } };
+          const next: Record<string, SessionTabSet> = {};
+          for (const [key, tabSet] of Object.entries(all)) {
+            if (key === scope || !key.startsWith(scopePrefix) || !tabSet.tabIds.includes(sessionId)) continue;
+            next[key] = {
+              tabIds: tabSet.tabIds.filter((id) => id !== sessionId),
+              previewTabId: tabSet.previewTabId === sessionId ? null : tabSet.previewTabId,
+            };
+          }
+          if (Object.keys(next).length === 0) return;
+          const seeded = all[scope] ? null : seed();
+          // No complete list to seed from yet: the scope stays unseen, and its
+          // first visit seeds it with the moved session among the rest.
+          const target = all[scope] ?? (seeded ? { tabIds: [...new Set(seeded)].slice(0, MAX_PINNED_SESSION_TABS), previewTabId: null } : null);
+          if (target) {
+            next[scope] = target.tabIds.includes(sessionId)
+              ? target
+              : { tabIds: capPinnedTabs([...target.tabIds, sessionId], target.previewTabId), previewTabId: target.previewTabId };
+          }
+          const { [shownScope]: shown, ...stored } = next;
+          set({
+            tabIds: shown?.tabIds ?? tabIds,
+            previewTabId: shown ? shown.previewTabId : previewTabId,
+            sets: { ...sets, ...stored },
           });
         },
 

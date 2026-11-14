@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -32,6 +33,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -2312,6 +2314,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'من {source}',
   'session.newWorktree.actions.cancel': 'إلغاء',
   'session.newWorktree.actions.creating': 'جارٍ الإنشاء…',
+  'session.newWorktree.creatingWithCommand': 'جارٍ تشغيل أمر الإنشاء الخاص بك…',
   'session.newWorktree.actions.createWorktree': 'إنشاء شجرة عمل (worktree)',
   'session.newWorktree.actions.reset': 'إعادة تعيين',
   'session.newWorktree.actions.unlink': 'إلغاء الربط',
@@ -2812,6 +2815,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'إضافة موفر جديد',
   'chat.modelControls.noAgentSelected': 'لم يتم اختيار وكيل.',
   'chat.modelControls.agentUnavailable': 'الوكيل "{agent}" غير متاح في مجلد هذه الجلسة. اختر وكيلًا آخر.',
+  'chat.modelControls.modelUnavailable': 'النموذج "{model}" لم يعد متاحًا. أُزيل مزوّده أو أُوقف. اختر نموذجًا آخر.',
   'chat.modelControls.searchModels': 'البحث في النماذج',
   'chat.modelControls.modelListAria': 'النماذج',
   'chat.modelControls.searchAgents': 'البحث في الوكلاء',
@@ -3345,6 +3349,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'إلغاء',
   'vscodeLayout.actions.newSessionAria': 'جلسة جديدة',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'تغيير حجم الشريط الجانبي للجلسات',
+  'vscodeLayout.actions.showSessionsAria': 'إظهار الجلسات',
+  'vscodeLayout.actions.hideSessionsAria': 'إخفاء الجلسات',
   'vscodeLayout.actions.settingsAria': 'الإعدادات',
   'updateDialog.header.updateAvailable': 'يتوفر تحديث',
   'updateDialog.header.updating': 'جارٍ تحديث OpenChamber…',
@@ -3917,6 +3923,7 @@ export const dict = {
   ...updateCheckErrorsI18n.ar,
   ...secretRequestI18n.ar,
   ...sessionNoticesI18n.ar,
+  ...settingsHintsI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
@@ -3930,6 +3937,7 @@ export const dict = {
   ...openchamberToolOutputI18n.ar,
   ...opencodeToolOutputI18n.ar,
   ...agentStatusI18n.ar,
+  ...androidWidgetsI18n.ar,
   ...snippetsI18n.ar,
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,

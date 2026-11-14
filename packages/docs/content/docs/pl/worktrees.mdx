@@ -21,6 +21,25 @@ OpenChamber tworzy gałąź, konfiguruje folder i otwiera w nim nową sesję, go
 
 Bez pytań: wybierz **Szybki worktree** w tym samym menu gałęzi. OpenChamber nada gałęzi tymczasową nazwę i skieruje na nią nową sesję. Gdy agent nada zadaniu nazwę, zmieni też nazwę gałęzi zgodnie z zadaniem, np. na `fix/login-timeout`, o ile gałąź nie została jeszcze wypchnięta.
 
+## Twórz worktree własnym narzędziem
+
+Każdy nowy worktree to świeży checkout, więc w dużym projekcie instalowanie zależności może zająć kilka minut, zanim cokolwiek ruszy. Narzędzie copy-on-write tworzy zamiast tego worktree jako klon checkoutu, który już masz: `node_modules`, `.venv` i wyniki budowania przechodzą razem z nim i nie zajmują dodatkowego miejsca na dysku, dopóki się nie zmienią.
+
+Żeby go użyć, otwórz ustawienia projektu, przejdź do **Worktree** i wpisz polecenie swojego narzędzia w sekcji **Tworzenie worktree**. OpenChamber najpierw tworzy gałąź, a potem uruchamia polecenie w katalogu głównym projektu z dwiema zmiennymi środowiskowymi:
+
+- `$WORKTREE_PATH` to folder, w którym ma powstać worktree. Jeszcze nie istnieje.
+- `$WORKTREE_BRANCH` to gałąź, którą trzeba tam wyewidencjonować. Już istnieje.
+
+To polecenie robi to samo, co OpenChamber robi bez własnego polecenia; wstaw polecenie swojego narzędzia w miejsce `git worktree add`:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+Potem worktree pojawia się na pasku bocznym jak każdy inny, a polecenia konfiguracyjne projektu uruchamiają się w nim. Jeśli narzędzie trzyma checkout gdzie indziej i zostawia link w `$WORKTREE_PATH`, OpenChamber pracuje w prawdziwym folderze. Jeśli polecenie się nie powiedzie, OpenChamber pokazuje jego wynik i usuwa gałąź, którą utworzył. Późniejsze usunięcie worktree działa nawet wtedy, gdy narzędzie go zablokowało.
+
+Polecenie jest tylko Twoje: nie jest zapisywane w repozytorium, więc członkowie zespołu bez tego narzędzia dalej tworzą worktree w zwykły sposób. Zostaw pole puste, żeby wrócić do git. Worktree dla pull requesta z cudzego forka zawsze używają git.
+
 ## Na pasku bocznym
 
 Worktree to jeden wiersz na pasku bocznym, a pod nim wszystkie jego sesje. Pod swoim projektem stoi wśród pozostałych sesji projektu według ostatniej aktywności, więc worktree, w którym właśnie pracowałeś, jest blisko góry. Wiersz pokazuje nazwę zadania, gdy tylko agent ją nada (do tego czasu tytuł sesji, w której pracowałeś tam ostatnio), pull request lub issue, za którym podąża, w postaci kolorowego znacznika, i to, czy któraś sesja w nim działa albo ma dla Ciebie nowości. Worktree utworzony dla pull requesta lub issue zaczyna od tytułu tego elementu, dopóki agent nie wybierze krótszej nazwy. Najedź na niego kursorem, żeby zobaczyć gałąź. Kliknij go, żeby otworzyć sesję, w której pracowałeś tam ostatnio; żeby rozwinąć listę, najedź kursorem na ikonę gałęzi po lewej i kliknij strzałkę, która pojawi się w jej miejscu. Jego menu zmienia nazwę zadania, przenosi worktree do folderu projektu, archiwizuje go albo usuwa. Na telefonie dotknij strzałki w wierszu, żeby rozwinąć listę, i przesuń wiersz w bok, żeby oznaczyć go jako gotowy, zmienić nazwę zadania, zarchiwizować worktree albo go usunąć. Jak prace trafiają do bloku W toku i z niego wychodzą, opisuje strona [Sesje w toku](/pl/sessions-in-work/).

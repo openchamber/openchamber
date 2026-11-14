@@ -9,7 +9,8 @@
         "id": "tasks-demo",
         "name": "Task Board",
         "icon": "task",
-        "entry": "panel/index.html"
+        "entry": "panel/index.html",
+        "mobile": true
       },
       "attach": {
         "mode": "dialog",
@@ -17,7 +18,8 @@
       },
       "page": {
         "entry": "panel/page.html",
-        "title": "Tasks board"
+        "title": "Tasks board",
+        "mobile": true
       },
       "capabilities": [
         "prompt",

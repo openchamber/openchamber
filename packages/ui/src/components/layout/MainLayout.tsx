@@ -86,15 +86,17 @@ const OnDemand: React.FC<{
 const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const peek = useSidebarPeek({ enabled: !isSidebarOpen && !isMobile, layoutAnimationMs: useLayoutAnimationMs() });
+    // The list's own controls sit in the strip above it, beside the titlebar buttons.
+    const [listControlsSlot, setListControlsSlot] = React.useState<HTMLDivElement | null>(null);
     return (
         <Sidebar
             isOpen={isSidebarOpen}
             isMobile={isMobile}
             className="border-border"
-            topBar={<SidebarTopBar />}
+            topBar={<SidebarTopBar actionsSlotRef={setListControlsSlot} />}
             peek={peek}
         >
-            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} />
+            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} listControlsSlot={listControlsSlot} />
         </Sidebar>
     );
 });

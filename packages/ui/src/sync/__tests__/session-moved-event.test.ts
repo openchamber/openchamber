@@ -3,6 +3,8 @@ import { GLOBAL_EVENT_DIRECTORY, type SyncEvent } from "@/lib/opencode/events"
 import type { Message, Part, Session } from "@/lib/opencode/model"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { ChildStoreManager } from "../child-store"
 import { setActionRefs } from "../session-actions"
 import { SessionMessageLoader, setImperativeSessionMessageLoader } from "../session-message-loader"
@@ -186,6 +188,50 @@ describe("session.moved", () => {
 
     expect(destination.getState().session).toBe(after.session)
     expect(destination.getState().message).toBe(after.message)
+  })
+
+  test("a session only the global list knows still takes its tab and folder along", () => {
+    run += 1
+    from = `/moved-${run}/old`
+    to = `/moved-${run}/new`
+    const childStores = new ChildStoreManager()
+    setActionRefs(childStores, () => "/somewhere-else")
+    cleanups.push(() => childStores.disposeAll())
+    useGlobalSessionsStore.getState().upsertSession(session())
+    const loaded = useGlobalSessionsStore.getState().hasLoaded
+    useGlobalSessionsStore.setState({ hasLoaded: true })
+    cleanups.push(() => {
+      useGlobalSessionsStore.getState().removeSessions(["ses_1"])
+      useGlobalSessionsStore.setState({ hasLoaded: loaded })
+    })
+    const runtimeKey = getRuntimeKey()
+    useSessionTabsStore.setState({ scope: `${runtimeKey}|/shown`, tabIds: ["ses_other"], previewTabId: null, sets: { [`${runtimeKey}|${from}`]: { tabIds: ["ses_1"], previewTabId: null } } })
+    const tasks = useSessionFoldersStore.getState().createFolder(from, "Tasks")
+    useSessionFoldersStore.getState().addSessionToFolder(from, tasks.id, "ses_1")
+    cleanups.push(() => useSessionFoldersStore.getState().forgetScopes([from]))
+
+    // No store for either directory: OpenCode tags the move with the one it left.
+    handleEvent(from, movedEvents()[0], childStores, createEventRoutingIndex(), runtimeKey)
+
+    expect(useGlobalSessionsStore.getState().entityById.get("ses_1")?.directory).toBe(to)
+    expect(useSessionTabsStore.getState().sets[`${runtimeKey}|${from}`]?.tabIds).toEqual([])
+    expect(useSessionTabsStore.getState().sets[`${runtimeKey}|${to}`]?.tabIds).toEqual(["ses_1"])
+    expect(useSessionFoldersStore.getState().getFoldersForScope(from)[0]?.sessionIds).toEqual([])
+  })
+
+  test("this client's own move, already applied, is not followed twice", () => {
+    const { source, destination, receive } = setup()
+    useGlobalSessionsStore.getState().upsertSession({ ...session(), directory: to })
+    cleanups.push(() => useGlobalSessionsStore.getState().removeSessions(["ses_1"]))
+    // The move's response already carried the session over.
+    destination.setState({ session: [{ ...session(), directory: to }], sessionTotal: 1, message: source.getState().message, part: source.getState().part })
+    source.setState({ session: [], sessionTotal: 0, message: {}, part: {} })
+    const after = destination.getState()
+
+    receive(from, movedEvents()[0])
+
+    expect(destination.getState().message).toBe(after.message)
+    expect(source.getState().session).toHaveLength(0)
   })
 
   test("a recovery asked for in the directory it left reads into the one it moved to", async () => {

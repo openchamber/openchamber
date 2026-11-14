@@ -1165,6 +1165,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'branch', 'repository'],
   },
   {
+    id: 'projects.worktree.create',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.create.title',
+    descriptionKey: 'settings.openchamber.worktrees.create.info',
+    keywords: ['worktree', 'create', 'copy-on-write', 'cow', 'reflink', 'clone', 'git worktree add', 'node_modules', 'disk'],
+  },
+  {
     id: 'projects.worktree.setup.wait',
     page: 'projects',
     titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
@@ -1734,7 +1741,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.add.label',
     descriptionKey: 'settings.extensions.add.info',
     keywords: ['folder', 'path', 'zip', 'git', 'url', 'install', 'guest', 'panel'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'extensions.browse',
@@ -1742,7 +1749,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.browse.label',
     descriptionKey: 'settings.extensions.browse.hint',
     keywords: ['community', 'catalog', 'marketplace', 'store', 'gallery', 'website', 'discover', 'find', 'extension'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile && !ctx.enterpriseMode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
   },
   {
     id: 'extensions.gitIdentity',
@@ -1750,14 +1757,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.identity.title',
     descriptionKey: 'settings.extensions.add.info',
     keywords: ['ssh', 'key', 'identity', 'git', 'private', 'clone', 'extension'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'extensions.updates.check',
     page: 'extensions',
     titleKey: 'settings.extensions.updates.check',
     keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
 ] as const;
 

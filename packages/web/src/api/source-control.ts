@@ -75,7 +75,7 @@ import type {
   RepositoryReferenceReviewer,
   RepositorySelector,
 } from '@openchamber/ui/lib/api/types';
-import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
@@ -297,8 +297,11 @@ const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdenti
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
-  if (!identity.instanceSshUrl?.trim()) return normalized;
-  return { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() };
+  const result: SourceControlIdentity = identity.instanceSshUrl?.trim()
+    ? { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() }
+    : normalized;
+  const aliases = Array.isArray(identity.instanceAliases) ? identity.instanceAliases.filter(isNonEmptyString) : [];
+  return aliases.length ? { ...result, instanceAliases: aliases } : result;
 };
 
 const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRepositoryContext => {
@@ -1326,6 +1329,26 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         throw new Error('Source control response contained an invalid SSH URL');
       }
       return { sshUrl: payload.sshUrl ?? null };
+    },
+    setInstanceAliases: async (identity, aliases) => {
+      const normalized = normalizeIdentity(identity);
+      const response = await fetch('/api/source-control/instances/aliases', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: normalized.provider, instance: normalized.instance, aliases }),
+      });
+      const payload: { aliases?: BoundaryScalar[]; alias?: BoundaryScalar } & ErrorResponse = await response.json();
+      if (!response.ok) {
+        const message = payload.error || response.statusText || 'Failed to save instance aliases';
+        if ((payload.code === 'INVALID_INSTANCE_ALIAS' || payload.code === 'INSTANCE_ALIAS_TAKEN') && isNonEmptyString(payload.alias)) {
+          throw new SourceControlInstanceAliasError(message, payload.code === 'INSTANCE_ALIAS_TAKEN' ? 'taken' : 'invalid', payload.alias);
+        }
+        throw new SourceControlRequestError(message, payload.code);
+      }
+      if (!Array.isArray(payload.aliases) || !payload.aliases.every(isNonEmptyString)) {
+        throw new Error('Source control response contained invalid instance aliases');
+      }
+      return { aliases: [...payload.aliases] };
     },
     authDisconnect: async (identity, accountId) => {
       if (!isNonEmptyString(accountId) || accountId.trim() !== accountId) {

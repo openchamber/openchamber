@@ -25,6 +25,7 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import type { SkillCatalogConfig } from '@/lib/desktop';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { identityTransport, type GitIdentityProfile } from '@/lib/api/git-identity';
 import { GLOBAL_IDENTITY_ID } from '@/lib/source-control/identity';
@@ -146,6 +147,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     ? 'none'
     : gitIdentityId;
   const selectedIdentity = gitIdentityProfiles.find((identity) => identity.id === selectedIdentityValue);
+  const showIdentityPicker = (availableIdentities.length > 0 || selectedIdentityValue !== 'none') && !isVSCodeRuntime();
 
   const isDuplicate = React.useMemo(() => {
     const normalizedSource = source.trim();
@@ -192,6 +194,20 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
           return;
         }
 
+        // With no identity that signs in on its own the picker is hidden, so
+        // the toast leads to Git settings instead of asking to pick one.
+        if (!showIdentityPicker) {
+          toast.error(t('settings.skills.catalog.add.toast.privateRepoNoIdentity'), {
+            action: {
+              label: t('settings.skills.catalog.add.toast.setUpIdentity'),
+              onClick: () => {
+                onOpenChange(false);
+                useUIStore.getState().openSettingsAt('git', 'git.identities');
+              },
+            },
+          });
+          return;
+        }
         toast.error(t('settings.skills.catalog.add.toast.authenticationRequiredScan'));
         return;
       }
@@ -320,11 +336,11 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
             />
           </div>
 
-          {(availableIdentities.length > 0 || selectedIdentityValue !== 'none') && !isVSCodeRuntime() ? (
+          {showIdentityPicker ? (
             <div className="space-y-2">
               <div className="flex items-center gap-1">
                 <span className="typography-ui-label text-foreground">{t('settings.skills.catalog.shared.auth.description')}</span>
-                <SettingsInfoHint>{t('settings.skills.catalog.shared.auth.footerHint')}</SettingsInfoHint>
+                <SettingsInfoHint>{t('settings.skills.catalog.shared.auth.identitiesHint')}</SettingsInfoHint>
               </div>
               <Select
                 value={selectedIdentityValue}

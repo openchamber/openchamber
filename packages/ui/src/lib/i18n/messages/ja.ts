@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -204,6 +206,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.ja,
   ...secretRequestI18n.ja,
   ...sessionNoticesI18n.ja,
+  ...settingsHintsI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
   ...sessionWarmingI18n.ja,
@@ -217,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.ja,
   ...opencodeToolOutputI18n.ja,
   ...agentStatusI18n.ja,
+  ...androidWidgetsI18n.ja,
   ...snippetsI18n.ja,
   ...sidebarWorkI18n.ja,
   ...sidebarSectionsI18n.ja,
@@ -2400,6 +2404,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': 'from {source}',
   'session.newWorktree.actions.cancel': 'キャンセル',
   'session.newWorktree.actions.creating': '作成中...',
+  'session.newWorktree.creatingWithCommand': '作成コマンドを実行中…',
   'session.newWorktree.actions.createWorktree': 'ワークツリーを作成',
   'session.newWorktree.actions.reset': 'リセット',
   'session.newWorktree.actions.unlink': 'リンクを解除',
@@ -2903,6 +2908,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '新しいプロバイダーを追加',
   'chat.modelControls.noAgentSelected': 'エージェントが選択されていません。',
   'chat.modelControls.agentUnavailable': 'エージェント "{agent}" はこのセッションのフォルダーでは使用できません。別のエージェントを選んでください。',
+  'chat.modelControls.modelUnavailable': 'モデル "{model}" は利用できなくなりました。プロバイダーが削除されたか無効になっています。別のモデルを選んでください。',
   'chat.modelControls.searchModels': 'モデルを検索',
   'chat.modelControls.modelListAria': 'モデル',
   'chat.modelControls.searchAgents': 'エージェントを検索',
@@ -3431,6 +3437,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'キャンセル',
   'vscodeLayout.actions.newSessionAria': '新しいセッション',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'セッションサイドバーのサイズを調整',
+  'vscodeLayout.actions.showSessionsAria': 'セッションを表示',
+  'vscodeLayout.actions.hideSessionsAria': 'セッションを非表示',
   'vscodeLayout.actions.settingsAria': '設定',
   'updateDialog.header.updateAvailable': '更新があります',
   'updateDialog.header.updating': 'OpenChamberを更新中...',

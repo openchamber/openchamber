@@ -127,7 +127,12 @@ const toggleIn = <T extends string>(list: readonly T[], value: T): T[] => (
  * the sidebar, so the section being edited shows in the list as it stands.
  */
 /** `pages`: this surface lists the app's pages (not on phones), so Pages is one of its sections. */
-export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElement | null>; pages: boolean }> = ({ anchor, pages }) => {
+/** `trigger`: the button that toggles the manager; a press or focus move onto it is not leaving the panel. */
+export const SidebarSectionsManager: React.FC<{
+  anchor: React.RefObject<HTMLElement | null>;
+  trigger: React.RefObject<HTMLElement | null>;
+  pages: boolean;
+}> = ({ anchor, trigger, pages }) => {
   const { t } = useI18n();
   const open = useSidebarSectionsUiStore((state) => state.managerOpen);
   const draft = useSidebarSectionsUiStore((state) => state.draft);
@@ -136,6 +141,14 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
       open={open}
       onOpenChange={(next, details) => {
         if (next) return;
+        // A press on the trigger or focus moving onto it: closing here would
+        // let the trigger's click open the panel again. Escape still closes.
+        const target = details.reason === 'outside-press' ? details.event.target
+          : details.reason === 'focus-out' && details.event instanceof FocusEvent ? details.event.relatedTarget : null;
+        if (target instanceof Node && trigger.current?.contains(target)) {
+          details.cancel();
+          return;
+        }
         // Escape in one of the panel's menus (Add condition and its lists stay
         // open while values are picked) closes that menu, not the panel with
         // the section being edited.

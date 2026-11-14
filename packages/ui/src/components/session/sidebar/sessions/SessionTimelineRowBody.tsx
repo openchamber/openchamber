@@ -1,12 +1,15 @@
 import React from 'react';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useZoneProjectNames } from './useZoneProjectNames';
 
 type TimelineRowProject = {
   id: string;
+  label?: string | null;
+  path?: string | null;
   icon?: string | null;
   color?: string | null;
   iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
@@ -18,8 +21,9 @@ type Props = {
       title and meta on one line, no branch line. */
   compact?: boolean;
   /** Set on detailed rows where projects mix (Pinned, In work, the list by
-      time): the second line opens with this project's icon. One-line rows
-      leave that room to the title.
+      time): the second line opens with this project's icon, followed by its
+      name when the user has several projects. One-line rows leave that room
+      to the title.
       Rows under their project header pass null. */
   project: TimelineRowProject | null;
   /** The project's name, spoken and shown on hover for its icon. */
@@ -115,9 +119,34 @@ export const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label:
   return label ? <RowMarkTooltip label={label}>{mark}</RowMarkTooltip> : mark;
 };
 
+// Names up to this length are printed whole; a longer one gives way before
+// the branch does, down to `min-w-16`, which still shows its start.
+const WHOLE_PROJECT_NAME_LENGTH = 8;
+
+/**
+ * The project's name on a detailed zone row's second line, right after the
+ * project's icon. When the line is tight the name truncates first: a user has
+ * a few projects and knows one by its icon and first letters, while what
+ * follows (a branch, a work's name) is the row's own. `separated` puts a dot
+ * between the name and text that follows it with no icon of its own.
+ */
+export const TimelineProjectName: React.FC<{ project: TimelineRowProject; fallback?: string | null; separated: boolean }> = ({ project, fallback = null, separated }) => {
+  const name = project.label?.trim() || (project.path ? formatDirectoryName(project.path, null) : null) || fallback;
+  if (!name) return null;
+  return <>
+    <span
+      dir="auto"
+      className={cn('truncate typography-micro text-muted-foreground', name.length > WHOLE_PROJECT_NAME_LENGTH ? 'min-w-16 shrink-[999]' : 'shrink-0')}
+    >
+      {name}
+    </span>
+    {separated ? <span aria-hidden="true" className="flex-shrink-0 typography-micro text-muted-foreground/50">·</span> : null}
+  </>;
+};
+
 // One line: the title with the session's live state. Two lines (the detailed
 // zone rows): then the branch and pull-request state, opened by the project's
-// icon where projects mix.
+// icon and, with several projects, its name where projects mix.
 export const SessionTimelineRowBody: React.FC<Props> = ({
   compact = false,
   project,
@@ -168,8 +197,9 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     : null;
   // The second line's first icon: the project's where projects mix, else the
   // space's or the row's own (a run's, a draft's).
+  const projectNamed = useZoneProjectNames() && Boolean(project);
   const leadIcon = project
-    ? <TimelineProjectIcon project={project} label={projectLabel} />
+    ? <TimelineProjectIcon project={project} label={projectNamed ? null : projectLabel} />
     : leadIconOverride ?? (!metaLineLead && branchLabel ? spaceIcon : null);
   // With no icon to stand on, the hover chevron sits over the name's start
   // and the name fades under it.
@@ -207,6 +237,8 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     </div>
     {secondLine ? <div className="relative flex h-4 w-full min-w-0 items-center gap-1">
       {leadSlot}
+      {/* A space's name and a run's line bring their own icon; a branch name does not. */}
+      {project && projectNamed ? <TimelineProjectName project={project} fallback={projectLabel} separated={Boolean(branchLine) && !metaLineLead && !spaceIcon} /> : null}
       {project ? branchLine : metaLineLead ?? (branchLabel ? branchText : null)}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1">
         {goal}
