@@ -214,6 +214,7 @@ import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib
 import { createUnreadBaseline } from './lib/openchamber-sessions/unread-baseline.js';
 import { createTurnDurationRecorder } from './lib/openchamber-sessions/turn-duration.js';
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
+import { createPlanBuildRuntime, registerPlanBuildRoutes } from './lib/plan-build/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
@@ -1197,6 +1198,18 @@ const openCodeSessionClient = (directory) => createOpenCodeClient({
   directory,
 });
 
+const planBuildRuntime = createPlanBuildRuntime({
+  clientFor: openCodeSessionClient,
+  resolveAutoModel: async ({ sessionID, directory, agent, prompt }) => {
+    if (!routingRuntime.isAutoSession(sessionID)) return null;
+    const chosen = await routingRuntime.resolveAutoSelection({
+      sessionId: sessionID, directory, model: { providerID: 'openchamber', id: 'auto' },
+      agent, requestText: prompt,
+    });
+    return chosen?.model ?? null;
+  },
+});
+
 /**
  * Owns what a session must be told about the project's knowledge. Every sender
  * asks it — the UI over HTTP, scheduled tasks and agent-dispatched sessions in
@@ -1558,6 +1571,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
+    if (!spaceId) void planBuildRuntime.onEvent(payload);
   },
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
@@ -3192,6 +3206,7 @@ async function main(options = {}) {
       }
     },
   });
+  registerPlanBuildRoutes(app, planBuildRuntime, express);
   await featureRoutesRuntime.registerRoutes(app, {
     environmentStore,
     environmentRuntime,
