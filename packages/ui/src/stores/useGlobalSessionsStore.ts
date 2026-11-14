@@ -65,6 +65,12 @@ type GlobalSessionsState = {
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applySessionMutations: (mutations: readonly GlobalSessionMutation[]) => void;
+  /**
+   * A change to the session that waits for its turn's end
+   * (`session-event-router.ts`) is still a mutation: a load that started
+   * before it must not overwrite the record it will apply to. Publishes no list.
+   */
+  noteDeferredSessionUpdate: (sessionId: string) => void;
   upsertSession: (session: Session) => void;
   upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
@@ -145,8 +151,15 @@ const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> =
 // a signature without them reads a usage or selection patch as no change and
 // drops it.
 const sessionUsageSignature = (session: Session): string => [
-  session.cost ?? 0,
-  JSON.stringify(session.tokens ?? null),
+  sessionSpendSignature(session),
+  sessionSelectionSignature(session),
+].join(':');
+
+// What every step of a running turn changes (OpenCode reports usage after each
+// step). The sidebar paints none of it.
+const sessionSpendSignature = (session: Session): string => `${session.cost ?? 0}:${JSON.stringify(session.tokens ?? null)}`;
+
+const sessionSelectionSignature = (session: Session): string => [
   JSON.stringify(session.model ?? null),
   JSON.stringify(session.permissions ?? null),
   JSON.stringify(session.outcome ?? null),
@@ -181,22 +194,28 @@ const getSessionStructuralSignature = (session: Session): string => {
     session.time?.created ?? 0,
     session.time?.archived ?? 0,
     // A finished turn and a view of it decide the unread mark, so they publish
-    // at once instead of waiting with the recency-only updates. A usage or
-    // selection change publishes at once for the same reason: the deferred
-    // record is rebuilt from the record the deferral started from, so a later
-    // patch in the same stream would drop what an earlier one carried.
+    // at once instead of waiting with the deferred updates. So does a
+    // selection change. Spend (cost, tokens) is left out: each step of a turn
+    // changes it, and publishing it rebuilt the whole sidebar once per step.
     session.time?.idle ?? 0,
     session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
-    sessionUsageSignature(session),
+    sessionSelectionSignature(session),
   ].join(':');
 };
 
-export const isGlobalSessionRecencyOnlyUpdate = (existing: Session, incoming: Session): boolean => {
+/**
+ * Whether `incoming` differs from the published `existing` only in what a
+ * running turn changes at every step: `time.updated` and spend. Such an update
+ * waits for the turn's end (`session-event-router.ts`); anything else
+ * publishes at once.
+ */
+export const isGlobalSessionDeferrableUpdate = (existing: Session, incoming: Session): boolean => {
   const merged = mergeSessionDirectoryMetadata(incoming, existing);
-  return existing.time?.updated !== merged.time?.updated
-    && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
+  const changed = existing.time?.updated !== merged.time?.updated
+    || sessionSpendSignature(existing) !== sessionSpendSignature(merged);
+  return changed && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
 };
 
 /**
@@ -753,6 +772,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   applySessionMutations: (mutations) => {
     if (mutations.length === 0) return;
     set((state) => applySessionMutations(state, mutations));
+  },
+
+  noteDeferredSessionUpdate: (sessionId) => {
+    set((state) => mutationRevisionPatch(state, [sessionId]));
   },
 
   // The module-init seed and runtime reset read the persisted snapshot before

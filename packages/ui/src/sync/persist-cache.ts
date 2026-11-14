@@ -8,6 +8,7 @@
  * Message/part data is always loaded from the server.
  */
 
+import { parseMetadata } from "@/lib/metadataParse"
 import type { Session, Vcs } from "@/lib/opencode/model"
 import type { ProjectMeta } from "./types"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
@@ -172,7 +173,7 @@ function toPersistedSession(session: Session): PersistedSession {
   // Undefined fields are dropped when the record is serialized.
   const persisted = { ...session, cost: undefined, tokens: undefined, permissions: undefined }
   const metadata = session.metadata
-  const namespace = metadata?.openchamber === undefined ? undefined : metadataNamespaceSchema.safeParse(metadata.openchamber).data
+  const namespace = metadata?.openchamber === undefined ? undefined : parseMetadata(metadataNamespaceSchema, metadata.openchamber).data
   if (!metadata || !namespace || !("assist" in namespace)) return persisted
   const openchamber = Object.fromEntries(Object.entries(namespace).filter(([key]) => key !== "assist"))
   return { ...persisted, metadata: { ...metadata, openchamber } }

@@ -130,11 +130,29 @@ export const areStatusMapsEquivalent = (
   return true
 }
 
+// Every live-session hook re-aggregates the same stores whenever any one
+// directory's list changes, several hooks per change. The result depends only
+// on the stores' session arrays, which are replaced, never mutated, so the
+// last answer is kept for those arrays and shared. Callers read it, never
+// mutate it.
+let lastSources: ReadonlyArray<LiveStateSlice["session"]> = []
+let lastAggregate: Session[] = []
+
 export function aggregateLiveSessions(states: Iterable<LiveStateSlice>): Session[] {
+  const sources = Array.from(states, (state) => state.session)
+  if (sources.length === lastSources.length && sources.every((source, index) => source === lastSources[index])) {
+    return lastAggregate
+  }
+  lastAggregate = aggregateSessionLists(sources)
+  lastSources = sources
+  return lastAggregate
+}
+
+function aggregateSessionLists(sources: ReadonlyArray<LiveStateSlice["session"]>): Session[] {
   const sessionsById = new Map<string, Session>()
 
-  for (const state of states) {
-    for (const session of state.session) {
+  for (const list of sources) {
+    for (const session of list) {
       if (!session?.id) {
         continue
       }

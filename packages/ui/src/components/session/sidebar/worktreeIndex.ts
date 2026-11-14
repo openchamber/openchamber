@@ -70,16 +70,17 @@ export const findPrefixWorktreeEntry = <T>(
   directory: string,
   index: ReadonlyMap<string, T>,
 ): T | null => {
-  let best: T | null = null;
-  let bestLength = -1;
-  for (const [path, entry] of index) {
-    if (path.length <= bestLength) continue;
-    if (directory === path || directory.startsWith(`${path}/`)) {
-      best = entry;
-      bestLength = path.length;
+  // Called for every session against every worktree on each sidebar rebuild,
+  // so it allocates nothing: keys only (no entry pairs), and the prefix is
+  // compared in place rather than building `${path}/`.
+  let bestPath: string | null = null;
+  for (const path of index.keys()) {
+    if (bestPath !== null && path.length <= bestPath.length) continue;
+    if (directory === path || (directory.length > path.length && directory.charCodeAt(path.length) === 47 && directory.startsWith(path))) {
+      bestPath = path;
     }
   }
-  return best;
+  return bestPath === null ? null : index.get(bestPath) ?? null;
 };
 
 /**
