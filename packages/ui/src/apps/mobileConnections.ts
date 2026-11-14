@@ -938,6 +938,7 @@ const deleteMobileConnection = async (id: string): Promise<MobileSavedConnection
   if (!writeConnections(next)) throw new MobileHeaderStorageError();
   if (removed?.requestHeadersKey) await deleteSecureHeaders(removed.requestHeadersKey);
   if (removed && isCapacitorApp()) await deleteSecureToken(secureTokenKeyOf(removed));
+  if (removed) writeLastTransport(secureTokenKeyOf(removed), null);
   return next;
 };
 
@@ -962,6 +963,40 @@ type ProbeResult =
 // (which alone cost up to MOBILE_CONNECT_TIMEOUT_MS per stale address).
 const RELAY_RACE_HEADSTART_MS = 1_500;
 
+// Which transport each device last connected over, by its runtime key. A phone
+// that last reached its server through the relay is most likely still away
+// from that server's network, so the next cold launch dials the relay at once.
+const MOBILE_LAST_TRANSPORT_STORAGE_KEY = 'openchamber.mobile.lastTransport.v1';
+
+const lastTransportSchema = z.enum(['direct', 'relay']);
+
+const readLastTransports = (): Map<string, z.infer<typeof lastTransportSchema>> => {
+  const transports = new Map<string, z.infer<typeof lastTransportSchema>>();
+  if (typeof window === 'undefined') return transports;
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(MOBILE_LAST_TRANSPORT_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object') return transports;
+    for (const [runtimeKey, value] of Object.entries(parsed)) {
+      const kind = lastTransportSchema.safeParse(value);
+      if (kind.success) transports.set(runtimeKey, kind.data);
+    }
+  } catch {
+    // An unreadable record reads as none.
+  }
+  return transports;
+};
+
+const writeLastTransport = (runtimeKey: string, kind: ChosenTransport['kind'] | null): void => {
+  const next = readLastTransports();
+  if (kind) next.set(runtimeKey, kind);
+  else next.delete(runtimeKey);
+  try {
+    window.localStorage.setItem(MOBILE_LAST_TRANSPORT_STORAGE_KEY, JSON.stringify(Object.fromEntries(next)));
+  } catch {
+    // Without the record the next launch gives direct its head start, as before.
+  }
+};
+
 // Probe a saved device's candidates and return the first transport that is both
 // reachable AND accepts the token. This is the heart of "one device, many
 // transports": at home the LAN candidate answers; away it is unreachable so we
@@ -973,7 +1008,7 @@ const RELAY_RACE_HEADSTART_MS = 1_500;
 const probeConnectionCandidates = async (
   candidates: MobileTransportCandidate[],
   token: string | undefined,
-  options?: { fast?: boolean; requestHeaders?: MobileRequestHeaders },
+  options?: { fast?: boolean; requestHeaders?: MobileRequestHeaders; relayFirst?: boolean },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
   // Identity gate for direct probes: when the device knows its server's identity
@@ -986,14 +1021,22 @@ const probeConnectionCandidates = async (
   const directList = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
 
   const probeDirectChain = async (): Promise<ProbeResult> => {
-    for (const candidate of directList) {
+    // Every address is asked for its health at once and the answers are read
+    // in priority order: dead addresses then cost one timeout together, where
+    // asking them one after another cost a timeout each.
+    const directProbes = directList.map((candidate) => {
       const url = normalizeConnectionUrl(candidate.url) || candidate.url;
       const headers = mobileHeadersForUrl(url, options?.requestHeaders);
-      const redirect = Object.keys(headers).length ? 'error' : undefined;
-      if (token) headers.Authorization = `Bearer ${token}`;
+      const redirect: RequestRedirect | undefined = Object.keys(headers).length ? 'error' : undefined;
       // /health is unauthenticated by design — never send the bearer token to an
       // address whose identity has not been checked yet.
-      const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers: mobileHeadersForUrl(url, options?.requestHeaders), redirect }, requestOptions);
+      const health = requestWithTimeout(`${url}/health`, { method: 'GET', headers: mobileHeadersForUrl(url, options?.requestHeaders), redirect }, requestOptions);
+      return { url, headers, redirect, health };
+    });
+    for (const probe of directProbes) {
+      const { url, headers, redirect } = probe;
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const health = await probe.health;
       logConnect('probe:direct:health', { url, ok: health?.ok === true, status: health?.status ?? null, source: health?.source ?? null });
       if (!health?.ok) continue;
       if (expectedServerId) {
@@ -1108,7 +1151,12 @@ const probeConnectionCandidates = async (
       startRelayProbe();
     });
 
-    headstartTimer = window.setTimeout(startRelayProbe, RELAY_RACE_HEADSTART_MS);
+    // A device that last connected over the relay skips the head start: away
+    // from home every direct address is dead, and waiting for them first only
+    // delays the dial. A direct candidate that answers still wins the next
+    // re-probe, which prefers direct.
+    if (options?.relayFirst) startRelayProbe();
+    else headstartTimer = window.setTimeout(startRelayProbe, RELAY_RACE_HEADSTART_MS);
   });
 };
 
@@ -1122,6 +1170,7 @@ const switchToTransport = (
   options?: { runtimeKey?: string; grant?: string; requestHeaders?: MobileRequestHeaders },
 ): void => {
   autoConnectSuppressed = false;
+  if (options?.runtimeKey) writeLastTransport(options.runtimeKey, transport.kind);
   if (transport.kind === 'relay') {
     switchToRelayRuntime(transport.relay, token, options?.grant, options?.runtimeKey, transport.tunnel?.client);
   } else {
@@ -1206,8 +1255,9 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
   } catch {
     return { status: 'unreachable', label: candidate.label };
   }
-  const result = await probeConnectionCandidates(candidate.candidates, token, { fast, requestHeaders });
-  logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind) });
+  const relayFirst = readLastTransports().get(secureTokenKeyOf(candidate)) === 'relay';
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast, requestHeaders, relayFirst });
+  logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind), relayFirst });
   if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
   if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
   if (result.status !== 'ok') return { status: 'unreachable', label: candidate.label };
