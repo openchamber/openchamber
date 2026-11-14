@@ -1684,7 +1684,9 @@ async function resyncDirectoryAfterReconnect(
   let succeeded = statuses !== null
   if (isStale()) return
 
-  await Promise.all(candidateSessionIds.map(async (sessionId) => {
+  // After a complete replay the records and transcripts are current: only what
+  // the server announces live, statuses and pending requests, is read again.
+  if (reason !== "stream-replayed") await Promise.all(candidateSessionIds.map(async (sessionId) => {
     syncDebug.recovery.materializing({ reason, directory, sessionID: sessionId })
     const loader = getImperativeSessionMessageLoader()
     const [session] = await Promise.all([
@@ -3032,15 +3034,25 @@ export function SyncProvider(props: {
     childDiscoveryBackoffByDirectoryRef.current = new Map()
   }, [childStores, props.sdk, runtimeKey])
 
+  /** Directories whose running resync follows a replay, with the gap repair asked for meanwhile. */
+  const replayResyncDirectoriesRef = useRef(new Map<string, SessionMaterializationReason | null>())
+  const triggerDirectoryResyncRef = useRef<(directory: string, reason: SessionMaterializationReason) => void>(() => undefined)
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
     const store = childStores.children.get(directory)
     if (!store) return
     const staleResyncBackoff = staleResyncBackoffByDirectoryRef.current
     if (reason === "stale-status-resync" && Date.now() < (staleResyncBackoff.get(directory)?.retryAt ?? 0)) return
     const resyncing = resyncingDirectoriesRef.current
-    if (resyncing.has(directory)) return
+    const replayResyncs = replayResyncDirectoriesRef.current
+    if (resyncing.has(directory)) {
+      // A repair after a replay reads no transcripts, so a gap found while it
+      // runs still needs its own.
+      if (replayResyncs.has(directory) && reason !== "stream-replayed") replayResyncs.set(directory, reason)
+      return
+    }
+    if (reason === "stream-replayed") replayResyncs.set(directory, null)
 
-    lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
+    if (reason !== "stream-replayed") lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
     resyncing.add(directory)
     const sdk = opencodeClient.getSdkClient()
     const expectedRuntimeKey = getRuntimeKey()
@@ -3058,8 +3070,14 @@ export function SyncProvider(props: {
       })
       .finally(() => {
         resyncing.delete(directory)
+        const queued = replayResyncs.get(directory)
+        replayResyncs.delete(directory)
+        if (queued && !isStale()) triggerDirectoryResyncRef.current(directory, queued)
       })
   }, [childStores, routingIndex])
+  useEffect(() => {
+    triggerDirectoryResyncRef.current = triggerDirectoryResync
+  }, [triggerDirectoryResync])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -3439,7 +3457,7 @@ export function SyncProvider(props: {
         if (runtimeKey !== getRuntimeKey()) return
         void usePermissionStore.getState().refreshSpaceModes(spaceId)
       },
-      onReconnect: ({ replayReset }) => {
+      onReconnect: ({ replayReset, replayed }) => {
         // The first connection and every one after a gap: spaces being made or whose making failed
         // are known only to the journey list, and a step announced during the gap was missed.
         if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
@@ -3464,6 +3482,13 @@ export function SyncProvider(props: {
           return
         }
         if (!replayReset && isRecentBoot()) {
+          return
+        }
+        if (replayed) {
+          // Every event of the gap arrived, so transcripts and session records
+          // are not read again.
+          for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, "stream-replayed")
+          void reconcileActivityAfterGap(childStores)
           return
         }
         resyncAfterStreamGap("stream-reconnect")

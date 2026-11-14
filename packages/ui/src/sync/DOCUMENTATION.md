@@ -1101,6 +1101,23 @@ covers the client cursor. The pipeline clears that cursor and the sync provider
 runs normal authoritative gap repair even during early boot. Ordinary reconnects
 retain their existing startup grace period.
 
+`replayed` on that callback means the server found the cursor and sent every
+event after it. The stream then has no gap, so the repair reads only what the
+server announces live and replay does not carry: session statuses, pending
+forms and permissions, and the global active list (`"stream-replayed"`). It
+reads no session record and no transcript tail, and marks no cached transcript
+stale. A full repair asked for while that one runs is queued behind it. A
+`ready` frame without `replayed` names the server's cursor, which the pipeline
+adopts, so a client that received no event can still resume.
+
+The pipeline moves to SSE for 60 s when a WebSocket fails before `ready`. Once
+a WebSocket has been ready in this pipeline the route is known to carry it, so
+a failed open is the network or the server being away: the pipeline retries
+the WebSocket, with its cursor, and falls back only after three failed opens
+in a row while the browser reports online. The SSE stream has no cursor, and
+its first event (`server.connected`) starts a bootstrap of the current
+directory.
+
 While `useAuthSessionStore` says the OpenChamber session is not usable
 (confirmed expiry, or a login in progress), the event pipeline and the
 OpenChamber control stream do not reconnect: every attempt would be refused
