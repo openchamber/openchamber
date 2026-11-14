@@ -203,6 +203,8 @@ mock.module('@/lib/opencode/client', () => ({
     clearConfigCache: mock(() => undefined),
     getDirectoryAvailability: mock(async () => directoryAvailability),
     invalidateAgentList: mock(() => undefined),
+    clearAgentListRequests: mock(() => undefined),
+    clearProviderCatalogRequests: mock(() => undefined),
   },
 }));
 
@@ -269,6 +271,7 @@ const {
   selectSettingsOnlyProvidersForDirectory,
   selectCatalogLoadedForDirectory,
   markConfigCatalogStale,
+  invalidateConfigCatalogsForReload,
   selectKnownAgent,
   selectKnownCatalogModel,
   invalidateConfigAgentsLoad,
@@ -2510,6 +2513,54 @@ describe('useConfigStore provider persistence', () => {
 
     expect(reads).toBe(2);
     expect(catalogIds()).toEqual(['builtin', 'plugin']);
+  });
+
+  test('a configuration reload retires a pre-reload provider read and keeps the loaded snapshot', async () => {
+    const other = OTHER_DIRECTORY;
+    liveProviderIdsByDirectory.set(DIRECTORY, 'active-catalog');
+    liveProviderIdsByDirectory.set(other, 'other-old');
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadProviders({ directory: other });
+    const revision = useConfigStore.getState().catalogReloadRevision;
+
+    const slowRead = deferred<TestProviderResponse>();
+    let reads = 0;
+    getProvidersForConfigImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : providerResponse('other-new');
+    };
+    const staleLoad = useConfigStore.getState().loadProviders({ directory: other });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['provider', 'agent']);
+    slowRead.resolve(providerResponse('other-stale'));
+    await staleLoad;
+
+    expect(selectProvidersForDirectory(useConfigStore.getState(), other).map((entry) => entry.id)).toEqual(['other-old']);
+    expect(useConfigStore.getState().catalogReloadRevision).toBeGreaterThan(revision);
+
+    await useConfigStore.getState().loadProviders({ directory: other });
+    expect(selectProvidersForDirectory(useConfigStore.getState(), other).map((entry) => entry.id)).toEqual(['other-new']);
+  });
+
+  test('a configuration reload retires an agent read that began before it', async () => {
+    const slowRead = deferred<TestAgent[]>();
+    let reads = 0;
+    listAgentsImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : [testAgent('new-agent')];
+    };
+    const staleLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['agent']);
+    slowRead.resolve([testAgent('stale-agent')]);
+
+    expect(await staleLoad).toBe(false);
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY)).toEqual([]);
+
+    await useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY).map((entry) => entry.name)).toEqual(['new-agent']);
   });
 
   test('what other catalogs know fills in for a directory still starting', async () => {

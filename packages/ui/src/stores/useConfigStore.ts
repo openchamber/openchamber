@@ -1292,6 +1292,10 @@ const CONFIG_REFRESH_TTL_MS = 30_000;
 // the directory fresh again, so marks carry a revision and loads capture one.
 const ALL_DIRECTORIES = '*';
 let _catalogRevision = 0;
+// A configuration reload can replace every directory's catalog. Reads that
+// began before it describe the old OpenCode configuration and must not publish,
+// whichever directory they target.
+let _configCatalogLoadEpoch = 0;
 const _providersStaleAt = new Map<string, number>();
 const _agentsStaleAt = new Map<string, number>();
 
@@ -1688,6 +1692,8 @@ interface ConfigStore {
     activeDirectoryKey: string;
     directoryScoped: Record<string, DirectoryScopedConfig>;
     configRuntimeKey: string;
+    /** Bumped when a configuration reload takes every directory's catalog out of the freshness window. */
+    catalogReloadRevision: number;
 
     providers: ProviderWithModelList[];
     agents: Agent[];
@@ -2049,6 +2055,7 @@ export const useConfigStore = create<ConfigStore>()(
                 activeDirectoryKey: resolveInitialDirectoryKey(),
                 directoryScoped: {},
                 configRuntimeKey: getRuntimeKey(),
+                catalogReloadRevision: 0,
 
                 providers: [],
                 agents: [],
@@ -2535,8 +2542,16 @@ export const useConfigStore = create<ConfigStore>()(
                         return existing;
                     }
 
+                    // Captured after waiting out an older read: a reload that
+                    // landed meanwhile belongs to the load this call starts.
+                    const catalogEpoch = _configCatalogLoadEpoch;
+                    const isCurrentProviderLoad = () => (
+                        isConfigRuntimeContextCurrent(runtimeContext)
+                        && _configCatalogLoadEpoch === catalogEpoch
+                    );
+
                     const promise: Promise<void> = (async () => {
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                    if (!isCurrentProviderLoad()) return;
                     const loadRevision = _catalogRevision;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadProviders:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
@@ -2560,7 +2575,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 () => opencodeClient.getProvidersForConfig(fromDirectoryKey(directoryKey), { fresh: options?.fresh }),
                                 { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                             );
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isCurrentProviderLoad()) return;
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const catalogModels = Array.isArray(apiResult?.models) ? apiResult.models : [];
                             // v2 has no `default` map any more: the server resolves one
@@ -2600,7 +2615,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     models: imageModelsByProvider.get(provider.id) ?? [],
                                 }));
 
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isCurrentProviderLoad()) return;
                             set((state) => {
                                 const previous = state.settingsOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
                                 return isSameProviderCatalog(previous, settingsOnlyProviders)
@@ -2614,7 +2629,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 : processedProviders;
                             const nextDefaults = isSameDefaults(previousDefaults, defaults) ? previousDefaults : defaults;
                             set((state) => {
-                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                                if (!isCurrentProviderLoad()) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers: [],
                                     agents: [],
@@ -2730,7 +2745,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 return nextState;
                             });
 
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isCurrentProviderLoad()) return;
                             const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('loadProviders:end', {
                                 directoryKey,
@@ -2758,11 +2773,11 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isCurrentProviderLoad()) return;
                         }
                     }
 
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                    if (!isCurrentProviderLoad()) return;
                     console.error("Failed to load providers:", lastError);
                     markStartupTrace('loadProviders:error', {
                         directoryKey,
@@ -2772,9 +2787,9 @@ export const useConfigStore = create<ConfigStore>()(
                         error: lastError instanceof Error ? lastError.message : String(lastError),
                     });
 
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                    if (!isCurrentProviderLoad()) return;
                     set((state) => {
-                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                        if (!isCurrentProviderLoad()) return state;
                         const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                             providers: [],
                             agents: [],
@@ -2841,7 +2856,7 @@ export const useConfigStore = create<ConfigStore>()(
                     // server that was still starting this directory.
                     if (source !== PROVIDERS_RETRY_SOURCE && !get().directoryScoped[directoryKey]?.providersLoaded) {
                         setTimeout(() => {
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (!isCurrentProviderLoad()) return;
                             const state = get();
                             if (state.activeDirectoryKey !== directoryKey || state.directoryScoped[directoryKey]?.providersLoaded) return;
                             void state.loadProviders({ directory: fromDirectoryKey(directoryKey), source: PROVIDERS_RETRY_SOURCE });
@@ -3159,6 +3174,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const directoryKey = toDirectoryKey(configDirectory);
                     const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
                     const source = options?.source ?? 'unknown';
+                    const entryCatalogEpoch = _configCatalogLoadEpoch;
                     markStartupTrace('loadAgents:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it.
@@ -3175,16 +3191,21 @@ export const useConfigStore = create<ConfigStore>()(
                         // read always belongs to the current generation.
                         const joinedGeneration = _agentsLoadGeneration.get(inFlightKey) ?? 0;
                         const loaded = await existing;
-                        if (isConfigRuntimeContextCurrent(runtimeContext)
-                            && (_agentsLoadGeneration.get(inFlightKey) ?? 0) !== joinedGeneration) {
+                        if (_configCatalogLoadEpoch !== entryCatalogEpoch
+                            || (isConfigRuntimeContextCurrent(runtimeContext)
+                                && (_agentsLoadGeneration.get(inFlightKey) ?? 0) !== joinedGeneration)) {
                             return get().loadAgents({ directory: configDirectory, source });
                         }
                         return loaded;
                     }
 
+                    // Captured after waiting out an older read: a reload that
+                    // landed meanwhile belongs to the load this call starts.
+                    const catalogEpoch = _configCatalogLoadEpoch;
                     const loadGeneration = _agentsLoadGeneration.get(inFlightKey) ?? 0;
                     const isCurrentAgentLoad = () => (
                         isConfigRuntimeContextCurrent(runtimeContext)
+                        && _configCatalogLoadEpoch === catalogEpoch
                         && (_agentsLoadGeneration.get(inFlightKey) ?? 0) === loadGeneration
                     );
                     const promise = (async (): Promise<boolean> => {
@@ -4878,6 +4899,31 @@ if (typeof window !== "undefined") {
     if (useConfigStore.persist.hasHydrated()) hydrateActiveCatalog();
     else useConfigStore.persist.onFinishHydration(hydrateActiveCatalog);
 }
+
+/**
+ * A configuration reload can replace every directory's provider and agent
+ * catalog. Retire reads that began before it, and take every directory out of
+ * the freshness window so it re-reads when the user next activates it. Loaded
+ * snapshots stay in place: a background project keeps showing its last catalog
+ * instead of booting its OpenCode location during the reload (#6815).
+ */
+export const invalidateConfigCatalogsForReload = (
+    kinds: readonly ("provider" | "agent")[],
+): void => {
+    _configCatalogLoadEpoch += 1;
+    if (kinds.includes("provider")) {
+        markConfigCatalogStale("provider", null);
+        _inFlightProviders.clear();
+        opencodeClient.clearProviderCatalogRequests();
+    }
+    if (kinds.includes("agent")) {
+        markConfigCatalogStale("agent", null);
+        _agentsLoadGeneration.clear();
+        _inFlightAgents.clear();
+        opencodeClient.clearAgentListRequests();
+    }
+    useConfigStore.setState((state) => ({ catalogReloadRevision: state.catalogReloadRevision + 1 }));
+};
 
 const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
     const runtimeContext = captureConfigRuntimeContext();

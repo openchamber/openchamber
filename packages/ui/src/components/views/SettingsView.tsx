@@ -304,6 +304,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const settingsDirectory = useSettingsDirectory();
+  const catalogReloadRevision = useConfigStore((state) => state.catalogReloadRevision);
 
   // Load stores when the settings project changes or a page becomes active.
   React.useEffect(() => {
@@ -336,7 +337,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
     // `activeProjectId` still matters: the settings directory follows the active
     // project until the user picks another one in the Settings selector.
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsDirectory, settingsSlug]);
+  }, [activeProjectId, catalogReloadRevision, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsDirectory, settingsSlug]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);

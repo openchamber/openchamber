@@ -382,7 +382,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     void openCode.reloadAfterUpgrade(async () => {
       await reloadOpenCodeConfiguration({
         message: t('opencodeUpdate.toast.reload.message'),
-        mode: 'projects',
         scopes: ['all'],
       });
     }).then(() => {

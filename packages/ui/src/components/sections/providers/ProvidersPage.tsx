@@ -149,9 +149,10 @@ export const ProvidersPage: React.FC = () => {
   // The app only loads providers for the project it is on; Settings has to ask
   // for the one it is looking at. Without a project that is the app's own.
   const loadProviders = useConfigStore((state) => state.loadProviders);
+  const catalogReloadRevision = useConfigStore((state) => state.catalogReloadRevision);
   React.useEffect(() => {
     void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
-  }, [loadProviders, settingsDirectory]);
+  }, [catalogReloadRevision, loadProviders, settingsDirectory]);
 
   // Starts from the list read earlier in this app session (prefetched at
   // startup or from the last visit), then reads it again below.

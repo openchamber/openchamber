@@ -88,7 +88,6 @@ export const OpenCodeCliSettings: React.FC = () => {
       await updateDesktopSettings({ opencodeBinary: unquoted });
       await reloadOpenCodeConfiguration({
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-        mode: 'projects',
         scopes: ['all'],
       });
     } catch (error) {
