@@ -234,6 +234,44 @@ itself; it can only ask and wait.
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
+## Annotation overlay
+
+The user's annotation (`annotationOverlay.ts`, driven by `annotationSession.ts`
+and `BrowserPane`) runs through the same desktop driver, in an isolated world
+of its own per session (`annotate` in `browser-panel-driver.mjs`). Its comment
+box takes dictation: the overlay asks the app for the microphone through a
+`Runtime.addBinding` function scoped to that world's name, and the app answers
+through `annotationSend`; `annotationMessage` is the app's long poll for the
+overlay's requests. A desktop app without the driver, or a page the debugger
+cannot attach to, runs the overlay in the page's own world, without a
+microphone. Annotation of a page shown in a frame (`useFrameAnnotation`) has
+no isolated world and no microphone either.
+
+### Why an isolated world and not `webview.executeJavaScript`
+
+In the page's own world every script of the page can call whatever the overlay
+calls, so a page could start the app's microphone and read the transcript
+from the comment box. A binding exposed to an isolated world is a function the
+page has no reference to and no way to call. `Runtime` is enabled only while a
+session runs, since it streams every console call of the page, and each
+session's world has a new name so a binding removed at the end cannot linger
+in a world the next session reuses.
+
+### Why a PDF gets an input layer
+
+Chromium draws a PDF in a viewer frame of its own: pointer and key input over
+it never reaches the document the overlay lives in, so marks could not be
+drawn. A transparent layer over the viewer takes the input for the session.
+It also takes the wheel, so the PDF holds still while it is marked; a PDF has
+no elements to pick, so the overlay offers Region and Draw only.
+
+### Why a stroke is drawn as short paths
+
+Rewriting one path's `d` on every pointer move costs time with the stroke's
+length, and a long stroke stalled the pointer. The stroke is a group of paths
+of at most 64 points, each starting where the last ended, so a move rewrites
+only the last one.
+
 ## Running the panel's code
 
 The agent tool reaches the panel of the app the agent works from, so a change

@@ -57,6 +57,9 @@ import {
 } from '@/lib/browser/viewport';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
+import { AnnotationDictation, type AnnotationVoiceChannel } from './AnnotationDictation';
+import { useAnnotationVoice } from './useAnnotationVoice';
+import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { deepActiveElement, isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 
@@ -165,6 +168,10 @@ const quietResultSchema = z.object({ quiet: z.boolean() });
 /** Dialogs an agent's tab answered while an action ran (`browser-panel-driver.mjs`). */
 const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
 const jsonObjectSchema = z.record(z.string(), z.json());
+/** The annotation overlay's answer, and its messages (`browser-panel-driver.mjs`). */
+const annotateReplySchema = z.object({ value: z.json().nullable() });
+const annotationMessageReplySchema = z.object({ ended: z.boolean().optional(), message: z.string().nullable().optional() });
+const overlayMessageSchema = z.object({ type: z.literal('voice'), action: z.enum(['start', 'finish', 'cancel']) });
 
 /**
  * Whether the window draws: true after two animation frames, false when a
@@ -326,6 +333,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [directory, startUrl]);
   const attachAnnotation = useAnnotationAttach(tabsDirectory);
   const overlayLabels = useAnnotationOverlayLabels();
+  const annotationVoice = useAnnotationVoice();
   const isLoading = navigation.status.kind === 'loading';
 
   const history = useBrowserHistoryStore(selectBrowserHistory(directory));
@@ -399,68 +407,6 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     // Only ever the initial navigation; later changes come from the user.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const annotationHost = React.useMemo<AnnotationHost>(() => ({
-    executeJavaScript: async (code: string, userGesture?: boolean) => {
-      const webview = webviewRef.current;
-      if (!webview) throw new Error('Browser view is not available');
-      return webview.executeJavaScript(code, userGesture);
-    },
-    capturePage: async (): Promise<PageCapture | null> => {
-      const webview = webviewRef.current;
-      if (!webview) return null;
-      const webContentsId = webview.getWebContentsId();
-      if (!Number.isFinite(webContentsId)) return null;
-      return await invokeDesktopCommand<PageCapture>('desktop_browser_capture_page', { webContentsId });
-    },
-  }), []);
-
-  const handleAnnotate = React.useCallback(() => {
-    if (isAnnotating) {
-      setIsAnnotating(false);
-      void cancelAnnotationSession(annotationHost);
-      return;
-    }
-    if (!navigation.url) {
-      toast.error(t('contextPanel.browser.annotate.noPage'));
-      return;
-    }
-
-    const theme = resolveAnnotationOverlayTheme(
-      currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
-    );
-
-    setIsAnnotating(true);
-    void runAnnotationSession({
-      host: annotationHost,
-      theme,
-      labels: overlayLabels,
-    })
-      .then(async (result) => {
-        setIsAnnotating(false);
-        if (!result) return;
-        await attachAnnotation(result);
-      })
-      .catch(() => {
-        setIsAnnotating(false);
-        toast.error(t('contextPanel.browser.annotate.failed'));
-      });
-  }, [annotationHost, attachAnnotation, currentTheme, isAnnotating, navigation.url, overlayLabels, t]);
-
-  // Escape leaves annotation mode from the app side too: the overlay owns the
-  // in-page Escape, but the panel can be focused instead.
-  React.useEffect(() => {
-    if (!isAnnotating) return;
-    const handler = (event: KeyboardEvent) => {
-      if (isIMECompositionEvent(event) || event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsAnnotating(false);
-      void cancelAnnotationSession(annotationHost);
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [annotationHost, isAnnotating]);
 
   // A tab woken for an agent action mounts its view first and its page a
   // moment later; scripts cannot run in the page until its document exists.
@@ -604,6 +550,161 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, []);
 
   const pageDriver = React.useMemo(() => createPageDriver({ drive: driveStep, withInput: withPageDrawn }), [driveStep, withPageDrawn]);
+
+  /** Runs the annotation overlay in a world of its own (`browser-panel-driver.mjs`). */
+  const runOverlayIsolated = React.useCallback(async (script: string, sessionId: number) => (
+    annotateReplySchema.parse(await driveStep('annotate', { expression: script, sessionId })).value
+  ), [driveStep]);
+
+  const annotationHost = React.useMemo<AnnotationHost>(() => ({
+    executeJavaScript: async (code: string, userGesture?: boolean) => {
+      const webview = webviewRef.current;
+      if (!webview) throw new Error('Browser view is not available');
+      return webview.executeJavaScript(code, userGesture);
+    },
+    capturePage: async (): Promise<PageCapture | null> => {
+      const webview = webviewRef.current;
+      if (!webview) return null;
+      const webContentsId = webview.getWebContentsId();
+      if (!Number.isFinite(webContentsId)) return null;
+      return await invokeDesktopCommand<PageCapture>('desktop_browser_capture_page', { webContentsId });
+    },
+  }), []);
+
+  /** The overlay's microphone, while an annotation that has one runs. */
+  const [voiceChannel, setVoiceChannel] = React.useState<AnnotationVoiceChannel | null>(null);
+
+  /**
+   * Hands the overlay's messages to the dictation until the session ends.
+   * The channel opens a moment after the session starts, so a read before
+   * that finds none and tries again, until the session is done.
+   */
+  const listenToOverlay = React.useCallback(async (listeners: Set<(message: AnnotationOverlayMessage) => void>, session: { id: number; done: boolean }) => {
+    while (!session.done) {
+      let reply: z.infer<typeof annotationMessageReplySchema>;
+      try {
+        reply = annotationMessageReplySchema.parse(await driveStep('annotationMessage', { sessionId: session.id, timeoutMs: 20_000 }));
+      } catch {
+        return;
+      }
+      if (reply.ended) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        continue;
+      }
+      if (!reply.message) continue;
+      let parsed: z.infer<typeof overlayMessageSchema> | null = null;
+      try {
+        parsed = overlayMessageSchema.parse(JSON.parse(reply.message));
+      } catch {
+        continue;
+      }
+      for (const listener of [...listeners]) listener(parsed);
+    }
+  }, [driveStep]);
+
+  /**
+   * The annotation session the panel shows. A session that ends after
+   * another took its place leaves the panel's state alone: its completion,
+   * screenshot included, can outlast a cancel and a new start.
+   */
+  type AnnotationRun = { id: number; done: boolean; cancelled: boolean };
+  const annotationRunRef = React.useRef<AnnotationRun | null>(null);
+  const annotationRunsRef = React.useRef(0);
+
+  const cancelAnnotation = React.useCallback(() => {
+    const run = annotationRunRef.current;
+    annotationRunRef.current = null;
+    setIsAnnotating(false);
+    setVoiceChannel(null);
+    if (run) {
+      run.cancelled = true;
+      // An overlay still starting in its world would otherwise show up after this.
+      void driveStep('annotationCancel', { sessionId: run.id }).catch(() => undefined);
+    }
+    void cancelAnnotationSession(annotationHost);
+  }, [annotationHost, driveStep]);
+
+  const handleAnnotate = React.useCallback(() => {
+    if (isAnnotating) {
+      cancelAnnotation();
+      return;
+    }
+    if (!navigation.url) {
+      toast.error(t('contextPanel.browser.annotate.noPage'));
+      return;
+    }
+
+    const theme = resolveAnnotationOverlayTheme(
+      currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
+    );
+
+    annotationRunsRef.current += 1;
+    const run: AnnotationRun = { id: annotationRunsRef.current, done: false, cancelled: false };
+    annotationRunRef.current = run;
+    const owns = () => annotationRunRef.current === run;
+    setIsAnnotating(true);
+
+    const listeners = new Set<(message: AnnotationOverlayMessage) => void>();
+    if (annotationVoice) {
+      setVoiceChannel({
+        send: async (message) => { await driveStep('annotationSend', { message }); },
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => { listeners.delete(listener); };
+        },
+      });
+    }
+    const host: AnnotationHost = {
+      ...annotationHost,
+      runIsolated: async (script) => {
+        if (annotationVoice) void listenToOverlay(listeners, run);
+        try {
+          return await runOverlayIsolated(script, run.id);
+        } catch (error) {
+          run.done = true;
+          // Cancelled meanwhile: no overlay in the page's world either.
+          if (run.cancelled) return null;
+          // Falls back to the page's world, where the overlay has no microphone.
+          if (owns()) setVoiceChannel(null);
+          throw error;
+        }
+      },
+    };
+    void runAnnotationSession({
+      host,
+      theme,
+      labels: overlayLabels,
+      voice: annotationVoice,
+    })
+      .finally(() => {
+        run.done = true;
+        if (!owns()) return;
+        annotationRunRef.current = null;
+        setVoiceChannel(null);
+        setIsAnnotating(false);
+      })
+      .then(async (result) => {
+        if (!result || run.cancelled) return;
+        await attachAnnotation(result);
+      })
+      .catch(() => {
+        if (!run.cancelled) toast.error(t('contextPanel.browser.annotate.failed'));
+      });
+  }, [annotationHost, annotationVoice, attachAnnotation, cancelAnnotation, currentTheme, driveStep, isAnnotating, listenToOverlay, navigation.url, overlayLabels, runOverlayIsolated, t]);
+
+  // Escape leaves annotation mode from the app side too: the overlay owns the
+  // in-page Escape, but the panel can be focused instead.
+  React.useEffect(() => {
+    if (!isAnnotating) return;
+    const handler = (event: KeyboardEvent) => {
+      if (isIMECompositionEvent(event) || event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cancelAnnotation();
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [cancelAnnotation, isAnnotating]);
 
   /** Writes the files of an upload where this machine's page can read them. */
   const stageUpload = React.useCallback((ticket: UploadTicket): Promise<string[]> => stageBrowserUpload(ticket, (files) => (
@@ -1162,6 +1263,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
+      {voiceChannel ? <AnnotationDictation channel={voiceChannel} /> : null}
       <BrowserToolbar
         address={address}
         onAddressChange={setAddress}
