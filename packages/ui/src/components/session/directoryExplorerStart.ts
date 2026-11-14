@@ -4,6 +4,24 @@ const ROOTED_PATH = /^(?:~(?:\/|$)|\/|[a-zA-Z]:\/)/;
 
 export const isRootedBrowseQuery = (query: string): boolean => ROOTED_PATH.test(query.trimStart());
 
+export const trimTrailingSeparators = (value: string): string => {
+  let result = value;
+  while (result.length > 1 && result.endsWith('/') && !/^[a-zA-Z]:\/$/.test(result)) {
+    result = result.slice(0, -1);
+  }
+  return result;
+};
+
+export const getBrowseParentPath = (value: string): string | null => {
+  const trimmed = trimTrailingSeparators(value.trim());
+  if (!trimmed || trimmed === '~' || trimmed === '~/' || trimmed === '/' || /^[a-zA-Z]:\/$/.test(trimmed)) return null;
+  const lastSeparator = trimmed.lastIndexOf('/');
+  if (lastSeparator < 0) return null;
+  if (trimmed.startsWith('~/') && lastSeparator <= 1) return '~/';
+  if (lastSeparator === 0) return '/';
+  return `${trimmed.slice(0, lastSeparator)}/`;
+};
+
 /**
  * What the path field means. A name without a root belongs to the folder being
  * browsed: the server would otherwise resolve it against its own working
@@ -17,7 +35,11 @@ type ProjectPlace = { path: string; addedAt?: number };
 
 const parentBrowseQuery = (projectPath: string, homeDirectory: string): string => {
   const path = toSlashes(projectPath);
-  const parent = path.slice(0, path.lastIndexOf('/'));
+  if (/^[a-zA-Z]:$/.test(path)) return `${path}/`;
+  if (!path && /^[\\/]+$/.test(projectPath.trim())) return '/';
+  const separator = path.lastIndexOf('/');
+  if (separator === 0) return '/';
+  const parent = path.slice(0, separator);
   if (!parent) return '~/';
   const home = toSlashes(homeDirectory);
   if (home && parent === home) return '~/';
