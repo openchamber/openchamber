@@ -56,7 +56,7 @@ The secure store and localStorage cannot commit together. A new reference lets a
 
 ### Why navigation carries intent and not the source's stores
 
-Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
+Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action, new-snippet action and selected skill without transferring chat state or overwriting the tab's independently edited settings.
 
 ### Why mobile web holds one back guard and not one history entry per layer
 

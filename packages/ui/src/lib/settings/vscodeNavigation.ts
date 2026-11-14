@@ -9,6 +9,7 @@ export const vscodeSettingsNavigationSchema = z.object({
   directory: navigationString.nullish(),
   connectProvider: z.boolean().optional(),
   providerId: navigationString.nullish(),
+  skillName: navigationString.nullish(),
   snippetDraft: z.object({
     name: navigationString,
     scope: z.enum(['global', 'project']),

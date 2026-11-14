@@ -3730,6 +3730,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} 個計畫',
   'chat.workStatus.breakdown.planCountPlural': '{count} 個計畫',
   'chat.workStatus.linkedPlans.open': '開啟計畫 {title}',
+  'chat.workStatus.loadedSkills.open': '開啟技能 {name}',
   'chat.workStatus.sections.open': '選擇區塊',
   'chat.workStatus.sections.dialogTitle': '面板區塊',
   'chat.workStatus.sections.reorder': '拖曳 {label} 以重新排序',

@@ -3730,6 +3730,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plannen',
   'chat.workStatus.linkedPlans.open': 'Plan {title} openen',
+  'chat.workStatus.loadedSkills.open': 'Skill {name} openen',
   'chat.workStatus.sections.open': 'Secties kiezen',
   'chat.workStatus.sections.dialogTitle': 'Paneelsecties',
   'chat.workStatus.sections.reorder': 'Sleep {label} om te herschikken',

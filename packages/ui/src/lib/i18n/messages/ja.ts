@@ -3730,6 +3730,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': 'プラン {count} 件',
   'chat.workStatus.breakdown.planCountPlural': 'プラン {count} 件',
   'chat.workStatus.linkedPlans.open': 'プラン「{title}」を開く',
+  'chat.workStatus.loadedSkills.open': 'スキル「{name}」を開く',
   'chat.workStatus.sections.open': 'セクションを選択',
   'chat.workStatus.sections.dialogTitle': 'パネルのセクション',
   'chat.workStatus.sections.reorder': '{label}をドラッグして並び替え',

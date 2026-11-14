@@ -3721,6 +3721,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} план',
   'chat.workStatus.breakdown.planCountPlural': '{count} плани',
   'chat.workStatus.linkedPlans.open': 'Відкрити план {title}',
+  'chat.workStatus.loadedSkills.open': 'Відкрити скіл {name}',
   'chat.workStatus.sections.open': 'Обрати секції',
   'chat.workStatus.sections.dialogTitle': 'Секції панелі',
   'chat.workStatus.sections.reorder': 'Перетягніть {label}, щоб змінити порядок',

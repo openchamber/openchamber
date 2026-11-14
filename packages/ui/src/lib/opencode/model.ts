@@ -180,6 +180,8 @@ type MessageBase = {
 export type UserMessage = MessageBase & {
   role: "user"
   time: { created: number }
+  /** Skills attached to the prompt (`$name` in the composer); OpenCode loads them with it. */
+  skills?: Array<{ id: string; name: string }>
 }
 
 export type AssistantFinish = "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
