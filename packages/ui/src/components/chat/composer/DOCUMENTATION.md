@@ -26,6 +26,25 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
+`chat/export/ConversationExportComposer.tsx` hides the mounted editor during
+conversation selection and renders a selection count, Cancel, Save as image,
+and Copy Markdown in `message/TextSelectionToolbar`, the same component used
+by the text-selection menu. On phones the shared toolbar portals to the safe-area
+edge; on desktop it sits in the composer slot. Both use the text-selection
+menu's glass surface and action grouping without a separate capsule component.
+Export actions share `TextSelectionToolbarAction` with the text-selection menu:
+start-aligned rounded tiles on phones, with the same fill and spacing but no icons.
+Narrow desktop columns use the same two-row grouping as phones, preserving
+both labels. Phones retain the menu's safe-area offset.
+Selection switches immediately without an entrance or exit animation. The
+editor uses `visibility: hidden` and becomes inert while retaining its layout,
+draft, and attachments. Cancel and Escape restore the
+editor with its draft and attachments. Export success or failure keeps the
+selection available; an empty selection disables both export buttons. Web,
+Electron and hosted mobile download images, VS Code uses its existing save
+bridge, and Capacitor uses the native file share path. Markdown uses the shared
+text clipboard helper and reports clipboard failures.
+
 `ComposerFloatingPanel` is the shared frame for `BtwPanel`, `PermissionDock`
 and `FormDock`. They mount inside the composer form, outside both the
 full editor and collapsed mobile pill, with one absolute `bottom-full`

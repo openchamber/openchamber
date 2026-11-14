@@ -27,6 +27,9 @@ import { KeepAlive } from '@/components/ui/KeepAlive';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
+import { ConversationSelectionContext } from './export/selectionContext';
+import { createConversationSelectionStore } from './export/selectionStore';
+import { ConversationExportComposer } from './export/ConversationExportComposer';
 import { createTimelineRevealGate, type TimelineRevealGate } from './timelineRevealGate';
 
 // How long the previous timeline stays on screen while a session that is not
@@ -953,6 +956,30 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const currentSessionKey = currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
         : null;
+    // Selection never outlives a navigation, including the deferred transcript hold.
+    const exportSelectionScope = JSON.stringify([currentSessionKey, liveSessionId, liveSessionDirectory]);
+    const [exportSelectionOwner, setExportSelectionOwner] = React.useState(() => ({
+        scope: exportSelectionScope, store: createConversationSelectionStore(),
+    }));
+    if (exportSelectionOwner.scope !== exportSelectionScope) {
+        setExportSelectionOwner({ scope: exportSelectionScope, store: createConversationSelectionStore() });
+    }
+    const conversationSelection = exportSelectionOwner.store;
+    React.useLayoutEffect(() => {
+        if (!currentSessionId || !effectiveSessionDirectory) return;
+        let release: (() => void) | undefined;
+        const updateRetention = () => {
+            if (conversationSelection.getState().active) {
+                release ??= messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'browsing');
+            } else {
+                release?.();
+                release = undefined;
+            }
+        };
+        updateRetention();
+        const unsubscribe = conversationSelection.subscribe(updateRetention);
+        return () => { unsubscribe(); release?.(); };
+    }, [conversationSelection, currentSessionId, effectiveSessionDirectory, messageLoader]);
     // A deferred switch can keep the previous transcript on screen after the
     // selected session changes. Protect what is actually rendered until commit.
     React.useLayoutEffect(() => {
@@ -2012,6 +2039,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			style={chatTypographyStyle}
 		>
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
+		<ConversationSelectionContext.Provider value={conversationSelection}>
 		<ChatColumnActionsContext.Provider value={columnActions}>
 		{/* One mobile comment controller per column: selections in this column
 		    comment into this column's composer, never a sibling's. */}
@@ -2110,6 +2138,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         </div>
                     </div>
                 )}
+                <ConversationExportComposer
+                    columnRef={columnRootRef}
+                    getMessages={() => messageListRef.current?.getExportMessages() ?? []}
+                >
                 {promptReadOnly ? (
                     <>
                         {/* The docks live inside ChatInput, which a read-only
@@ -2147,6 +2179,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         formsInChat={formsInChat}
                     />
                 )}
+                </ConversationExportComposer>
             </div>
 
             {/* Inside the chat column, not beside it: as a row sibling it took
@@ -2176,6 +2209,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </ChatQuoteHighlightContext.Provider>
         </MobileCommentComposerContext.Provider>
         </ChatColumnActionsContext.Provider>
+		</ConversationSelectionContext.Provider>
         </ChatColumnSessionContext.Provider>
         {/* Kept mounted while it could ever show, so it can fade out and back
             in; `visible` drives that, `reserved` keeps its column in the right

@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 
 import type { Part, UserMessage } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
+import { I18nProvider } from '@/lib/i18n';
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
 import TurnItem from './TurnItem';
 
@@ -53,7 +54,7 @@ afterEach(() => {
 });
 
 const render = (turn: Turn) => {
-    act(() => root.render(<TurnItem turn={turn} renderMessage={renderMessage} />));
+    act(() => root.render(<I18nProvider><TurnItem turn={turn} renderMessage={renderMessage} /></I18nProvider>));
 };
 const stickyHeader = () => container.querySelector('[data-turn-sticky-header]');
 
@@ -62,7 +63,7 @@ describe('TurnItem sticky user header', () => {
         render(userTurn([textPart('Fix the build')]));
 
         expect(stickyHeader()).toBeNull();
-        expect(container.querySelector('section > [data-message-id="user"]')).not.toBeNull();
+        expect(container.querySelector('section [data-message-id="user"]')).not.toBeNull();
     });
 
     test('pins the prompt while the setting is on', () => {

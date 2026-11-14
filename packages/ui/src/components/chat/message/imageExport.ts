@@ -1,3 +1,9 @@
+import type { VSCodeAPI } from '@/lib/api/types';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
+import { z } from 'zod';
+
 export const MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE = 'data-message-image-export-exclude';
 
 /** `html-to-image` squashes a canvas past this size instead of failing. */
@@ -86,6 +92,91 @@ export const cloneMessageImageExportSource = (source: HTMLElement): HTMLElement 
         element.remove();
     });
     return clone;
+};
+
+const imageSaveResult = z.object({ saved: z.boolean().optional(), canceled: z.boolean().optional(), error: z.string().optional() });
+
+/** Single-answer and conversation exports share the same capture and runtime save path. */
+export const saveMessageImageExport = async (
+    source: HTMLElement,
+    fileName: string,
+    vscodeApi: VSCodeAPI | undefined,
+    exportWidth = resolveMessageImageExportWidth(source),
+): Promise<'saved' | 'canceled'> => {
+    const { toPng } = await import('html-to-image');
+    const computedStyle = window.getComputedStyle(source);
+    const rootStyle = window.getComputedStyle(document.documentElement);
+    const backgroundColor = rootStyle.getPropertyValue('--surface-background').trim()
+        || computedStyle.backgroundColor || window.getComputedStyle(document.body).backgroundColor;
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-message-image-export', 'true');
+    wrapper.style.cssText = `padding: 24px; background-color: ${backgroundColor}; display: inline-block; position: fixed; inset-inline-start: 0; top: 0; z-index: -1; pointer-events: none;`;
+    wrapper.style.boxSizing = 'content-box';
+    const exportStyle = document.createElement('style');
+    exportStyle.textContent = `
+        [data-message-image-export] * { scrollbar-width: none; }
+        [data-message-image-export] *::-webkit-scrollbar { display: none; }
+    `;
+    wrapper.appendChild(exportStyle);
+    const clone = cloneMessageImageExportSource(source);
+    // Keep explicit export widths and syntax variables supplied by generated sources.
+    clone.style.transform = 'none';
+    clone.style.contain = 'none';
+    clone.querySelectorAll('[data-code-wrap]').forEach((root) => root.setAttribute('data-code-wrap', 'true'));
+    clone.querySelectorAll<HTMLElement>('[data-message-actions="true"], [data-message-action-group="true"]').forEach((row) => {
+        row.style.display = 'none';
+    });
+    const adjustedFooters = new Set<HTMLElement>();
+    clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]').forEach((element) => {
+        const timestamp = element.getAttribute('aria-label')?.replace('Message time:', '').trim();
+        if (!timestamp || element.textContent?.includes(timestamp)) return;
+        const text = document.createElement('span');
+        text.style.marginInlineStart = '4px';
+        text.textContent = timestamp;
+        element.appendChild(text);
+        const footer = element.parentElement?.parentElement;
+        if (footer && !adjustedFooters.has(footer)) {
+            footer.style.justifyContent = 'flex-start';
+            adjustedFooters.add(footer);
+        }
+    });
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+    try {
+        if (exportWidth) fitMessageImageExportLayout(wrapper, clone, exportWidth);
+        const bounds = wrapper.getBoundingClientRect();
+        const width = Math.ceil(bounds.width);
+        const height = Math.ceil(bounds.height);
+        const dataUrl = await toPng(wrapper, {
+            quality: 1,
+            width,
+            height,
+            pixelRatio: resolveMessageImageExportPixelRatio(width, height),
+            backgroundColor,
+        });
+        if (isVSCodeRuntime()) {
+            const result = imageSaveResult.parse(await vscodeApi?.saveImage?.({ fileName, dataUrl }));
+            if (!result.saved) {
+                if (result.canceled) return 'canceled';
+                throw new Error(result.error || 'Failed to save image in VS Code');
+            }
+        } else if (isCapacitorMobileApp()) {
+            const blob = await fetch(dataUrl).then((response) => response.blob());
+            await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
+        } else {
+            // A data URL would put the entire image in the desktop save dialog's title.
+            const blob = await fetch(dataUrl).then((response) => response.blob());
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.download = fileName;
+            link.href = url;
+            document.body.appendChild(link);
+            try { link.click(); } finally { link.remove(); URL.revokeObjectURL(url); }
+        }
+        return 'saved';
+    } finally {
+        wrapper.remove();
+    }
 };
 
 /** Renders every text part, including folded and unmounted earlier messages. */

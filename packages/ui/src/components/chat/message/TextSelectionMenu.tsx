@@ -44,6 +44,7 @@ import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/short
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
 import { captureChatQuoteAnchor, findChatQuoteRoots, findUiRenderQuoteRoot, resolveChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { TextSelectionToolbar, TextSelectionToolbarAction } from './TextSelectionToolbar';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
@@ -940,73 +941,52 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     if (commentMode) {
       return commentHighlightOverlay;
     }
-    return createPortal(
-      <div
+    return (
+      <TextSelectionToolbar
+        mobile
         ref={menuRef}
         className={cn(
-          'fixed inset-s-3 inset-e-3 bottom-0 z-50 mx-auto max-w-[420px]',
-          'oc-glass-popover oc-glass-floating rounded-2xl',
-          'p-2',
-          'safe-area-bottom',
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
           isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
-        style={{
-          bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
-        }}
       >
         {/* Without Read, both rows share equal-width columns. With Read, the
             first row sizes tiles by their labels so three fit. Only Comment
             shrinks, hyphenating a long word instead of clipping it. */}
-        <div className="flex flex-col gap-2">
           <div className={cn('gap-2', canReadAloud ? 'flex' : 'grid grid-cols-2')}>
-            <button
+            <TextSelectionToolbarAction
+              mobile
               onClick={handleOpenMobileComment}
-              className={cn(
-                'flex flex-auto items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                'text-sm font-medium leading-tight',
-                'bg-foreground/[0.04] text-foreground',
-                'active:opacity-80',
-                'transition-opacity duration-150'
-              )}
+              className="flex-auto"
               title={t('chat.textSelection.title.commentOnSelection')}
               type="button"
             >
               <Icon name="chat-1" className="h-5 w-5 flex-shrink-0" />
               <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.comment')}</span>
-            </button>
+            </TextSelectionToolbarAction>
 
             <Tooltip>
             <TooltipTrigger asChild>
-            <button
+            <TextSelectionToolbarAction
+              mobile
+              primary
               onClick={handleAddToChat}
-              className={cn(
-                'flex flex-[1_0_auto] items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                'text-sm font-medium leading-tight',
-                'bg-[var(--primary-base)] text-[var(--primary-foreground)]',
-                'active:opacity-80',
-                'transition-opacity duration-150'
-              )}
+              className="flex-[1_0_auto]"
               aria-label={t('chat.textSelection.title.addToCurrentChat')}
               type="button"
             >
               <Icon name="add" className="h-5 w-5 flex-shrink-0" />
               <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.addToInput')}</span>
-            </button>
+            </TextSelectionToolbarAction>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={6}><TooltipLabelWithShortcut label={t('chat.textSelection.title.addToCurrentChat')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('add_selection_to_chat', shortcutOverrides), '')} /></TooltipContent>
             </Tooltip>
 
             {canReadAloud ? (
-              <button
+              <TextSelectionToolbarAction
+                mobile
                 onClick={handleReadAloud}
-                className={cn(
-                  'flex flex-[1_0_auto] items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                  'text-sm font-medium leading-tight',
-                  'bg-foreground/[0.04] text-foreground',
-                  'active:opacity-80',
-                  'transition-opacity duration-150'
-                )}
+                className="flex-[1_0_auto]"
                 title={readAloudLabel}
                 type="button"
               >
@@ -1014,71 +994,51 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 <span className="whitespace-normal hyphens-auto">
                   {isReading ? t('chat.textSelection.actions.stopReading') : t('chat.textSelection.actions.read')}
                 </span>
-              </button>
+              </TextSelectionToolbarAction>
             ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2 [&>button]:flex-[1_1_40%]">
             {currentSessionId ? (
-              <button
+              <TextSelectionToolbarAction
+                mobile
                 onClick={handleAskOpenChamber}
-                className={cn(
-                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                  'text-sm font-medium leading-tight',
-                  'bg-foreground/[0.04] text-foreground',
-                  'active:opacity-80',
-                  'transition-opacity duration-150'
-                )}
                 title={t('chat.textSelection.title.askOpenChamber')}
                 type="button"
               >
                 <Icon name="chat-ai-3" className="h-5 w-5 flex-shrink-0" />
                 <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.askOpenChamber')}</span>
-              </button>
+              </TextSelectionToolbarAction>
             ) : null}
 
             {!isVSCodeRuntime() ? (
-              <button
+              <TextSelectionToolbarAction
+                mobile
                 onClick={handleAddToNotes}
                 disabled={isAddingToNotes}
-                className={cn(
-                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                  'text-sm font-medium leading-tight',
-                  'bg-foreground/[0.04] text-foreground',
-                  'active:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed',
-                  'transition-opacity duration-150'
-                )}
                 title={t('chat.textSelection.title.saveInsightToNotes')}
                 type="button"
               >
                 {isAddingToNotes ? <Icon name="loader-4" className="h-5 w-5 flex-shrink-0 animate-spin" /> : <Icon name="booklet" className="h-5 w-5 flex-shrink-0" />}
                 <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToNotes')}</span>
-              </button>
+              </TextSelectionToolbarAction>
             ) : null}
 
             {selectionActions.map((entry) => (
-              <button
+              <TextSelectionToolbarAction
+                mobile
                 key={`${entry.guest.id}:${entry.action.id}`}
                 onClick={() => runSelectionAction(entry)}
-                className={cn(
-                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                  'text-sm font-medium leading-tight',
-                  'bg-foreground/[0.04] text-foreground',
-                  'active:opacity-80',
-                  'transition-opacity duration-150'
-                )}
                 type="button"
               >
                 <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="h-5 w-5 flex-shrink-0" />
                 <span className="min-w-0 whitespace-normal">{entry.action.label}</span>
-              </button>
+              </TextSelectionToolbarAction>
             ))}
 
             {approvalButton}
           </div>
-        </div>
-      </div>,
-      document.body
+      </TextSelectionToolbar>
     );
   }
 
@@ -1100,11 +1060,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       }}
     >
       {commentMode ? (<>{commentHighlightOverlay}{commentInput}</>) : (
-        <div
+        <TextSelectionToolbar
+          mobile={false}
           className={cn(
-            'flex items-center whitespace-nowrap',
-            'oc-glass-popover oc-glass-floating rounded-full',
-            'p-1',
             'transition-[opacity,transform] duration-200 ease-out',
             isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
           )}
@@ -1225,7 +1183,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </HoverTooltip>
             </>
           ) : null}
-        </div>
+        </TextSelectionToolbar>
       )}
     </div>,
     menuPortalTarget
