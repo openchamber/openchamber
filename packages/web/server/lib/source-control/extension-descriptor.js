@@ -269,6 +269,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
+        issueEdit: presentation.features.issueEdit === true,
+        changeRequestEdit: presentation.features.changeRequestEdit === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

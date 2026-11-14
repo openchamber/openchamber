@@ -742,6 +742,18 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
   body?: string;
 }
 
+/** An issue's title and body, replaced together; an empty body clears it. */
+export interface UpdateIssueInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
+/** A discussion's title and body, replaced together; an empty body clears it. */
+export interface UpdateDiscussionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
   /** GitHub only: remove from the queue or disable auto-merge. */

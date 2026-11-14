@@ -153,10 +153,14 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
       __typename
       ... on Issue {
         number
+        body
+        viewerCanUpdate
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
       }
       ... on PullRequest {
         number
+        body
+        viewerCanUpdate
         state
         reviewDecision
         # The preview's checks, from the PR itself rather than the list's batch.
@@ -214,6 +218,7 @@ query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     discussion(number: $number) {
       number
+      body
       locked
       viewerCanUpdate
       viewerCanClose
@@ -328,6 +333,7 @@ const discussionDetailSchema = z.object({
   repository: z.object({
     discussion: z.object({
       number: z.number().int(),
+      body: z.string().optional(),
       locked: z.boolean(),
       viewerCanUpdate: z.boolean(),
       viewerCanClose: z.boolean(),
@@ -353,11 +359,16 @@ const detailSchema = z.object({
       z.object({
         __typename: z.literal('Issue'),
         number: z.number().int(),
+        // Optional so a host that does not send the description or the permission still reads.
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
       }),
       z.object({
         __typename: z.literal('PullRequest'),
         number: z.number().int(),
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         headCommit: z.object({
@@ -610,6 +621,14 @@ const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.
 
 const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
 
+// A detail's whole description and the permission to replace it, only when the host answered them.
+const editableText = (item) => {
+  const text = {};
+  if (item.body !== undefined) text.body = item.body;
+  if (item.viewerCanUpdate !== undefined) text.viewerCanUpdate = item.viewerCanUpdate;
+  return text;
+};
+
 /**
  * Comments of one issue or PR, oldest first, and for a PR its size, review
  * decision and checks. A PR's reviews join the comments: a review's own text
@@ -638,7 +657,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     review: null,
   }));
   if (item.__typename === 'Issue') {
-    return { number: item.number, comments, commentTotal: item.comments.totalCount, pull: null };
+    return { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null };
   }
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
@@ -680,6 +699,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   comments.sort(byCreatedAt);
   const detail = {
     number: item.number,
+    ...editableText(item),
     comments,
     commentTotal: item.comments.totalCount,
     pull: {
@@ -748,6 +768,7 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   };
   return {
     number: discussion.number,
+    ...editableText(discussion),
     comments: discussion.comments.nodes.map(commentOf),
     commentTotal: discussion.comments.totalCount,
     pull: null,

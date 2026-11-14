@@ -18,6 +18,9 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
 
 const requestText = (value) => (isString(value) ? value.trim() : '');
 
+// Short text fields (a title, a label or reviewer id) share this cap.
+const TITLE_MAX = 256;
+
 // A votes host's label names and values (Gerrit's Code-Review, Verified, ...).
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
@@ -173,6 +176,20 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
+  // An issue's title and body, replaced together; an empty body clears it.
+  entries['/issues/update'] = {
+    kind: 'issue-update',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const title = requestText(input.title);
+      if (!title || title.length > TITLE_MAX) throw invalidMutationContext(`title is required and must fit ${TITLE_MAX} characters`);
+      if (input.body !== undefined && !isString(input.body)) throw invalidMutationContext('body must be a string');
+      const normalized = { title };
+      if (input.body !== undefined) normalized.body = input.body;
+      normalized.digest = { title, body: normalized.body ?? null };
+      return normalized;
+    },
+  };
   // Close or reopen: `state` is what the item should become.
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     entries[route] = {

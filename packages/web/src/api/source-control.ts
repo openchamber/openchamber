@@ -71,6 +71,8 @@ import type {
   SourceControlReadContext,
   SourceControlUser,
   UpdateChangeRequestInput,
+  UpdateIssueInput,
+  UpdateDiscussionInput,
   Label,
   RepositoryReferenceReviewer,
   RepositorySelector,
@@ -1393,6 +1395,13 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/create', body);
       return parseMutationReceipt(result, payload, identity, parseCreateMutationResult);
     },
+    issueUpdate: async (payload: UpdateIssueInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/update', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
     changeRequestUpdate: async (payload: UpdateChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
       const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
@@ -1569,6 +1578,13 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/answer', {
         ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, answer: payload.answer,
       });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionUpdate: async (payload: UpdateDiscussionInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/update', body);
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     discussionSetLabels: async (payload: SetLabelsInput) => {

@@ -533,6 +533,12 @@ anywhere under `packages/ui/src`).
   `refs/for/<target>` on the provider association's primary remote) and
   uploads a new patchset while the status's `localRevision.uploadedAs` is
   null. The status may also carry the change's chain (`stack`).
+- `features.issueEdit` / `features.changeRequestEdit`: the preview offers a
+  pencil that replaces an issue's or a change request's title and
+  description (`issueUpdate`, `changeRequestUpdate`); a discussion edits under
+  `features.discussions`. A host without the flag, a linked item, a detail that
+  says `viewerCanUpdate: false`, and a list body cut at 20 000 characters with
+  no whole one in the detail all show no pencil.
 - `features.branchHeads: false`: the head is a revision's ref, not a branch,
   so nothing offers to stack on it or shows it as a branch, and a worktree
   made from a change gets the branch `change-<number>`, the name the server

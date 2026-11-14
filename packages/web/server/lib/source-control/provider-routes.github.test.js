@@ -375,7 +375,7 @@ describe('GET /api/source-control/github/references', () => {
       .query({ ...readContext(project), owner: 'example', repo: 'project', number: '9', kind: 'discussion' })
       .expect(200);
     expect(detail.body).toEqual({ connected: true, detail: {
-      number: 9, comments: [], commentTotal: 0, pull: null, discussion: { canComment: true, canClose: true, canReopen: false },
+      number: 9, viewerCanUpdate: true, comments: [], commentTotal: 0, pull: null, discussion: { canComment: true, canClose: true, canReopen: false },
     } });
   });
 

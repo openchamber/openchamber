@@ -112,6 +112,10 @@ function mutationOperations() {
       reconcile: unknownOutcome,
     };
   }
+  operations['/issues/update'] = {
+    perform: (service, normalized, resolved) => service.updateIssue(call(resolved, { title: normalized.title, body: normalized.body })),
+    reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized.title, normalized.body),
+  };
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     operations[route] = {
       perform: (service, normalized, resolved) => service.setState(call(resolved, { state: normalized.state, kind })),
