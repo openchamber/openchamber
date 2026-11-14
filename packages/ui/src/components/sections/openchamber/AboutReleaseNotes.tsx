@@ -8,6 +8,23 @@ import { formatCanaryBuild, parseCanaryVersion } from '@/lib/updateChannel';
 
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 
+// The Android app shows its own notes and its server's, each titled like the
+// version line it belongs to.
+const TITLE_KEYS = {
+  installed: {
+    current: 'settings.openchamber.about.releaseNotes.current',
+    since: 'settings.openchamber.about.releaseNotes.since',
+  },
+  app: {
+    current: 'settings.openchamber.about.releaseNotes.app.current',
+    since: 'settings.openchamber.about.releaseNotes.app.since',
+  },
+  server: {
+    current: 'settings.openchamber.about.releaseNotes.server.current',
+    since: 'settings.openchamber.about.releaseNotes.server.since',
+  },
+} as const;
+
 type ReleaseCardProps = {
   release: ReleaseNotesRelease;
   /**
@@ -39,6 +56,8 @@ type AboutReleaseNotesProps = {
   since: string | null;
   /** "2.5.4 Canary · Oct 30" for a Canary build, with its build number beside a same-day `beside`. */
   describeVersion: (version: string, beside?: string | null) => string;
+  /** Whose notes these are; `installed` while the page shows one installed build. */
+  owner: keyof typeof TITLE_KEYS;
 };
 
 /**
@@ -46,7 +65,7 @@ type AboutReleaseNotesProps = {
  * Nothing shows while the notes load, when they cannot be read, or when the
  * changelog has none for this version.
  */
-export const AboutReleaseNotes: React.FC<AboutReleaseNotesProps> = ({ version, since, describeVersion }) => {
+export const AboutReleaseNotes: React.FC<AboutReleaseNotesProps> = ({ version, since, describeVersion, owner }) => {
   const { t } = useI18n();
   const [loaded, setLoaded] = React.useState<{ key: string; releases: ReleaseNotesRelease[] } | null>(null);
   const requestKey = `${since ?? ''}>${version}`;
@@ -78,8 +97,8 @@ export const AboutReleaseNotes: React.FC<AboutReleaseNotesProps> = ({ version, s
       title={(
         <h2 className={SETTINGS_SECTION_TITLE_CLASS}>
           {since
-            ? t('settings.openchamber.about.releaseNotes.since', { version: describeVersion(since, version) })
-            : t('settings.openchamber.about.releaseNotes.current', { version: describeVersion(version) })}
+            ? t(TITLE_KEYS[owner].since, { version: describeVersion(since, version) })
+            : t(TITLE_KEYS[owner].current, { version: describeVersion(version) })}
           {showDate && <span className="typography-meta whitespace-nowrap text-muted-foreground"> · {formatReleaseDate(single.date)}</span>}
         </h2>
       )}
