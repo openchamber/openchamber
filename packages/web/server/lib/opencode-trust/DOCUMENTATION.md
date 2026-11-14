@@ -147,22 +147,39 @@ name), and the commands of local MCP servers, language servers, formatters
 and the shell. Every `{env:…}` and `{file:…}` in a configuration file, by
 name: OpenCode substitutes them into the file's text wherever they stand, so
 one in a remote MCP header, a provider option or an instruction URL sends the
-value to an address the repository picked. Every rule that allows something,
-in the configuration (`permission`, `permissions`, `tools`, and the same
-under `agent`, `agents` and `mode`) and in the agent files of `.opencode/`
-(`agent/`, `agents/`, `mode/`, `modes/`): a project's rules are evaluated
-after the user's, so an allow there silently overrides an ask the user set.
+value to an address the repository picked. Every rule that allows something
+one of the user's own ask or deny rules covers, in the configuration
+(`permission`, `permissions`, `tools`, and the same under `agent`, `agents`
+and `mode`) and in the agent files of `.opencode/` (`agent/`, `agents/`,
+`mode/`, `modes/`): a project's rules are evaluated after the user's, so such
+an allow silently overrides the user's ask.
 
 A folder with only models, skills, remote MCP servers without such values,
-or agents that allow nothing opens without a prompt, and editing those never
-asks again. Asks and denies only tighten the user's rules, so they do not
-count. Every allow counts, also one that matches OpenCode's allow-all
-default: whether it overrides anything depends on the user's own rules,
-which can change after the answer was given. Instruction URLs do not count:
-the repository's own `AGENTS.md` can say the same. A configuration file that
-does not parse counts as code, and so does an agent file that names
-permissions in frontmatter YAML cannot read, since OpenCode may still read
-what these parsers reject.
+or allows the user never restricted opens without a prompt, and editing
+those never asks again. Asks and denies only tighten the user's rules, so
+they do not count. Instruction URLs do not count: the repository's own
+`AGENTS.md` can say the same. A configuration file that does not parse
+counts as code, and so does an agent file that names permissions and that
+neither plain YAML nor OpenCode's colon fallback reads, since OpenCode may
+still read what these parsers reject.
+
+### Why an allow counts only against the user's own rules
+
+OpenCode allows everything by default, so a repository allow changes nothing
+for a user who set no ask or deny. Counting every allow asked about nearly
+every repository with agent files, read-only reviewers included, and taught
+users to click through the dialog. The user's rules are read from OpenCode's
+global configuration directories, `~/.opencode` (documents and agent files)
+and `OPENCODE_CONFIG`/`OPENCODE_CONFIG_CONTENT`, and an allow counts when its
+action can match the action of one of them. Resources are not compared:
+shell patterns intersect in ways neither pattern shows (`git push *` and
+`git * --force`), OpenCode expands `~` in path resources and substitutes
+`{env:…}` before matching, so proving two resources never meet is not
+possible here, and a miss would let the repository win silently. OpenCode's
+own `.env` read asks are left out: a repository agent that may read `*`
+would otherwise ask everywhere. The fingerprint holds only the counted
+allows, so adding an ask later asks again for folders whose allows override
+it.
 
 ### Why a plugin's hash covers the local files it imports
 
