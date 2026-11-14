@@ -55,3 +55,56 @@ describe('quota provider manifest (vscode)', () => {
     assert.deepEqual(dispatchIds(), configuredIds());
   });
 });
+
+// Managed-credential conformance (issue #2281): the bridge credentials
+// handler and the webview fetch interceptor are surfaces of the one
+// managed-credential provider set stated in quotaCredentials.ts
+// (MANAGED_PROVIDERS). A provider missing from either surface — the
+// opendesign gap this guards — fails here, as does a surface inventing
+// its own list.
+const credentialsSource = fs.readFileSync(path.join(here, 'quotaCredentials.ts'), 'utf8');
+const bridgeSource = fs.readFileSync(path.join(here, 'bridge-system-runtime.ts'), 'utf8');
+const webviewSource = fs.readFileSync(path.join(here, '../webview/main.tsx'), 'utf8');
+
+const managedProviders = () => {
+  const match = credentialsSource.match(/MANAGED_PROVIDERS[^=]*=\s*\[([^\]]+)\]/);
+  assert.ok(match, 'MANAGED_PROVIDERS not found in quotaCredentials.ts');
+  return new Set([...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]));
+};
+
+const interceptorRegex = () => {
+  const line = webviewSource.split('\n').find((entry) => entry.includes('quotaCredentialMatch') && entry.includes('pathname.match'));
+  assert.ok(line, 'webview quota credential interceptor not found');
+  const literal = line.match(/pathname\.match\((\/.+\/)\)/)?.[1];
+  assert.ok(literal, 'interceptor regex literal not found');
+  return new RegExp(literal.slice(1, literal.lastIndexOf('/')));
+};
+
+describe('managed credential surfaces (vscode)', () => {
+  it('the bridge credentials handler derives its allowlist from MANAGED_PROVIDERS', () => {
+    const start = bridgeSource.indexOf("case 'api:quota:credentials'");
+    assert.notEqual(start, -1, 'bridge credentials case not found');
+    const body = bridgeSource.slice(start, start + 4000);
+    assert.ok(body.includes('MANAGED_PROVIDERS'), 'bridge allowlist must use the shared MANAGED_PROVIDERS constant');
+    assert.ok(!/\['exe-dev', 'cursor', 'zenmux'\]/.test(body), 'bridge must not keep a separate hardcoded provider list');
+    assert.ok(managedProviders().size > 0);
+  });
+
+  it('the webview interceptor alternation is exactly the managed-credential provider set', () => {
+    const line = webviewSource.split('\n').find((entry) => entry.includes('quotaCredentialMatch') && entry.includes('pathname.match'));
+    assert.ok(line);
+    const alternation = line.match(/credentials\\\/\(([^)]+)\)/)?.[1];
+    assert.ok(alternation, 'interceptor provider alternation not found');
+    assert.deepEqual(new Set(alternation.split('|')), managedProviders());
+  });
+
+  it('the webview interceptor routes every managed provider credential path incl. validate and import', () => {
+    const regex = interceptorRegex();
+    for (const provider of managedProviders()) {
+      assert.ok(regex.test(`/api/quota/credentials/${provider}`), `${provider} base path`);
+      assert.ok(regex.test(`/api/quota/credentials/${provider}/validate`), `${provider} validate path`);
+      assert.ok(regex.test(`/api/quota/credentials/${provider}/import`), `${provider} import path`);
+    }
+    assert.ok(!regex.test('/api/quota/credentials/command-code'), 'command-code is not a managed credential provider');
+  });
+});

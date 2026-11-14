@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 // runner's runtime resolves homedir from the environment it starts with, so
 // each case runs the real import in a child process whose HOME is the fake
 // home. The child also stubs the darwin platform gate before calling it.
-import { normalizeCredential } from './quotaCredentials';
+import { normalizeCredential, validateCredential, OPEN_DESIGN_API_BASE_URL, OPEN_DESIGN_SESSION_EXPIRED_ERROR } from './quotaCredentials';
 
 const modulePath = fileURLToPath(new URL('./quotaCredentials.ts', import.meta.url));
 
@@ -83,4 +83,50 @@ test('normalizeCredential: opendesign wraps a bare session token and requires a 
   assert.equal(normalizeCredential('opendesign', { cookie: 'tok123' }), null);
   assert.equal(normalizeCredential('opendesign', { workspaceId: 'ws_1' }), null);
   assert.equal(normalizeCredential('opendesign', { cookie: 'tok\n123', workspaceId: 'ws_1' }), null);
+});
+
+// validateCredential's opendesign branch: the session probe mirrors the
+// quota fetcher — GET ${OPEN_DESIGN_API_BASE_URL}/auth/get-session with the
+// workspace header; any non-object session is an expired session.
+const openDesignCredential = { cookie: 'better-auth.session_token=token-value', workspaceId: 'ws-1' };
+
+const sessionFetch = (respond: () => Response, calls: { url: string; init: RequestInit }[]) =>
+  async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return respond();
+  };
+
+test('validateCredential opendesign: a valid session object passes and probes get-session', async () => {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fetchImpl = sessionFetch(() => new Response(JSON.stringify({ user: { id: 'u1' } }), { status: 200 }), calls);
+  await validateCredential('opendesign', openDesignCredential, fetchImpl);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${OPEN_DESIGN_API_BASE_URL}/auth/get-session`);
+  const headers = calls[0].init.headers as Record<string, string>;
+  assert.equal(headers['x-vela-workspace-id'], 'ws-1');
+  assert.equal(headers.Cookie, openDesignCredential.cookie);
+});
+
+test('validateCredential opendesign: a non-object session throws the expired-session error', async () => {
+  for (const body of ['null', '"ok"', '42']) {
+    const fetchImpl = sessionFetch(() => new Response(body, { status: 200 }), []);
+    await assert.rejects(
+      validateCredential('opendesign', openDesignCredential, fetchImpl),
+      (error: Error) => error.message === OPEN_DESIGN_SESSION_EXPIRED_ERROR
+    );
+  }
+});
+
+test('validateCredential opendesign: an HTTP error session probe throws the expired-session error', async () => {
+  const fetchImpl = sessionFetch(() => new Response('nope', { status: 401 }), []);
+  await assert.rejects(
+    validateCredential('opendesign', openDesignCredential, fetchImpl),
+    (error: Error) => error.message === OPEN_DESIGN_SESSION_EXPIRED_ERROR
+  );
+});
+
+test('validateCredential opendesign: missing cookie or workspace is rejected before any fetch', async () => {
+  const fetchImpl = sessionFetch(() => { throw new Error('must not fetch'); }, []);
+  await assert.rejects(validateCredential('opendesign', { workspaceId: 'ws-1' }, fetchImpl), /cookie is required/);
+  await assert.rejects(validateCredential('opendesign', { cookie: 'better-auth.session_token=t' }, fetchImpl), /workspace ID is required/);
 });
