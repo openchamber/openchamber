@@ -336,6 +336,8 @@ export interface Issue extends SourceControlIdentity {
   locked?: boolean;
   /** Whether this account follows the issue's conversation; absent where the host does not say. */
   subscribed?: boolean;
+  /** Whether this account may write in the repository; absent where the host does not say. */
+  writeAccess?: boolean;
   /** Items that mentioned this one, oldest first. */
   references?: SourceControlReference[];
 }
@@ -634,6 +636,8 @@ export interface ChangeRequestContext {
   references?: SourceControlReference[];
   /** Whether this account follows the change, where the host says. */
   subscribed?: boolean;
+  /** Whether this account may write in the repository; absent where the host does not say. */
+  writeAccess?: boolean;
   /** Whether the conversation is locked, where the host reports it with the context. */
   locked?: boolean;
 }

@@ -97,6 +97,7 @@ const sourceControl: SourceControlAPI = {
   changeRequestSetReviewers: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
   referenceReviewers: unexpected, changeRequestsList: unexpected, changeRequestContext: unexpected,
   issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected,
+  credentialScopes: unexpected,
   projectBranches: unexpected, referenceDetail: unexpected, changeRequestListStatuses: unexpected,
 };
 

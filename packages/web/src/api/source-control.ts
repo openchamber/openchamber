@@ -904,6 +904,9 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.subscribed !== undefined && Object.prototype.toString.call(issue.subscribed) !== '[object Boolean]') {
     throw new Error('Source control response contained an invalid issue subscription');
   }
+  if (issue.writeAccess !== undefined && Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') {
+    throw new Error('Source control response contained an invalid issue write access');
+  }
   if (issue.references !== undefined && !Array.isArray(issue.references)) {
     throw new Error('Source control response contained invalid issue references');
   }
@@ -926,6 +929,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
   if (issue.locked !== undefined) result.locked = issue.locked;
   if (issue.subscribed !== undefined) result.subscribed = issue.subscribed;
+  if (issue.writeAccess !== undefined) result.writeAccess = issue.writeAccess;
   if (issue.references !== undefined) result.references = issue.references.map((reference) => parseSourceReference(reference, identity));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
@@ -1877,6 +1881,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         query.set('owner', projectSelector.owner);
         query.set('repo', projectSelector.name);
       }
+      query.set('timeline', '1');
       // Null is an issue outside the bound repository network.
       const payload = await request<(Issue & ErrorResponse) | null>(fetch, normalized, '/issues/get', {}, query);
       return payload === null ? null : parseSourceIssue(payload, normalized);
@@ -1892,6 +1897,17 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const payload = await request<IssueComment[] & ErrorResponse>(fetch, normalized, '/issues/comments', {}, query);
       if (!Array.isArray(payload)) throw new Error('Source control response contained invalid comments');
       return payload.map((comment) => parseSourceComment(comment, normalized));
+    },
+    credentialScopes: async (context): Promise<string[] | null> => {
+      const normalized = normalizeIdentity(context);
+      const query = boundReadQuery(context);
+      const payload = await request<{ scopes: string[] | null } & ErrorResponse>(fetch, normalized, '/repo/scopes', {}, query);
+      const scopes = payload?.scopes;
+      if (scopes === null) return null;
+      if (!Array.isArray(scopes) || scopes.some((scope) => typeof scope !== 'string')) {
+        throw new Error('Source control response contained invalid credential scopes');
+      }
+      return scopes;
     },
     projectUpstream: async (context): Promise<ProjectUpstream> => {
       const normalized = normalizeIdentity(context);

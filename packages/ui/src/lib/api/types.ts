@@ -1927,6 +1927,12 @@ export type RepositoryReferenceDetail = {
   categories?: RepositoryDiscussionCategory[];
   /** Whether the conversation is locked. Absent where the host does not say. */
   locked?: boolean;
+  /**
+   * Whether this account may write in the repository, which lock, base and
+   * branch changes need. Absent where the host does not say, and that never
+   * hides a control: only a reported false does.
+   */
+  writeAccess?: boolean;
   /** Whether this account follows the item's conversation. Absent where the host does not say. */
   viewerSubscribed?: boolean;
 };
@@ -2171,6 +2177,11 @@ export interface SourceControlAPI {
     project?: { owner: string; name: string },
   ): Promise<IssueComment[]>;
   projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>;
+  /**
+   * The scopes the stored credential carries, or null when the host does not
+   * report them (a fine-grained token, or a provider without the concept).
+   */
+  credentialScopes(context: SourceControlReadContext): Promise<string[] | null>;
   projectBranches(context: SourceControlReadContext, owner: string, project: string): Promise<string[]>;
 
   /**

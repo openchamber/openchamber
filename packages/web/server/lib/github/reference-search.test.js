@@ -518,6 +518,22 @@ describe('fetchReferenceDetail', () => {
     expect(unanswered).not.toHaveProperty('locked');
   });
 
+  it('carries whether this account may write in the repository only when the host answers it', async () => {
+    const withPermission = (permission) => ({
+      graphql: async () => ({ repository: { viewerPermission: permission, issueOrPullRequest: { __typename: 'Issue', number: 3, comments: { totalCount: 0, nodes: [] } } } }),
+    });
+
+    expect((await fetchReferenceDetail({ octokit: withPermission('WRITE'), owner: 'acme', repo: 'app', number: 3 }))?.writeAccess).toBe(true);
+    expect((await fetchReferenceDetail({ octokit: withPermission('ADMIN'), owner: 'acme', repo: 'app', number: 3 }))?.writeAccess).toBe(true);
+    expect((await fetchReferenceDetail({ octokit: withPermission('TRIAGE'), owner: 'acme', repo: 'app', number: 3 }))?.writeAccess).toBe(false);
+    expect((await fetchReferenceDetail({ octokit: withPermission('READ'), owner: 'acme', repo: 'app', number: 3 }))?.writeAccess).toBe(false);
+    const unanswered = await fetchReferenceDetail({
+      octokit: graphqlReturning({ __typename: 'Issue', number: 3, comments: { totalCount: 0, nodes: [] } }),
+      owner: 'acme', repo: 'app', number: 3,
+    });
+    expect(unanswered).not.toHaveProperty('writeAccess');
+  });
+
   it('carries whether this account follows the item only when the host answers it', async () => {
     const issue = await fetchReferenceDetail({
       octokit: graphqlReturning({ __typename: 'Issue', number: 3, viewerSubscription: 'SUBSCRIBED', comments: { totalCount: 0, nodes: [] } }),

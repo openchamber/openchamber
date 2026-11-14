@@ -267,6 +267,19 @@ export function createProvider({
       getIssue: resources.getIssue,
       issueComments: resources.issueComments,
       projectUpstream: resources.projectUpstream,
+
+      /**
+       * The scopes the token was granted, from the API root's own header. A
+       * fine-grained token sends none, and `null` says so rather than claiming
+       * the token has no scopes.
+       */
+      credentialScopes: async ({ session }) => {
+        const response = await accountOf(session).octokit.request('GET /');
+        const header = response?.headers?.['x-oauth-scopes'];
+        return typeof header === 'string'
+          ? header.split(',').map((scope) => scope.trim()).filter(Boolean)
+          : null;
+      },
       projectBranches: resources.projectBranches,
       listLabels: resources.listLabels,
       listReviewerCandidates: resources.listReviewerCandidates,

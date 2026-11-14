@@ -326,6 +326,7 @@ export const fetchListBackedReferenceDetail = async (
         if (assignees.length > 0) detail.assignees = assignees;
         if (issue && issue.locked !== undefined) detail.locked = issue.locked;
         if (issue && issue.subscribed !== undefined) detail.viewerSubscribed = issue.subscribed;
+        if (issue && issue.writeAccess !== undefined) detail.writeAccess = issue.writeAccess;
         const issueReferences = toReferenceLinks(issue?.references);
         if (issueReferences && issueReferences.length > 0) detail.references = issueReferences;
         return detail;
@@ -350,5 +351,6 @@ export const fetchListBackedReferenceDetail = async (
     if (contextReferences && contextReferences.length > 0) detail.references = contextReferences;
     if (changeRequestContext.locked !== undefined) detail.locked = changeRequestContext.locked;
     if (changeRequestContext.subscribed !== undefined) detail.viewerSubscribed = changeRequestContext.subscribed;
+    if (changeRequestContext.writeAccess !== undefined) detail.writeAccess = changeRequestContext.writeAccess;
     return detail;
 };

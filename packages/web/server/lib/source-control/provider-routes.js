@@ -1105,6 +1105,7 @@ export function registerProviderRoutes(app, {
           session,
           directory,
           number: requestIssueNumber(req.query?.number),
+          includeTimeline: req.query?.timeline === '1',
           project: optionalProject(req),
           context: trustedContext, remote: trustedContext.primaryRemote,
         }));
@@ -1118,6 +1119,18 @@ export function registerProviderRoutes(app, {
     boundRead('projects', '/repo/upstream', async ({ res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       return res.json(await impl.resources.projectUpstream({ session, directory, context: trustedContext, remote: trustedContext.primaryRemote }));
+    });
+
+    // What the stored credential is allowed to do, when the host says so. A
+    // write that needs a scope the token lacks fails at the host, so the UI
+    // asks here before offering it.
+    boundRead('projects', '/repo/scopes', async ({ res, impl, instance, directory, trustedContext }) => {
+      // A host that has no such concept answers as unsupported, which the UI
+      // reads as "unknown", not as "no scopes".
+      if (!(impl.resources?.credentialScopes instanceof Function)) return unsupportedCapability(res);
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      const scopes = await impl.resources.credentialScopes({ session, directory, context: trustedContext, remote: trustedContext.primaryRemote });
+      return res.json({ scopes: Array.isArray(scopes) ? scopes : null });
     });
 
     boundRead('projects', '/repo/branches', async ({ req, res, impl, instance, directory, trustedContext }) => {

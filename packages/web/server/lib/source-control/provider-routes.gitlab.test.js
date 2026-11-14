@@ -1225,6 +1225,21 @@ describe('GitLab routes', () => {
     }
   });
 
+  it('answers 501 for credential scopes this provider does not report', async () => {
+    const active = { id: `${origin}#1`, token: 'active-token', user: { id: 1 }, source: 'pat', scope: '', status: 'valid' };
+    const app = appWith({
+      store: makeStore(active),
+      createClient: vi.fn(() => ({})),
+      createResourceService: vi.fn(() => ({ projectUpstream: vi.fn(async () => ({ isFork: false, upstream: null })) })),
+    });
+
+    const response = await request(app).get('/api/source-control/gitlab/repo/scopes').query({
+      instance: origin, directory: '/repo', repositoryId: 'repo_one', bindingRevision: 4, accountId: active.id, primaryRemote: 'origin',
+    }).expect(501);
+
+    expect(response.body.code).toBe('SOURCE_CONTROL_CAPABILITY_UNSUPPORTED');
+  });
+
   it('uses the exact bound account and primary remote for issue and repository reads', async () => {
     const active = { id: `${origin}#1`, token: 'active-token', user: { id: 1 }, source: 'pat', scope: '', status: 'valid' };
     const bound = { id: `${origin}#2`, token: 'bound-token', user: { id: 2 }, source: 'oauth', scope: 'api', status: 'valid' };
@@ -1259,7 +1274,7 @@ describe('GitLab routes', () => {
     expect(createClient).toHaveBeenCalledWith({ origin, token: 'bound-token', tokenType: 'oauth' });
     expect(createResourceService).toHaveBeenCalledWith(expect.objectContaining({ canonicalReads: true }));
     expect(listIssues).toHaveBeenCalledWith('/repo', { page: 2, query: 'bug', state: 'open', people: 'any', remote: 'upstream' });
-    expect(getIssue).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream', { linked: undefined });
+    expect(getIssue).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream', { linked: undefined, includeTimeline: false });
     expect(issueComments).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream', { linked: undefined });
     expect(projectUpstream).toHaveBeenCalledWith('/repo', 'upstream');
     expect(projectBranches).toHaveBeenCalledWith('/repo', { owner: 'team', name: 'repo' }, 'upstream');

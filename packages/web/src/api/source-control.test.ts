@@ -578,7 +578,7 @@ describe('createWebSourceControlAPI', () => {
       bindingRevision: '4', primaryRemote: 'upstream',
     };
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/get', {
-      query: new URLSearchParams({ ...base, number: '17', owner: 'openchamber', repo: 'openchamber' }),
+      query: new URLSearchParams({ ...base, number: '17', owner: 'openchamber', repo: 'openchamber', timeline: '1' }),
       headers: { Accept: 'application/json' },
     });
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/issues/comments', {

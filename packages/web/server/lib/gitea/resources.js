@@ -128,11 +128,12 @@ export function createGiteaResourceService({
     return { primary, target, targets };
   };
 
-  /** The repository a list of this folder reads: a fork clone lists its upstream. */
-  const listedRepo = async (directory, selector, remote) => {
-    const resolved = await network(directory, selector, remote);
-    return sameName(resolved.primary.project, selector) ? resolved.targets.at(-1) : resolved.target;
-  };
+  /**
+   * The repository whose labels and people a picker offers: the one the
+   * selector names. The upstream would hand out labels the fork's item cannot
+   * take (Gitea answers 422) and assignees it does not have.
+   */
+  const listedRepo = async (directory, selector, remote) => (await network(directory, selector, remote)).target;
   const reviewsPath = (providerTarget) => `${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/reviews`;
   /** The viewer's pending review, kept by the host; only its author can read it. */
   const readPendingReview = async (providerTarget) => {
@@ -200,6 +201,9 @@ export function createGiteaResourceService({
     });
     return currentLogin;
   };
+
+  /** Whether the repository payload says this account may push; absent when it says nothing. */
+  const giteaWriteAccess = (raw) => (typeof raw?.permissions?.push === 'boolean' ? raw.permissions.push : undefined);
 
   /**
    * Whether the acting account follows the item, from Gitea's own check.
@@ -571,6 +575,8 @@ export function createGiteaResourceService({
         ci,
       };
       if (subscribed !== null) context.subscribed = subscribed;
+      const writeAccess = giteaWriteAccess(target.raw);
+      if (writeAccess !== undefined) context.writeAccess = writeAccess;
       if (!options.includeTimeline) return context;
       if (references.length > 0) context.references = references;
       return {
@@ -614,11 +620,14 @@ export function createGiteaResourceService({
       return { items, page, hasMore: result.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote, { linked } = {}) {
+    async getIssue(directory, number, selector, remote, { linked, includeTimeline } = {}) {
       const { target } = await network(directory, selector, remote, { linked });
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
-      // The follow flag and cross-references are further reads; a failure in
-      // either leaves the issue answering without it.
+      const writeAccess = giteaWriteAccess(target.raw);
+      if (writeAccess !== undefined) issue.writeAccess = writeAccess;
+      // The follow flag and cross-references serve the preview, which is the
+      // only reader that shows them: an agent-context read skips both.
+      if (!includeTimeline) return issue;
       const repo = repoPath(target.project);
       const [subscribed, references] = await Promise.all([readSubscription(target.project, number), readTimelineReferences(repo, number)]);
       if (subscribed !== null) issue.subscribed = subscribed;

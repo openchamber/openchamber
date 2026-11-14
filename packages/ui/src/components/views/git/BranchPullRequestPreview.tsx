@@ -181,7 +181,9 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
                 onSaveText={saveText}
-                stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
+                stateMenu={reference.state !== 'merged' ? (
+                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} />
+                ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
                 commentActions={commentActions}

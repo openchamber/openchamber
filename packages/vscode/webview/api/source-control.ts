@@ -114,6 +114,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   issueGet: unsupported,
   issueComments: unsupported,
   projectUpstream: unsupported,
+  credentialScopes: unsupported,
   projectBranches: unsupported,
   references: unsupported,
   referenceDetail: unsupported,

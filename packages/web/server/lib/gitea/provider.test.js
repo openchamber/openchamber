@@ -179,7 +179,7 @@ describe('Gitea provider authentication', () => {
     expect(session).toMatchObject({ instance: ORIGIN, providerUserId: `${ORIGIN}#1`, secretKind: 'pat' });
   });
 
-  it("reads a fork clone's labels and reviewer candidates from the upstream its list shows", async () => {
+  it("reads a fork clone's labels and reviewer candidates from the project the selector names", async () => {
     const { impl } = await setup(forkNetworkRoutes({
       'GET /repos/alice/app/labels': [{ name: 'upstream', color: 'ff0000' }],
       'GET /repos/bob/app/labels': [{ name: 'fork', color: '00ff00' }],
@@ -188,11 +188,16 @@ describe('Gitea provider authentication', () => {
     }));
     await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
     const session = await impl.auth.resolveAccount({ instance: ORIGIN });
-    const read = { session, directory: '/repo', project: { owner: 'bob', name: 'app' }, remote: 'origin' };
 
-    await expect(impl.resources.listLabels(read)).resolves.toEqual([{ name: 'upstream', color: 'ff0000' }]);
-    const candidates = await impl.resources.listReviewerCandidates(read);
-    expect(candidates.map((candidate) => [candidate.id, candidate.login])).toEqual([['2', 'ann']]);
+    // The fork's own repository: what it offers is what its item can take.
+    const fork = { session, directory: '/repo', project: { owner: 'bob', name: 'app' }, remote: 'origin' };
+    await expect(impl.resources.listLabels(fork)).resolves.toEqual([{ name: 'fork', color: '00ff00' }]);
+    expect((await impl.resources.listReviewerCandidates(fork)).map((candidate) => [candidate.id, candidate.login])).toEqual([['3', 'bob']]);
+
+    // The upstream's own, for a board listing the upstream's items.
+    const upstream = { session, directory: '/repo', project: { owner: 'alice', name: 'app' }, remote: 'origin' };
+    await expect(impl.resources.listLabels(upstream)).resolves.toEqual([{ name: 'upstream', color: 'ff0000' }]);
+    expect((await impl.resources.listReviewerCandidates(upstream)).map((candidate) => [candidate.id, candidate.login])).toEqual([['2', 'ann']]);
   });
 
   it('stores the instance\'s separate SSH address and recognises remotes there', async () => {

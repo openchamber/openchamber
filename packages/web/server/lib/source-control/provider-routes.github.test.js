@@ -356,8 +356,29 @@ describe('GET /api/source-control/github/pulls/list free-text search', () => {
     expect(paths).not.toContain('/search/issues');
   });
 
+  it('reads a plain closed board page from the REST list, not search', async () => {
+    const paths = [];
+    let state;
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      paths.push(endpoint.pathname);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/repos/example/project/pulls') {
+        state = endpoint.searchParams.get('state');
+        return response([pull(1)]);
+      }
+      if (endpoint.pathname === '/repos/example/project/pulls/1') return response(pull(1));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), state: 'closed' }).expect(200);
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1]);
+    expect(state).toBe('closed');
+    expect(paths).not.toContain('/search/issues');
+  });
+
   it.each([
-    ['closed', 'is:closed is:unmerged'],
     ['merged', 'is:merged'],
   ])('searches a %s board page with %s and no open-state qualifier', async (state, qualifier) => {
     let q;
@@ -396,21 +417,25 @@ describe('GET /api/source-control/github/pulls/list free-text search', () => {
     expect(q).toBe('repo:example/project is:pr is:open sort:updated-desc review-requested:@me');
   });
 
-  it('adds no state qualifier for an all page', async () => {
-    let q;
+  it('adds no state qualifier for an all page, which REST answers too', async () => {
+    const paths = [];
+    let state;
     const fetch = vi.fn(async (url) => {
       const endpoint = new URL(url);
+      paths.push(endpoint.pathname);
       if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
-      if (endpoint.pathname === '/search/issues') {
-        q = endpoint.searchParams.get('q');
-        return response({ total_count: 0, items: [] });
+      if (endpoint.pathname === '/repos/example/project/pulls') {
+        state = endpoint.searchParams.get('state');
+        return response([]);
       }
       throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
     });
     vi.stubGlobal('fetch', fetch);
-    await request(app).get('/api/source-control/github/pulls/list')
+    const result = await request(app).get('/api/source-control/github/pulls/list')
       .query({ ...readContext(repository), state: 'all' }).expect(200);
-    expect(q).toBe('repo:example/project is:pr sort:updated-desc');
+    expect(result.body.items).toEqual([]);
+    expect(state).toBe('all');
+    expect(paths).not.toContain('/search/issues');
   });
 
   it('maps a merged pull request from a merged search page', async () => {

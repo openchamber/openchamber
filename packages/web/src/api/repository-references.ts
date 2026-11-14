@@ -139,6 +139,8 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
       })),
       commentTotal: z.number(),
+      // Whether this account may write in the repository, where the host says.
+      writeAccess: z.boolean().optional(),
       // Whether this account follows the conversation, where the host says.
       viewerSubscribed: z.boolean().optional(),
       // Whether the conversation is locked, where the host says.

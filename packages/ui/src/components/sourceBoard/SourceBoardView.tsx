@@ -773,7 +773,7 @@ const SourceBoardBody: React.FC<{
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
-                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
+                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} writeAccess={browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined} />
             ) : undefined}
             commentAttachments={previewItem?.source === 'repository'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }

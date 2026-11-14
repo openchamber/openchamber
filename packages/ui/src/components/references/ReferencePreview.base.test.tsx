@@ -105,6 +105,8 @@ type ShowOptions = {
   failWrite?: boolean;
   /** Holds the branch read open so the popup's loading state can be seen. */
   holdBranches?: boolean;
+  /** What the host says this account may do in the repository. */
+  writeAccess?: boolean;
 };
 
 /** Renders the preview and records the base changes it sends and the refreshes it asks for. */
@@ -156,7 +158,7 @@ const show = async (options: ShowOptions = {}) => {
             directory={null}
             pullStatus={{ status: 'idle' }}
             trackerDetail={{ status: 'idle' }}
-            repositoryDetail={{ status: 'ready', value: detail }}
+            repositoryDetail={{ status: 'ready', value: options.writeAccess === undefined ? detail : { ...detail, writeAccess: options.writeAccess } }}
             purpose="attach"
             pinned={false}
             includeDiff={false}
@@ -203,6 +205,12 @@ describe('changing a change request\'s base branch from its preview', () => {
 
   test('keeps the base plain text where the host cannot change it', async () => {
     await show({ baseChange: false });
+    expect(pencil()).toBeNull();
+    expect(host.textContent).toContain('main');
+  });
+
+  test('keeps the base plain text where the host says this account cannot write', async () => {
+    await show({ writeAccess: false });
     expect(pencil()).toBeNull();
     expect(host.textContent).toContain('main');
   });

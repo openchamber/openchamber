@@ -296,7 +296,7 @@ describe('GitLab resource service', () => {
     }));
     const service = createGitLabResourceService({ origin: host, client, resolveProjects });
 
-    const result = await service.getIssue('/repo', 3, undefined, 'origin');
+    const result = await service.getIssue('/repo', 3, undefined, 'origin', { includeTimeline: true });
 
     // Oldest first, whichever order the notes arrived in.
     expect(result.references).toEqual([
@@ -311,9 +311,20 @@ describe('GitLab resource service', () => {
       IssueNotes: { all: vi.fn(async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); }) },
     });
 
-    const issue = await service.getIssue('/repo', 3, undefined, 'origin');
+    const issue = await service.getIssue('/repo', 3, undefined, 'origin', { includeTimeline: true });
     expect(issue).toMatchObject({ number: 3 });
     expect(issue).not.toHaveProperty('references');
+  });
+
+  it('reads no notes for an issue detail that shows no timeline', async () => {
+    const all = vi.fn(async () => []);
+    const { service } = setup({ IssueNotes: { all } });
+
+    const issue = await service.getIssue('/repo', 3, undefined, 'origin');
+
+    expect(issue).toMatchObject({ number: 3 });
+    expect(issue).not.toHaveProperty('references');
+    expect(all).not.toHaveBeenCalled();
   });
 
   it('starts, answers and resolves threads on the merge request the path names', async () => {
@@ -568,14 +579,21 @@ describe('GitLab resource service', () => {
     await expect(malformedFork.service.projectUpstream('/repo', 'origin')).rejects.toThrow('invalid fork metadata');
   });
 
-  it("reads a fork clone's labels and reviewer candidates from the upstream its list shows", async () => {
+  it("reads a fork clone's labels and reviewer candidates from the project the selector names", async () => {
     const labels = vi.fn(async () => [{ name: 'upstream', color: '#ff0000' }]);
     const members = vi.fn(async () => [{ id: 2, username: 'ann', state: 'active' }]);
     const { service } = setup({ ProjectLabels: { all: labels }, ProjectMembers: { all: members } });
 
+    // The fork's own project: a label or an assignee picked here is one its item can take.
     await expect(service.listLabels('/repo', { owner: 'me', name: 'repo' })).resolves.toEqual([{ name: 'upstream', color: 'ff0000' }]);
-    expect(labels).toHaveBeenLastCalledWith('2', { perPage: 100, maxPages: 1 });
+    expect(labels).toHaveBeenLastCalledWith('1', { perPage: 100, maxPages: 1 });
     await expect(service.listReviewerCandidates('/repo', { owner: 'me', name: 'repo' })).resolves.toEqual([{ id: '2', login: 'ann' }]);
+    expect(members).toHaveBeenLastCalledWith('1', { includeInherited: true, perPage: 100, maxPages: 1 });
+
+    // The upstream keeps its own, which is what a board listing its items reads.
+    await service.listLabels('/repo', { owner: 'team', name: 'repo' });
+    expect(labels).toHaveBeenLastCalledWith('2', { perPage: 100, maxPages: 1 });
+    await service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' });
     expect(members).toHaveBeenLastCalledWith('2', { includeInherited: true, perPage: 100, maxPages: 1 });
   });
 
@@ -1124,6 +1142,41 @@ describe('GitLab comments and reviews', () => {
     expect(plainIssue).not.toHaveProperty('locked');
   });
 
+  it('reports whether this account may write, from the project permissions GitLab sends', async () => {
+    const withPermissions = (permissions) => setup({
+      Projects: { show: vi.fn(async (id) => (Number(id) === 2
+        ? { ...targetProject, permissions }
+        : { ...sourceProject, permissions })) },
+    }).service;
+
+    const writer = withPermissions({ project_access: { access_level: 30 }, group_access: null });
+    expect((await writer.getIssue('/repo', 3, undefined, 'origin')).writeAccess).toBe(true);
+    expect((await writer.changeRequestContext('/repo', 5, {})).writeAccess).toBe(true);
+
+    const reader = withPermissions({ project_access: { access_level: 20 }, group_access: null });
+    expect((await reader.getIssue('/repo', 3, undefined, 'origin')).writeAccess).toBe(false);
+
+    const throughGroup = withPermissions({ project_access: null, group_access: { access_level: 40 } });
+    expect((await throughGroup.getIssue('/repo', 3, undefined, 'origin')).writeAccess).toBe(true);
+
+    const silent = setup().service;
+    expect(await silent.getIssue('/repo', 3, undefined, 'origin')).not.toHaveProperty('writeAccess');
+  });
+
+  it('reads a null discussion_locked as not locked', async () => {
+    const { service } = setup({
+      Issues: { ...setup().client.Issues, show: vi.fn(async () => ({
+        iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened', discussion_locked: null,
+      })) },
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ ...openMR, discussion_locked: null })) },
+    });
+
+    const context = await service.changeRequestContext('/repo', 5, {});
+    expect(context.locked).toBe(false);
+    const issue = await service.getIssue('/repo', 3, undefined, 'origin');
+    expect(issue).toMatchObject({ number: 3, locked: false });
+  });
+
   it('subscribes and unsubscribes an issue and a merge request through the subscription calls', async () => {
     const subscribeIssue = vi.fn(async () => ({
       iid: 3, title: 'Bug', web_url: `${origin}/team/repo/-/issues/3`, state: 'opened', subscribed: true,
@@ -1159,6 +1212,42 @@ describe('GitLab comments and reviews', () => {
     expect(unsubscribeIssue).toHaveBeenCalledWith('2', 3);
     expect(subscribeMR).toHaveBeenCalledWith('2', 5);
     expect(unsubscribeMR).toHaveBeenCalledWith('2', 5);
+  });
+
+  it('treats an already-followed 304 as success only when the read-back agrees', async () => {
+    const already = () => Object.assign(new Error('Not Modified'), { cause: { response: { status: 304 } } });
+    const project = { id: '2', owner: 'team', name: 'repo' };
+    const { service } = setup({
+      Issues: {
+        ...setup().client.Issues,
+        subscribe: vi.fn(async () => { throw already(); }),
+        show: vi.fn(async () => ({
+          iid: 3, title: 'Bug', web_url: `${origin}/team/repo/-/issues/3`, state: 'opened', subscribed: true,
+        })),
+      },
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        unsubscribe: vi.fn(async () => { throw already(); }),
+        show: vi.fn(async () => ({ ...openMR, subscribed: false })),
+      },
+    });
+
+    await expect(service.setConversationSubscription({
+      kind: 'issue-subscription', subscribed: true, providerTarget: { projectId: '2', number: 3 }, targetProject: project,
+    })).resolves.toEqual({});
+
+    const { service: disagreeing } = setup({
+      Issues: {
+        ...setup().client.Issues,
+        subscribe: vi.fn(async () => { throw already(); }),
+        show: vi.fn(async () => ({
+          iid: 3, title: 'Bug', web_url: `${origin}/team/repo/-/issues/3`, state: 'opened', subscribed: false,
+        })),
+      },
+    });
+    await expect(disagreeing.setConversationSubscription({
+      kind: 'issue-subscription', subscribed: true, providerTarget: { projectId: '2', number: 3 }, targetProject: project,
+    })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
   });
 
   it('refuses a subscription answer that disagrees with the write', async () => {

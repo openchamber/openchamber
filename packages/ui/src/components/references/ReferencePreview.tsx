@@ -34,6 +34,7 @@ import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimeli
 import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips, RowPerson } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
+import { useCredentialScopes } from './useCredentialScopes';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
 import {
     repositoryStateLook,
@@ -730,19 +731,29 @@ const RepositoryPreview: React.FC<{
     // The conversation's lock, where the detail says what it is, this surface
     // may write with this account, and the item is not only read.
     const locked = detail.status === 'ready' ? detail.value.locked : undefined;
-    const showLock = locked !== undefined && conversationWriteContext !== null && conversationWriteContext !== undefined && reference.linked !== true;
+    // Locking needs write access to the repository; a read-only account gets no
+    // button that can only be refused.
+    const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
+    const showLock = locked !== undefined
+        && writeAccess !== false
+        && conversationWriteContext !== null && conversationWriteContext !== undefined && reference.linked !== true;
     // Following the conversation, where the detail says whether this account
-    // follows it and this surface may write with this account.
+    // follows it and this surface may write with this account. GitHub's
+    // subscribe needs the token's notifications scope, so a token known to
+    // lack it offers no control that would only fail.
     const viewerSubscribed = detail.status === 'ready' ? detail.value.viewerSubscribed : undefined;
-    const showSubscription = viewerSubscribed !== undefined
+    const canFollow = viewerSubscribed !== undefined
         && conversationWriteContext !== null && conversationWriteContext !== undefined
         && reference.linked !== true;
+    const scopes = useCredentialScopes(canFollow ? conversationWriteContext : null);
+    const showSubscription = canFollow && (scopes === null || scopes.includes('notifications'));
     // Pointing a change request at another base, where the host can, this
     // surface may write and the item is not only read; without a write
     // context the base stays plain text.
     const canChangeBase = reference.kind === 'pull'
         && reference.linked !== true
         && descriptor.features.baseChange
+        && writeAccess !== false
         && conversationWriteContext !== null && conversationWriteContext !== undefined;
     // Moving a discussion into another category, where its detail names the
     // categories, this surface may write and the item is not only read.

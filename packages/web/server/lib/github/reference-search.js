@@ -152,6 +152,8 @@ const DETAIL_THREAD_COMMENT_LIMIT = 50;
 const DETAIL_QUERY = `
 query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
+    # What this account may do in the repository: lock, base and branch writes need WRITE.
+    viewerPermission
     issueOrPullRequest(number: $number) {
       __typename
       ... on Issue {
@@ -259,6 +261,7 @@ fragment DetailComment on IssueComment { databaseId author { login avatarUrl } b
 const DISCUSSION_DETAIL_QUERY = `
 query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
+    viewerPermission
     discussion(number: $number) {
       id
       number
@@ -394,6 +397,7 @@ const discussionCategorySchema = z.object({
 
 const discussionDetailSchema = z.object({
   repository: z.object({
+    viewerPermission: z.string().optional(),
     discussion: z.object({
       // Read for the record's internal use, never emitted; a host may leave it out.
       id: z.string().min(1).optional(),
@@ -444,6 +448,7 @@ const timelineItemsSchema = z.object({ nodes: z.array(crossReferenceSchema).null
 
 const detailSchema = z.object({
   repository: z.object({
+    viewerPermission: z.string().optional(),
     issueOrPullRequest: z.discriminatedUnion('__typename', [
       z.object({
         __typename: z.literal('Issue'),
@@ -715,6 +720,11 @@ export function toReference(value, repos) {
 
 const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', COMMENTED: 'commented', DISMISSED: 'dismissed' };
 
+// GitHub's viewerPermission values that may lock a conversation or change a
+// branch; TRIAGE and READ may not.
+const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
+const writeAccessOf = (permission) => (typeof permission === 'string' ? WRITE_PERMISSIONS.has(permission) : undefined);
+
 const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
 // What this account may do with one comment, only when the host answered. A
@@ -803,6 +813,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     };
     if (item.locked !== undefined) detail.locked = item.locked;
     if (item.viewerSubscription !== undefined) detail.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+    const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+    if (writeAccess !== undefined) detail.writeAccess = writeAccess;
     // Named by login, like the reviewer candidates the picker offers.
     if (item.assignees !== undefined) {
       detail.assignees = item.assignees.nodes.map((assignee) => {
@@ -888,6 +900,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   };
   if (item.locked !== undefined) detail.locked = item.locked;
   if (item.viewerSubscription !== undefined) detail.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+  const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   // The items that mention this PR, from its timeline; absent when none do.
   const references = toReferences(item);
   if (references.length > 0) detail.references = references;
@@ -951,6 +965,8 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   if (discussion.locked !== undefined) detail.locked = discussion.locked;
   if (discussion.viewerSubscription !== undefined) detail.viewerSubscribed = discussion.viewerSubscription === 'SUBSCRIBED';
   if (discussion.viewerHasUpvoted !== undefined) detail.viewerHasUpvoted = discussion.viewerHasUpvoted;
+  const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   detail.category = categoryOf(discussion.category);
   if (parsed.repository?.discussionCategories !== undefined) {
     detail.categories = parsed.repository.discussionCategories.nodes.map(categoryOf);

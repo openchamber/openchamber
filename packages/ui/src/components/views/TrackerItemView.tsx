@@ -281,7 +281,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 discussionWriteContext={reference.kind === 'discussion' ? writeContext ?? undefined : undefined}
                 stateMenu={reference.state !== 'merged' && writeContext
                     && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
-                    <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
+                    <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}

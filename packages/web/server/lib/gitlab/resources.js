@@ -175,10 +175,32 @@ function liveIssueSummary(ref, raw) {
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-/** A conversation's lock flag, only when GitLab's payload carries one. */
-const lockFlag = (raw) => (raw?.discussion_locked === true || raw?.discussion_locked === false
-  ? raw.discussion_locked
-  : undefined);
+/**
+ * A conversation's lock flag, only when GitLab's payload carries one.
+ * GitLab answers `discussion_locked: null` for a conversation that was never
+ * locked, which is a false, not a missing answer.
+ */
+const lockFlag = (raw) => {
+  if (!isPlainObject(raw) || !Object.hasOwn(raw, 'discussion_locked')) return undefined;
+  const value = raw.discussion_locked;
+  if (value === null) return false;
+  return value === true || value === false ? value : undefined;
+};
+
+const DEVELOPER_ACCESS_LEVEL = 30;
+
+/**
+ * Whether the project payload says this account may write, from the access
+ * level of its own or its group's membership; absent when it says neither.
+ * Reading a public project grants neither, so a payload without permissions
+ * is the only case that stays unknown.
+ */
+const gitlabWriteAccess = (raw) => {
+  const permissions = raw?.permissions;
+  if (!isPlainObject(permissions)) return undefined;
+  return [permissions.project_access?.access_level, permissions.group_access?.access_level]
+    .some((level) => Number.isInteger(level) && level >= DEVELOPER_ACCESS_LEVEL);
+};
 
 /** A conversation's subscription flag, only when GitLab's payload carries one. */
 const subscriptionFlag = (raw) => (raw?.subscribed === true || raw?.subscribed === false
@@ -304,14 +326,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     throw error;
   };
   const constrainedProject = async (...args) => (await constrainedProjectNetwork(...args)).target;
-  /** The repository a list of this folder reads: a fork clone lists its upstream. */
-  const listedProject = async (directory, selector, remote) => {
-    const network = await constrainedProjectNetwork(directory, selector, remote);
-    const { primary } = network;
-    const isPrimary = primary.project.owner.toLowerCase() === selector.owner.toLowerCase()
-      && primary.project.name.toLowerCase() === selector.name.toLowerCase();
-    return isPrimary ? network.targets.at(-1) : network.target;
-  };
+  /**
+   * The project whose labels and people a picker offers: the one the selector
+   * names, so a label or an assignee picked here is one the write can set.
+   * Reading the upstream instead would put an upstream label on a fork's item
+   * and drop an upstream assignee without saying so.
+   */
+  const listedProject = async (directory, selector, remote) => (await constrainedProjectNetwork(directory, selector, remote)).target;
 
   // The account's own user, read once: review requests are filtered by name.
   let currentUsername = null;
@@ -1152,9 +1173,23 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     async setConversationSubscription(payload) {
       const { projectId, number } = payload.providerTarget;
       const write = payload.subscribed ? 'subscribe' : 'unsubscribe';
-      const raw = payload.kind === 'issue-subscription'
-        ? await client.Issues[write](projectId, number)
-        : await client.MergeRequests[write](projectId, number);
+      const readBack = async () => (payload.kind === 'issue-subscription'
+        ? client.Issues.show(number, { projectId })
+        : client.MergeRequests.show(projectId, number));
+      let raw;
+      try {
+        raw = payload.kind === 'issue-subscription'
+          ? await client.Issues[write](projectId, number)
+          : await client.MergeRequests[write](projectId, number);
+      } catch (error) {
+        // GitLab answers 304 when the state already was the one asked for:
+        // a success, as long as the item reads back with that state.
+        if (requestStatus(error) !== 304) throw error;
+        if ((await readBack())?.subscribed !== payload.subscribed) {
+          throw mutationTargetInvalid('GitLab returned an unexpected subscription state');
+        }
+        return {};
+      }
       const target = payload.kind === 'issue-subscription'
         ? requireIssue(raw, payload.targetProject)
         : requireMutationResponse(raw, payload.targetProject, payload.providerTarget, payload.expectedTarget);
@@ -1607,6 +1642,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (locked !== undefined) context.locked = locked;
       const subscribed = subscriptionFlag(raw);
       if (subscribed !== undefined) context.subscribed = subscribed;
+      const writeAccess = gitlabWriteAccess(target.raw);
+      if (writeAccess !== undefined) context.writeAccess = writeAccess;
       if (!options.includeTimeline) return context;
       // Cross-references GitLab records as system notes, only when it named some.
       const references = systemReferences(notes, raw.web_url, projectPath(target.project.owner, target.project.name));
@@ -1660,7 +1697,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { items, page: options.page ?? 1, hasMore: page.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote, { linked } = {}) {
+    async getIssue(directory, number, selector, remote, { linked, includeTimeline } = {}) {
       const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
       const issue = canonicalReads
@@ -1671,7 +1708,11 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (locked !== undefined) flags.locked = locked;
       const subscribed = subscriptionFlag(raw);
       if (subscribed !== undefined) flags.subscribed = subscribed;
+      const writeAccess = gitlabWriteAccess(target.raw);
+      if (writeAccess !== undefined) flags.writeAccess = writeAccess;
       const result = Object.keys(flags).length === 0 ? issue : { ...issue, ...flags };
+      // A second read of the issue's notes, for the timeline the preview shows.
+      if (!includeTimeline) return result;
       const references = await readIssueReferences(target.project, number, issue.url);
       return references.length > 0 ? { ...result, references } : result;
     },

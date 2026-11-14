@@ -697,7 +697,7 @@ describe('Gitea mutations', () => {
         'GET /repos/bob/app/issues/6/subscriptions/check': { subscribed: true },
       });
 
-      const followed = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+      const followed = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin', { includeTimeline: true });
       expect(followed.subscribed).toBe(true);
       expect(calls.filter((call) => call.url.pathname.endsWith('/subscriptions/check'))).toHaveLength(1);
 
@@ -705,8 +705,39 @@ describe('Gitea mutations', () => {
         'GET /repos/bob/app/issues/6': fixtures.issue,
         'GET /repos/bob/app/issues/6/subscriptions/check': () => new Response('{}', { status: 500 }),
       });
-      const answer = await unreadable.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+      const answer = await unreadable.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin', { includeTimeline: true });
       expect(answer).not.toHaveProperty('subscribed');
+    });
+
+    it('reports whether this account may push, from the repository permissions Gitea sends', async () => {
+    const { service: writer } = setup({
+      'GET /repos/bob/app': { ...fixtures.forkRepo, permissions: { admin: false, push: true, pull: true } },
+      'GET /repos/alice/app': { ...fixtures.upstreamRepo, permissions: { admin: false, push: true, pull: true } },
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/alice/app/issues/1/comments': [],
+      'GET /repos/alice/app/pulls/1/reviews': [],
+      'GET /repos/alice/app/pulls/1/commits': [],
+    });
+    expect((await writer.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin')).writeAccess).toBe(true);
+    expect((await writer.changeRequestContext('/repo', 1, {})).writeAccess).toBe(true);
+
+    const { service: reader } = setup({
+      'GET /repos/bob/app': { ...fixtures.forkRepo, permissions: { admin: false, push: false, pull: true } },
+      'GET /repos/alice/app': { ...fixtures.upstreamRepo, permissions: { admin: false, push: false, pull: true } },
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+    });
+    expect((await reader.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin')).writeAccess).toBe(false);
+  });
+
+  it('skips the follow and timeline reads for a read that shows neither', async () => {
+      const { service, calls } = setup({ 'GET /repos/bob/app/issues/6': fixtures.issue });
+
+      const issue = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+
+      expect(issue).not.toHaveProperty('subscribed');
+      expect(issue).not.toHaveProperty('references');
+      expect(calls.map((call) => call.url.pathname)).not.toContain('/api/v1/repos/bob/app/issues/6/subscriptions/check');
+      expect(calls.map((call) => call.url.pathname)).not.toContain('/api/v1/repos/bob/app/issues/6/timeline');
     });
   });
 
@@ -974,7 +1005,7 @@ describe('Gitea cross-references', () => {
       'GET /repos/bob/app/issues/6/timeline': [timelineEntry()],
     });
 
-    const issue = await service.getIssue('/repo', 6, undefined, 'origin');
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeTimeline: true });
 
     expect(issue.references).toEqual([{
       kind: 'issue',

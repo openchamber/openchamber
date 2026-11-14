@@ -87,9 +87,10 @@ const discussion: RepositoryDiscussionReference = {
   state: 'open', answered: null, upvotes: 0, locked: false, category: { name: 'Ideas', emoji: null, answerable: false },
 };
 
-const detailWith = (locked?: boolean): RepositoryReferenceDetail => {
+const detailWith = (locked?: boolean, writeAccess?: boolean): RepositoryReferenceDetail => {
   const detail: RepositoryReferenceDetail = { number: 7, comments: [], commentTotal: 0, pull: null };
   if (locked !== undefined) detail.locked = locked;
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   return detail;
 };
 
@@ -102,6 +103,7 @@ const setProvider = async () => {
 
 type ShowOptions = {
   locked?: boolean;
+  writeAccess?: boolean;
   reference?: RepositoryReference;
   writeContext?: SourceControlReadContext | null;
   fail?: boolean;
@@ -150,7 +152,7 @@ const show = async (options: ShowOptions = {}) => {
             directory={null}
             pullStatus={{ status: 'idle' }}
             trackerDetail={{ status: 'idle' }}
-            repositoryDetail={{ status: 'ready', value: detailWith(options.locked) }}
+            repositoryDetail={{ status: 'ready', value: detailWith(options.locked, options.writeAccess) }}
             purpose="attach"
             pinned={false}
             includeDiff={false}
@@ -231,6 +233,11 @@ describe('locking a conversation from its preview', () => {
 
   test('a linked item is only read and offers no lock', async () => {
     await show({ locked: false, reference: { ...issue, linked: true } });
+    expect(lockButton()).toBeNull();
+  });
+
+  test('a read-only account gets no lock button', async () => {
+    await show({ locked: false, writeAccess: false });
     expect(lockButton()).toBeNull();
   });
 

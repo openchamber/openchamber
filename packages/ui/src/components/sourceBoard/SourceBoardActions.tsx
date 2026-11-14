@@ -643,18 +643,21 @@ export const SourceBoardStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+    /** Whether this account may write in the repository, where the host says. */
+    writeAccess?: boolean;
+}> = ({ item, context, onChanged, writeAccess }) => {
     if (item.source === 'repository' && item.reference.kind === 'discussion') {
         return <DiscussionStateMenuItems discussion={item.reference} context={context} onChanged={onChanged} />;
     }
-    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} />;
+    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} writeAccess={writeAccess} />;
 };
 
 const ItemStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+    writeAccess?: boolean;
+}> = ({ item, context, onChanged, writeAccess }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     // An open issue or PR closes, a closed one reopens; a merged PR stays as it is.
@@ -776,13 +779,13 @@ const ItemStateMenuItems: React.FC<{
                 </DropdownMenuItem>
             ) : null}
             {/* The host may finish later, so these ask it to start rather than claim the branch now matches. */}
-            {openPull && !openPull.draft && descriptor.features.updateBranch ? (
+            {openPull && !openPull.draft && descriptor.features.updateBranch && writeAccess !== false ? (
                 <DropdownMenuItem onSelect={() => void changeBranch('update')}>
                     <Icon name="arrow-up-double" className="size-4 shrink-0" />
                     {t('sourceBoard.actions.updateBranch')}
                 </DropdownMenuItem>
             ) : null}
-            {openPull && !openPull.draft && descriptor.features.rebase ? (
+            {openPull && !openPull.draft && descriptor.features.rebase && writeAccess !== false ? (
                 <DropdownMenuItem onSelect={() => void changeBranch('rebase')}>
                     <Icon name="git-merge" className="size-4 shrink-0" />
                     {t('sourceBoard.actions.rebase')}

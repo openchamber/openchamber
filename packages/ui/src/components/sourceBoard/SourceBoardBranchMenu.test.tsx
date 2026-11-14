@@ -129,7 +129,7 @@ const menuItems = () => [...document.querySelectorAll('[role="menuitem"]')].map(
 const openMenu = async (
   reference: RepositoryChangeRequestReference,
   descriptor: SourceControlProviderDescriptor,
-  options: { fail?: 'update' | 'rebase' } = {},
+  options: { fail?: 'update' | 'rebase'; writeAccess?: boolean } = {},
 ) => {
   const { SourceBoardStateMenuItems } = await import('./SourceBoardActions');
   const { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } = await import('@/components/ui/dropdown-menu');
@@ -139,7 +139,7 @@ const openMenu = async (
   await render(settle.apis(), (
     <DropdownMenu defaultOpen>
       <DropdownMenuTrigger asChild><button type="button">State</button></DropdownMenuTrigger>
-      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={contextFor(reference.provider)} onChanged={() => { changes += 1; }} /></DropdownMenuContent>
+      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={contextFor(reference.provider)} writeAccess={options.writeAccess} onChanged={() => { changes += 1; }} /></DropdownMenuContent>
     </DropdownMenu>
   ));
   return { ...settle, changes: () => changes };
@@ -153,6 +153,14 @@ const clickItem = async (label: string) => {
 };
 
 describe('the state menu of an open change request', () => {
+  test('hides the branch actions where the host says this account cannot write', async () => {
+    const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+    await openMenu(pull(), githubLikeDescriptor(), { writeAccess: false });
+
+    expect(menuItems()).toContain('Close pull request');
+    expect(menuItems()).not.toContain('Update branch');
+  });
+
   test('asks to update the branch with the head it saw, then reads the item again', async () => {
     const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
     const { updates, rebases, changes } = await openMenu(pull(), githubLikeDescriptor());

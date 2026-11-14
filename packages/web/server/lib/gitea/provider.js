@@ -265,7 +265,7 @@ export function createGiteaFamilyProvider({
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, labels, remote }),
-      getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
+      getIssue: ({ session, context, directory, number, project, remote, includeTimeline }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked, includeTimeline: Boolean(includeTimeline) }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),

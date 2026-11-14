@@ -199,6 +199,26 @@ describe('list-backed references', () => {
     expect('viewerSubscribed' in silent).toBe(false);
   });
 
+  test('a write access the host reports reaches the preview, and nothing is claimed when it says nothing', async () => {
+    const issuePage = await fetchListBackedReferencePage(reads(), context, provider, 'issue', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (issuePage.kind !== 'page') throw new Error('expected a page');
+    const readOnly = await fetchListBackedReferenceDetail(reads({
+      issueGet: async () => ({ ...issue, writeAccess: false }),
+    }), context, issuePage.items[0]!);
+    expect(readOnly.writeAccess).toBe(false);
+
+    const pullPage = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
+    if (pullPage.kind !== 'page') throw new Error('expected a page');
+    const writer = await fetchListBackedReferenceDetail(reads({
+      changeRequestContext: async () => ({
+        identity, project, changeRequest: mergeRequest, issueComments: [], reviewComments: [], files: [], writeAccess: true,
+      }),
+    }), context, pullPage.items[0]!);
+    expect(writer.writeAccess).toBe(true);
+    const silent = await fetchListBackedReferenceDetail(reads(), context, pullPage.items[0]!);
+    expect('writeAccess' in silent).toBe(false);
+  });
+
   test('the items that mentioned a merge request come with its timeline', async () => {
     const page = await fetchListBackedReferencePage(reads(), context, provider, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (page.kind !== 'page') throw new Error('expected a page');
