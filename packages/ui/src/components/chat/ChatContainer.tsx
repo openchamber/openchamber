@@ -39,6 +39,10 @@ const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
+// The first timeline of a launch is usually the session restored on startup.
+// It appears as soon as it is in place; the fade is for a session the user
+// switched to and watched load.
+let launchTimelineRevealed = false;
 // Mirrors the oc-chat-hydration-reveal duration in index.css.
 const TIMELINE_REVEAL_FADE_MS = 100;
 // After a turn starts or ends, how long the transcript settles before an
@@ -503,6 +507,8 @@ const ChatViewport = React.memo(({
             if (finished) return;
             finished = true;
             if (timer !== null) window.clearTimeout(timer);
+            const fadeIn = fade && launchTimelineRevealed;
+            launchTimelineRevealed = true;
             const startedAt = performance.now();
             let lastHeight = -1;
             let stableFrames = 0;
@@ -523,7 +529,7 @@ const ChatViewport = React.memo(({
                     frame = window.requestAnimationFrame(settle);
                     return;
                 }
-                if (!fade) {
+                if (!fadeIn) {
                     root.removeAttribute('data-timeline-reveal');
                     return;
                 }

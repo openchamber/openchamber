@@ -63,6 +63,11 @@ request headers) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
 has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
 after parsing ends, so no application code runs before the values are set.
+The entry loads the application with a dynamic import, which the document's
+own preload list does not follow, so the web build adds the application's
+chunks to a preload list that applies on this scheme only
+(`packages/web/vite-preload-app-graph.ts`): they are fetched during the wait
+instead of after it.
 Remote, SSH, environment-target, HMR and background launches keep the previous
 order: resolve, then navigate, with the splash reporting the connection attempt.
 

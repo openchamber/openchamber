@@ -878,7 +878,9 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
                   <MainLayout />
-                  {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
+                  {/* Unmounted, not faded: the shell under it is ready, and a
+                      fade only delays the moment it is seen. */}
+                  {isDesktopRuntime && !(bootOutcomeKnown && bootViewIsMain) ? <AppStartupOverlay ready={false} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SnippetQuickCreateDialog />

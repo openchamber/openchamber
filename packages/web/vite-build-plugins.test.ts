@@ -3,6 +3,7 @@ import { transformWithEsbuild } from 'vite';
 
 import { escapeRegexLiterals, escapeRemainingWide } from './vite-one-byte-chunks';
 import { dictionaryLocale, localeSliceId, sliceLocale } from './vite-locale-slices';
+import { preloadScript, staticImportClosure } from './vite-preload-app-graph';
 
 const evaluate = (expression: string) => new Function(`return ${expression}`)();
 const WIDE = /[Ā-\u{10FFFF}]/u;
@@ -86,5 +87,31 @@ describe('locale slices', () => {
     expect(dictionaryLocale('/x/components/Panel.tsx')).toBeNull();
     expect(localeSliceId(featureId, 'uk')).toBe(`${featureId}?i18n-locale=uk`);
     expect(localeSliceId('/x/i18n/messages/en.ts', 'uk')).toBeNull();
+  });
+});
+
+describe('preloadAppGraph', () => {
+  const chunk = (imports: string[], dynamicImports: string[] = []) => ({ type: 'chunk' as const, imports, dynamicImports });
+
+  test('the closure follows static imports once and stops at dynamic ones', () => {
+    const bundle = {
+      'app.js': chunk(['a.js', 'b.js'], ['lazy.js']),
+      'a.js': chunk(['b.js']),
+      'b.js': chunk(['a.js']),
+      'lazy.js': chunk([]),
+      'style.css': { type: 'asset' as const },
+    };
+    expect(staticImportClosure(bundle, 'app.js')).toEqual(['app.js', 'a.js', 'b.js']);
+  });
+
+  test('links are added only on a listed protocol', () => {
+    const run = (protocol: string) => {
+      const added: Array<{ rel: string; href: string }> = [];
+      const document = { createElement: () => ({}), head: { appendChild: (link: { rel: string; href: string }) => added.push(link) } };
+      new Function('location', 'document', preloadScript(['/assets/app.js'], ['openchamber-ui:']))({ protocol }, document);
+      return added.map((link) => `${link.rel} ${link.href}`);
+    };
+    expect(run('openchamber-ui:')).toEqual(['modulepreload /assets/app.js']);
+    expect(run('https:')).toEqual([]);
   });
 });
