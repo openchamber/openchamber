@@ -1249,6 +1249,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'اختر من يستجيب لإجراءات المتصفح التي ينفذها الوكيل',
   'settings.openchamber.tools.browserProvider.info': 'OpenChamber Web هو لوحة المتصفح في تطبيق سطح المكتب. إضافة المتصفح تعمل على الخادم، فيمكن للوكلاء التصفح دون فتح تطبيق سطح المكتب.',
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web (ÙØ¯ÙØ¬)',
+  'settings.openchamber.tools.agentBrowserLogins.label': "تستخدم علامات تبويب الوكيل تسجيلات دخولي",
+  'settings.openchamber.tools.agentBrowserLogins.info': "إيقاف: تستخدم علامات التبويب التي يفتحها الوكيل ملفًا شخصيًا خاصًا بها، ويبقى ما تسجّل الدخول إليه هناك للوكيل. تشغيل: تستخدم ملفك الشخصي في اللوحة، فيتصرف الوكيل باسمك في كل موقع سجّلت الدخول إليه.",
   'settings.openchamber.tools.browserProvider.toast.reset': 'لم يعد بإمكان {name} توفير المتصفح. سيستخدم الوكلاء OpenChamber Web مجددًا.',
   'settings.openchamber.tools.field.agentMemoryTool': 'أداة ذاكرة الوكيل',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'أداة ذاكرة الوكيل',

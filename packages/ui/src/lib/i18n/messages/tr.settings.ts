@@ -1222,6 +1222,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'Ajanın tarayıcı eylemlerini kimin yanıtlayacağını seçin',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web, masaüstü uygulamasının tarayıcı panelidir. Bir tarayıcı eklentisi sunucuda çalışır, böylece agent'lar masaüstü uygulaması açık olmadan gezinebilir.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "Agent sekmeleri oturumlarımı kullansın",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Kapalı: Agent'ın açtığı sekmeler kendi profilini kullanır ve orada açılan oturumlar agent için kalır. Açık: Panel profilinizi kullanırlar, böylece agent oturum açtığınız her sitede sizin adınıza işlem yapar.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} artık tarayıcı sağlayamıyor. Ajanlar yeniden OpenChamber Web kullanıyor.',
   'settings.openchamber.tools.field.agentMemoryTool': 'Agent hafıza aracı',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'Agent hafıza aracı',

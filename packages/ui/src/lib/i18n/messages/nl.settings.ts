@@ -1250,6 +1250,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'Bepaal wie de browseractions van de agent uitvoert',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web is het browserpaneel van de desktop-app. Een browserextensie draait op de server, zodat agents kunnen browsen zonder geopende desktop-app.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "Agenttabbladen gebruiken mijn aanmeldingen",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Uit: tabbladen die de agent opent, hebben een eigen profiel, en aanmeldingen daar blijven voor de agent bewaard. Aan: ze gebruiken uw paneelprofiel, dus de agent handelt als u op elke site waar u bent aangemeld.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} kan de browser niet meer leveren. Agents gebruiken weer OpenChamber Web.',
   'settings.openchamber.tools.field.agentMemoryTool': 'Geheugentool voor agents',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'Geheugentool voor agents',

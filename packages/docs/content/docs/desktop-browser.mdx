@@ -41,9 +41,9 @@ The page itself is never modified — annotating marks what is there. `Esc` canc
 
 ## Let the agent drive
 
-The agent can use the browser panel itself — opening a page, reading what is on it, clicking, typing, scrolling, and switching between mobile, tablet and desktop layouts — so it can check its own work instead of asking you to. You will see it happening in the panel.
+The agent can use the browser panel itself — opening a page, reading what is on it (embedded frames included), clicking, hovering, typing and pressing keys, dragging, scrolling, answering the page's alerts and confirmations, attaching files to an upload field, and switching between mobile, tablet and desktop layouts — so it can check its own work instead of asking you to. You will see it happening in the panel.
 
-The agent cannot run arbitrary code in the page. The browser keeps your real logins, so it is limited to the specific actions above.
+The agent cannot run arbitrary code in the page. The browser keeps your real logins, so it is limited to the specific actions above. Files it attaches to an upload field come only from the project's folder and OpenCode's temporary folder. Pages the agent opens itself use a browser profile of their own, without your logins; what you or the agent sign in to there stays for the agent. To give those tabs your logins instead, turn on **Agent tabs use my logins** under the OpenChamber Web tool in **Settings → General → OpenChamber Tools**.
 
 It can also save a picture of what it is looking at into `.openchamber/screenshots/` in your project and show it to you in its reply. That is what makes a before-and-after possible, and the file stays there afterwards to attach to a pull request.
 

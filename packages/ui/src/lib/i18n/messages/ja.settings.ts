@@ -1250,6 +1250,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'エージェントのブラウザー操作に応答する側を選択',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web はデスクトップアプリのブラウザパネルです。ブラウザ拡張はサーバーで動くため、デスクトップアプリを開かずに閲覧できます。",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "エージェントのタブで自分のログインを使う",
+  'settings.openchamber.tools.agentBrowserLogins.info': "オフ: エージェントが開くタブは専用のプロファイルを使い、そこでのログインはエージェント用に残ります。オン: パネルのあなたのプロファイルを使うため、エージェントはログイン済みのすべてのサイトであなたとして操作します。",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} はブラウザーを提供できなくなりました。エージェントは再び OpenChamber Web を使用します。',
   'settings.openchamber.tools.field.agentMemoryTool': 'エージェントメモリツール',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'エージェントメモリツール',

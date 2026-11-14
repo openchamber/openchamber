@@ -26,6 +26,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { ModelVariantSelect } from './ModelVariantSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { isDesktopShell } from '@/lib/desktop';
 
 interface ToolRowProps {
   icon: IconName;
@@ -102,6 +103,8 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
   const browserProvider = useUIStore((state) => state.browserProvider);
   const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
+  const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
+  const setAgentBrowserSharesLogins = useUIStore((state) => state.setAgentBrowserSharesLogins);
   const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
   // Absent where no OpenChamber server answers settings (VS Code).
@@ -299,7 +302,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
         <ToolRow
           icon="global"
           settingsItem="sessions.agent-web-tool"
-          reveals={['sessions.browser-provider']}
+          reveals={['sessions.browser-provider', 'sessions.agent-browser-logins']}
           checked={agentWebToolEnabled}
           onChange={handleAgentWebToolChange}
           title={t('settings.openchamber.tools.name.web')}
@@ -341,6 +344,25 @@ export const OpenChamberToolsSettings: React.FC = () => {
                 </SelectContent>
               </Select>
             </ToolOption>
+          ) : null}
+          {/* The desktop panel's profiles; agent tabs re-open in the other one when it changes. */}
+          {agentWebToolEnabled && isDesktopShell() ? (
+            <div data-settings-item="sessions.agent-browser-logins" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+              <Checkbox
+                checked={agentBrowserSharesLogins}
+                onChange={setAgentBrowserSharesLogins}
+                ariaLabel={t('settings.openchamber.tools.agentBrowserLogins.label')}
+              />
+              <button
+                type="button"
+                className="truncate typography-meta text-muted-foreground"
+                onClick={() => setAgentBrowserSharesLogins(!agentBrowserSharesLogins)}
+              >
+                {t('settings.openchamber.tools.agentBrowserLogins.label')}
+              </button>
+              <SettingsNewBadge items={['sessions.agent-browser-logins']} />
+              <SettingsInfoHint>{t('settings.openchamber.tools.agentBrowserLogins.info')}</SettingsInfoHint>
+            </div>
           ) : null}
         </ToolRow>
       </SettingsControlGroup>

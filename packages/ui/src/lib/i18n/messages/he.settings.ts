@@ -1249,6 +1249,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'בחירה מי מבצע את פעולות הדפדפן של הסוכן',
   'settings.openchamber.tools.browserProvider.info': 'OpenChamber Web הוא חלונית הדפדפן של אפליקציית שולחן העבודה. הרחבת דפדפן פועלת בשרת, כך שסוכנים יכולים לגלוש גם כשאפליקציית שולחן העבודה לא פתוחה.',
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "לשוניות הסוכן משתמשות בהתחברויות שלי",
+  'settings.openchamber.tools.agentBrowserLogins.info': "כבוי: לשוניות שהסוכן פותח משתמשות בפרופיל משלהן, והתחברות שתבצע שם נשמרת לסוכן. מופעל: הן משתמשות בפרופיל הלוח שלך, כך שהסוכן פועל בשמך בכל אתר שבו אתה מחובר.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} כבר לא יכול לספק את הדפדפן. הסוכנים חוזרים להשתמש ב-OpenChamber Web.',
   'settings.openchamber.tools.field.agentMemoryTool': 'כלי הזיכרון של הסוכנים',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'כלי הזיכרון של הסוכנים',

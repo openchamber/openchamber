@@ -204,6 +204,7 @@ import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
+import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
@@ -2345,6 +2346,7 @@ const serviceHostApi = createServiceHostApi({
 });
 serviceHostApi.register();
 
+const browserUploadStore = createUploadStore();
 const openChamberControlService = createOpenChamberControlService({
   isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
@@ -2362,6 +2364,7 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlRouter,
+  browserUploads: browserUploadStore,
   fileOpen: fileOpenRequester,
   projectContextRuntime,
   // The resolver session knowledge reads pinned notes and plans through, so
@@ -3155,6 +3158,7 @@ async function main(options = {}) {
   registerReceivedPageRoutes(app, receivedPagesRuntime);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerUploadRoute(app, { store: browserUploadStore });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.

@@ -102,7 +102,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
  * in the other tool's schema, which is both misleading and paid for in context
  * on every call.
  */
-const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId'];
+const WEB_PARAMETER_NAMES = ['url', 'ref', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'to', 'toSelector', 'key', 'paths', 'accept', 'dialog', 'gone', 'timeoutMs'];
 // `title` is shared with the control tool, so it is not listed here — only the
 // names memory alone introduces are kept out of the other schemas.
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
@@ -190,9 +190,18 @@ const ALL_PARAMETER_PROPERTIES = {
   cleanupWorktree: { type: 'boolean', description: 'False keeps the run\'s worktree and branch for review; default removes them when the run settles (git only)' },
   path: { type: 'string', description: 'Absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s)' },
-  selector: { type: 'string', description: 'From browser.snapshot' },
-  text: { type: 'string', description: 'Visible label, when no selector' },
-  value: { type: 'string', description: 'Text to type, or the option value for browser.select' },
+  ref: { type: 'string', description: 'An element from the last browser.snapshot, such as e12; reaches inside frames and shadow DOM' },
+  selector: { type: 'string', description: 'A CSS selector of the top document, from browser.snapshot' },
+  text: { type: 'string', description: 'Visible label of a link or button, when no ref; browser.wait: text to wait for' },
+  value: { type: 'string', description: 'Text to type, the option value for browser.select, or the answer to a prompt dialog' },
+  to: { type: 'string', description: 'browser.drag: the ref to drop on' },
+  toSelector: { type: 'string', description: 'browser.drag: a selector to drop on, when no to' },
+  key: { type: 'string', description: 'browser.press: Enter, Escape, Tab, Backspace, Delete, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, Space or one character, with Alt+, Control+, Meta+ or Shift+' },
+  paths: { type: 'array', items: { type: 'string' }, description: 'browser.upload: files, absolute or relative to the session directory' },
+  accept: { type: 'boolean', description: 'browser.dialog: true accepts, false dismisses' },
+  dialog: { type: 'string', enum: ['accept', 'dismiss'], description: "In a tab you opened: the answer to a dialog this action brings up; default dismiss" },
+  gone: { type: 'boolean', description: 'browser.wait: wait until it leaves the page instead' },
+  timeoutMs: { type: 'integer', minimum: 0, maximum: 15000, description: 'browser.wait: how long to wait, default 15000' },
   submit: { type: 'boolean', description: 'Press Enter after typing' },
   direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'] },
@@ -416,7 +425,7 @@ const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. 
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";
 
-const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type, select or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
+const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, refs and errors, then click, type, select, hover, drag, press or scroll by those refs. In tabs you opened, a page dialog is answered at once, no unless the action passed dialog: accept; the result reports it. In the user's tabs it waits for browser.dialog. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
 
 const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"PR lists: one or two sentences per PR\", not \"Reporting preferences\". Save what code and docs do not show: the user's corrections and preferences, people and private context, a hard-won pointer; a project's decisions, rejected alternatives and deliberate \"leave this as it is\" only when it keeps no agent docs to put them in. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 

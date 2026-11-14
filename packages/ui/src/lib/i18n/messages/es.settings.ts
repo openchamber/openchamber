@@ -1217,6 +1217,8 @@ export const settingsDict = {
   "settings.openchamber.tools.browserProvider.aria": "Elegir quién responde a las acciones de navegador del agente",
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web es el panel del navegador de la app de escritorio. Una extensión de navegador se ejecuta en el servidor, así los agentes navegan sin la app de escritorio abierta.",
   "settings.openchamber.tools.browserProvider.option.builtin": "OpenChamber Web",
+  'settings.openchamber.tools.agentBrowserLogins.label': "Las pestañas del agente usan mis sesiones",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Desactivado: las pestañas que abre el agente usan un perfil propio, y lo que inicies ahí queda para el agente. Activado: usan tu perfil del panel, así que el agente actúa como tú en cada sitio donde hayas iniciado sesión.",
   "settings.openchamber.tools.browserProvider.toast.reset": "{name} ya no puede proporcionar el navegador. Los agentes vuelven a usar OpenChamber Web.",
   "settings.openchamber.tools.field.agentMemoryTool": "Herramienta de memoria del agente",
   "settings.openchamber.tools.field.agentMemoryToolAria": "Herramienta de memoria del agente",

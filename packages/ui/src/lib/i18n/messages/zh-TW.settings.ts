@@ -1175,6 +1175,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': '選擇由誰回應代理程式的瀏覽器操作',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web 是桌面應用程式的瀏覽器面板。瀏覽器擴充在伺服器上執行，無需開啟桌面應用程式也能瀏覽。",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "代理分頁使用我的登入狀態",
+  'settings.openchamber.tools.agentBrowserLogins.info': "關閉：代理開啟的分頁使用自己的設定檔，在其中的登入會為代理保留。開啟：它們使用你在面板中的設定檔，因此代理會在你已登入的每個網站上以你的身分操作。",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} 無法再提供瀏覽器。代理程式將重新使用 OpenChamber Web。',
   'settings.openchamber.tools.field.agentMemoryTool': '智慧代理記憶工具',
   'settings.openchamber.tools.field.agentMemoryToolAria': '智慧代理記憶工具',

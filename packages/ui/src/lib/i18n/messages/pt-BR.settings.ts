@@ -1217,6 +1217,8 @@ export const settingsDict = {
   "settings.openchamber.tools.browserProvider.aria": "Escolher quem responde às ações de navegador do agente",
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web é o painel de navegador do app desktop. Uma extensão de navegador roda no servidor, então os agentes navegam sem o app desktop aberto.",
   "settings.openchamber.tools.browserProvider.option.builtin": "OpenChamber Web",
+  'settings.openchamber.tools.agentBrowserLogins.label': "Abas do agente usam meus logins",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Desligado: as abas que o agente abre usam um perfil próprio, e o que você entrar ali fica para o agente. Ligado: elas usam seu perfil do painel, então o agente age como você em todo site onde você está conectado.",
   "settings.openchamber.tools.browserProvider.toast.reset": "{name} não pode mais fornecer o navegador. Os agentes voltam a usar o OpenChamber Web.",
   "settings.openchamber.tools.field.agentMemoryTool": "Ferramenta de memória do agente",
   "settings.openchamber.tools.field.agentMemoryToolAria": "Ferramenta de memória do agente",

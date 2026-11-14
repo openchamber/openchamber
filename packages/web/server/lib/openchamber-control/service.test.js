@@ -1676,8 +1676,9 @@ describe('browser select', () => {
   });
 
   it.each([
-    [{ label: 'Canada' }, 'selector is required for browser.select'],
-    [{ selector: '  ', label: 'Canada' }, 'selector is required for browser.select'],
+    [{ label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ selector: '  ', label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ ref: 'button', label: 'Canada' }, 'ref must be a ref from browser.snapshot'],
     [{ selector: '#country' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 'Canada', value: 'ca' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 42 }, 'browser.select requires exactly one of label or value'],
@@ -1933,6 +1934,82 @@ describe('render.page with share', () => {
       expect(result.shared.recipients).toEqual(['Yulia']);
     } finally {
       restoreEnv();
+    }
+  });
+});
+
+describe('browser actions by ref, keys, dialogs and waits', () => {
+  it('passes a ref, a drop target, a key, a dialog answer and a capped wait to the browser', async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await service.execute('browser.click', { ref: 'e12' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e12' }, expect.anything());
+    await service.execute('browser.drag', { ref: 'e1', to: 'e2' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.drag', { ref: 'e1', to: 'e2' }, expect.anything());
+    await service.execute('browser.press', { key: 'Shift+Tab' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.press', { key: 'Shift+Tab' }, expect.anything());
+    await service.execute('browser.dialog', { accept: false }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.dialog', { accept: false }, expect.anything());
+    await service.execute('browser.click', { ref: 'e4', dialog: 'accept' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e4', dialog: 'accept' }, expect.anything());
+    await expect(service.execute('browser.click', { ref: 'e4', dialog: 'yes' }, '/repo')).rejects.toThrow('dialog must be accept or dismiss');
+    await service.execute('browser.wait', { text: 'Saved', timeoutMs: 60_000 }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.wait', { text: 'Saved', timeoutMs: 15_000 }, expect.anything());
+  });
+
+  it.each([
+    ['browser.hover', {}, 'browser.hover requires ref, selector or text'],
+    ['browser.drag', { ref: 'e1' }, 'browser.drag requires to or toSelector'],
+    ['browser.press', {}, 'key is required'],
+    ['browser.dialog', {}, 'accept is required'],
+    ['browser.wait', {}, 'browser.wait requires ref or selector'],
+    ['browser.click', { ref: 'e1; drop' }, 'ref must be a ref from browser.snapshot'],
+  ])('refuses %s without what it needs, before contacting the browser', async (action, input, message) => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await expect(service.execute(action, input, '/repo')).rejects.toThrow(message);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('browser upload', () => {
+  const uploadFixture = async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upload-'));
+    const project = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    await fs.mkdir(project);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(project, 'avatar.png'), 'png');
+    await fs.writeFile(path.join(outside, 'id_rsa'), 'secret');
+    await fs.symlink(path.join(outside, 'id_rsa'), path.join(project, 'link'));
+    const put = vi.fn((files) => ({ token: 't', files: files.map(({ name, size }) => ({ name, size })) }));
+    const request = vi.fn(async () => ({ uploaded: 1 }));
+    const { service } = createService({ browserControl: { request }, browserUploads: { put } });
+    return { root, project, outside, put, request, service };
+  };
+
+  it('holds a file of the session folder and sends the browser its token', async () => {
+    const { root, project, put, request, service } = await uploadFixture();
+    try {
+      await service.execute('browser.upload', { ref: 'e3', paths: ['avatar.png'] }, project);
+      expect(put).toHaveBeenCalledWith([{ name: 'avatar.png', path: await fs.realpath(path.join(project, 'avatar.png')), size: 3, bytes: Buffer.from('png') }]);
+      expect(request).toHaveBeenCalledWith('browser.upload', { ref: 'e3', upload: { token: 't', files: [{ name: 'avatar.png', size: 3 }] } }, expect.anything());
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a file outside the session folder, also through a symlink, and ignores a directory the caller names', async () => {
+    const { root, project, outside, request, service } = await uploadFixture();
+    try {
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: [path.join(outside, 'id_rsa')] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['link'] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['id_rsa'], directory: outside }, project)).rejects.toThrow('does not exist');
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 });

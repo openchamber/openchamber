@@ -1121,6 +1121,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'Choisir qui répond aux actions de navigateur de l\'agent',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web est le panneau navigateur de l’app de bureau. Une extension navigateur tourne sur le serveur, pour naviguer sans app de bureau ouverte.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "Les onglets de l'agent utilisent mes connexions",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Désactivé : les onglets que l'agent ouvre ont leur propre profil, et ce à quoi vous vous y connectez reste pour l'agent. Activé : ils utilisent votre profil du panneau, donc l'agent agit en votre nom sur chaque site où vous êtes connecté.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} ne peut plus fournir le navigateur. Les agents utilisent de nouveau OpenChamber Web.',
   'settings.openchamber.tools.field.agentMemoryTool': 'Outil de mémoire de l’agent',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'Outil de mémoire de l’agent',

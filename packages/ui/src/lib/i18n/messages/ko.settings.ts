@@ -1217,6 +1217,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': '에이전트의 브라우저 동작에 응답할 대상 선택',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web은 데스크톱 앱의 브라우저 패널입니다. 브라우저 확장은 서버에서 실행되므로 데스크톱 앱 없이도 탐색할 수 있습니다.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "에이전트 탭에서 내 로그인 사용",
+  'settings.openchamber.tools.agentBrowserLogins.info': "끄기: 에이전트가 여는 탭은 자체 프로필을 쓰고, 그곳에서 한 로그인은 에이전트용으로 유지됩니다. 켜기: 패널의 내 프로필을 쓰므로 에이전트가 로그인된 모든 사이트에서 나로서 동작합니다.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name}이(가) 더 이상 브라우저를 제공할 수 없습니다. 에이전트는 다시 OpenChamber Web을 사용합니다.',
   'settings.openchamber.tools.field.agentMemoryTool': '에이전트 메모리 도구',
   'settings.openchamber.tools.field.agentMemoryToolAria': '에이전트 메모리 도구',

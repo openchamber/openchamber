@@ -1071,6 +1071,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'Wybierz, kto odpowiada na akcje przeglądarki agenta',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web to panel przeglądarki w aplikacji desktopowej. Rozszerzenie przeglądarki działa na serwerze, więc agenci mogą przeglądać bez otwartej aplikacji desktopowej.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "Karty agenta używają moich logowań",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Wyłączone: karty otwierane przez agenta mają własny profil, a logowania w nich zostają dla agenta. Włączone: używają twojego profilu panelu, więc agent działa jako ty na każdej stronie, na której jesteś zalogowany.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} nie może już udostępniać przeglądarki. Agenci znów używają OpenChamber Web.',
   'settings.openchamber.tools.field.agentMemoryTool': 'Narzędzie pamięci agenta',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'Narzędzie pamięci agenta',

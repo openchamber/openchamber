@@ -1217,6 +1217,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': '选择由谁响应智能体的浏览器操作',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web 是桌面应用的浏览器面板。浏览器扩展在服务器上运行，无需打开桌面应用也能浏览。",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "智能体标签页使用我的登录状态",
+  'settings.openchamber.tools.agentBrowserLogins.info': "关闭：智能体打开的标签页使用自己的配置文件，在其中的登录会为智能体保留。开启：它们使用你在面板中的配置文件，因此智能体会在你已登录的每个网站上以你的身份操作。",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} 无法再提供浏览器。智能体将重新使用 OpenChamber Web。',
   'settings.openchamber.tools.field.agentMemoryTool': '智能体记忆工具',
   'settings.openchamber.tools.field.agentMemoryToolAria': '智能体记忆工具',

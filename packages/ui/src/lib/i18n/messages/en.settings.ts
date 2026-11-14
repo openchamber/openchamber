@@ -1249,6 +1249,8 @@ export const settingsDict = {
   'settings.openchamber.tools.browserProvider.aria': 'Choose who answers the agent\'s browser actions',
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web is the desktop app's browser panel. A browser extension runs on the server, so agents can browse with no desktop app open.",
   'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.agentBrowserLogins.label': "Agent tabs use my logins",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Off: tabs the agent opens use a profile of their own, and what you sign in to there stays for the agent. On: they use your panel profile, so the agent acts as you on every site you are signed in to.",
   'settings.openchamber.tools.browserProvider.toast.reset': '{name} can no longer provide the browser. Agents use OpenChamber Web again.',
   'settings.openchamber.tools.field.agentMemoryTool': 'Agent memory tool',
   'settings.openchamber.tools.field.agentMemoryToolAria': 'Agent memory tool',

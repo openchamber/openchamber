@@ -1217,6 +1217,8 @@ export const settingsDict = {
   "settings.openchamber.tools.browserProvider.aria": "Обрати, хто відповідає на браузерні дії агента",
   "settings.openchamber.tools.browserProvider.info": "OpenChamber Web — це панель браузера в десктопному застосунку. Розширення-браузер працює на сервері, тож агенти можуть переглядати сторінки без відкритого десктопа.",
   "settings.openchamber.tools.browserProvider.option.builtin": "OpenChamber Web",
+  'settings.openchamber.tools.agentBrowserLogins.label': "Вкладки агента бачать мої логіни",
+  'settings.openchamber.tools.agentBrowserLogins.info': "Вимкнено: вкладки, які відкриває агент, мають власний профіль, і вхід, зроблений там, лишається для агента. Увімкнено: вони використовують ваш профіль панелі, тож агент діє від вашого імені на кожному сайті, де ви увійшли.",
   "settings.openchamber.tools.browserProvider.toast.reset": "{name} більше не може надавати браузер. Агенти знову використовують OpenChamber Web.",
   "settings.openchamber.tools.field.agentMemoryTool": "Інструмент памʼяті агента",
   "settings.openchamber.tools.field.agentMemoryToolAria": "Інструмент памʼяті агента",
