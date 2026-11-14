@@ -107,6 +107,54 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `snapshotWorktree(directory, { ref })` (`POST /api/git/worktrees/snapshot`): Record the worktree's complete state (HEAD plus staged, unstaged and untracked-but-not-ignored files) as a commit whose parent is HEAD, stored at `ref`. Only `refs/openchamber/runs/<group>/<session>` refs are accepted, so snapshots never appear as branches or tags. A throwaway index (`GIT_INDEX_FILE`) keeps the real index, HEAD, branch and files untouched; the commit uses a fixed OpenChamber identity. Returns `{ ref, commit, head }`. Used by multi-run Keep and code fusion (`packages/ui/src/lib/multirun/DOCUMENTATION.md`); VS Code implements it in the bridge git runtime.
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
+### Worktree create command
+
+A project's personal `createWorktreeCommand` (`../projects/DOCUMENTATION.md`)
+reaches `createWorktree` as `input.createCommand` and replaces
+`git worktree add --no-checkout` plus the background populate
+(`createWorktreeWithCommand`). The VS Code host mirrors it in
+`packages/vscode/src/gitService.ts`.
+
+- The branch is made first, the way `worktree add -b`/`-B` would make it
+  (`git branch [--no-track] [-f] <branch> <start>`), so every command does one
+  thing: check out the existing `$WORKTREE_BRANCH` at `$WORKTREE_PATH`, which
+  does not exist yet. It runs from the primary checkout through the setup
+  command runner (stdin closed, own process group), stopped after 10 minutes.
+- A failure throws `WORKTREE_CREATE_COMMAND_FAILED` with the end of the
+  command's output. A branch this attempt made and no checkout holds is
+  deleted again; a moved change-request branch goes back to its tip.
+- Success requires a registered worktree of this repository on that branch at
+  the path's real location. A tool that keeps the checkout in its own store and
+  leaves a symlink at the path is adopted at the store path, and that is the
+  path the response, the bootstrap record and the client use.
+- The command populates the checkout itself, hooks and filters included, so
+  the bootstrap skips `populateWorktreeWithLockRecovery` and the post-checkout
+  hook; hydration, upstream setup and setup commands run as usual.
+- Contributor-fork worktrees never use it: their population must run no
+  repository hooks or content filters, which a command cannot promise.
+- The worktree's admin folder (`<common dir>/worktrees/<id>`) gets an
+  `openchamber-created-by-command` mark. `removeWorktree` passes git's second
+  `--force` for a locked worktree only when it carries the mark. The mark holds
+  the path the command was given when the tool left a symlink there; removal
+  deletes that symlink while it still names the removed worktree, so the name
+  is free for the next worktree.
+
+#### Why the request waits for the command
+
+`returnAfterDirectoryCreated` makes the folder before git runs, so the client
+can open the session at once. A command needs the path free, and a tool may put
+the checkout elsewhere, so the path is not known until it finishes. With a
+create command the request waits and answers with the real path; the VS Code
+webview sends that request without the bridge's 30 second timeout.
+
+#### Why the lock is overridden only for marked worktrees
+
+Copy-on-write tools lock their worktrees, and `git worktree remove --force`
+refuses a locked one, so a worktree made this way could not be deleted from
+the app. A lock anyone else set means "do not remove", and removal keeps
+refusing it; the mark tells the two apart without reading the lock reason,
+which every tool words differently.
+
 ### Worktree location
 - New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.
 - The setting is read from the merged OpenCode configuration on the canonical checkout (`packages/web/server/lib/opencode/worktree-directory.js`, shared with the VS Code extension host through `packages/vscode/src/worktree-directory.ts`) so a linked worktree sees the project's saved value.

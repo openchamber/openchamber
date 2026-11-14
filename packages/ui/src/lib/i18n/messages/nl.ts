@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -32,6 +33,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -203,6 +205,7 @@ export const dict = {
   ...updateCheckErrorsI18n.nl,
   ...secretRequestI18n.nl,
   ...sessionNoticesI18n.nl,
+  ...settingsHintsI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
@@ -216,6 +219,7 @@ export const dict = {
   ...openchamberToolOutputI18n.nl,
   ...opencodeToolOutputI18n.nl,
   ...agentStatusI18n.nl,
+  ...androidWidgetsI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
@@ -2404,6 +2408,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'uit {source}',
   'session.newWorktree.actions.cancel': 'Annuleren',
   'session.newWorktree.actions.creating': 'Bezig met aanmaken...',
+  'session.newWorktree.creatingWithCommand': 'Je opdracht om aan te maken draait…',
   'session.newWorktree.actions.createWorktree': 'Worktree maken',
   'session.newWorktree.actions.reset': 'Resetten',
   'session.newWorktree.actions.unlink': 'Ontkoppelen',
@@ -2904,6 +2909,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Nieuwe provider toevoegen',
   'chat.modelControls.noAgentSelected': 'Geen agent geselecteerd.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" is niet beschikbaar in de map van deze sessie. Kies een andere agent.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" is niet meer beschikbaar. De provider is verwijderd of uitgeschakeld. Kies een ander model.',
   'chat.modelControls.searchModels': 'Modellen zoeken',
   'chat.modelControls.modelListAria': 'Modellen',
   'chat.modelControls.searchAgents': 'Agents zoeken',
@@ -3434,6 +3440,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Annuleren',
   'vscodeLayout.actions.newSessionAria': 'Nieuwe sessie',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Breedte van de zijbalk met sessies aanpassen',
+  'vscodeLayout.actions.showSessionsAria': 'Sessies tonen',
+  'vscodeLayout.actions.hideSessionsAria': 'Sessies verbergen',
   'vscodeLayout.actions.settingsAria': 'Instellingen',
   'updateDialog.header.updateAvailable': 'Update beschikbaar',
   'updateDialog.header.updating': 'OpenChamber bijwerken...',

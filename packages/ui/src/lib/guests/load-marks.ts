@@ -1,6 +1,5 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { parseGuestMarksJson, type GuestMarkEntry } from './marks.ts';
@@ -26,7 +25,7 @@ type GuestMarksLoaderDeps = {
   /** The marks the server lists, or null when the read failed. */
   read: () => Promise<GuestMarkEntry[] | null>;
   runtimeKey: () => string;
-  /** VS Code and mobile load no extensions. */
+  /** VS Code loads no extensions. */
   supported: () => boolean;
   later: (run: () => void, delayMs: number) => Cancel;
 };
@@ -123,7 +122,7 @@ export const createGuestMarksLoader = ({ read, runtimeKey, supported, later }: G
 const loader = createGuestMarksLoader({
   read: readGuestMarks,
   runtimeKey: getRuntimeKey,
-  supported: () => !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+  supported: () => !isVSCodeRuntime(),
   later: (run, delayMs) => {
     const timer = setTimeout(run, delayMs);
     return () => clearTimeout(timer);

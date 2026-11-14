@@ -115,7 +115,10 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
           // the actions drop to their own line instead.
           <div className={cn(
             'flex flex-wrap items-start justify-between gap-x-4 gap-y-3',
-            isMobile && description == null ? 'mb-0' : 'mb-2 pb-6',
+            // On the phone a plain title is screen-reader only, so a header with
+            // nothing else shows nothing and takes no room; a visible title row or
+            // actions keep the gap to the first section.
+            isMobile && description == null && headerEnd == null && !hasTitleChrome ? 'mb-0' : 'mb-2 pb-6',
           )}>
             <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (

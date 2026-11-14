@@ -7,10 +7,14 @@ import { createGitIdentityProvisioning } from '../git/identity-provisioning.js';
 import { createProfile, getProfiles, updateProfile } from '../git/identity-storage.js';
 import { resolveRepositoryIdentity } from './repository-identity.js';
 import { redactSensitiveText } from './url-redaction.js';
+import { isPlainObject } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { createMutationStore } from './mutation-storage.js';
 import { createMutationExecutor } from './mutation-executor.js';
 import { createSourceControlAuthStore } from './auth-storage.js';
+import {
+  MAX_INSTANCE_ALIASES, createInstanceAliasStore, instanceHostname, normalizeInstanceAlias,
+} from './instance-aliases.js';
 import { createSourceControlProviders } from './provider-registry.js';
 import { registerProviderRoutes } from './provider-routes.js';
 import { publicProviderDescriptor, sourceControlProviderDescriptors } from './provider-descriptors.js';
@@ -170,8 +174,15 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     onMutationSucceeded: dependencies.onMutationSucceeded,
     onMutationStarting: dependencies.onMutationStarting,
   });
-  /** The instances of one provider the user can work with: its defaults first, then the ones it knows of. */
-  const instancesOf = async (descriptor) => {
+  const instanceAliases = dependencies.instanceAliasStore ?? createInstanceAliasStore({
+    filePath: path.join(configRoot, 'source-control-instance-aliases.json'),
+  });
+  /**
+   * The instances of one provider the user can work with: its defaults first,
+   * then the ones it knows of. `aliases` is the stored alias map; an instance
+   * the provider no longer knows keeps its aliases on disk but lists none.
+   */
+  const instancesOf = async (descriptor, aliases = {}) => {
     const impl = await providers.implementation(descriptor.id);
     const defaults = [...descriptor.instance.defaultInstances];
     const known = (await impl?.auth.listInstances?.()) ?? [];
@@ -182,8 +193,19 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
         const entry = { provider: descriptor.id, instance };
         const sshUrl = sshHosts.get(instance);
         if (sshUrl !== undefined) entry.instanceSshUrl = sshUrl;
+        const instanceAliasList = defaults.includes(instance) ? undefined : aliases[descriptor.id]?.[instance];
+        if (instanceAliasList?.length) entry.instanceAliases = [...instanceAliasList];
         return entry;
       });
+  };
+  /** The stored aliases; a file that cannot be read lists none, so instances still list. */
+  const readInstanceAliases = async () => {
+    try {
+      return await instanceAliases.list();
+    } catch (error) {
+      console.warn('Failed to read source control instance aliases:', redactSensitiveText(error?.message));
+      return {};
+    }
   };
   app.get('/api/source-control/providers', (_req, res) => {
     // Built-ins in priority order, then extension providers sorted by id
@@ -195,15 +217,73 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   app.get('/api/source-control/instances', async (_req, res) => {
     const instances = [];
     const unavailableProviders = [];
+    const aliases = await readInstanceAliases();
     for (const descriptor of providers.list()) {
       try {
-        instances.push(...await instancesOf(descriptor));
+        instances.push(...await instancesOf(descriptor, aliases));
       } catch (error) {
         unavailableProviders.push(descriptor.id);
         console.warn(`Failed to list ${descriptor.label} instances:`, redactSensitiveText(error?.message));
       }
     }
     return res.json(unavailableProviders.length ? { instances, unavailableProviders } : { instances });
+  });
+  /**
+   * Replaces the aliases of one instance the user added (never a provider's
+   * default one). An address that already names another listed instance, or
+   * is an alias of one, is refused: a link there would name two instances.
+   */
+  app.post('/api/source-control/instances/aliases', async (req, res) => {
+    const body = isPlainObject(req.body) ? req.body : {};
+    const descriptor = providers.list().find((candidate) => candidate.id === body.provider);
+    if (!descriptor) {
+      return res.status(404).json({ error: 'Source control provider is unavailable', code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE' });
+    }
+    let instance;
+    try { instance = descriptor.instance.normalize(String(body.instance ?? '')); }
+    catch { return res.status(400).json({ error: 'Source control instance is invalid', code: 'INVALID_SOURCE_CONTROL_INSTANCE' }); }
+    if (!Array.isArray(body.aliases) || body.aliases.length > MAX_INSTANCE_ALIASES) {
+      return res.status(400).json({ error: `At most ${MAX_INSTANCE_ALIASES} aliases`, code: 'INVALID_INSTANCE_ALIAS' });
+    }
+    let aliases;
+    try {
+      aliases = [...new Set(body.aliases.map((alias) => normalizeInstanceAlias(descriptor.instance.form, alias)))];
+    } catch (error) {
+      return res.status(400).json({ error: error.message, code: 'INVALID_INSTANCE_ALIAS', alias: error.alias });
+    }
+    const listed = [];
+    for (const candidate of providers.list()) {
+      try { listed.push(...await instancesOf(candidate)); }
+      catch { /* a provider that cannot list owns no address to collide with */ }
+    }
+    const isTarget = (entry) => entry.provider === descriptor.id && entry.instance === instance;
+    if (descriptor.instance.defaultInstances.includes(instance) || !listed.some(isTarget)) {
+      return res.status(404).json({ error: 'Source control instance is unknown', code: 'SOURCE_CONTROL_INSTANCE_UNKNOWN' });
+    }
+    try {
+      const saved = await instanceAliases.set(descriptor.id, instance, aliases, (stored) => {
+        const occupied = new Set([instanceHostname(instance)]);
+        for (const entry of listed) {
+          if (isTarget(entry)) continue;
+          occupied.add(instanceHostname(entry.instance));
+          for (const alias of stored[entry.provider]?.[entry.instance] ?? []) occupied.add(instanceHostname(alias));
+        }
+        const taken = aliases.find((alias) => occupied.has(instanceHostname(alias)));
+        if (taken) {
+          throw Object.assign(new Error(`${taken} is already the address of an instance`), { code: 'INSTANCE_ALIAS_TAKEN', alias: taken });
+        }
+      });
+      return res.json({ aliases: saved });
+    } catch (error) {
+      if (error?.code === 'INSTANCE_ALIAS_TAKEN') {
+        return res.status(409).json({ error: error.message, code: error.code, alias: error.alias });
+      }
+      if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
+      console.warn('Failed to save source control instance aliases:', redactSensitiveText(error?.message));
+      return res.status(500).json({ error: 'Failed to save instance aliases', code: error?.code ?? 'INSTANCE_ALIASES_FAILED' });
+    }
   });
   app.get('/api/source-control/repository-context', async (req, res) => {
     try {

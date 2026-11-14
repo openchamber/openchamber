@@ -214,8 +214,13 @@ queue rows with reorder and remove, but no edit or send action.
 
 The action button (`ComposerActionButtons`, and the same rule in the
 collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's
-button size in VS Code, and a 28px disc inside the 32px touch target on
-phones. It is drawn by `.oc-action-disc` in `design-system.css`: the
+button size in VS Code, and a 28px disc at the end of the 32px touch target on
+phones, where the footer and the collapsed pill take `pe-3.5` so the disc's
+right edge lines up with the agent label in the row below. The pill's action
+row is built like the expanded footer (`h-12`, the attach button in
+`composer-mobile-actions` at a 10px inset, mic and Send in a `gap-x-1`
+group), so no icon moves across the swap with 32px buttons or on the 36px
+touch floor. It is drawn by `.oc-action-disc` in `design-system.css`: the
 composer's text colour with the glyph cut out in the composer's own fill
 (`--oc-composer-foreground` over `--oc-composer-background`), flat, no ring
 or shadow. Disabled, it is a quiet tone step of the text colour with the
@@ -1143,6 +1148,14 @@ picker uses, and then draws as a chip where it stands: its number and title.
   (typed or restored), with that read.
 - Editing a queued message puts each item its text links back as that link's
   chip, the rest above the text.
+- The sent message draws the same chips where the links stand
+  (`message/parts/referenceLinkChips.tsx`, from the message's context parts;
+  in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
+  an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
+  identifier), so a picker item whose link the user also typed draws there too.
+  An item drawn inline leaves the attachment row; one the text does not link,
+  or links only inside code, stays there. Both chips open the item in the
+  Tracker (`useOpenTrackerItem`), Cmd or Ctrl its page.
 - A link on another host than the project's, or one no account can read, stays
   text with the picker's attach-failed toast. A link past the project's fork
   network is read again as a linked item, as the Tracker does. Discussions stay

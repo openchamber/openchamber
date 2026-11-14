@@ -142,13 +142,15 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'search-result'; result: ConversationResult; context: ConversationResultContext })
   // The caption over a search's archived matches, which follow the active ones.
   | (RowBase & { kind: 'search-archived-caption' })
-  // Matches beyond the first batch of the active or the archived block wait behind this row.
+  // Active matches beyond the first batch wait behind this row.
   | (RowBase & { kind: 'search-show-more'; section: SearchResultSection; hidden: number })
-  | (RowBase & { kind: 'search-more' });
+  // Asks the server for the block's next message matches.
+  | (RowBase & { kind: 'search-more'; section: SearchResultSection });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
-  kind: 'activity' | 'project';
+  /** `search`: the caption over a search's archived matches. */
+  kind: 'activity' | 'project' | 'search';
   id: string;
 };
 
@@ -211,7 +213,8 @@ export type SessionSidebarRowModelArgs = {
   contentSearchResults?: readonly ConversationResult[];
   /** The blocks the user asked to see whole, past their first batch. */
   revealedSearchSections?: ReadonlySet<SearchResultSection>;
-  hasMoreSearchResults?: boolean;
+  /** The blocks whose message matches have a further page to ask for. */
+  searchSectionsWithMore?: ReadonlySet<SearchResultSection>;
   searchIncomplete?: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedGroups: ReadonlySet<string>;
@@ -329,8 +332,6 @@ const SESSIONS_INCREMENT = 7;
 const SEARCH_ROW_ESTIMATE = 32;
 const SEARCH_EXCERPT_ESTIMATE = 20;
 const searchRowEstimate = (hasExcerpt: boolean): number => SEARCH_ROW_ESTIMATE + (hasExcerpt ? SEARCH_EXCERPT_ESTIMATE : 0);
-/** Archived matches a search lists before Show more. */
-export const ARCHIVED_SEARCH_INITIAL = 5;
 /**
  * Active matches a search lists before Show more. A one-letter query matches
  * most of a large history, and nobody reads past the first screens of it.
@@ -1369,8 +1370,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   // A search answers with one flat list, best match first, each row marked
-  // with its project. Archived matches follow under their own caption, the
-  // first few shown.
+  // with its project. Archived matches follow under their own caption. Each
+  // block ends with its own pager.
   const appendFlatSearch = (): void => {
     const results = args.contentSearchResults ?? [];
     const appendResult = (result: ConversationResult): void => {
@@ -1383,12 +1384,18 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const shown = args.revealedSearchSections?.has(section) ? sectionResults.length : Math.min(sectionResults.length, initial);
       for (let index = 0; index < shown; index += 1) appendResult(sectionResults[index]);
       if (shown < sectionResults.length) push({ kind: 'search-show-more', key: `search:${section}:more`, estimateSize: STATUS_ESTIMATE, section, hidden: sectionResults.length - shown });
+      // One button per block: the pager waits until the matches already loaded all show.
+      else if (args.searchSectionsWithMore?.has(section)) push({ kind: 'search-more', key: `search:${section}:page`, estimateSize: 36, section });
     };
     appendSection('active', results.filter((result) => !result.archived), ACTIVE_SEARCH_INITIAL);
     const archived = results.filter((result) => result.archived);
-    if (archived.length === 0) return;
+    // A page whose matches were all left out still has a next one to ask for.
+    if (archived.length === 0 && !args.searchSectionsWithMore?.has('archived')) return;
+    // Held at the top while its matches scroll under it, so a list scrolled down still says what it shows.
+    stickyHeaders.push(Object.freeze({ rowIndex: rows.length, kind: 'search', id: 'archived' }));
     push({ kind: 'search-archived-caption', key: 'search:archived', estimateSize: SECTION_HEADER_ESTIMATE });
-    appendSection('archived', archived, ARCHIVED_SEARCH_INITIAL);
+    // Nothing follows the archived block, so it has no first batch to fold to.
+    appendSection('archived', archived, archived.length);
   };
 
   if (search) appendFlatSearch();
@@ -1403,8 +1410,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       case 'projects': appendProjects(block); break;
     }
   }
-
-  if (search && args.hasMoreSearchResults) push({ kind: 'search-more', key: 'search:more', estimateSize: 36 });
 
   if ((!search || !args.searchIncomplete) && rows.length === pageRowCount) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });

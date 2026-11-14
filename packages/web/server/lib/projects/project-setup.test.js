@@ -26,6 +26,7 @@ const emptyPersonal = {
   setupWorktreeWait: null,
   setupWorktreeMode: 'append',
   teardownWorktree: [],
+  createWorktreeCommand: '',
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -112,6 +113,7 @@ describe('project setup sanitizers', () => {
       'setup-worktree-wait': true,
       setupWorktreeMode: 'replace',
       teardownWorktree: [' docker compose down ', ''],
+      createWorktreeCommand: ' git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH" ',
       projectActions: [{ id: 'a', name: 'A', command: 'x' }],
       projectActionsPrimaryId: 'missing',
       draftStarters: [{ type: 'skill', name: 's' }],
@@ -123,6 +125,7 @@ describe('project setup sanitizers', () => {
       setupWorktreeWait: true,
       setupWorktreeMode: 'replace',
       teardownWorktree: ['docker compose down'],
+      createWorktreeCommand: 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
       projectActions: [{ id: 'a', name: 'A', command: 'x', icon: null }],
       projectActionsPrimaryId: null,
       draftStarters: [{ type: 'skill', name: 's' }],
@@ -147,6 +150,10 @@ describe('project setup sanitizers', () => {
     expect(projectSetupPatchToStored({})).toEqual({});
     expect(projectSetupPatchToStored({ teardownWorktree: [' docker compose down ', ''] })).toEqual({ teardownWorktree: ['docker compose down'] });
     expect(() => projectSetupPatchToStored({ teardownWorktree: 'docker compose down' })).toThrow('teardownWorktree must be');
+    expect(projectSetupPatchToStored({ createWorktreeCommand: ' git parhel add "$WORKTREE_PATH" ' })).toEqual({ createWorktreeCommand: 'git parhel add "$WORKTREE_PATH"' });
+    // An empty command removes the key, back to the built-in creation.
+    expect(projectSetupPatchToStored({ createWorktreeCommand: '  ' })).toEqual({ createWorktreeCommand: undefined });
+    expect(() => projectSetupPatchToStored({ createWorktreeCommand: ['git'] })).toThrow('createWorktreeCommand must be');
     expect(() => projectSetupPatchToStored({ setupWorktree: 'a' })).toThrow('setupWorktree must be');
     expect(() => projectSetupPatchToStored({ setupWorktreeWait: 'yes' })).toThrow('setupWorktreeWait must be');
     expect(() => projectSetupPatchToStored({ projectActions: {} })).toThrow('projectActions must be');

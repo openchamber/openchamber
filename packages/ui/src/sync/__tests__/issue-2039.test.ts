@@ -377,6 +377,7 @@ mock.module("@/lib/git/branchNameGenerator", () => ({
 }))
 
 mock.module("@/lib/openchamberConfig", () => ({
+  getWorktreeCreateCommand: async () => "",
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
   substituteCommandVariables: (command: string) => command,

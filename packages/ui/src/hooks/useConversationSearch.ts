@@ -42,9 +42,14 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
   const [content, setContent] = React.useState<ContentState>(idle);
   // The request key of the next page in flight; `loadingMore` is true only while it is the current key.
   const [pagingKey, setPagingKey] = React.useState<string | null>(null);
-  const metadataIdsKey = canCount ? metadataIds.join('\n') : 'too-many';
+  // Sorted: a match moving up the ranking as its session changes asks for nothing new.
+  const metadataIdsKey = canCount ? [...metadataIds].sort().join('\n') : 'too-many';
   const requestKey = `${runtimeKey}\0${enabled}\0${text}\0${lifecycle}\0${searchIn}\0${(directories ?? []).join('\n')}\0${normalizedAuthor}\0${reasoningAvailable}\0${messageSearchEnabled}\0${isVSCodeRuntime()}\0${metadataIdsKey}`;
   const requestKeyRef = React.useRef(requestKey);
+  // The caller rebuilds these lists whenever any session changes. `requestKey` says when what
+  // they hold changed, so a request reads them from here and a rebuilt list starts no new one.
+  const scopeRef = React.useRef({ directories, exclude: canCount ? metadataIds : undefined });
+  scopeRef.current = { directories, exclude: canCount ? metadataIds : undefined };
   const pagingOperationRef = React.useRef<{ key: string; cursor: string } | null>(null);
   const pageControllerRef = React.useRef<AbortController | null>(null);
   const generationRef = React.useRef(0);
@@ -64,7 +69,7 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     const timeout = window.setTimeout(() => {
       setContent({ ...idle, key: requestKey, status: { kind: 'loading' } });
       const role = normalizedAuthor === 'user' ? 'user' : normalizedAuthor === 'assistant' ? 'assistant' : normalizedAuthor === 'reasoning' ? 'reasoning' : null;
-      searchConversations({ query: text, lifecycle, directories, exclude: canCount ? metadataIds : undefined, role, includeReasoning: reasoningAvailable, limit: pageSize, signal: controller.signal }).then(async (result) => {
+      searchConversations({ query: text, lifecycle, ...scopeRef.current, role, includeReasoning: reasoningAvailable, limit: pageSize, signal: controller.signal }).then(async (result) => {
         if (controller.signal.aborted || generationRef.current !== generation || requestKeyRef.current !== requestKey) return;
         if (result.status === 'query-too-short') { setContent({ ...idle, key: requestKey, status: { kind: 'too-short' } }); return; }
         if (result.status === 'unavailable') {
@@ -86,7 +91,7 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
       pagingOperationRef.current = null;
       if (generationRef.current === generation) generationRef.current += 1;
     };
-  }, [enabled, text, lifecycle, searchIn, normalizedAuthor, directories, messageSearchEnabled, pageSize, requestKey, contentDebounceMs, canCount, metadataIds, reasoningAvailable]);
+  }, [enabled, text, lifecycle, searchIn, normalizedAuthor, messageSearchEnabled, pageSize, requestKey, contentDebounceMs, reasoningAvailable]);
 
   // Content from an earlier key is never shown: it goes away on the render that changes the key.
   const shown = content.key === requestKey ? content : idle;
@@ -140,12 +145,12 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
       setPagingKey((current) => (current === key ? null : current));
     };
     // A failed or unusable page keeps what is loaded and the cursor, so the same page can be asked again.
-    void searchConversations({ query: text, lifecycle, directories, exclude: canCount ? metadataIds : undefined, role, includeReasoning: reasoningAvailable, before: content.next, limit: pageSize, signal: controller.signal }).then((result) => {
+    void searchConversations({ query: text, lifecycle, ...scopeRef.current, role, includeReasoning: reasoningAvailable, before: content.next, limit: pageSize, signal: controller.signal }).then((result) => {
       if (controller.signal.aborted || generationRef.current !== generation || requestKeyRef.current !== key) return;
       if (result.status !== 'ok') { failPage(); return; }
       setContent((current) => current.key === key ? { ...current, hits: [...current.hits, ...result.hits], next: result.next, status: current.status.kind === 'ready' ? { ...current.status, hasMore: result.next !== null, pageError: false } : current.status } : current);
     }, failPage).finally(finish);
-  }, [canCount, content, directories, lifecycle, metadataIds, normalizedAuthor, pageSize, reasoningAvailable, text]);
+  }, [content, lifecycle, normalizedAuthor, pageSize, reasoningAvailable, text]);
 
   const contentReady = shown.status.kind === 'ready';
   // An unscoped request counts the whole index; only directories whose rows can show count here.

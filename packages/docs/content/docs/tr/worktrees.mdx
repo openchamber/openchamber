@@ -21,6 +21,25 @@ OpenChamber branch'i oluşturur, klasörü hazırlar ve orada ilk mesajınızı 
 
 Soruları atlamak için aynı dal menüsünden **Hızlı worktree** seçin: OpenChamber dala geçici bir ad verir ve yeni oturumu ona yönlendirir. Agent göreve bir ad verdiğinde, dal henüz push edilmediyse dalı da göreve göre yeniden adlandırır, örneğin `fix/login-timeout`.
 
+## Worktree'leri kendi aracınızla oluşturun
+
+Her yeni worktree sıfırdan bir checkout'tur, bu yüzden büyük bir projede herhangi bir şey çalışmadan önce bağımlılıkları kurmak dakikalar sürebilir. Copy-on-write bir araç ise worktree'yi zaten sahip olduğunuz bir checkout'un klonu olarak oluşturur: `node_modules`, `.venv` ve derleme çıktıları da gelir ve değişene kadar diskte ek yer kaplamaz.
+
+Böyle bir araç kullanmak için projenin ayarlarını açın, **Worktree'ler** bölümüne gidin ve aracınızın komutunu **Worktree oluşturma** altına girin. OpenChamber önce dalı oluşturur, ardından komutu iki ortam değişkeniyle proje kök dizininde çalıştırır:
+
+- `$WORKTREE_PATH`, worktree'nin oluşturulacağı klasördür. Henüz yoktur.
+- `$WORKTREE_BRANCH`, orada checkout edilecek daldır. Zaten vardır.
+
+Bu komut, OpenChamber'ın komut girilmediğinde yaptığı şeyi yapar; `git worktree add` yerine aracınızın komutunu yazın:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+Ardından worktree diğerleri gibi kenar çubuğunda görünür ve projenin kurulum komutları onun içinde çalışır. Araç checkout'u başka bir yerde tutup `$WORKTREE_PATH` konumuna bir bağlantı bırakırsa OpenChamber gerçek klasörde çalışır. Komut başarısız olursa OpenChamber çıktısını gösterir ve oluşturduğu dalı siler. Araç worktree'yi kilitlemiş olsa bile onu daha sonra silebilirsiniz.
+
+Komut yalnızca size aittir: depoya kaydedilmez, bu yüzden araca sahip olmayan ekip arkadaşlarınız her zamanki oluşturma yöntemiyle devam eder. git'e dönmek için alanı boş bırakın. Başka birinin fork'undan gelen bir pull request için oluşturulan worktree'ler her zaman git kullanır.
+
 ## Kenar çubuğunda
 
 Bir worktree kenar çubuğunda tek bir satırdır; içindeki tüm oturumlar altında durur. Projesinin altında, projenin diğer oturumları arasında son etkinliğine göre sıralanır; yani az önce çalıştığınız bir worktree üst sıralarda yer alır. Satır, ajan adlandırdıktan sonra görevin adını (o zamana kadar orada en son çalıştığınız oturumun başlığını), takip ettiği pull request ya da issue'yu renkli bir işaretle ve oradaki bir oturumun çalışıp çalışmadığını ya da sizin için yeniliği olup olmadığını gösterir. Bir pull request ya da issue için oluşturulan worktree, ajan daha kısa bir ad seçene kadar o öğenin başlığıyla başlar. Dalı görmek için imleci üzerine getirin. Orada en son çalıştığınız oturumu açmak için tıklayın; listeyi açmak için imleci solundaki dal simgesinin üzerine getirin ve onun yerine çıkan oka tıklayın. Menüsü görevi yeniden adlandırır, worktree'yi projenin bir klasörüne taşır, arşivler ya da siler. Telefonda listeyi açmak için satırdaki oka dokunun; satırı tamamlandı olarak işaretlemek, görevi yeniden adlandırmak, worktree'yi arşivlemek ya da silmek için satırı yana kaydırın. İşlerin Devam eden bölümüne nasıl girip çıktığı için bkz. [Devam eden oturumlar](/tr/sessions-in-work/).

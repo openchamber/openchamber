@@ -73,9 +73,10 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     // (queue or steer); double Escape still stops. A second control stacked
     // above Stop read as a stray mark (maintainer, 2026-11-12). The disc is
     // 28px on desktop; VS Code draws it at its footer's button size, and on
-    // a phone the button keeps the footer's touch target with the disc inside.
+    // a phone the button keeps the footer's touch target with the disc at its
+    // end, so the disc's edge, not the wider slot's, sets the footer inset.
     const discSized = !isMobile && !isVSCodeRuntime();
-    const actionSlotClass = cn(footerIconButtonClass, discSized && 'h-7 w-7');
+    const actionSlotClass = cn(footerIconButtonClass, discSized && 'h-7 w-7', isMobile && 'justify-end');
     const discClass = cn('oc-action-disc', isMobile ? 'size-7' : 'size-full');
     const stopText = t('chat.chatInput.actions.stopGeneratingAria');
 

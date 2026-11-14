@@ -22,9 +22,12 @@ A sidebar search answers with one flat list instead of the tree. The row model
 in search mode lists the active matches best first (titles that hold the words
 as typed, newest first; then conversations on a branch that holds them; then
 conversations found only by a message), the first fifty with a Show more row for the rest, then an
-Archived caption with the first five archived matches and its own Show more
-row, then the pager for more message matches. A block shown whole folds again
-when the search is cleared or changed. What a session started (a subagent, a
+Archived caption with every archived match found. The caption opens with the
+widest gap, as a zone's does, and on the desktop holds at the top of the list
+while its matches scroll under it. Each block ends with its own
+pager for more message matches; the active block draws it once its loaded
+matches all show, so a block never ends with two buttons. The active block
+shown whole folds again when the search is cleared or changed. What a session started (a subagent, a
 workflow's agent: any session with a `parentID`) is left out, by title and by
 message: it is part of its parent, and such sessions outnumber the user's own.
 Project and folder names are not searched: every row already shows its
@@ -74,8 +77,27 @@ tree out of the per-keystroke work.
 Searching for an old conversation is the main reason to search at all, and the
 user rarely knows whether they archived it. A lifecycle filter made them
 guess, and remembered its last value. Archived matches are always found and
-listed after the active ones, five at a time, so they never push the active
-ones down.
+listed after the active ones, so they never push the active ones down. The
+block is not folded to a first few: nothing follows it, and a Show more for
+loaded rows next to the pager for further ones read as two of the same button.
+
+### Why each block asks for its own message matches
+
+`useSidebarConversationSearch` runs the shared hook twice, once per lifecycle.
+One request for both answers newest first, twenty at a time, and archived
+conversations are usually the oldest: they arrived only after paging past
+every active match, so the Archived block looked empty for a conversation
+found by a message. With a request each, the block fills at once and pages on
+its own.
+
+### Why a rebuilt session list starts no new content request
+
+Any session changing (a running one does several times a second) rebuilds the
+metadata list passed to `useConversationSearch`. The hook keys its request on
+what the list holds, the matched ids, and reads the list itself through a ref.
+Depending on the array restarted the request on every rebuild: the message
+matches left the list and came back, and the shorter list pulled the scroll
+position to the top.
 
 ### Why search ownership has its own index
 
@@ -264,7 +286,9 @@ no Shift.
   stands for. A long press on a session or worktree work row opens its menu
   (`mobileSidebar/MobileRowMenu.tsx`, Base UI's context menu): Mark as read
   or unread, which has no room in the swipe, then the row's own actions
-  without delete, which keeps its two-tap confirmation in the swipe. The
+  without delete, which keeps its two-tap confirmation in the swipe. A
+  session row's menu ends with the extensions' session actions, which the
+  desktop lists under Export (the phone has no submenus). The
   click the finger's release sends is dropped, so the press never opens the
   row. The rows share their behaviour with the desktop's through
   `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
@@ -608,12 +632,19 @@ setting, and VS Code always groups by project. The display menu (the header's
 as read, which marks every unread session the
 client knows of seen (`markAllSessionsViewed`), hidden sections included, and
 is disabled while none is unread. Customize sections is its own header button
-(`list-settings`), shown where the manager is (`showSectionControls`); it opens
-the sections manager beside the sidebar in one click (the order, each section's
+(`list-settings`), shown where the manager is (`showSectionControls`); a click
+opens the sections manager beside the sidebar and a second click closes it
+(the manager ignores the press on its trigger, so it does not close and reopen;
+the order, each section's
 visibility, the "Also in projects" chip on Pinned (`keepPinnedInPlace`,
 `sidebarKeepPinnedInPlace`, on by default) and on In work (`keepWorkInPlace`,
-`sidebarKeepWorkInPlace`, off by default) and the user's own sections). The
-phone's display menu keeps its toggles
+`sidebarKeepWorkInPlace`, off by default) and the user's own sections). On the
+desktop sidebar the button and the "…" sit at the end of the titlebar strip
+above the list (`listControlsSlot`, a `no-drag` slot in `SidebarTopBar` the
+header portals into), so the search field has its row to itself. They belong
+to the list, so they live in the sidebar and slide with it; the titlebar
+overlay with the sidebar toggle stays put when the sidebar collapses, and a
+list menu there would hang over the chat. The phone's display menu keeps its toggles
 and lists the user's sections as toggles too; it has no manager. It ends with
 the same Mark all as read.
 
@@ -868,15 +899,16 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   waiting request or expansion chevron keeps it visible, and an extension's
   mark never does. The first holds the title and the action indicator, pin, done hint,
   status icon and time; hover actions cover that cluster. The second opens
-  with the project's icon and holds the branch (or the space's name) and the
-  state cluster: goal glyph, PR (or the zombie warning), extension marks,
+  with the project's icon (and its name, with several projects) and holds the
+  branch (or the space's name) and the state cluster: goal glyph, PR (or the zombie warning), extension marks,
   permission/question badges. It shows no provider logo: the model's provider says nothing about
   the work, and the maintainer dropped it on 2026-10-25. The linked PRs and
   issues come from `useSessionRefLines`, which the phone's rows read too.
 - Extension marks (`contributes.marks`, contract in
   `packages/sdk/DOCUMENTATION.md`, *Sidebar marks*) are icons a running
   extension service puts on rows: `sessions/GuestRowMarks.tsx` draws them,
-  `sessions/useRowGuestMarks.ts` reads them for one row, and
+  `sessions/useRowGuestMarks.ts` reads them for one row (`useSessionRowGuestMarks`
+  and `useWorkRowGuestMarks` compute a row's keys, shared with the phone's rows), and
   `lib/guests/marks-store.ts` holds them, read from the server by
   `hooks/useGuestMarksSync.ts`. The rules:
   - Place. Right after the PR badge (or the zombie warning) and before the
@@ -927,8 +959,17 @@ chevron, while its saved collapse stays and its delete dialog counts the members
     `event-stream-ready`, and when the set of extensions that may show marks
     changes, and asks nothing while that set is empty.
   - Not shown: rows of an isolated space (no service hears of a space's
-    sessions), VS Code and mobile (no extensions are loaded there). An icon
-    name the sprite lacks draws the fallback glyph.
+    sessions) and VS Code (no extensions are loaded there). An icon name the
+    sprite lacks draws the fallback glyph.
+  - The phone. `apps/mobileSidebar/MobileGuestMarks.tsx` draws the same marks
+    in the same place on the phone's session and worktree rows, keyed by the
+    same hooks. A phone has no hover. A tap on a mark of an extension whose
+    panel opted into the phone (`panel.mobile`) opens the row and that
+    extension's workspace tab, as a desktop click opens its panel; any other
+    mark shows `{extension name}: {text}` as a toast and opens the mark's link
+    when it has one, and that tap stays off the row. The mark is a span with
+    a 28px hit area around its 12px icon, because the row it sits in is a
+    button.
 - Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
   under a project, every work takes the two lines too. That is the project
   root's sessions and drafts, in its folders as well (a session row's
@@ -955,6 +996,36 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   opens with a pen and names the branch its session will go to once that
   directory's git status is known. A draft without a project icon, branch or
   attachment mark uses one line.
+- In a zone, once the user has more than one project
+  (`useZoneProjectNames`), the project's name follows its icon on that line
+  (`TimelineProjectName`): `icon name · branch`. The dot stands only before
+  a session's branch, which has no icon of its own; a
+  worktree mark, a space's mark, a run's mark, a draft's pen and the phone's
+  branch icon already set the name apart. The icon then drops its tooltip and
+  accessible name, which would repeat the printed one. Sessions, runs,
+  worktree works and drafts all print it, on the desktop and on the phone.
+  One-line zone rows stay as they are: the whole-row tooltip names the project.
+  A worktree work named by its branch ("Name worktrees by branch") leaves its
+  task's name off that line once the project's name is there: the user chose
+  the branch as the name, the two names would squeeze each other, and the
+  tooltip still opens with the task's name (maintainer, 2026-11-12). Under its
+  project, and with one project, the task's name stays on the line.
+
+### Why the project's name truncates before the branch
+
+On a tight line the name shrinks first (`shrink-[999]`), down to 4rem, and
+only then the branch or the work's name. A user has a few projects and knows
+one by its icon and first letters; the branch is the row's own and loses its
+telling part when cut. Names of 8 characters or fewer never shrink. The
+maintainer chose this over keeping the name whole (2026-11-12).
+
+### Why zone rows name the project only with several projects
+
+With one project the name would repeat on every row and tell nothing. It is
+tied to the number of projects in the app and not to what a zone holds, so a
+row's second line does not change as works of another project come and go.
+There is no setting for it. A project prefix in the title was rejected: it
+takes width from a title that already truncates.
 
 ### Why empty detailed lines collapse at the row
 

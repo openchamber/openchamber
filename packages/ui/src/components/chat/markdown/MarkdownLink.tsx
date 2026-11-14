@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { parseSessionLink } from '@/lib/sessionLinks';
 import { parseExtensionInstallLink } from '@/lib/guests/install-link';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { requestGuestInstall } from '@/lib/guests/install-request';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
@@ -14,6 +13,8 @@ import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { sessionLinkKey } from '@/lib/sessionLinks';
 import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
 import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
+import { ReferenceLinkChipsContext } from '../message/parts/referenceLinkChips';
+import { ReferenceLinkChipButton } from '../message/parts/ReferenceLinkChipButton';
 import { useUIStore } from '@/stores/useUIStore';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -26,6 +27,7 @@ import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
 import { claimGuestIdentifier, claimGuestUrl } from '@/lib/guests/links';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isBuiltInLink, runGuestLink } from './guestLinkClick';
 
@@ -135,17 +137,25 @@ function GuestIdentifierLink({ identifier, className, children }: { identifier: 
   const { guestLinks, directory } = useMarkdownPresentation();
   const { t } = useI18n();
   const claim = guestLinks ? claimGuestIdentifier(guestLinks, identifier) : null;
-  const name = useGuestsStore((state) => (claim ? state.guests.find((guest) => guest.id === claim.guestId)?.name : undefined));
-  if (!claim || !name) return <>{children}</>;
+  const guest = useGuestsStore((state) => (claim ? state.guests.find((entry) => entry.id === claim.guestId) : undefined));
+  const name = guest?.name;
+  const openChatLink = useOpenChatLink(directory);
+  if (!claim || !guest || !name) return <>{children}</>;
+  // An extension that did not opt its panel into the phone cannot open the
+  // identifier there, so it goes to the item's page when it names one.
+  const pageUrl = claim.action === 'open' && !guestPanelOpensHere(guest) ? claim.url : undefined;
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     event.stopPropagation();
-    runGuestLink(claim, 'identifier', directory, t);
+    if (pageUrl) openChatLink(pageUrl);
+    else runGuestLink(claim, 'identifier', directory, t);
   };
-  const label = claim.action === 'open'
-    ? t('chat.guestLink.open', { identifier, name })
-    : t('chat.guestLink.attach', { identifier, name });
+  const label = pageUrl
+    ? pageUrl
+    : claim.action === 'open'
+      ? t('chat.guestLink.open', { identifier, name })
+      : t('chat.guestLink.attach', { identifier, name });
   return (
     <a
       role="button"
@@ -195,6 +205,8 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   // A session or message the user's message mentioned draws as its chip.
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
+  // An issue, change request or tracker item the user's message linked draws as its chip.
+  const referenceLink = React.useContext(ReferenceLinkChipsContext).get(href);
   const app = isAppLinkUrl(href);
   const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click', 'href');
   const revealPath = useRevealMarkdownPath();
@@ -282,7 +294,6 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   }
   // A reply can offer the extension it built: a click is the go-ahead for a
   // folder, and the approval dialog still decides what the package may do.
-  if (extensionInstall && isMobileSurfaceRuntime()) return <span>{children}</span>;
   if (extensionInstall) {
     return (
       <Button
@@ -300,6 +311,9 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
 
   if (session && mentionChip) {
     return <SessionMentionChipButton chip={mentionChip} target={session} />;
+  }
+  if (referenceLink) {
+    return <ReferenceLinkChipButton chip={referenceLink.chip} url={referenceLink.url} />;
   }
   if (agent) {
     return (

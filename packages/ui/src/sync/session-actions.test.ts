@@ -74,6 +74,8 @@ let readActiveStatusSnapshot: (directory?: string | null) => Promise<Record<stri
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const queueMoves: Array<{ sessionId: string; directory: string }> = []
+const tabMoves: Array<{ sessionId: string; directory: string }> = []
+const folderMoves: Array<{ sessionId: string; directory: string; worktree: string | null }> = []
 const worktreeMetadataCalls: Array<{ sessionID: string; metadata: WorktreeMetadata | null; cwd?: string }> = []
 let availableWorktreesByProject = new Map<string, WorktreeMetadata[]>()
 const globalArchivedSessions: Session[] = []
@@ -407,6 +409,22 @@ mock.module("@/stores/messageQueueStore", () => ({
   },
 }))
 
+mock.module("@/stores/useSessionFoldersStore", () => ({
+  useSessionFoldersStore: {
+    getState: () => ({
+      followSessionMove: (sessionId: string, directory: string, worktree: string | null) => {
+        folderMoves.push({ sessionId, directory, worktree })
+      },
+    }),
+  },
+}))
+
+mock.module("@/lib/sessionTabs", () => ({
+  followSessionTabMove: (sessionId: string, directory: string) => {
+    tabMoves.push({ sessionId, directory })
+  },
+}))
+
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
@@ -641,6 +659,9 @@ describe("moveSessionToDirectory", () => {
     movedSessionDirectories.length = 0
     worktreeMetadataCalls.length = 0
     queueMoves.length = 0
+    tabMoves.length = 0
+    folderMoves.length = 0
+    globalActiveSessions = []
     availableWorktreesByProject = new Map()
     globalUpsertedSessions.length = 0
   })
@@ -789,6 +810,28 @@ describe("moveSessionToDirectory", () => {
     })
     expect(worktreeMetadataCalls.at(-1)?.metadata?.path).toBe("/destination")
     expect(queueMoves).toEqual([{ sessionId: "session-a", directory: "/destination" }])
+    expect(tabMoves).toEqual([{ sessionId: "session-a", directory: "/destination" }])
+    expect(folderMoves).toEqual([{ sessionId: "session-a", directory: "/destination", worktree: "/destination" }])
+  })
+
+  test("an event-applied move of a session no open folder lists still moves its attachment, folders and tabs", async () => {
+    // SAFETY: test fixture; only the worktree path and branch are read.
+    const worktree = { path: "/destination", projectDirectory: "/repo", branch: "feature", label: "feature" } as WorktreeMetadata
+    availableWorktreesByProject = new Map([["/repo", [worktree]]])
+    // SAFETY: test fixture; the action reads id, title and directory.
+    globalActiveSessions = [{ id: "session-a", title: "Elsewhere", directory: "/destination" } as Session]
+    const destination = createStore({})
+    const childStores = createChildStores([["/destination", destination]])
+    const { adoptSessionMove, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/other")
+
+    adoptSessionMove("session-a", "/source", "/destination")
+
+    expect(destination.getState().session[0]?.id).toBe("session-a")
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-a", directory: "/destination" }])
+    expect(worktreeMetadataCalls.at(-1)?.metadata?.path).toBe("/destination")
+    expect(folderMoves).toEqual([{ sessionId: "session-a", directory: "/destination", worktree: "/destination" }])
+    expect(tabMoves).toEqual([{ sessionId: "session-a", directory: "/destination" }])
   })
 
   test("an event-applied move out of a worktree clears the attachment", async () => {

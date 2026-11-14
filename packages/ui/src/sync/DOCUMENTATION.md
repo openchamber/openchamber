@@ -478,7 +478,17 @@ sidebar and the session switcher read the global store and the attachment, so
 neither may wait for the next poll; the attachment outranks the session record
 in grouping, so leaving it behind keeps a session under the worktree it left.
 The global upsert also protects the correct directory from a poll response
-that predates the move.
+that predates the move. The header tab and the sidebar folders follow in the
+same step (`followSessionTabMove`, the folders store's `followSessionMove`):
+both are kept per project root, worktree or space, and the place the session
+left would keep listing it. A session no loaded store lists (a folder this
+client never opened) is still followed: `handleEvent` reads its global record's
+directory before the event patches it, and when no store gave the move, that
+directory is the source (`globalSessionMove`). `adoptSessionMove` then works
+on the global record, which the event already moved. Without it the
+attachment, routing, open chat, queue, tab and folders all stayed at the
+source. A record that already holds the destination, as after this client's
+own move, gives no second move.
 
 Opening a session (`syncSession`) and pending-form recovery
 (`recoverPendingQuestions`) resolve their directory through

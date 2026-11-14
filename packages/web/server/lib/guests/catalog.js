@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
+import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolvePageMobile, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
   toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, toPublicWaits, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
@@ -228,6 +228,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.size !== undefined) {
     guest.entrySize = panel.size;
   }
+  // The phone shows the panel page (and what reuses it) only on this opt-in.
+  if (panel.entry && panel.mobile === true) {
+    guest.entryMobile = true;
+  }
   const backgroundEntry = parsed.manifest.contributes.background?.entry;
   if (backgroundEntry) {
     if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
@@ -271,6 +275,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     guest.pageEntry = pageEntry;
     const page = parsed.manifest.contributes.page;
     if (page !== true && page?.title) guest.pageTitle = page.title;
+    if (resolvePageMobile(parsed.manifest.contributes)) guest.pageMobile = true;
   }
   // The Work Status section is checked like any other entry, and may be the
   // package's only frame. A source section has no frame: the host reads it
@@ -474,6 +479,9 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (typeof guest.entrySize === 'number') {
     row.entrySize = guest.entrySize;
   }
+  if (guest.entryMobile === true) {
+    row.entryMobile = true;
+  }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
   }
@@ -496,6 +504,7 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   const attach = resolveAttachMode(guest.attach);
   if (guest.pageEntry) row.pageEntry = guest.pageEntry;
   if (guest.pageTitle) row.pageTitle = guest.pageTitle;
+  if (guest.pageMobile === true) row.pageMobile = true;
   if (guest.statusEntry) row.statusEntry = guest.statusEntry;
   if (guest.statusSource) row.statusSource = { path: guest.statusSource.path, interval: guest.statusSource.interval };
   if (guest.statusTitle) row.statusTitle = guest.statusTitle;

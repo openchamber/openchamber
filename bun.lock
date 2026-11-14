@@ -90,7 +90,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -128,7 +128,7 @@
     },
     "packages/sdk": {
       "name": "@openchamber/sdk",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "bin": {
         "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
         "openchamber-guest-check": "./scripts/check-guest.ts",
@@ -139,7 +139,7 @@
     },
     "packages/sdk/examples/agent-desk": {
       "name": "@openchamber/example-agent-desk",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
         "@openchamber/sdk": "workspace:*",
       },
@@ -234,7 +234,7 @@
     },
     "packages/sdk/examples/tools-only": {
       "name": "@openchamber/example-tools-only",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "dependencies": {
         "@openchamber/sdk": "workspace:*",
       },
@@ -255,7 +255,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -370,7 +370,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode/client": "2.2.7",
@@ -393,7 +393,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "bin": {
         "openchamber": "./bin/cli.js",
       },

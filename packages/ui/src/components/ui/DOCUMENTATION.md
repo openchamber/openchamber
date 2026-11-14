@@ -37,6 +37,10 @@ This folder owns runtime-independent controls and their Base UI integration, inc
   (`lifecycle: 'all'`) and lists a hit only when its folder passes the session
   admission filter. A hit is marked archived when the archived-session cache
   has its session; the active cache clears a stale mark.
+- A second request asks for archived conversations alone
+  (`lifecycle: 'archived'`). Its hits that the first request has not listed
+  follow the preview's three, three at most, and in "Show all" form an Archived
+  group with its own paging.
 - An archived session or message hit opens through `openSessionLink`, which
   selects the session and leaves it archived.
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
@@ -80,6 +84,16 @@ a search that found nothing gave no hint that the answer sat in the archive,
 and the setting brought typed flags, a Filters menu and a status line to
 explain why results were missing. A separate, short group keeps archived rows
 from crowding active ones without anything to configure.
+
+### Why archived message hits get a request of their own
+
+Hits come newest first, and archived conversations are usually the oldest: in
+one list they sat pages below every active hit, and the preview of three never
+showed one. The first request still asks for every lifecycle, so hits of
+unknown lifecycle stay listed; the archived request only adds what that list
+has not reached, and an archived hit the list reaches later is shown there
+once. A server that ignores the lifecycle parameter answers the archived
+request with unmarked hits, and the palette then drops that answer whole.
 
 ### Why a message hit of unknown lifecycle is shown as active
 
