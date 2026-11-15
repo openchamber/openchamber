@@ -32,10 +32,11 @@ const mockUsage = (rateLimit) => {
 
 describe('Codex quota windows', () => {
   it.each([
-    { balance: 62500, unlimited: false, expected: '62500' },
-    { balance: '62500.00', unlimited: false, expected: '62500' },
-    { balance: 12.3456, unlimited: false, expected: '12.3456' },
-    { balance: '12.3456', unlimited: false, expected: '12.3456' },
+    { balance: 62500, unlimited: false, expected: '62,500' },
+    { balance: '62500.00', unlimited: false, expected: '62,500' },
+    { balance: 12.3456, unlimited: false, expected: '12.3' },
+    { balance: '12.3456', unlimited: false, expected: '12.3' },
+    { balance: 38538.5254395, unlimited: false, expected: '38,538.5' },
     { balance: 0, unlimited: false, expected: '0' },
     { balance: null, unlimited: true, expected: 'Unlimited' },
     { balance: 62500, unlimited: true, expected: 'Unlimited' },
