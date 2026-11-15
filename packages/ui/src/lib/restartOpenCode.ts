@@ -11,7 +11,6 @@ export async function restartOpenCodeWithFeedback(t: TranslateFn): Promise<void>
   try {
     await reloadOpenCodeConfiguration({
       message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-      mode: 'projects',
       scopes: ['all'],
     });
   } catch (error) {
