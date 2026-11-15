@@ -167,6 +167,7 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
         bridge?.registerPluginInstance(RuntimeWebSocketPlugin())
         bridge?.registerPluginInstance(MobileDevTunnelPlugin())
+        bridge?.registerPluginInstance(KeepAwakePlugin())
         restrictBridgeToMainFrame()
     }
 
