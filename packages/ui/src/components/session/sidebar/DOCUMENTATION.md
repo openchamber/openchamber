@@ -300,8 +300,8 @@ no Shift.
   always shown, since there is no hover to reveal it: in the slot of a
   one-line row, over the second line's first icon of a two-line row, in a
   thumb-sized target. The live state sits on the right before the time on
-  every row, and the marks before it come in the desktop's order (the goal,
-  the PR, the requests waiting on the user, the pin, the done hint). No row
+  every row, and the marks before it come in the desktop's order (the done
+  hint, the goal, the PR, the requests waiting on the user, the pin). No row
   shows a date, as on the
   desktop: the list is ordered by recency; a turn's duration shows while it
   runs and until it is read.
@@ -897,8 +897,9 @@ chevron, while its saved collapse stays and its delete dialog counts the members
 - A detailed zone row has two lines of fixed height (20px and 16px). An empty
   second line is omitted; a project icon, branch, goal, linked reference,
   waiting request or expansion chevron keeps it visible, and an extension's
-  mark never does. The first holds the title and the action indicator, pin, done hint,
-  status icon and time; hover actions cover that cluster. The second opens
+  mark never does. The first holds the title and the done hint, action indicator, pin,
+  status icon and time; hover actions cover that cluster. The done hint comes and
+  goes, so it opens the cluster: the marks that stay keep their place at the row's end. The second opens
   with the project's icon (and its name, with several projects) and holds the
   branch (or the space's name) and the state cluster: goal glyph, PR (or the zombie warning), extension marks,
   permission/question badges. It shows no provider logo: the model's provider says nothing about
@@ -1255,7 +1256,7 @@ rest it is as quiet as the button was.
   state (running kind, unread, the move/rename spinner) sits on the right
   before the time. With the state in the slot a running worktree read as a
   chat, its branch mark gone (maintainer, 2026-10-26). Session rows use the
-  one-line form of `SessionTimelineRowBody`: pin, done hint, the live state
+  one-line form of `SessionTimelineRowBody`: done hint, pin, the live state
   and, while a turn runs or until it is read, the turn's duration on the
   right. No row shows a date:
   every list is ordered by recency and the whole-row tooltip has the time.
