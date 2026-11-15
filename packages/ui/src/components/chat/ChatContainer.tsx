@@ -1517,7 +1517,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // Assigned during render: the entry restore runs in a layout effect of
     // this same commit, before passive effects could update the ref.
     const controllerLoadHistoryUntilMessage = timelineController.loadHistoryUntilMessage;
-    loadHistoryUntilMessageRef.current = (messageId, maxBatches) => controllerLoadHistoryUntilMessage(messageId, { maxBatches });
+    // The reader sits at the end while this search loads the history above
+    // them, which is when the history trim cuts it: the search holds the
+    // history as a reader browsing it does, or a cut would send it back to
+    // the start.
+    loadHistoryUntilMessageRef.current = async (messageId, maxBatches) => {
+        const release = currentSessionId && effectiveSessionDirectory
+            ? messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'browsing')
+            : null;
+        try {
+            return await controllerLoadHistoryUntilMessage(messageId, { maxBatches });
+        } finally {
+            release?.();
+        }
+    };
     const chatQuoteHighlights = useChatQuoteHighlightStore();
     const loadQuoteSource = React.useCallback(async (messageId: string): Promise<boolean> => {
         return loadQuoteSourceMessage(messageId, {

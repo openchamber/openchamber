@@ -153,6 +153,9 @@ export interface MessageListHandle {
     // estimate), `aligned` when it already sits there, `missing` when the
     // message is not in the loaded timeline.
     alignViewportAnchor: (anchor: MessageViewportAnchor) => ViewportAnchorAlignment;
+    // Whether the message has a row. A loaded reply has none while the prompt
+    // that opens its turn is still in unloaded history.
+    hasMessageRow: (messageId: string) => boolean;
     holdViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => void;
     isHistoryVirtualized: () => boolean;
     scrollToBottom: () => void;
@@ -1507,6 +1510,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             restoreViewportAnchor: (anchor) => alignViewportAnchor(anchor) !== 'missing',
 
             alignViewportAnchor,
+
+            hasMessageRow: (messageId) => messageIndexMap.has(messageId),
 
             scrollToBottom: () => {
                 const list = listRef.current;
