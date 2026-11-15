@@ -343,9 +343,20 @@ jobs:
               echo "Fixes #${EXISTING_NUMBER}"
             fi
           } > "${pr_body}"
-          pr_url=$(gh pr create --base main --head "${branch}" \
+          if ! pr_url=$(gh pr create --base main --head "${branch}" \
             --title "chore(deps): update opencode to ${NEW_REV:0:12}" \
-            --body-file "${pr_body}")
+            --body-file "${pr_body}" 2>&1); then
+            echo "gh pr create failed: ${pr_url}"
+            if echo "${pr_url}" | grep -qiE "not permitted to create|createPullRequest|not authorized to create"; then
+              msg="The \`opencode-update\` workflow validated opencode \`${NEW_REV}\` (\`nix build .#openchamber\` and \`bun run test\` passed) and pushed branch \`${branch}\`, but could not open a PR because the workflow token is not permitted to create pull requests (GitHub setting \`Allow GitHub Actions to create and approve pull requests\` is disabled, or equivalent policy). Run: ${RUN_URL}"
+            else
+              msg="The \`opencode-update\` workflow validated opencode \`${NEW_REV}\` (\`nix build .#openchamber\` and \`bun run test\` passed) and pushed branch \`${branch}\`, but \`gh pr create\` failed. See run log for details: ${RUN_URL}"
+            fi
+            if [ -n "${EXISTING_NUMBER}" ]; then
+              gh issue comment "${EXISTING_NUMBER}" --body "${msg}" || true
+            fi
+            exit 1
+          fi
           pr_number="${pr_url##*/}"
           echo "Opened PR #${pr_number}: ${pr_url}"
           merged="false"
@@ -356,11 +367,6 @@ jobs:
           elif auto_out=$(gh pr merge "${pr_number}" --auto --merge 2>&1); then
             echo "Direct merge was refused; auto-merge enabled for PR #${pr_number}."
           else
-            # Neither merge path is available to the workflow token (for
-            # example if branch protection is added later). The update itself
-            # succeeded and is validated, so hand the PR over visibly instead
-            # of failing the run: comment that it is ready for a privileged
-            # merge. Any other publish error still fails the step.
             echo "${merge_out}"
             echo "${auto_out}"
             if echo "${merge_out}${auto_out}" | grep -qiE "not authorized|not allowed|protected|permission"; then
