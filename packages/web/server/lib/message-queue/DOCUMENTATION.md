@@ -151,15 +151,9 @@ persisted "sending" flag would strand a message forever.
    will never complete, so a restored queue would wait on it forever. A reply
    with no `created` time still blocks. A failed fetch is unknown, never idle:
    the tick re-arms with backoff.
-   The turn must also be over for the session's subagents: a parent idles
-   while a background subagent works and runs again when OpenCode hands the
-   result back. While `../opencode/session-activity.js` finds a running descendant
-   the head waits (the rerun's idle event re-arms it, a 5 s recheck covers a
-   missed one); a failed check is unknown and backs off like the rest.
-   The descendant check follows live active sessions through at most 8 parent
-   links, including idle intermediate subagents; a deeper chain counts as
-   unrelated, as in the UI. Unreadable lineage, cycles and the shared fetch
-   deadline keep the queue held with the existing retry policy. It does not scan historical child pages.
+   Background work does not hold the head: a parent idle while its
+   background subagents or commands run gets the next queued message, the
+   same as a message the user sends from the composer then.
 5. The head is marked in flight (broadcast), then sent. The captured model and
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
@@ -201,6 +195,15 @@ persisted "sending" flag would strand a message forever.
 6. The next item goes out after the next busy → idle cycle.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
+
+### Why background work does not hold the queue
+
+The queue used to wait for a session's running subagents, treating the
+parent's idle as a pause in one turn. Users read the idle parent as free: the
+composer sends to it directly at that point, while a message queued a moment
+earlier sat until every subagent finished. Delivering on the parent's own idle
+keeps both paths the same; OpenCode hands the background result back to the
+session whether or not a new turn started meanwhile.
 
 ## Held delivery
 
