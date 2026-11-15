@@ -200,6 +200,18 @@ sherpa's default of 128 generated tokens can cut off a 25 s segment of fast
 speech. With 512, 25 s segments of English and Ukrainian speech decoded in
 full.
 
+### Why engine threads follow the CPU quota and not only the core count
+
+The worker is its own process and exits after its idle TTL, so a decode can use
+the host's cores without slowing the server's event loop: on a 32-core host a
+7.4 s Parakeet clip decoded in 409 ms at 2 threads and ~200 ms at 8. The count
+is the CPUs the process may run on, capped at 8 (`engine-threads.js`).
+`availableParallelism()` alone reports the affinity mask, not a Linux cgroup
+CPU quota, so a container limited to 2 CPUs on a many-core host would run 8
+threads and be throttled; the quota bounds the count too. When a Linux host's
+quota cannot be read, the worker keeps the old 2 threads. The memory figures in
+this document were measured at 2 threads.
+
 ### Why retired models are deleted on startup
 
 A model removed from the catalog (`RETIRED_LOCAL_MODEL_DIRS`) no longer shows
