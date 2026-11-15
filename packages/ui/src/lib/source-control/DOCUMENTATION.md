@@ -188,18 +188,19 @@ is gone.
 
 `accountUsableByIdentity` decides which listed accounts count. The server uses
 a provider's CLI login for Git transport only where the descriptor says so
-(`auth.cliTransport`: the gh CLI), and only while it is the provider's active
-account in Integrations, so the identity editor offers it, and an identity
-naming it counts as connected, only while that account is current. The OAuth
-account and the CLI account of the same person are separate options told apart
-by their source label. An identity that names the CLI account while it is not
-in use, disabled or signed out is not offered. `unavailableAccountReason` picks
-its Git Settings note: switch to the CLI account in Integrations
-(`cliAccountInactive`) while no CLI account is in use, else `accountGone`,
-since a CLI login in use as another person is not fixed by switching. A CLI
-login of a provider without `cliTransport` (the glab login) is never offered:
-Git transport reads only the credentials OpenChamber stores. The account
-labels name the provider by its descriptor's `label`.
+(`auth.cliTransport`: the gh CLI), and only while that login is usable there:
+the account layer states it per account (`usable`), because one host can hold
+several gh logins at once and each is a credential of its own. An account from a
+server that does not state `usable` keeps the older rule and counts only while
+it is current. The OAuth account and the CLI account of the same person are
+separate options told apart by their source label. An identity that names a CLI
+login the server does not call usable, or one disabled or signed out, is not
+offered. `unavailableAccountReason` picks its Git Settings note: switch to the
+CLI account in Integrations (`cliAccountInactive`) while no CLI account is
+usable, else `accountGone`, since a CLI login in use as another person is not
+fixed by switching. A CLI login of a provider without `cliTransport` (the glab
+login) is never offered: Git transport reads only the credentials OpenChamber
+stores. The account labels name the provider by its descriptor's `label`.
 
 An identity is complete when it has a signature and a way to push:
 `isCompleteIdentity` accepts `account` with an account, a managed SSH key,

@@ -420,6 +420,18 @@ describe('buildManagedAccountOptions for GitHub', () => {
     const options = buildManagedAccountOptions(identity, github, [{ ...oauth, current: true }, gh(false)], sourceLabel);
     expect(options.map((option) => option.reference.accountId)).toEqual([oauth.id]);
   });
+
+  test('offers every gh login the host lists as usable, not only the one in use', () => {
+    // A host gh is signed in to twice: the switch is on, and both logins are
+    // usable, while `current` names the one an unbound use falls back to.
+    const work = { ...gh(false), id: 'github.com#cli:10', credentialId: 'github.com#cli:10', providerUserId: 'github.com#10', usable: true };
+    const options = buildManagedAccountOptions(identity, github, [{ ...oauth, current: true }, { ...gh(true), usable: true }, work], sourceLabel);
+    expect(options.map((option) => option.reference.accountId)).toEqual([
+      oauth.id,
+      'github.com#cli:9',
+      'github.com#cli:10',
+    ]);
+  });
 });
 
 describe('accountUsableByIdentity', () => {
@@ -428,6 +440,16 @@ describe('accountUsableByIdentity', () => {
     expect(accountUsableByIdentity({ source: 'cli', current: false }, true)).toBe(false);
     expect(accountUsableByIdentity({ source: 'oauth', current: false }, true)).toBe(true);
     expect(accountUsableByIdentity({ source: 'cli', current: true }, false)).toBe(false);
+  });
+
+  test('a server that says which accounts are usable is believed over `current`', () => {
+    // A gh host with several logins: each usable one can answer, though only
+    // one of them is `current`. A server that says nothing keeps the old rule,
+    // which the case above covers.
+    expect(accountUsableByIdentity({ source: 'cli', current: false, usable: true }, true)).toBe(true);
+    expect(accountUsableByIdentity({ source: 'cli', current: true, usable: false }, true)).toBe(false);
+    // A provider that does not use its CLI for transport never does.
+    expect(accountUsableByIdentity({ source: 'cli', current: false, usable: true }, false)).toBe(false);
   });
 
 });
@@ -441,6 +463,9 @@ describe('unavailableAccountReason', () => {
     expect(unavailableAccountReason(ghBound, [{ source: 'oauth', current: true }], true)).toBe('cli-not-in-use');
     // gh is in use, as another person: switching in Integrations cannot help.
     expect(unavailableAccountReason(ghBound, [{ source: 'cli', current: true }], true)).toBe('gone');
+    // A host with several usable logins where the bound one is not among them:
+    // the switch is on, so switching in Integrations still cannot help.
+    expect(unavailableAccountReason(ghBound, [{ source: 'cli', current: false, usable: true }], true)).toBe('gone');
   });
 
   test('any other account is gone', () => {
