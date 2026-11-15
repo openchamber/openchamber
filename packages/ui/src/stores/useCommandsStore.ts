@@ -126,7 +126,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const COMMANDS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_COMMANDS_CACHE_KEY = '__default__';
 const commandsLastLoadedAt = new Map<string, number>();
-const commandsLoadInFlight = new Map<string, Promise<boolean>>();
+const commandsLoadInFlight = new Map<string, { promise: Promise<boolean>; invalidated: boolean }>();
 let commandsGeneration = 0;
 const commandReadControllers = new Set<AbortController>();
 
@@ -153,7 +153,10 @@ const getCommandsCacheKey = (directory: string | null): string => {
 };
 
 export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
+  const cacheKey = getCommandsCacheKey(directory);
+  commandsLastLoadedAt.delete(cacheKey);
+  const inFlight = commandsLoadInFlight.get(cacheKey);
+  if (inFlight) inFlight.invalidated = true;
 };
 
 const buildCommandsSignature = (commands: Command[]): string => {
@@ -381,10 +384,12 @@ export const useCommandsStore = create<CommandsStore>()(
 
           const inFlight = commandsLoadInFlight.get(cacheKey);
           if (inFlight) {
-            return inFlight;
+            return inFlight.promise;
           }
 
           const generation = commandsGeneration;
+          const entry = { promise: Promise.resolve(false), invalidated: false };
+          const isCurrent = () => generation === commandsGeneration && !entry.invalidated;
           const request = (async () => {
             set({ isLoading: true });
             // Only this directory can supply the comparison baseline. The mirror
@@ -400,19 +405,19 @@ export const useCommandsStore = create<CommandsStore>()(
                 // Ensure the list is scoped to the same directory we use for config source detection.
                 // v2 keeps skills in their own catalog, so every command here is a real command file.
                 const commands = await readCommandMetadata(generation, (signal) => opencodeClient.listCommands(directory, signal));
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
 
                 // One request answers every entry; a server without that
                 // route (an older one, the VS Code bridge) is asked per command.
                 const entries = commands.length > 0
                   ? await readCommandMetadata(generation, (signal) => readCommandEntries(commands.map((cmd) => cmd.name), directory, signal))
                   : new Map<string, CommandEntityEnvelope>();
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
                 const commandsWithScope = entries
                   ? commands.map((cmd) => withCommandEntry(cmd, entries.get(cmd.name)))
                   : await Promise.all(
                     commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
-                      if (generation !== commandsGeneration) return cmd;
+                      if (!isCurrent()) return cmd;
                       try {
                         const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
                           signal,
@@ -429,13 +434,13 @@ export const useCommandsStore = create<CommandsStore>()(
                           return withCommandEntry(cmd, await response.json() as CommandEntityEnvelope);
                         }
                       } catch (err) {
-                        if (generation !== commandsGeneration) return cmd;
+                        if (!isCurrent()) return cmd;
                         console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
                       }
                       return cmd;
                     }))
                   );
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
                 const nextCommands = previousCommands !== undefined && previousSignature === nextSignature
@@ -451,29 +456,32 @@ export const useCommandsStore = create<CommandsStore>()(
                   }
                   return next;
                 });
-                commandsLastLoadedAt.set(cacheKey, Date.now());
+                // Cold locations can answer before OpenCode has built the catalog.
+                if (nextCommands.length > 0) commandsLastLoadedAt.set(cacheKey, Date.now());
+                else commandsLastLoadedAt.delete(cacheKey);
                 return true;
               } catch (error) {
-                if (generation !== commandsGeneration) return false;
+                if (!isCurrent()) return false;
                 lastError = error;
                 const waitMs = 200 * (attempt + 1);
                 await new Promise((resolve) => setTimeout(resolve, waitMs));
               }
             }
 
-            if (generation !== commandsGeneration) return false;
+            if (!isCurrent()) return false;
             console.error("Failed to load commands:", lastError);
             // Keep the current directory cache, including edits made during the load.
             set({ isLoading: false });
             return false;
           })();
 
-          commandsLoadInFlight.set(cacheKey, request);
-          try {
-            return await request;
-          } finally {
-            if (commandsLoadInFlight.get(cacheKey) === request) commandsLoadInFlight.delete(cacheKey);
-          }
+          entry.promise = request.finally(() => {
+            if (commandsLoadInFlight.get(cacheKey) === entry) commandsLoadInFlight.delete(cacheKey);
+          }).then((loaded) => (
+            generation === commandsGeneration && entry.invalidated ? get().loadCommands(directory) : loaded
+          ));
+          commandsLoadInFlight.set(cacheKey, entry);
+          return entry.promise;
         },
 
         createCommand: async (config: CommandConfig, requestedDirectory?: string | null) => {
