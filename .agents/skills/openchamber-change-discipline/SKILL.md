@@ -146,7 +146,8 @@ The document describes the module as it is now. When a decision changes, rewrite
 ## Completion Standard
 
 - Implement the behavior end to end, including rollback and cleanup.
-- Prove the changed behavior (*Proof*): the reproduction passes, and the report says what the proof did not cover.
+- Prove the changed behavior (*Proof*): the reproduction passes in every runtime the change has code of its own in.
+- No known problem is handed over. A case noticed on the way (a runtime that may differ, state that may not survive a reload, a server switch or eviction from cache) is run, and fixed when it breaks. Between several ways to fix something, pick the one that works and passes the checks, and show it; only a product decision goes to the maintainer. The report names what could not be run at all and the reason, which is a missing device or account and never a missing step.
 - Preserve unrelated changes encountered in shared files.
 - The owning `DOCUMENTATION.md` is true of the new code and has a decision entry for every non-obvious choice the change made; a new module that meets the bar in *Module Documentation* has its own document.
 - Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent.
