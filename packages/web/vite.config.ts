@@ -7,6 +7,9 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
 import { cacheReactBabel } from './vite-react-babel-cache';
 import { SHARE_DOCUMENT_FILE, shareDocumentPlugin } from './vite-share-document';
+import { localeSlicesPlugins } from './vite-locale-slices';
+import { oneByteChunksPlugin } from './vite-one-byte-chunks';
+import { preloadAppGraph } from './vite-preload-app-graph';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -83,6 +86,16 @@ export default defineConfig({
       },
     },
     themeJsonHmrPlugin(),
+    // Each locale dictionary gets only its own locale of the feature string files.
+    ...localeSlicesPlugins(),
+    // Chunks the browser can hold as one-byte text are written as ASCII.
+    oneByteChunksPlugin(),
+    preloadAppGraph({
+      appModule: path.resolve(__dirname, '../ui/src/main.tsx'),
+      document: 'index.html',
+      // The packaged desktop app's scheme (`UI_PROTOCOL` in packages/electron).
+      protocols: ['openchamber-ui:'],
+    }),
     // The renderer a shared ui page carries, as one script the chat inlines into the page.
     shareDocumentPlugin({
       uiSource: path.resolve(__dirname, '../ui/src'),

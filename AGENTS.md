@@ -84,6 +84,7 @@ implementation skills unless a specialized subsystem has to be interpreted.
 
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
 - Before every commit of source changes, `bun run check:changed` passes (`scripts/check-changed.mjs` says what it runs). Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
+- A correction becomes a check. When the maintainer or a reviewer corrects how code is written, the fix includes a lint rule (`tools/oxlint/openchamber`) or a test that catches the same thing next time, with the reason in the rule's message. A line in a skill is for what no check can decide.
 
 ## Pull Request Handoff
 
@@ -107,6 +108,10 @@ Where that decision is settled depends on who is working:
   The decision already happened off GitHub; no discussion thread and no link is
   expected on the pull request.
 - **Working as an outside contributor**: open a feature request and build only after the maintainer marks it `accepted`, as `CONTRIBUTING.md` (*Before you start*) describes; the pull request links it with `Fixes #N` or `Part of #N`. A pull request without that link is closed automatically.
+
+Decisions already made are in `.agents/skills/triage-issues/references/product-stances.md`;
+read it before proposing or building a feature, and add a line when the maintainer
+decides something that will come up again.
 
 When the call is unclear, ask before building. Deciding it silently is the one
 thing that is always wrong.

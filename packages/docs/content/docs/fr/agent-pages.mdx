@@ -1,0 +1,84 @@
+---
+title: Pages de l’agent
+description: Laissez un agent afficher des graphiques et des maquettes dans le chat, vous poser une question sur une page et envoyer une page à un collègue pour obtenir sa réponse.
+---
+
+# Pages de l’agent
+
+Un agent peut dessiner une page directement dans le chat : un graphique, un tableau, un diagramme, une maquette d’interface ou un court formulaire. Il peut vous y demander de choisir une option, et quand la réponse doit venir de quelqu’un d’autre, il peut envoyer la même page à un collègue avec un lien et un PIN.
+
+## Demander une page
+
+Parlez à l’agent en langage naturel. Par exemple :
+
+- « Montre-moi les trois options de mise en page sous forme de maquettes et laisse-moi en choisir une. »
+- « Mets les résultats des tests dans un graphique. »
+- « Demande-moi laquelle de ces migrations lancer en premier. »
+
+La page apparaît dans le chat, dans un cadre qui n’a pas accès à vos fichiers. **Ouvrir en plein écran** l’affiche en plus grand, et **Télécharger en HTML** en enregistre une copie.
+
+## Répondre sur une page
+
+Quand l’agent vous pose une question sur une page, le chat affiche **En attente de votre réponse sur la page**. Choisissez une option ou remplissez les champs, puis appuyez sur le bouton d’envoi de la page. L’agent reçoit votre réponse, et la page affiche votre choix.
+
+- **Refuser** indique à l’agent que vous ne choisirez pas. Il ne choisit pas à votre place.
+- Vous pouvez aussi répondre avec vos mots : écrivez dans le chat, et l’agent lit votre message.
+
+### Répondre plus tard
+
+L’agent n’a pas toujours besoin de vous attendre. Il peut afficher une page et continuer à travailler. La page reste ouverte jusqu’à votre réponse, même après la fin du tour de l’agent ou un redémarrage de l’app. Votre réponse arrive dans la session sur sa propre ligne et relance l’agent s’il était inactif.
+
+## Partager une page avec un collègue
+
+Quand la réponse doit venir de quelqu’un d’autre, par exemple un collègue ou un manager, demandez à l’agent de lui envoyer la page :
+
+- « Demande à Yulia et Denis lequel de ces deux designs ils préfèrent. »
+
+1. L’agent crée un lien par personne. Une carte sous son message liste chaque nom avec **Copier le lien** et **Copier le PIN**.
+2. Envoyez vous-même à chaque personne son lien et son PIN, dans la messagerie de votre choix.
+3. La personne ouvre le lien dans un navigateur, saisit le PIN et répond sur la page. Elle n’a pas besoin d’OpenChamber pour cela.
+4. Sa réponse revient dans la session qui a posé la question, avec une notification pour vous. L’agent la lit et poursuit.
+
+L’agent peut aussi partager une page que les gens lisent seulement, comme un rapport avec des tableaux et des graphiques. Elle n’a pas de formulaire, et aucune réponse ne revient.
+
+La carte indique quand chaque personne a ouvert la page et quand elle a répondu. **Ouvrir** dans la carte vous montre la page telle qu’elle la voit, et votre propre consultation ne compte pas comme une ouverture de sa part.
+
+### Fonctionnement des liens partagés
+
+- Il n’y a rien à activer : une page n’atteint personne tant que vous n’envoyez pas le lien à quelqu’un.
+- Chaque personne répond une seule fois, et la réponse est définitive.
+- Un lien fonctionne jusqu’à deux jours ouvrés, sans compter le samedi ni le dimanche. Demandez une durée plus courte à l’agent si besoin.
+- **Annuler le lien** dans le menu d’une personne sur la carte retire son lien.
+- Trop de PIN erronés verrouillent le lien.
+- OpenChamber ne vérifie pas qui répond : toute personne qui a le lien et le PIN peut répondre. Le nom sur la carte est celui que vous avez donné à l’agent.
+- La page et la réponse circulent chiffrées. Le service de partage ne garde que la copie chiffrée et la supprime dès que la réponse vous parvient. Sans son PIN, le lien n’ouvre rien.
+- Les pages passent par le service de partage d’OpenChamber, ou par votre propre relais si vous en configurez un dans [Relais privé](/fr/private-relay/).
+
+## Ouvrir une page qu’on vous a partagée
+
+Avec OpenChamber, vous pouvez ouvrir une page partagée dans l’app, pour que votre propre agent la lise et vous aide à décider :
+
+1. Collez le lien dans le champ de saisie du chat. Il devient une puce avec un champ PIN.
+2. Saisissez le PIN, écrivez votre question et envoyez. L’agent reçoit le contenu de la page avec votre message, marqué comme contenu d’une autre personne.
+3. Sous votre message, **Ouvrir** affiche la page dans le panneau latéral, ou en plein écran sur un téléphone. Répondez avec le bouton d’envoi de la page.
+
+L’agent peut suggérer une réponse, mais vous seul pouvez l’envoyer. Le lien et le PIN n’atteignent jamais le modèle.
+
+**Pages partagées** dans le panneau latéral liste toutes les pages que vous avez reçues, des plus récentes aux plus anciennes, avec leur état. Sur un téléphone, c’est un onglet du tiroir de l’espace de travail. **Ajouter au chat** sur une page ouverte la joint au message que vous écrivez.
+
+## Activer ou désactiver
+
+Les pages de l’agent sont activées par défaut. Pour les désactiver, ouvrez **Paramètres → Général → Outils OpenChamber** et désactivez **Graphiques et maquettes**.
+
+## À garder en tête
+
+- Les pages de l’agent nécessitent le propre serveur OpenCode d’OpenChamber, comme l’[Outil de contrôle pour les agents](/fr/agent-control-tool/).
+- Dans l’extension VS Code, les liens partagés restent du texte brut, et une page à laquelle l’agent vous demande de répondre plus tard s’affiche sans contrôles de réponse. Répondez-y dans l’app desktop ou web.
+- En mode entreprise, le partage ne fonctionne que via le relais propre à votre organisation. Sans relais, le partage n’est pas proposé à l’agent du tout. Voir [Sécurité](/fr/security/).
+
+## Voir aussi
+
+- [Outil de contrôle pour les agents](/fr/agent-control-tool/)
+- [Relais privé](/fr/private-relay/)
+- [Notifications](/fr/notifications/)
+- [Sécurité](/fr/security/)

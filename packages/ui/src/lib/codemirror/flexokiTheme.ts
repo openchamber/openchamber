@@ -10,7 +10,7 @@ import { resolveSyntaxTokens } from '../theme/syntax';
 
 export function createFlexokiCodeMirrorTheme(
   theme: Theme,
-  // When syntax colors are provided elsewhere (e.g. the Shiki decoration
+  // When syntax colors are provided elsewhere (e.g. the code highlight
   // extension), pass `{ syntaxColors: false }` to keep only the editor UI theme
   // (gutters, selection, cursor) and avoid a competing token color source.
   options?: { syntaxColors?: boolean; fontSize?: number },

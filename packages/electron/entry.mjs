@@ -9,10 +9,14 @@
  */
 
 import { app, protocol } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { plainChromeUserAgent } from './browser-panel-security.mjs';
 import { enableMainProcessCompileCache } from './compile-cache.mjs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
+import { configureDevDataDir } from './dev-data-dir.mjs';
+import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
 import {
   APP_USER_MODEL_ID,
   UI_PROTOCOL,
@@ -41,6 +45,8 @@ if (app.getVersion() !== versionBeforeRename) {
 }
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
+  // Chromium's Linux speech synthesis backend is opt-in and uses libspeechd.
+  app.commandLine.appendSwitch('enable-speech-dispatcher');
 }
 // Shared and service workers ignore the browser panel's session user agent and
 // use this fallback. Left at Electron's default, a page saw plain Chrome in its
@@ -81,6 +87,16 @@ if (shouldIgnoreLoopbackConnectionLimit({
 // that tab ran its timers at an eighth of the speed while out of sight. The
 // user's hidden tabs keep their timer throttling, so they stay cheap.
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Caps the young generation of every renderer's JS heap at 4 MB per half
+// (V8 grows it to several times that on a desktop). A streaming reply fills
+// whatever it is given with short-lived objects, and what the heap gives back
+// afterwards still counts against the process once macOS has compressed it,
+// so the window's footprint followed its peak: after an agent turn it read
+// about 300 MB with the cap and about 370 MB without, at no more CPU. A
+// `--js-flags` given on the command line wins, for measuring other values.
+if (!app.commandLine.hasSwitch('js-flags')) {
+  app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=4');
+}
 // Development only: lets a debugger or an agent attach to the dev window over
 // CDP. Chromium binds the port to loopback.
 const devRemoteDebuggingPort = String(process.env.OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT || '').trim();
@@ -120,6 +136,26 @@ app.whenReady().then(async () => {
     await createEarlyWindow().whenShown;
   }
   if (shellEnvironmentProbeBlocksMainThread) void startShellEnvironmentProbe().catch(() => {});
+  const hmrStartFile = process.env.OPENCHAMBER_ELECTRON_HMR_START_FILE;
+  if (!app.isPackaged && hmrStartFile) {
+    const deadline = Date.now() + 75_000;
+    while (!fs.existsSync(hmrStartFile)) {
+      if (Date.now() >= deadline) throw new Error('Timed out waiting for the HMR server to start');
+      await delay(50);
+    }
+    const data = JSON.parse(fs.readFileSync(hmrStartFile, 'utf8'));
+    if (!data.directory?.trim()) throw new Error('Invalid HMR data directory');
+    if (data.injected) assignInjectedEnv(process.env, { OPENCHAMBER_DATA_DIR: data.directory });
+    else process.env.OPENCHAMBER_DATA_DIR = data.directory;
+    delete process.env.OPENCHAMBER_ELECTRON_HMR_START_FILE;
+  }
+  if (!app.isPackaged && !process.env.OPENCHAMBER_DATA_DIR?.trim()) {
+    const shellEnv = await startShellEnvironmentProbe();
+    if (shellEnv?.OPENCHAMBER_DATA_DIR?.trim()) {
+      process.env.OPENCHAMBER_DATA_DIR = shellEnv.OPENCHAMBER_DATA_DIR;
+    }
+    configureDevDataDir(process.env, false);
+  }
   return import('./main.mjs');
 }).catch((error) => {
   console.error('[electron] startup failed before the main module loaded:', error);

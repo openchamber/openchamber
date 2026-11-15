@@ -83,6 +83,8 @@ type DevServerCandidate = {
   readonly port: number;
   /** Present when a server announced this address itself. */
   readonly announced: boolean;
+  /** Process name from discovery, when available. */
+  readonly command?: string;
   /** The folder the process runs in, when discovery could tell. */
   readonly directory?: string;
 };
@@ -136,6 +138,7 @@ export const mergeDevServerCandidates = ({
         url: announcedUrl ?? server.url,
         port: server.port,
         announced: announcedUrl !== undefined,
+        command: server.command,
         directory: server.directory,
       };
     })

@@ -18,22 +18,48 @@ rendererWindow.close();
 
 type FormRequest = import('@/lib/opencode/model').FormRequest;
 type FormAnswer = import('@/sync/session-actions').FormAnswer;
-type Call = { kind: 'reply' | 'cancel'; sessionID: string; formID: string; answer?: FormAnswer };
+type Call = { kind: 'reply' | 'cancel' | 'send'; sessionID: string; formID: string; answer?: FormAnswer };
 
 let calls: Call[] = [];
 let pendingForms: FormRequest[] = [];
+// The memoized dock re-renders only when the store tells it the list changed.
+const pendingListeners = new Set<() => void>();
+const refreshPendingForms = (next: FormRequest[]) => {
+  pendingForms = next;
+  for (const listener of pendingListeners) listener();
+};
+const subscribePendingForms = (listener: () => void) => {
+  pendingListeners.add(listener);
+  return () => { pendingListeners.delete(listener); };
+};
 
 const actualSessionActions = await import('@/sync/session-actions');
 mock.module('@/sync/session-actions', () => ({
   ...actualSessionActions,
   replyToForm: async (sessionID: string, formID: string, answer: FormAnswer) => { calls.push({ kind: 'reply', sessionID, formID, answer }); },
   cancelForm: async (sessionID: string, formID: string) => { calls.push({ kind: 'cancel', sessionID, formID }); },
+  sendRecoveredFormAnswer: async (question: RecoveredQuestion) => { calls.push({ kind: 'send', sessionID: question.sessionID, formID: question.form.id }); },
 }));
+const recoverable = await import('@/sync/recoverable-questions');
+type RecoveredQuestion = import('@/sync/recoverable-questions').RecoveredQuestion;
+// The cards a question deferred on send leaves (#5391): the real recovery store decides them, so a
+// local dismissal closes them the way it does in the app.
+const deferredView = {
+  form: {},
+  part: { 'msg-ask': [{
+    id: 'tool-ask', sessionID: 'session-1', messageID: 'msg-ask', callID: 'call-1', tool: 'question', type: 'tool' as const,
+    state: { status: 'error' as const, input: {}, error: recoverable.DEFERRED_QUESTION_NOTE, errorType: 'tool.execution', time: { start: 1, end: 2 } },
+  }] },
+};
+const useDeferredQuestions = () => {
+  const recovery = recoverable.useRecoverableQuestionsStore();
+  return React.useMemo(() => recoverable.deriveRecoveredQuestions(deferredView, recovery, new Set(['session-1'])), [recovery]);
+};
 const actualSync = await import('@/sync/sync-context');
 mock.module('@/sync/sync-context', () => ({
   ...actualSync,
-  useScopedBlockingForms: () => pendingForms,
-  useRecoveredQuestions: () => [],
+  useScopedBlockingForms: () => React.useSyncExternalStore(subscribePendingForms, () => pendingForms),
+  useRecoveredQuestions: useDeferredQuestions,
   useSessions: () => [],
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -45,7 +71,8 @@ const { resolveFormsInChat } = await import('./formsInChat');
 const { I18nProvider } = await import('@/lib/i18n');
 const { dict: en } = await import('@/lib/i18n/messages/en');
 const { isWaitingPageRevealPending, pendingWaitingPageID, revealRequest, takeWaitingPageReveal } = await import('@/sync/request-reveal');
-const { resetFormDrafts } = await import('./formDrafts');
+const { formDraftScope, loadFormDraft, resetFormDrafts } = await import('./formDrafts');
+const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 
 const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'HTMLTextAreaElement', 'Event', 'CustomEvent', 'ResizeObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 
@@ -124,6 +151,7 @@ describe('questions in the chat', () => {
     calls = [];
     pendingForms = [question('form-1', 'Pick a color')];
     resetFormDrafts();
+    recoverable.resetRecoverableQuestions();
     dom = installDom();
     root = createRoot(dom.container);
   });
@@ -302,6 +330,124 @@ describe('questions in the chat', () => {
     await type(slot('A'), 'note');
     await click(button(slot('A'), en['chat.formCard.submit']));
     expect(calls).toEqual([{ kind: 'reply', sessionID: 'global', formID: 'form-global', answer: { color: 'blue', note: 'note' } }]);
+  });
+
+  // A snapshot refresh of the pending list (a reconnect or a directory
+  // snapshot) hands every surface a new object of the same form; a dock must
+  // not save what it holds over an answer typed elsewhere.
+  const noteOnly = (): FormRequest => ({ id: 'form-note', sessionID: 'session-1', title: 'A note', fields: [
+    { key: 'note', type: 'string', title: 'Note' },
+  ] });
+  const savedNote = () => loadFormDraft(formDraftScope({ id: 'form-note', sessionID: 'session-1' }, '/project'))?.values.note?.text;
+  const slot = (name: string) => {
+    const found = dom.container.querySelector<HTMLElement>(`[data-slot="${name}"]`);
+    if (!found) throw new Error(`Missing slot ${name}`);
+    return found;
+  };
+
+  test('two docks on one form keep the typed answer when the pending list is refreshed', async () => {
+    pendingForms = [noteOnly()];
+    // A chat pinned in the side panel and the main chat, both with the full dock.
+    const view = () => <>
+      <div data-slot="main"><FormDock sessionId="session-1" directory="/project" hidden={false} /></div>
+      <div data-slot="pinned"><FormDock sessionId="session-1" directory="/project" hidden={false} /></div>
+    </>;
+    await render(view());
+    await type(slot('main'), 'my answer');
+    expect(savedNote()).toBe('my answer');
+
+    await act(async () => refreshPendingForms([noteOnly()]));
+    expect(savedNote()).toBe('my answer');
+  });
+
+  test('a dock beside a card keeps the card\'s answer when the pending list is refreshed', async () => {
+    pendingForms = [noteOnly()];
+    // The transcript's card above, the full dock of an expanded composer below.
+    const view = () => <>
+      <div data-slot="card"><TranscriptForms sessionId="session-1" directory="/project" /></div>
+      <div data-slot="dock"><FormDock sessionId="session-1" directory="/project" hidden={false} /></div>
+    </>;
+    await render(view());
+    await type(slot('card'), 'card answer');
+    expect(savedNote()).toBe('card answer');
+
+    await act(async () => refreshPendingForms([noteOnly()]));
+    expect(savedNote()).toBe('card answer');
+  });
+
+  // VS Code and the mini chat switch runtimes without remounting the chat, and
+  // two runtimes can hold a form with the same id, session and directory.
+  test('a runtime switch starts the dock over from that runtime\'s draft', async () => {
+    const previousBaseUrl = getRuntimeApiBaseUrl();
+    const previousKey = getRuntimeKey();
+    const noteIn = (runtimeKey: string) => loadFormDraft(formDraftScope({ id: 'form-note', sessionID: 'session-1' }, '/project', runtimeKey))?.values.note?.text;
+    // The panel of the runtime switched away from may still be fading out
+    // above the new one.
+    const textbox = () => [...dom.container.querySelectorAll<HTMLTextAreaElement>('textarea')].at(-1);
+    const typeInShownPanel = async (text: string) => {
+      const target = textbox();
+      if (!target) throw new Error('Missing text box');
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(target, text);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+    try {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.example', runtimeKey: 'runtime-a' });
+      pendingForms = [noteOnly()];
+      await render(<FormDock sessionId="session-1" directory="/project" hidden={false} />);
+      await type(dom.container, 'answer for a');
+      expect(noteIn('runtime-a')).toBe('answer for a');
+
+      await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.example', runtimeKey: 'runtime-b' }));
+      await act(async () => refreshPendingForms([noteOnly()]));
+      expect(noteIn('runtime-b')).toBe('');
+      expect(noteIn('runtime-a')).toBe('answer for a');
+
+      expect(textbox()?.value).toBe('');
+      await typeInShownPanel('answer for b');
+      expect(noteIn('runtime-b')).toBe('answer for b');
+      expect(noteIn('runtime-a')).toBe('answer for a');
+
+      // Back on the first runtime, its own answer comes back.
+      await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.example', runtimeKey: 'runtime-a' }));
+      await act(async () => {});
+      const shown = [...dom.container.querySelectorAll<HTMLTextAreaElement>('textarea')].map((item) => item.value);
+      expect(shown).toContain('answer for a');
+      expect(noteIn('runtime-a')).toBe('answer for a');
+      expect(noteIn('runtime-b')).toBe('answer for b');
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: previousBaseUrl, runtimeKey: previousKey });
+    }
+  });
+
+  // A question deferred on send: dismissing its card closes it and its draft here, and sends nothing,
+  // so the agent never gets an answer the user did not give.
+  test('dismissing a deferred card in the dock or the chat closes it and sends nothing', async () => {
+    const deferred = (): FormRequest => ({ ...noteOnly(), id: 'form-deferred', metadata: { kind: 'question', tool: { messageID: 'msg-ask', id: 'tool-ask' } } });
+    const deferredNote = () => loadFormDraft(formDraftScope({ id: 'form-deferred', sessionID: 'session-1' }, '/project'))?.values.note;
+    for (const [surface, view, dismiss] of [
+      ['dock', <FormDock sessionId="session-1" directory="/project" hidden={false} />, en['chat.questionCard.dismiss']],
+      ['chat', <TranscriptForms sessionId="session-1" directory="/project" />, en['chat.formCard.cancel']],
+    ] as const) {
+      recoverable.resetRecoverableQuestions();
+      resetFormDrafts();
+      calls = [];
+      pendingForms = [];
+      recoverable.noteQuestionFormSnapshot('/project', [deferred()]);
+      await render(view);
+      expect(dom.container.textContent?.includes(en['chat.formCard.deferredNotice'])).toBe(true);
+      await type(dom.container, `${surface} draft`);
+      expect(deferredNote()?.text).toBe(`${surface} draft`);
+
+      await click(button(dom.container, dismiss));
+      expect(calls).toEqual([]);
+      expect(deferredNote()).toBeUndefined();
+      expect(recoverable.useRecoverableQuestionsStore.getState().outcomes.get('form-deferred')).toBe('dismissed');
+      // The dock's panel fades out through its exit animation, so the closed list is checked, not the DOM.
+      expect([surface, recoverable.deriveRecoveredQuestions(deferredView, recoverable.useRecoverableQuestionsStore.getState(), new Set(['session-1']))]).toEqual([surface, []]);
+      await render(null);
+    }
   });
 
   test('a chat pinned in the side panel keeps the full dock', () => {

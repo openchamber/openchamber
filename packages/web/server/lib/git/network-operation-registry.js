@@ -278,7 +278,7 @@ export function createNetworkOperationRegistry({
       completedSteps: [...completedSteps],
       finishedAt: now(),
       completion: cloneAndFreeze(completion),
-      child: undefined,
+      children: new Set(),
       executionPromise: undefined,
       cancellationListeners: new Set(),
       recovered: true,
@@ -316,7 +316,7 @@ export function createNetworkOperationRegistry({
   const blockForDurability = (entry) => {
     entry.state = 'outcome-unknown';
     entry.finishedAt = now();
-    entry.child = undefined;
+    entry.children.clear();
     const completion = {
       error: {
         code: 'OUTCOME_UNKNOWN',
@@ -355,9 +355,10 @@ export function createNetworkOperationRegistry({
       }
       return snapshot(entry);
     }
-    if (entry.child) {
-      try { cancelChild(entry.child); } catch {}
+    for (const child of entry.children) {
+      try { cancelChild(child); } catch {}
     }
+    entry.children.clear();
     const completionData = {};
     if (completion.error !== undefined) completionData.error = cloneAndFreeze(completion.error);
     if (completion.stepResults !== undefined) completionData.stepResults = cloneAndFreeze(completion.stepResults);
@@ -371,7 +372,7 @@ export function createNetworkOperationRegistry({
     const commit = () => {
       entry.state = completion.state;
       entry.finishedAt = now();
-      entry.child = undefined;
+      entry.children.clear();
       entry.completion = completionData;
       return snapshot(entry);
     };
@@ -414,18 +415,16 @@ export function createNetworkOperationRegistry({
     if (entry.state !== 'running' || !child || !(child.kill instanceof Function)) {
       throw registryError('INVALID_GIT_NETWORK_OPERATION_CHILD', 'Git network operation child is invalid');
     }
-    if (entry.child && entry.child !== child) {
-      throw registryError('GIT_NETWORK_OPERATION_CHILD_ATTACHED', 'Git network operation already has a child');
-    }
-    entry.child = child;
+    entry.children.add(child);
     if (entry.cancellationRequested && !allowAfterCancellation) {
       try { cancelChild(child); } catch {}
+      entry.children.delete(child);
     }
     return entry.cancellationRequested;
   };
   const detachChild = (operationId, child) => {
     const entry = getEntry(operationId);
-    if (entry.child === child) entry.child = undefined;
+    entry.children.delete(child);
   };
   const cancelLocal = (operationId) => {
     const entry = getEntry(operationId);
@@ -436,9 +435,10 @@ export function createNetworkOperationRegistry({
       try { listener(); } catch {}
     }
     entry.cancellationListeners.clear();
-    if (entry.child) {
-      try { cancelChild(entry.child); } catch {}
+    for (const child of entry.children) {
+      try { cancelChild(child); } catch {}
     }
+    entry.children.clear();
     if (entry.state === 'planned') return finish(operationId, plannedCancellation(entry, 'Git network operation was cancelled'));
     return snapshot(entry);
   };
@@ -499,7 +499,7 @@ export function createNetworkOperationRegistry({
       completedSteps: [],
       finishedAt: undefined,
       completion: undefined,
-      child: undefined,
+      children: new Set(),
       executionPromise: undefined,
       cancellationListeners: new Set(),
     };

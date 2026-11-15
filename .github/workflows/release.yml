@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_npm:
+        description: 'Skip npm publishing, for a rerun of a release whose packages are already on npm'
+        required: false
+        default: false
+        type: boolean
       finish_published_release:
         description: 'Finish a release whose macOS build failed: build and add only macOS, rebuild the Windows update manifests from the installers on the release, skip npm, Windows and Linux. Publishes only when everything succeeds'
         required: false
@@ -79,7 +84,7 @@ jobs:
 
   publish-npm:
     needs: create-release
-    if: ${{ github.event.inputs.finish_published_release != 'true' }}
+    if: ${{ github.event.inputs.finish_published_release != 'true' && github.event.inputs.skip_npm != 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

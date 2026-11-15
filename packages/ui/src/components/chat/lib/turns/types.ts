@@ -107,6 +107,7 @@ export interface TurnGroupingContext {
     turnId: string;
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
+    opensAnswerText?: boolean;
     /**
      * Text the turn's earlier assistant messages wrote, one entry per text
      * part, in order. Set on the last assistant message only, so the turn

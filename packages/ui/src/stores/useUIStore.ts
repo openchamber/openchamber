@@ -70,8 +70,11 @@ export type TimeFormatPreference = 'auto' | '12h' | '24h';
 type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 type DesktopWindowControlsPosition = 'left' | 'right';
 type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
+export type MobileKeepScreenAwake = 'off' | 'working' | 'always';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
+/** Chat column width: a reading column, a wider capped column, or the whole chat for the transcript. */
+export type ChatWidth = 'default' | 'wider' | 'full';
 export type SessionGoalChecker = 'classifier' | 'small-model';
 
 const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
@@ -1072,6 +1075,8 @@ interface UIStore {
   terminalLoginShells: TerminalShell[];
   /** A terminal or project action tab closes when its process exits; off keeps the exited output. */
   terminalCloseOnExit: boolean;
+  /** Starting a project action brings its terminal tab forward in the side panel. */
+  terminalOpenOnProjectAction: boolean;
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -1125,6 +1130,8 @@ interface UIStore {
   // Desktop dock badge showing the count of sessions with unseen activity (macOS).
   dockBadgeEnabled: boolean;
   alwaysShowScrollbars: boolean;
+  // Native phone app: keep the display on while the open session works, always, or never.
+  mobileKeepScreenAwake: MobileKeepScreenAwake;
   // An agent's question shows as a card at the end of the chat instead of
   // the dock above the composer. This device only.
   questionsInChat: boolean;
@@ -1168,6 +1175,7 @@ interface UIStore {
   agentKnowledgeToolEnabled: boolean;
   agentNotifyToolEnabled: boolean;
   agentUsageToolEnabled: boolean;
+  agentTerminalToolEnabled: boolean;
   agentImageToolEnabled: boolean;
   /** `provider/model` the image tool draws with; empty until the user picks one. */
   agentImageModel: string;
@@ -1217,7 +1225,7 @@ interface UIStore {
   enterToSend: boolean;
   enterToSendConfigured: boolean;
   mobileReturnKeySends: boolean;
-  wideChatLayoutEnabled: boolean;
+  chatWidth: ChatWidth;
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
@@ -1405,6 +1413,7 @@ interface UIStore {
   setTerminalShell: (shell: TerminalShell) => void;
   setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setTerminalCloseOnExit: (value: boolean) => void;
+  setTerminalOpenOnProjectAction: (value: boolean) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -1464,6 +1473,7 @@ interface UIStore {
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setAlwaysShowScrollbars: (value: boolean) => void;
+  setMobileKeepScreenAwake: (value: MobileKeepScreenAwake) => void;
   setQuestionsInChat: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnPullRequests: (value: boolean) => void;
@@ -1487,6 +1497,7 @@ interface UIStore {
   setAgentKnowledgeToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
   setAgentUsageToolEnabled: (value: boolean) => void;
+  setAgentTerminalToolEnabled: (value: boolean) => void;
   setAgentImageToolEnabled: (value: boolean) => void;
   setAgentImageModel: (value: string) => void;
   setAgentMemoryDreamingEnabled: (value: boolean) => void;
@@ -1510,7 +1521,7 @@ interface UIStore {
   setEnterToSend: (value: boolean) => void;
   setMobileReturnKeySends: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatWidth: (value: ChatWidth) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
@@ -1679,6 +1690,7 @@ export const useUIStore = create<UIStore>()(
         terminalShell: 'auto',
         terminalLoginShells: [],
         terminalCloseOnExit: true,
+        terminalOpenOnProjectAction: true,
         editorFontSize: DEFAULT_EDITOR_FONT_SIZE,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -1718,6 +1730,7 @@ export const useUIStore = create<UIStore>()(
         notifyOnSubtasks: true,
         dockBadgeEnabled: true,
         alwaysShowScrollbars: false,
+        mobileKeepScreenAwake: 'off',
         questionsInChat: false,
 
         // Event toggles (which events trigger notifications)
@@ -1754,6 +1767,7 @@ export const useUIStore = create<UIStore>()(
         agentKnowledgeToolEnabled: true,
         agentNotifyToolEnabled: false,
         agentUsageToolEnabled: false,
+        agentTerminalToolEnabled: false,
         agentImageToolEnabled: false,
         agentImageModel: '',
         agentMemoryDreamingEnabled: false,
@@ -1776,7 +1790,7 @@ export const useUIStore = create<UIStore>()(
         enterToSend: false,
         enterToSendConfigured: false,
         mobileReturnKeySends: false,
-        wideChatLayoutEnabled: false,
+        chatWidth: 'default',
         codeBlockLineWrap: true,
         tableCellWrap: true,
         copyMessagesAsPlainText: true,
@@ -2912,6 +2926,10 @@ export const useUIStore = create<UIStore>()(
           set({ terminalCloseOnExit: value });
         },
 
+        setTerminalOpenOnProjectAction: (value) => {
+          set({ terminalOpenOnProjectAction: value });
+        },
+
         setEditorFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(32, rounded));
@@ -3398,6 +3416,9 @@ export const useUIStore = create<UIStore>()(
         setAlwaysShowScrollbars: (value) => {
           set({ alwaysShowScrollbars: value });
         },
+        setMobileKeepScreenAwake: (value) => {
+          set({ mobileKeepScreenAwake: value });
+        },
         setQuestionsInChat: (value) => {
           set({ questionsInChat: value });
         },
@@ -3455,6 +3476,9 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentUsageToolEnabled: (value) => {
           set({ agentUsageToolEnabled: value });
+        },
+        setAgentTerminalToolEnabled: (value) => {
+          set({ agentTerminalToolEnabled: value });
         },
         setAgentImageToolEnabled: (value) => {
           set({ agentImageToolEnabled: value });
@@ -3533,8 +3557,8 @@ export const useUIStore = create<UIStore>()(
         setMobileReturnKeySends: (value) => {
           set({ mobileReturnKeySends: value });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatWidth: (value) => {
+          set({ chatWidth: value });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -3642,7 +3666,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 29,
+        version: 30,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3674,6 +3698,12 @@ export const useUIStore = create<UIStore>()(
           // width the user set (any other) stays.
           if (version < 29 && state.contextEditorTreeWidth === 240) {
             state.contextEditorTreeWidth = DEFAULT_CONTEXT_EDITOR_TREE_WIDTH;
+          }
+
+          // v29 -> v30: the Wide chat layout switch became the Full chat width.
+          if (version < 30) {
+            state.chatWidth = state.wideChatLayoutEnabled === true ? 'full' : 'default';
+            delete state.wideChatLayoutEnabled;
           }
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.
@@ -4004,6 +4034,7 @@ export const useUIStore = create<UIStore>()(
           terminalShell: state.terminalShell,
           terminalLoginShells: state.terminalLoginShells,
           terminalCloseOnExit: state.terminalCloseOnExit,
+          terminalOpenOnProjectAction: state.terminalOpenOnProjectAction,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
@@ -4040,6 +4071,7 @@ export const useUIStore = create<UIStore>()(
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           alwaysShowScrollbars: state.alwaysShowScrollbars,
+          mobileKeepScreenAwake: state.mobileKeepScreenAwake,
           questionsInChat: state.questionsInChat,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnPullRequests: state.notifyOnPullRequests,
@@ -4061,6 +4093,7 @@ export const useUIStore = create<UIStore>()(
           agentKnowledgeToolEnabled: state.agentKnowledgeToolEnabled,
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,
           agentUsageToolEnabled: state.agentUsageToolEnabled,
+          agentTerminalToolEnabled: state.agentTerminalToolEnabled,
           agentImageToolEnabled: state.agentImageToolEnabled,
           agentImageModel: state.agentImageModel,
           agentMemoryDreamingEnabled: state.agentMemoryDreamingEnabled,
@@ -4077,7 +4110,7 @@ export const useUIStore = create<UIStore>()(
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
           mobileReturnKeySends: state.mobileReturnKeySends,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatWidth: state.chatWidth,
           codeBlockLineWrap: state.codeBlockLineWrap,
           tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,

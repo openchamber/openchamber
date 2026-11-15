@@ -172,46 +172,12 @@ describe('resolveQueuedSessionStatusType', () => {
     expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
   });
 
-  test('treats an idle parent as busy while its background subagent runs', () => {
-    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
-    const child = { id: 'ses_child', parentID: 'ses_1' } as Session;
-    store.setState({ session: [child], session_status: { ses_child: { type: 'busy' } } });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
-    store.setState({ session_status: {} });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
-  });
-
-  test('holds an idle parent through nested busy and retry descendants', () => {
+  test('resolves an idle parent as idle while its background subagents run', () => {
     const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
     store.setState({
-      session: [
-        session('ses_child', 'ses_1'),
-        session('ses_grandchild', 'ses_child'),
-        session('ses_unrelated', 'ses_other'),
-      ],
-      session_status: { ses_grandchild: { type: 'busy' } },
+      session: [session('ses_child', 'ses_1'), session('ses_grandchild', 'ses_child')],
+      session_status: { ses_child: { type: 'busy' }, ses_grandchild: { type: 'busy' } },
     });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
-    store.setState({ session_status: { ses_grandchild: { type: 'retry', attempt: 1, message: 'retry', next: 10 } } });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
-    store.setState({ session_status: { ses_unrelated: { type: 'busy' } } });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
-    expect(resolveQueuedSessionStatusType('ses_1', '/other')).toBe('idle');
-  });
-
-  test('re-evaluates changed lineage while descendant status stays busy', () => {
-    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
-    store.setState({
-      session: [session('ses_grandchild', 'ses_child')],
-      session_status: { ses_grandchild: { type: 'busy' } },
-    });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
-    store.setState({ session: [
-      session('ses_child', 'ses_1'),
-      session('ses_grandchild', 'ses_child'),
-    ] });
-    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
-    store.setState({ session_status: {} });
     expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
   });
 

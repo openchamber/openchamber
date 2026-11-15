@@ -5,8 +5,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { shareRequestFailure } from '@/lib/share-pages/api';
 
 /**
- * Pages other people shared by link and PIN, opened in this app (decision
- * 0013). The OpenChamber server keeps the link's key and makes every relay
+ * Pages other people shared by link and PIN, opened in this app. The OpenChamber server keeps the link's key and makes every relay
  * call; the client hands the link over once and from then on knows the page
  * by `receivedId`, so no key or PIN is ever held here or written to a draft.
  *

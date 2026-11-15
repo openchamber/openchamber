@@ -24,7 +24,7 @@ Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: tr
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 const { I18nProvider } = await import('@/lib/i18n');
 const { createMarkdownCodePlugin } = await import('./markdown/streamdownCode');
-const { streamdownCodeWorker } = await import('./markdown/streamdownCodeWorker');
+const { markdownCodeHighlighter } = await import('./markdown/markdownCodeHighlighter');
 const host = document.createElement('div');
 document.body.append(host);
 const root = createRoot(host);
@@ -65,7 +65,7 @@ test('streaming stable prefix retains selection, disclosure and scroll through a
 
 test('warm code is highlighted at the first layout commit and source changes never commit stale text', async () => {
   const source = 'const warmCode = "中文";';
-  const highlighted = await streamdownCodeWorker.highlight(source, 'typescript', false);
+  const highlighted = await markdownCodeHighlighter.highlight(source, 'typescript', false);
   expect(highlighted).not.toBeNull();
   const commits: Array<{ text: string; colored: boolean }> = [];
   function Capture({ code, language }: { code: string; language: string }) {
@@ -80,11 +80,23 @@ test('warm code is highlighted at the first layout commit and source changes nev
   expect(commits[0]).toEqual({ text: source, colored: true });
   const firstRow = host.querySelector('[data-streamdown="code-block-body"] code > span');
   const appended = source + '\nconst appended = 2;';
-  await streamdownCodeWorker.highlight(appended, 'typescript', false);
+  await markdownCodeHighlighter.highlight(appended, 'typescript', false);
   await act(() => root.render(<Capture code={appended} language="typescript" />));
   expect(host.querySelector('[data-streamdown="code-block-body"] code > span')).toBe(firstRow);
   await act(() => root.render(<Capture code="replacement" language="unknown-language" />));
   expect(commits.at(-1)?.text).toBe('replacement');
+});
+
+test('an ansi fence shows its text without escape sequences and still copies its own source', async () => {
+  const esc = String.fromCharCode(27);
+  const source = `${esc}[32mok${esc}[0m 2 passed\n${esc}[31mfail${esc}[0m 1`;
+  await act(() => root.render(<I18nProvider>
+    <MarkdownContent content={`\`\`\`ansi\n${source}\n\`\`\``} enableFileReferences={false} />
+  </I18nProvider>));
+  const body = host.querySelector('[data-streamdown="code-block-body"]');
+  expect(body?.textContent).toBe('ok 2 passedfail 1');
+  expect(body?.getAttribute('data-language')).toBe('ansi');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe(source);
 });
 
 test('append results advance while newer requests are pending without resetting highlighted nodes', async () => {
@@ -96,10 +108,10 @@ test('append results advance while newer requests are pending without resetting 
     [{ content: 'let', color: 'var(--syntax-keyword)' }, { content: ' tail' }],
   ] };
   const pending = new Map<string, (result: HighlightResult | null) => void>();
-  const lookup = spyOn(streamdownCodeWorker, 'cached').mockImplementation((code, language) => (
+  const lookup = spyOn(markdownCodeHighlighter, 'cached').mockImplementation((code, language) => (
     code === original && language === 'typescript' ? colored : undefined
   ));
-  const highlight = spyOn(streamdownCodeWorker, 'highlight').mockImplementation((code, language) => (
+  const highlight = spyOn(markdownCodeHighlighter, 'highlight').mockImplementation((code, language) => (
     code === original && language === 'typescript'
       ? Promise.resolve(colored)
       : new Promise((resolve) => { pending.set(code, resolve); })

@@ -13,7 +13,7 @@ import type { JsonValue } from '@/lib/opencode/model';
  *
  * The page runs in an opaque origin; the viewer is its only parent. `answer`
  * is the data this page already sent, which only the recipient's app sends
- * (it shows an answered page again, decision 0013; the relay's viewer never
+ * (it shows an answered page again; the relay's viewer never
  * does): the page shows it and takes no other.
  */
 

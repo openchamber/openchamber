@@ -11,9 +11,11 @@ import {
   buildAnnotationOverlayScript,
   type BrowserAnnotationOverlayLabels,
   type BrowserAnnotationOverlayTheme,
+  type BrowserAnnotationVoice,
 } from './annotationOverlay';
 import { isBrowserAnnotationPayload, type BrowserAnnotationPayload, type BrowserRect } from './contract';
 import { renderAnnotationScreenshot } from './annotationScreenshot';
+import type { JsonValue } from '@openchamber/sdk';
 
 export type PageCapture = {
   readonly mime: string;
@@ -34,6 +36,13 @@ export type PageCapture = {
  */
 export type AnnotationHost = {
   readonly executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  /**
+   * Runs the overlay in a world of its own beside the page's, the one place
+   * its microphone can reach the app from. Throws when it cannot start there;
+   * the overlay then runs in the page's world, without a microphone. Absent
+   * where the host has no such world.
+   */
+  readonly runIsolated?: (script: string) => Promise<JsonValue>;
   readonly capturePage: () => Promise<PageCapture | null>;
 };
 
@@ -66,26 +75,47 @@ export const cancelAnnotationSession = async (host: AnnotationHost): Promise<voi
   }
 };
 
-export const runAnnotationSession = async ({
-  host,
-  theme,
-  labels,
-}: {
-  host: AnnotationHost;
-  theme: BrowserAnnotationOverlayTheme;
-  labels: BrowserAnnotationOverlayLabels;
-}): Promise<AnnotationSessionResult | null> => {
-  const script = buildAnnotationOverlayScript(theme, labels);
-  const raw = await host.executeJavaScript(script, true);
+const runOverlay = async (
+  host: AnnotationHost,
+  theme: BrowserAnnotationOverlayTheme,
+  labels: BrowserAnnotationOverlayLabels,
+  voice: BrowserAnnotationVoice | null,
+): Promise<BrowserAnnotationPayload | null> => {
+  let raw;
+  let started = false;
+  if (host.runIsolated) {
+    try {
+      raw = await host.runIsolated(buildAnnotationOverlayScript(theme, labels, voice));
+      started = true;
+    } catch {
+      // A desktop app older than this UI, or a page the debugger cannot attach to.
+    }
+  }
+  if (!started) raw = await host.executeJavaScript(buildAnnotationOverlayScript(theme, labels), true);
 
   // Cancelled from inside the page.
   if (raw === null || raw === undefined) return null;
-
   if (!isBrowserAnnotationPayload(raw)) {
     await cancelAnnotationSession(host);
     return null;
   }
-  const payload = raw;
+  return raw;
+};
+
+export const runAnnotationSession = async ({
+  host,
+  theme,
+  labels,
+  voice = null,
+}: {
+  host: AnnotationHost;
+  theme: BrowserAnnotationOverlayTheme;
+  labels: BrowserAnnotationOverlayLabels;
+  /** Dictation into the comment; it takes effect only where `host.runIsolated` runs the overlay. */
+  voice?: BrowserAnnotationVoice | null;
+}): Promise<AnnotationSessionResult | null> => {
+  const payload = await runOverlay(host, theme, labels, voice);
+  if (!payload) return null;
 
   try {
     const viewport = await readViewport(host) ?? payload.viewport;

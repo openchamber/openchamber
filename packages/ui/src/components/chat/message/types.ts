@@ -37,4 +37,10 @@ export interface ToolPopupContent {
         filename?: string;
         source?: string;
     };
+    /** A PDF sent inline (`data:` URL), shown as the Files view shows one. */
+    document?: {
+        url: string;
+        filename: string;
+        size?: number;
+    };
 }

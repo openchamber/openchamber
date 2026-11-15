@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { ScrollShadow, ScrollShadowBands } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
@@ -249,7 +249,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           the shadow's blur and paints a grey band past the card's edge. */}
       <DockedPanelSurfaceContext.Provider value={!overlay}>
       <div
-        className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
+        className={cn('relative flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
         style={overlay ? {
           opacity: interactive ? 1 : 0,
           transitionProperty: 'opacity',
@@ -283,6 +283,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         ref={restore}
         onScroll={handleScroll}
         size={24}
+        // Docked, the card is the page colour, so the fades are bands in it;
+        // over the chat it is glass and keeps the mask.
+        surface={overlay ? undefined : 'var(--background)'}
         // Sections returning null leave no DOM node, so this reserves room for
         // settings in the first rendered heading, regardless of saved order.
         className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
@@ -295,6 +298,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           visible={visible}
         />
       </ScrollShadow>
+      {overlay ? null : <ScrollShadowBands surface="var(--background)" size={24} />}
       </WorkStatusPresenceProvider>
       ) : null}
 

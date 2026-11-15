@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  DEV_SERVER_AFTER_ACTION_MS,
   DEV_SERVER_FIRST_RETRY_MS,
   DEV_SERVER_MAX_RETRY_MS,
   DEV_SERVER_WAIT_MS,
@@ -33,6 +34,27 @@ describe('dev server wait', () => {
     const later = planFailedLoadRetry(failure, { ...watching, run: first.run, now: 20_000 });
     expect(later.next).toBe('retry');
     expect(later.run).toEqual(first.run);
+  });
+
+  test('a server whose project action is still running is waited for without a limit', () => {
+    const run = { url: DEAD_PORT, startedAt: 0, paused: false };
+    const late = DEV_SERVER_WAIT_MS * 3;
+    expect(planFailedLoadRetry(failure, { ...watching, run, now: late }).next).toBe('stop');
+
+    const plan = planFailedLoadRetry(failure, { ...watching, run, now: late, actionRunning: true });
+    expect(plan).toEqual({ next: 'retry', delayMs: DEV_SERVER_MAX_RETRY_MS, run });
+  });
+
+  test('an action that stopped gets quick retries for a moment, then the error', () => {
+    // A start script that exits once its servers are up in the background.
+    const run = { url: DEAD_PORT, startedAt: 0, paused: false };
+    const actionStoppedAt = DEV_SERVER_WAIT_MS * 3;
+
+    const soon = planFailedLoadRetry(failure, { ...watching, run, now: actionStoppedAt + 100, actionStoppedAt });
+    expect(soon).toEqual({ next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run });
+
+    const later = planFailedLoadRetry(failure, { ...watching, run, now: actionStoppedAt + DEV_SERVER_AFTER_ACTION_MS + 1, actionStoppedAt });
+    expect(later.next).toBe('stop');
   });
 
   test('the pause starts short and grows to the cap as the wait goes on', () => {

@@ -22,7 +22,7 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 export type ComposerReference =
     | {
         /**
-         * A page another person shared by link (decision 0013). The link went
+         * A page another person shared by link. The link went
          * to the server, which keeps its key; this chip knows the page by
          * `receivedId` (null until the server has read the link) and `shareKey`
          * (relay host and share id, no secret). `contextText` is what the agent
@@ -35,6 +35,11 @@ export type ComposerReference =
         title: string | null;
         opened: boolean;
         contextText: string;
+        /**
+         * The link without its key, which stands for the page in the composer
+         * text. Absent on chips from before pages were chips in the text.
+         */
+        link?: string;
     }
     | {
         kind: 'repository-issue';

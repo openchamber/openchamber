@@ -24,6 +24,8 @@ const storedChipSchema = z.object({
   receivedId: z.string().min(1),
   host: z.string(),
   title: z.string().nullable(),
+  /** The link without its key that stands for the page in the draft's text. */
+  link: z.string().optional(),
 });
 
 const envelopeSchema = z.object({
@@ -61,7 +63,7 @@ export function serializeSharedPageChips(drafts: ReadonlyMap<string, readonly Co
   const kept: [string, z.infer<typeof storedChipSchema>[]][] = [];
   for (const [key, references] of drafts) {
     const chips = references.flatMap((reference) => (reference.kind === 'shared-page' && reference.receivedId
-      ? [{ shareKey: reference.shareKey, receivedId: reference.receivedId, host: reference.host, title: reference.title }]
+      ? [{ shareKey: reference.shareKey, receivedId: reference.receivedId, host: reference.host, title: reference.title, link: reference.link }]
       : []));
     if (chips.length > 0) kept.push([key, chips]);
   }

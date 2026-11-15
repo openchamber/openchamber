@@ -18,6 +18,9 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
 
 const requestText = (value) => (isString(value) ? value.trim() : '');
 
+// Short text fields (a title, a label or reviewer id) share this cap.
+const TITLE_MAX = 256;
+
 // A votes host's label names and values (Gerrit's Code-Review, Verified, ...).
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
@@ -65,6 +68,10 @@ export function createStandardMutations(descriptor) {
   const reviewDrafts = Boolean(descriptor.capabilities.reviewDrafts);
   const requireNumber = (context) => {
     if (!context.target.number) throw invalidMutationContext('target number is required');
+  };
+  const commentId = (value) => {
+    if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
+    return value;
   };
   /**
    * A votes host's review: votes on its labels, a message, or both, on the
@@ -170,6 +177,48 @@ export function createStandardMutations(descriptor) {
         requireNumber(context);
         const text = commentText(input.body, true);
         return { body: text, digest: { body: text } };
+      },
+    };
+  }
+  // An issue's title and body, replaced together; an empty body clears it.
+  entries['/issues/update'] = {
+    kind: 'issue-update',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const title = requestText(input.title);
+      if (!title || title.length > TITLE_MAX) throw invalidMutationContext(`title is required and must fit ${TITLE_MAX} characters`);
+      if (input.body !== undefined && !isString(input.body)) throw invalidMutationContext('body must be a string');
+      const normalized = { title };
+      if (input.body !== undefined) normalized.body = input.body;
+      normalized.digest = { title, body: normalized.body ?? null };
+      return normalized;
+    },
+  };
+  // Replace or remove one conversation comment, named by its id on the target item.
+  for (const [route, kind] of [
+    ['/pr/comment/update', 'change-request-comment-update'],
+    ['/issues/comment/update', 'issue-comment-update'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        const text = commentText(input.body, true);
+        return { commentId: id, body: text, digest: { commentId: id, body: text } };
+      },
+    };
+  }
+  for (const [route, kind] of [
+    ['/pr/comment/delete', 'change-request-comment-delete'],
+    ['/issues/comment/delete', 'issue-comment-delete'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        return { commentId: id, digest: { commentId: id } };
       },
     };
   }

@@ -91,19 +91,32 @@ function requestIssueNumber(value) {
   return Number.isSafeInteger(number) ? number : null;
 }
 
+/** The labels a page is narrowed to: every one must be carried, in the order asked. */
+function readLabelFilter(value) {
+  const raw = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  const names = raw
+    .map((entry) => requestText(entry))
+    .filter((entry) => entry.length > 0 && entry.length <= 256);
+  return [...new Set(names)].slice(0, 20);
+}
+
 /**
- * A list's state and whose items, from the query; unknown values read as open
- * and anyone. `unanswered` narrows a list of discussions to open questions
- * without an answer; no other list has it.
+ * A list's state, whose items and which labels, from the query; unknown values
+ * read as open, anyone and no labels. `unanswered` narrows a list of
+ * discussions to open questions without an answer; no other list has it.
  */
 function readListFilter(query) {
   const state = requestText(query?.state);
   const people = requestText(query?.people);
   const states = requestText(query?.kind) === 'discussion' ? ['open', 'closed', 'all', 'unanswered'] : ['open', 'closed', 'merged', 'all'];
-  return {
+  const labels = readLabelFilter(query?.label);
+  const filter = {
     state: states.includes(state) ? state : 'open',
     people: ['any', 'assigned', 'created', 'reviewRequested'].includes(people) ? people : 'any',
   };
+  // An unfiltered page reads exactly as it did before labels existed.
+  if (labels.length > 0) filter.labels = labels;
+  return filter;
 }
 
 // A provider writes a file attached in Markdown as `/uploads/<32-hex secret>/<name>`.
@@ -238,6 +251,11 @@ const MUTATION_ROUTES = [
   ['/pr/thread/reply', 'reviewThreads.reply'],
   ['/pr/thread/resolve', 'reviewThreads.resolve'],
   ['/issues/comment', 'comments'],
+  ['/issues/update', 'issues'],
+  ['/pr/comment/update', 'commentEdit'],
+  ['/pr/comment/delete', 'commentEdit'],
+  ['/issues/comment/update', 'commentEdit'],
+  ['/issues/comment/delete', 'commentEdit'],
   ['/pr/state', 'state'],
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
@@ -249,9 +267,12 @@ const MUTATION_ROUTES = [
   ['/pr/review/comment/delete', 'reviewDrafts'],
   ['/pr/review/discard', 'reviewDrafts'],
   ['/discussions/comment', 'discussions'],
+  ['/discussions/comment/update', 'commentEdit'],
+  ['/discussions/comment/delete', 'commentEdit'],
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
+  ['/discussions/update', 'discussions'],
 ];
 
 /**

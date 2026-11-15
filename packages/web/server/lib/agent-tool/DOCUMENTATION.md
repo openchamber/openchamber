@@ -152,6 +152,19 @@ the user can want independently:
   sits behind Code Mode like notify, since the chat draws nothing from its
   call, and its catalog line says to read it when the user asks about limits
   or a model choice depends on them, never before every task.
+- `openchamber_terminal` — `terminal.list` and `terminal.read`, the terminal
+  panel read-only (`../openchamber-control/terminal-read.js`): the terminals
+  open in the session's folder and one's retained output as plain text. Off by
+  default: enabled only while `agentTerminalToolEnabled` is `true`, and the
+  action reads the setting on every call and refuses while it is not. A read
+  copies the replay the panel's `attach` snapshot sends
+  (`../terminal/runtime.js`), never raw PTY bytes, converted to plain text
+  without colour or other control sequences, and the runtime caps it
+  (512 KiB retained, at most 256 KiB of text per read); nothing is typed,
+  started or stopped. Only this callback reaches the actions: the ordinary
+  control route refuses `terminal.*`. VS Code has no such tool, since the
+  plugin is not injected there. It sits behind Code Mode like usage, and its catalog line says to
+  read it when the answer is in a terminal the user is looking at.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
   default: enabled only while `agentWorkflowToolEnabled` is `true`, and the
@@ -385,6 +398,21 @@ it, and with the rule in the session context the next agent linked the issue
 first thing (2026-10-02). The tool descriptions carried a second copy of each
 trigger, which cost about 2,000 characters per request and pushed two of them
 past the 2048-character cut.
+
+### Why the terminal is its own tool, off by default
+
+A terminal is the one surface here whose content the user did not write for the
+agent: it may hold a token they pasted, a password prompt, or a log line from a
+service they are debugging. Leaving it inside `openchamber` would hand it to
+every session the moment that tool was on, which is on by default. Its own row
+makes the trade visible and reversible, the same shape `openchamber_image`,
+`openchamber_notify` and `openchamber_usage` use, and the setting is read again
+on each call so a materialized plugin cannot outlive the decision.
+
+It sits behind Code Mode like usage: two actions with a short result are worth
+one namespace line in the catalog, and the catalog line says when to read it —
+the answer is in a terminal the user is looking at — so an agent does not
+sample the panel on every task.
 
 ## Security invariants
 

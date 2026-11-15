@@ -2,27 +2,34 @@ import * as React from 'react';
 
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { Input } from '@/components/ui/input';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
+import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
-import { ReferenceComments, type ReferenceThreadActions } from './ReferenceComments';
+import { ReferenceComments, type ReferenceCommentActions, type ReferenceThreadActions, type ScopedCommentActions } from './ReferenceComments';
+import { commentDraftScope } from './referenceCommentDrafts';
+import { useRepositoryReadContext } from './referenceSources';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
 import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
@@ -39,6 +46,7 @@ import {
 } from './referencePickerItems';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { DiffCount } from '@/components/ui/diff-count';
+import { forgetReferenceTextDraft, referenceTextDraft, referenceTextDraftKey, rememberReferenceTextDraft } from './referenceTextDrafts';
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
@@ -269,7 +277,8 @@ const CommentsSection: React.FC<{
     now: number;
     attachments?: CommentAttachments;
     threadActions?: ReferenceThreadActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions }) => {
+    commentActions?: ScopedCommentActions;
+}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions }) => {
     const { t } = useI18n();
     const shown = state.status === 'ready' ? state.value.filter((entry) => entry.kind === 'comment').length : 0;
     return (
@@ -304,7 +313,7 @@ const CommentsSection: React.FC<{
             ) : state.value.length === 0 ? (
                 <p className="typography-meta text-muted-foreground">{t('references.picker.preview.commentsEmpty')}</p>
             ) : (
-                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} />
+                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
             )}
         </section>
     );
@@ -460,7 +469,11 @@ const RepositoryPreview: React.FC<{
     threadActions?: ReferenceThreadActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
+    /** Saves an edited title and description; absent where the item is only read. */
+    onSaveText?: (input: { title: string; body: string }) => Promise<void>;
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ScopedCommentActions;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
@@ -481,6 +494,9 @@ const RepositoryPreview: React.FC<{
                 context: location ?? (comment.review && comment.review !== 'commented' ? t(REVIEW_VERDICT_KEYS[comment.review]) : null),
                 location,
             };
+            if (comment.id !== undefined) item.id = comment.id;
+            if (comment.canUpdate !== undefined) item.canUpdate = comment.canUpdate;
+            if (comment.canDelete !== undefined) item.canDelete = comment.canDelete;
             if (comment.answer) item.answer = comment.answer;
             if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
@@ -514,6 +530,101 @@ const RepositoryPreview: React.FC<{
     const numberLabel = (number: number) => referenceNumberLabel({ ...reference, number }, descriptor);
     // Counted from the bottom, as GitHub numbers layers.
     const stackPosition = stack ? stack.layers.findIndex((layer) => layer.number === reference.number) + 1 : 0;
+
+    // Editing the item's own title and description, where the host and this
+    // account allow it: the host replaces both together. The board shows the
+    // next item in this same preview, so the open editor and every save in
+    // flight belong to the item they started on: another item never shows,
+    // saves or closes them.
+    const draftKey = referenceTextDraftKey(reference);
+    const currentDraftKey = React.useRef(draftKey);
+    currentDraftKey.current = draftKey;
+    const [openEditor, setOpenEditor] = React.useState<{ key: string; title: string; body: string } | null>(null);
+    const editing = openEditor?.key === draftKey ? openEditor : null;
+    const [savingKeys, setSavingKeys] = React.useState<ReadonlySet<string>>(() => new Set());
+    const savingRef = React.useRef(new Set<string>());
+    const saving = savingKeys.has(draftKey);
+    const titleInput = React.useRef<HTMLInputElement>(null);
+    // Where the keyboard goes back to once the editor closes.
+    const editButton = React.useRef<HTMLButtonElement>(null);
+    const focusEditButton = () => { requestAnimationFrame(() => editButton.current?.focus()); };
+    const isEditing = editing !== null;
+    const editDraft = (next: { title: string; body: string }) => {
+        rememberReferenceTextDraft(draftKey, next);
+        setOpenEditor({ key: draftKey, ...next });
+    };
+    const markSaving = (key: string, on: boolean) => {
+        if (on) savingRef.current.add(key);
+        else savingRef.current.delete(key);
+        setSavingKeys(new Set(savingRef.current));
+    };
+    const detailBody = detail.status === 'ready' ? detail.value.body : undefined;
+    const storedBody = detailBody ?? reference.body;
+    // The list body is cut at 20 000 characters: without the detail's own body,
+    // saving it would overwrite the rest of the description.
+    const canEditText = onSaveText !== undefined
+        && reference.linked !== true
+        && !(reference.bodyTruncated && detailBody === undefined)
+        && (detail.status !== 'ready' || detail.value.viewerCanUpdate !== false)
+        && (reference.kind === 'pull'
+            ? descriptor.features.changeRequestEdit
+            : reference.kind === 'discussion'
+                ? descriptor.features.discussions
+                : descriptor.features.issueEdit);
+    const showEdit = canEditText && !isEditing;
+    const trimmedTitle = editing?.title.trim() ?? '';
+    const changed = editing !== null && (trimmedTitle !== reference.title || editing.body !== storedBody);
+    const canSave = changed && trimmedTitle.length > 0 && !saving;
+    React.useEffect(() => {
+        if (!isEditing) return;
+        const input = titleInput.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    }, [isEditing]);
+    const closeEditor = (key: string) => {
+        setOpenEditor((current) => (current?.key === key ? null : current));
+        if (currentDraftKey.current === key) focusEditButton();
+    };
+    const cancelEditing = () => {
+        if (savingRef.current.has(draftKey)) return;
+        forgetReferenceTextDraft(draftKey);
+        closeEditor(draftKey);
+    };
+    const saveText = async () => {
+        if (!editing || !canSave || !onSaveText || savingRef.current.has(draftKey)) return;
+        // The item, its save and its text as they are now: the preview may show
+        // another item by the time the host answers.
+        const key = draftKey;
+        const save = onSaveText;
+        const input = { title: trimmedTitle, body: editing.body };
+        markSaving(key, true);
+        try {
+            await save(input);
+            forgetReferenceTextDraft(key);
+            closeEditor(key);
+        } catch (error) {
+            toast.error(t('sourceBoard.edit.saveFailed'), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            markSaving(key, false);
+        }
+    };
+    const onEditorKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        // The board's arrow-key navigation and a dialog's Escape stay away from the editor.
+        event.stopPropagation();
+        if (isIMECompositionEvent(event)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelEditing();
+        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void saveText();
+        } else if (event.key === 'Enter' && event.currentTarget instanceof HTMLInputElement) {
+            // The title is one line: Enter is the save it would be in any other field.
+            event.preventDefault();
+            void saveText();
+        }
+    };
 
     const footer = footerOverride ?? (
         <div className="flex flex-col gap-2">
@@ -565,8 +676,21 @@ const RepositoryPreview: React.FC<{
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>
                             {joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} {referenceNumberLabel(reference, descriptor)}
                         </span>
+                        {showEdit ? (
+                            <ButtonTooltip label={t('sourceBoard.edit.action')} side="bottom" className="ms-auto shrink-0">
+                                <button
+                                    ref={editButton}
+                                    type="button"
+                                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                                    aria-label={t('sourceBoard.edit.action')}
+                                    onClick={() => setOpenEditor({ key: draftKey, ...(referenceTextDraft(draftKey) ?? { title: reference.title, body: storedBody }) })}
+                                >
+                                    <Icon name="pencil" className="size-3.5" />
+                                </button>
+                            </ButtonTooltip>
+                        ) : null}
                         {refresh ? (
-                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className="ms-auto shrink-0">
+                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className={cn('shrink-0', showEdit ? undefined : 'ms-auto')}>
                                 <button
                                     type="button"
                                     className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
@@ -578,7 +702,7 @@ const RepositoryPreview: React.FC<{
                                 </button>
                             </ButtonTooltip>
                         ) : null}
-                        <CopyReferenceLinkButton url={reference.url} className={refresh ? undefined : 'ms-auto'} />
+                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -594,7 +718,33 @@ const RepositoryPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    {editing ? (
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <Input
+                                ref={titleInput}
+                                dir="auto"
+                                inputSize="compact"
+                                value={editing.title}
+                                onChange={(event) => {
+                                    if (!editing) return;
+                                    editDraft({ title: event.target.value, body: editing.body });
+                                }}
+                                onKeyDown={onEditorKeyDown}
+                                aria-label={t('sourceBoard.edit.title')}
+                                placeholder={t('sourceBoard.edit.title')}
+                                disabled={saving}
+                            />
+                            <Button size="sm" onClick={() => void saveText()} disabled={!canSave}>
+                                {saving ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                                {t('sourceBoard.edit.save')}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={saving}>
+                                {t('sourceBoard.edit.cancel')}
+                            </Button>
+                        </div>
+                    ) : (
+                        <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    )}
                     <ChangeFlags reference={reference} />
                 </>
             }
@@ -700,7 +850,33 @@ const RepositoryPreview: React.FC<{
             ) : null}
 
             <div className="min-w-0 flex-1">
-                {body ? (
+                {editing ? (
+                    <>
+                        <ReferenceMarkdownEditor
+                            value={editing.body}
+                            onChange={(text) => {
+                                if (!editing) return;
+                                editDraft({ title: editing.title, body: text });
+                            }}
+                            onSubmit={() => void saveText()}
+                            onCancel={cancelEditing}
+                            placeholder={t('sourceBoard.edit.body')}
+                            disabled={saving}
+                            maxLines={8}
+                            aria-label={t('sourceBoard.edit.body')}
+                        />
+                        {/* A touch screen has no hover and no Cmd/Ctrl: the actions sit with the text. */}
+                        <div className="mt-2 hidden items-center gap-2 pointer-coarse:flex">
+                            <Button size="sm" onClick={() => void saveText()} disabled={!canSave}>
+                                {saving ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                                {t('sourceBoard.edit.save')}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={saving}>
+                                {t('sourceBoard.edit.cancel')}
+                            </Button>
+                        </div>
+                    </>
+                ) : body ? (
                     <ReferenceBody content={body} />
                 ) : (
                     <p className="typography-meta text-muted-foreground">{t('references.picker.preview.noDescription')}</p>
@@ -710,7 +886,7 @@ const RepositoryPreview: React.FC<{
                 ) : null}
             </div>
 
-            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} />
+            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} />
             {reply}
         </PreviewFrame>
     );
@@ -939,14 +1115,28 @@ export const ReferencePreview: React.FC<{
     onRefresh?: () => Promise<void>;
     /** Answer and resolve a PR's review threads, or answer a discussion's comments and choose its answer; without it they are read only. */
     threadActions?: ReferenceThreadActions;
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ReferenceCommentActions;
     /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     /** A change's revisions to pick the shown one from, where the host keeps revisions. */
     revisionChoice?: RevisionChoice;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
+    /** Saves an edited title and description for the previewed repository item; absent where the item is only read. */
+    onSaveText?: (input: { title: string; body: string }) => Promise<void>;
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
-    const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
-    const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
+    const reference = item?.source === 'repository' ? item.reference : null;
+    const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
+    const links = useReferenceLinks(directory, reference);
+    // A host that cannot change a comment publishes no route for it; the
+    // per-comment flags stay the second gate (whose comment it is).
+    const commentWrites = useSourceControlProvider(reference?.provider ?? null).features.commentEdit;
+    // The account that writes the folder's comments, so another one never
+    // opens this one's unsaved rewrite.
+    const readContext = useRepositoryReadContext(reference ? directory : null);
+    const commentAccount = readContext && readContext !== 'missing'
+        ? [readContext.provider, readContext.instance, readContext.accountId].join('\u0000')
+        : '';
     if (!item) {
         return (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
@@ -981,6 +1171,8 @@ export const ReferencePreview: React.FC<{
                     threadActions={threadActions}
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}
+                    onSaveText={onSaveText}
+                    commentActions={commentWrites && commentActions ? { ...commentActions, draftScope: commentDraftScope(getRuntimeKey(), directory, commentAccount, item.reference.url) } : undefined}
                 />
             </ReferenceLinksContext.Provider>
         </ReferenceMarkdownRewriteContext.Provider>

@@ -229,9 +229,9 @@ export const MobileSessionRow: React.FC<{
           ? renameForm(0, 'h-[1lh] pe-0 typography-ui-label [&_button]:size-6 [&_button>svg]:size-3.5')
           : <>
             {titleText}
+            {doneHint}
             {hasSecondLine ? null : marks}
             {pinMarker}
-            {doneHint}
             {liveState}
             {timeSlot}
           </>}
@@ -268,16 +268,16 @@ export const MobileSessionRow: React.FC<{
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >
-          {/* The desktop row's order: the goal, the PR, the extensions'
-              marks and the requests waiting on the user, then the pin, the
-              done hint, the live state and its time. */}
+          {/* The desktop row's order: the done hint, the goal, the PR, the
+              extensions' marks and the requests waiting on the user, then the
+              pin, the live state and its time. */}
           {titleText}
+          {doneHint}
           <MobileSessionGoalGlyph session={session} />
           {refMark(false)}
           {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
           {pinMarker}
-          {doneHint}
           {liveState}
           {timeSlot}
         </button>

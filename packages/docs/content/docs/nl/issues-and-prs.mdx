@@ -27,12 +27,14 @@ Reacties, labels, reviewers en mergen werken op de repository waar een item bij 
 
 Op **Linear** wordt de projectkiezer een teamkiezer: kies **All teams** of één team. Hebt u meer dan één Linear-werkruimte verbonden, dan wisselt u van werkruimte in hetzelfde menu. Hoe u Linear verbindt, staat bij [Integraties](/nl/integrations/).
 
-Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren.
+Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren. Op GitHub accepteert het veld ook eigen kwalificaties (`is:closed`, `label:bug`, `author:@me`), die voorgaan op het menu.
 
 Voor GitHub, GitLab, Gitea, Forgejo en Gerrit:
 
 - Status: **Open**, **Closed**, **All**, en **Merged** voor pull requests
 - Personen: **Anyone**, **Assigned to me**, **Created by me**, en **Review requested** voor pull requests
+
+Het menu **Filter** toont ook de labels van de repository, met een zoekveld en een vinkje per label; elk vinkje verkleint de lijst meteen. Het filter wordt per repository en per tabblad onthouden.
 
 Voor Linear:
 
@@ -46,6 +48,8 @@ De voorvertoning toont de beschrijving, labels en reacties. Klik bij een Linear-
 
 De rij **Labels** heeft een potloodknop die een doorzoekbare lijst met de labels van de repository opent. Vink ze aan of uit. De wijziging wordt opgeslagen als u de lijst sluit, dus meerdere klikken tellen als één wijziging. Een open pull request (op GitLab een merge request) heeft ook een rij **Reviewers** die op dezelfde manier werkt, met de mensen die in de repository kunnen reviewen. Op GitHub wordt de auteur van de pull request niet aangeboden. Linear-issues hebben geen van beide rijen.
 
+Een potlood naast de titel bewerkt de titel en de beschrijving samen. <kbd>⌘</kbd>+<kbd>Enter</kbd> slaat op (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux), <kbd>Esc</kbd> annuleert, en daarna toont de voorvertoning wat de host heeft opgeslagen. Een item dat via een link is geopend heeft geen potlood, en een host die de tekst niet kan wijzigen ook niet.
+
 ## Reageren en reviewen
 
 Onder de activiteit van een issue of pull request staat een reactieveld. **Comment** plaatst uw tekst bij de host van de repository, net als <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux). De tekst blijft in het veld tot hij geplaatst is, dus bij een mislukte poging raakt u niets kwijt. Wisselt u naar een ander item, dan wordt het veld leeggemaakt. Linear-issues hebben geen reactieveld.
@@ -53,6 +57,8 @@ Onder de activiteit van een issue of pull request staat een reactieveld. **Comme
 Een open pull request (op GitLab een merge request) heeft ook **Approve** en **Request changes**, en de tekst in het veld gaat mee met de review. **Request changes** vraagt om tekst die zegt wat er moet veranderen. De review geldt voor de commits die de voorvertoning toont. Heeft iemand sindsdien gepusht, dan wordt de review geweigerd en ververst de voorvertoning, zodat u opnieuw kunt kijken. Op GitLab werkt **Request changes** als u reviewer van de merge request bent, en de reviewtekst wordt als aparte reactie geplaatst. Mislukt alleen die reactie, dan telt de review toch en blijft uw tekst in het veld.
 
 Een Gerrit-wijziging heeft een rij voor elk label van het project, zoals Code-Review en Verified, met de scores die u mag geven. Kies ze en kies **Vote**. Uw tekst gaat als bericht mee met de stemmen. Stemmen gelden voor de nieuwste patchset, dus ze worden niet aangeboden terwijl u een eerdere leest.
+
+Een reactie die u zelf schreef heeft een menu naast de verzendknop: **Edit** herschrijft haar ter plekke, **Delete** verwijdert haar na een vraag. Een antwoord wordt op dezelfde manier bewerkt en verwijderd. Beide werken op de host, dus de reactie verandert voor iedereen.
 
 ## Aan het werk
 

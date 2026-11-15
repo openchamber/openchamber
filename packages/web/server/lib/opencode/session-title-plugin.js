@@ -52,17 +52,28 @@ const attachedContextOfShortFirstMessage = (messages) => {
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
+    let originalTitleSystem
     await ctx.agent.transform((editor) => {
       if (!editor.get("title")) return
+      if (editor.get("title").system !== TITLE_SYSTEM_PROMPT) originalTitleSystem = editor.get("title").system
       editor.update("title", (agent) => {
         agent.system = TITLE_SYSTEM_PROMPT
       })
     })
     await ctx.session.hook("title", async (draft) => {
+      const request = draft.messages.at(-1)
+      // Free OpenCode models failed to generate titles with a replaced system
+      // prompt. Keep the native prompt and give the same style in the input.
+      // A user-configured title prompt wins and must not be rewritten here.
+      if (draft.model?.providerID === "opencode" && draft.model.id.endsWith("-free")
+        && originalTitleSystem && draft.system.length === 1 && draft.system[0].text === TITLE_SYSTEM_PROMPT
+        && request?.role === "user") {
+        draft.system[0].text = originalTitleSystem
+        request.content.push({ type: "text", text: TITLE_SYSTEM_PROMPT })
+      }
       // A failed read leaves the title to the message alone, as OpenCode built it.
       const context = await ctx.session.context({ sessionID: draft.sessionID })
         .then(attachedContextOfShortFirstMessage, () => "")
-      const request = draft.messages.at(-1)
       if (!context || request?.role !== "user") return
       // A text part on the same user message: some providers reject two user messages in a row.
       draft.messages = [

@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -583,6 +584,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': 'הסתר בשבילי',
   'settings.projects.shared.replaceMode': 'להשתמש רק בפקודות ההכנה שלי, לדלג על אלה של המאגר',
   'settings.projects.shared.toast.shareFailed': 'עדכון הגדרות המאגר נכשל',
+  'settings.projects.notesTodos.title': 'הערות ומשימות',
+  'settings.projects.notesTodos.inRepository': 'לשמור הערות ומשימות במאגר',
+  'settings.projects.notesTodos.inRepositoryDescription': 'המחשב הזה קורא ושומר אותן ב-.openchamber/notes-todos.json, כך ש-Git יכול לסנכרן אותן. ההפעלה מעבירה את ההערות והמשימות שלך לקובץ; הכיבוי מעתיק את הרשומות מהקובץ בחזרה למחשב הזה.',
+  'settings.projects.notesTodos.toast.saveFailed': 'שינוי מקום השמירה של ההערות והמשימות נכשל',
   'settings.projects.actions.state.loading': 'טוען…',
   'settings.projects.actions.state.noDesktopSshForwards': 'אין העברות SSH מקומיות פעילות.',
   'settings.projects.actions.field.selectIconAria': 'בחר סמל',
@@ -1258,6 +1263,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'כלי ההתראות של הסוכנים',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'כלי ההתראות של הסוכנים',
   'settings.openchamber.tools.field.agentNotifyToolSummary': 'סוכנים יכולים לשלוח לך התראה כשהעבודה הסתיימה או כשהם תקועים.',
+  'settings.openchamber.tools.field.agentTerminalTool': 'פאנל מסוף',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'מאפשר לסוכן לרשום את המסופים של התיקייה הזו ולקרוא מה הם הדפיסו. מסוף שומר כל מה שהוקלד בו, כולל סודות, ולכן זה נשאר כבוי עד שתפעיל אותו.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "כלי ידע הפרויקט",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "כלי ידע הפרויקט",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "סוכנים יכולים לקרוא ולעדכן את ההערות, המשימות והתוכניות של הפרויקט.",
@@ -2422,6 +2429,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'הצגת Esc, Ctrl וחיצים בתצוגת המסוף',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'סגירת הלשונית כשהמעטפת יוצאת',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'חל על מסופים ועל פעולות פרויקט. כשהאפשרות כבויה, הלשונית שומרת את הפלט שלה, למשל יומן של שרת פיתוח אחרי שעצר.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'פתיחת המסוף כשפעולת פרויקט מתחילה',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'כשהאפשרות כבויה, הפעולה רצה בלי להחליף את הלוח הצדדי. הפלט שלה נשאר בלשונית הפעולה במסוף.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'מיפוי מקשים בעורך הקבצים',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'ברירת מחדל',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2466,8 +2475,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'שמירה אוטומטית של קבצים',
   'settings.openchamber.visual.field.autoSaveEnabled': 'שמירה אוטומטית של קבצים',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'שמירה אוטומטית של עריכות בקבצים אחרי שמפסיקים להקליד. כשהאפשרות כבויה, צריך לשמור ידנית.',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'פריסת צ\'אט רחבה',
-  'settings.openchamber.visual.field.wideChatLayout': 'פריסת צ\'אט רחבה',
+  'settings.openchamber.visual.field.chatWidth': 'רוחב הצ\'אט',
+  'settings.openchamber.visual.field.chatWidthInfo': 'ברירת מחדל ורחב יותר שומרים את ההודעות בעמודה ממורכזת. מלא משתמש בכל הצ\'אט להודעות, ושדה ההודעה נשאר ברוחב של רחב יותר.',
+  'settings.openchamber.visual.option.chatWidth.default.label': 'ברירת מחדל',
+  'settings.openchamber.visual.option.chatWidth.wider.label': 'רחב יותר',
+  'settings.openchamber.visual.option.chatWidth.full.label': 'מלא',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'גלישת שורות בבלוקי קוד',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'גלישת שורות בבלוקי קוד',
   'settings.openchamber.visual.field.tableCellWrap': 'גלישת טקסט בתאי טבלה',
@@ -2766,5 +2778,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
   ...settingsLayoutI18n.he,
+  ...mobileAppSettingsI18n.he,
   'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "חיפוש בהיסטוריית ההנחיות",
 } as const;

@@ -81,15 +81,19 @@ import {
 } from '@/lib/reviewFlow';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
-import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
-import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
-import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
+import { buildTurnImageExportSource, resolveMessageImageExportWidth, saveMessageImageExport } from './imageExport';
+import { MessageSelectionMark } from '../messageSelection/MessageSelectionMark';
+import { messageSelectionKey } from '@/stores/useMessageSelectionStore';
 import { hasTextSelectionInside } from '@/lib/textSelection';
 import { DiffCount } from '@/components/ui/diff-count';
+import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 
 
-const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
+// Layout containment only. A `translateZ(0)` here once gave every message its
+// own compositor layer; the transcript's scroller is already one, so the extra
+// layers only added tiles (about 10 MB of GPU memory for one screen of chat).
+const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
 
@@ -299,6 +303,7 @@ interface MessageBodyProps {
     onCopyLink?: () => void;
     /** Opens "Save as snippet" with this user message's text. */
     onSaveAsSnippet?: () => void;
+    onSelectMessages?: () => void;
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
@@ -400,7 +405,7 @@ const CopyMessageLinkButton: React.FC<{ onCopyLink: () => void }> = ({ onCopyLin
     );
 };
 
-const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onSaveAsSnippet, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userMessagePart = 'bubble', extraActions, promptOrigin }: {
+const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onSaveAsSnippet, onSelectMessages, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userMessagePart = 'bubble', extraActions, promptOrigin }: {
     parts: Part[];
     promptOrigin?: PromptOrigin;
     messageCreatedAt?: number | null;
@@ -411,6 +416,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
     onSaveAsSnippet?: () => void;
+    onSelectMessages?: () => void;
     onShowPopup: (content: ToolPopupContent) => void;
     agentMention?: AgentMentionInfo;
     onRevert?: () => void;
@@ -585,6 +591,14 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
                 onSelect: onSaveAsSnippet,
             });
         }
+        if (onSelectMessages && hasCopyableText) {
+            actions.push({
+                id: 'select-messages',
+                label: t('chat.messageSelection.action'),
+                icon: <Icon name="checkbox-multiple" className="h-4 w-4" />,
+                onSelect: onSelectMessages,
+            });
+        }
         if (onToggleContextPin && hasCopyableText) {
             actions.push({
                 id: 'pin-context',
@@ -614,7 +628,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
             actions.push({ id: extra.id, label: extra.label, icon: extra.icon, onSelect: extra.onSelect });
         }
         return actions;
-    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyMessage, onRevert, onSaveAsSnippet, onToggleContextPin, t]);
+    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyMessage, onRevert, onSaveAsSnippet, onSelectMessages, onToggleContextPin, t]);
     // On pointer surfaces copy and revert have their own buttons.
     const userMenuActions = userSheetActions.filter((action) => action.id !== 'copy' && action.id !== 'revert');
     const timestamp = React.useMemo(() => {
@@ -625,7 +639,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
     }, [locale, messageCreatedAt, timeFormatPreference]);
     const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
     const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) ? (
-        <div className={cn(
+        <div data-user-message-actions="" className={cn(
             'group/user-actions flex items-start justify-end',
             // In a sticky turn header (TurnItem) the mobile row is shorter: it
             // stays on screen, and the reply below keeps its own top margin.
@@ -1281,8 +1295,11 @@ const AssistantMessageBody = React.memo(({
     footerAgentName,
     footerVariant,
     extraActions,
+    onSelectMessages,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
+    const theme = useOptionalThemeSystem()?.currentTheme;
+    const answerSelectionKey = turnGroupingContext?.turnId ? messageSelectionKey('answer', turnGroupingContext.turnId) : null;
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1507,147 +1524,17 @@ const AssistantMessageBody = React.memo(({
         async (requestedSourceElement?: HTMLElement | null) => {
             const sourceElement = requestedSourceElement ?? messageTextContentRef.current ?? messageContentRef.current;
             if (!sourceElement) return;
-
-            let wrapper: HTMLDivElement | null = null;
             try {
-                // Load the exporter before attaching its temporary clone so a slow
-                // chunk request cannot leave export-only content in the page layout.
-                const { toPng } = await import('html-to-image');
-                const originalElement = sourceElement;
-                const computedStyle = window.getComputedStyle(originalElement);
-                const rootStyle = window.getComputedStyle(document.documentElement);
-                const resolvedBackgroundColor =
-                    rootStyle.getPropertyValue('--surface-background').trim() ||
-                    computedStyle.backgroundColor ||
-                    window.getComputedStyle(document.body).backgroundColor;
-                const paddingSize = 24;
-                // The turn source is built off-screen, so the visible column is the
-                // only element still holding the width the reader saw.
-                const exportWidth = resolveMessageImageExportWidth(messageContentRef.current ?? originalElement);
-
-                wrapper = document.createElement('div');
-                wrapper.setAttribute('data-message-image-export', 'true');
-                wrapper.style.cssText = `
-                    padding: ${paddingSize}px;
-                    ${exportWidth ? `width: ${exportWidth}px; box-sizing: content-box;` : ''}
-                    background-color: ${resolvedBackgroundColor};
-                    display: inline-block;
-                `;
-                // Scrollbars are dead weight in a still image, and hiding them stops
-                // their gutter from clipping the last column of a wide table.
-                const exportStyle = document.createElement('style');
-                exportStyle.textContent = `
-                    [data-message-image-export] * { scrollbar-width: none; }
-                    [data-message-image-export] *::-webkit-scrollbar { display: none; }
-                `;
-                wrapper.appendChild(exportStyle);
-
-                const clone = cloneMessageImageExportSource(originalElement);
-                clone.style.cssText = `
-                    ${computedStyle.cssText}
-                    transform: none;
-                    contain: none;
-                `;
-
-                // A column-width canvas would clip an unwrapped code line behind its
-                // scroll container, so long lines wrap only for the export.
-                const codeWrapRoots = clone.querySelectorAll<HTMLElement>('[data-code-wrap]');
-                codeWrapRoots.forEach((root) => {
-                    root.setAttribute('data-code-wrap', 'true');
+                const result = await saveMessageImageExport({
+                    source: sourceElement,
+                    width: resolveMessageImageExportWidth(messageContentRef.current ?? sourceElement),
+                    fileName: `message-${messageId}.png`,
+                    vscode: vscodeApi,
                 });
-
-                const actionRows = clone.querySelectorAll<HTMLElement>('[data-message-actions="true"]');
-                actionRows.forEach((row) => {
-                    row.style.display = 'none';
-                });
-                const actionGroups = clone.querySelectorAll<HTMLElement>('[data-message-action-group="true"]');
-                actionGroups.forEach((group) => {
-                    group.style.display = 'none';
-                });
-
-                const timestampElements = clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]');
-                const footerRowsAdjusted = new Set<HTMLElement>();
-                timestampElements.forEach((element) => {
-                    const label = element.getAttribute('aria-label');
-                    const timestamp = label?.replace('Message time:', '').trim();
-                    if (!timestamp || element.textContent?.includes(timestamp)) {
-                        return;
-                    }
-
-                    const timestampText = document.createElement('span');
-                    timestampText.style.marginLeft = '4px';
-                    timestampText.textContent = timestamp;
-                    element.appendChild(timestampText);
-
-                    const metaGroup = element.parentElement;
-                    const footerRow = metaGroup?.parentElement as HTMLElement | null;
-                    if (!footerRow || footerRowsAdjusted.has(footerRow)) {
-                        return;
-                    }
-
-                    footerRow.style.justifyContent = 'flex-start';
-                    footerRowsAdjusted.add(footerRow);
-                });
-
-                wrapper.appendChild(clone);
-                document.body.appendChild(wrapper);
-
-                if (exportWidth) {
-                    // Keep the clone at the column so prose wraps where the reader saw it;
-                    // only the canvas and the clipped blocks grow.
-                    fitMessageImageExportLayout(wrapper, clone, exportWidth);
-                }
-
-                const bounds = wrapper.getBoundingClientRect();
-                const canvasWidth = Math.ceil(bounds.width);
-                const canvasHeight = Math.ceil(bounds.height);
-
-                const dataUrl = await toPng(wrapper, {
-                    quality: 1,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
-                    backgroundColor: resolvedBackgroundColor,
-                });
-
-                const fileName = `message-${messageId}.png`;
-
-                if (isVSCodeRuntime()) {
-                    const payload = await vscodeApi?.saveImage?.({ fileName, dataUrl }) as { saved?: boolean; canceled?: boolean; error?: string } | undefined;
-                    if (!payload) {
-                        throw new Error('Failed to save image in VS Code');
-                    }
-                    if (payload.saved !== true) {
-                        if (payload.canceled) {
-                            return;
-                        }
-                        throw new Error(payload.error || 'Failed to save image in VS Code');
-                    }
-                } else if (isCapacitorMobileApp()) {
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
-                } else {
-                    // Desktop titles the save dialog with the download URL, so a data URL
-                    // would put the whole image in the title.
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.download = fileName;
-                    link.href = url;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                }
-
-                toast.success(t('chat.messageBody.toast.imageSaved'));
+                if (result === 'saved') toast.success(t('chat.messageBody.toast.imageSaved'));
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
-            } finally {
-                if (wrapper && wrapper.parentNode) {
-                    wrapper.parentNode.removeChild(wrapper);
-                }
             }
         },
         [messageId, t, vscodeApi]
@@ -1664,7 +1551,10 @@ const AssistantMessageBody = React.memo(({
             const syntaxStyle = messageContentRef.current?.querySelector('[data-markdown-content]')?.getAttribute('style') ?? null;
             let turnSource: HTMLElement;
             try {
-                turnSource = await buildTurnImageExportSource(segments, syntaxStyle);
+                turnSource = await buildTurnImageExportSource(segments, syntaxStyle, {
+                    width: resolveMessageImageExportWidth(messageContentRef.current),
+                    theme,
+                });
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
@@ -1672,7 +1562,7 @@ const AssistantMessageBody = React.memo(({
             }
             await shareMessageAsImage(turnSource);
         },
-        [shareMessageAsImage, t]
+        [shareMessageAsImage, t, theme]
     );
     const shareTurnAsImage = React.useCallback(
         (requestedSourceElement?: HTMLElement | null) => shareTextAsImage(
@@ -1807,7 +1697,18 @@ const AssistantMessageBody = React.memo(({
                 }
                 hasRenderedAnswerText = true;
                 rendered.push(
-                    <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
+                    <div
+                        key={`assistant-text-${messageId}-${i}`}
+                        ref={messageTextContentRef}
+                        data-message-text-export-source="true"
+                        data-message-select-unit={answerSelectionKey ?? undefined}
+                    >
+                        <MessageSelectionMark
+                            sessionId={sessionId}
+                            unitKey={answerSelectionKey}
+                            kind="answer"
+                            showCheckbox={Boolean(turnGroupingContext?.opensAnswerText) && part.id === firstTextPartId && textStart === 0}
+                        />
                         <AssistantTextPart
                             part={part}
                             sessionId={sessionId}
@@ -1978,6 +1879,7 @@ const AssistantMessageBody = React.memo(({
         slice,
         turnGroupingContext,
         visibleParts,
+        answerSelectionKey,
     ]);
 
     const turnDurationText = React.useMemo(() => {
@@ -2062,6 +1964,15 @@ const AssistantMessageBody = React.memo(({
                 onSelect: () => { void shareTurnAsImage(); },
             });
         }
+        if (onSelectMessages) {
+            actions.push({
+                id: 'select-messages',
+                label: t('chat.messageSelection.action'),
+                icon: <Icon name="checkbox-multiple" className="h-3.5 w-3.5" />,
+                disabled: !hasCopyableText,
+                onSelect: onSelectMessages,
+            });
+        }
         if (!isMiniChatSurface && showMessageTTSButtons && hasCopyableText) {
             actions.push({
                 id: 'tts',
@@ -2117,7 +2028,7 @@ const AssistantMessageBody = React.memo(({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onSelectMessages, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const footerMenuActions = footerSheetActions.filter((action) => !action.onPointerRow);
 
@@ -2335,6 +2246,7 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
+                        data-message-footer=""
                         className="mt-2 mb-1 flex flex-col gap-y-1.5"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
@@ -2483,6 +2395,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 onCopyMessage={props.onCopyMessage}
                 copiedMessage={props.copiedMessage}
                 onSaveAsSnippet={props.onSaveAsSnippet}
+                onSelectMessages={props.onSelectMessages}
                 onShowPopup={props.onShowPopup}
                 agentMention={props.agentMention}
                 onRevert={props.onRevert}

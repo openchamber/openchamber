@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -551,6 +552,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': '对我隐藏',
   'settings.projects.shared.replaceMode': '仅使用我的设置命令，跳过仓库中的命令',
   'settings.projects.shared.toast.shareFailed': '更新仓库配置失败',
+  'settings.projects.notesTodos.title': '笔记和待办事项',
+  'settings.projects.notesTodos.inRepository': '将笔记和待办事项保存在仓库中',
+  'settings.projects.notesTodos.inRepositoryDescription': '这台机器会从 .openchamber/notes-todos.json 读取并保存它们，以便 Git 同步。开启后，你的笔记和待办事项会移入该文件；关闭后，文件中的条目会复制回这台机器。',
+  'settings.projects.notesTodos.toast.saveFailed': '无法更改笔记和待办事项的保存位置',
   'settings.projects.actions.state.loading': '加载中...',
   'settings.projects.actions.state.noDesktopSshForwards': '没有可用的本地 SSH 转发。',
   'settings.projects.actions.field.selectIconAria': '选择图标',
@@ -1226,6 +1231,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': '智能体通知工具',
   'settings.openchamber.tools.field.agentNotifyToolAria': '智能体通知工具',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "工作完成或卡住时，智能体会通知你。",
+  'settings.openchamber.tools.field.agentTerminalTool': '终端面板',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': '让智能体列出此文件夹的终端并读取其输出。终端会保留其中输入的所有内容，包括机密信息，因此在开启前始终保持关闭。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "项目知识工具",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "项目知识工具",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "让智能体读取并更新项目的笔记、待办和计划。",
@@ -2401,6 +2408,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '在终端视图显示 Esc、Ctrl、方向键',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Shell 退出时关闭标签页',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '适用于终端和项目操作。关闭后，标签页会保留输出，例如开发服务器停止后的日志。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '项目操作启动时打开终端',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '关闭后，操作启动时不会切换侧边面板。输出仍保留在终端中该操作的标签页里。',
   'settings.openchamber.visual.field.fileEditorKeymap': '文件编辑器键位映射',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '默认',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2459,8 +2468,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': '文件树位置',
   'settings.openchamber.visual.option.fileTreeSide.left': '左侧',
   'settings.openchamber.visual.option.fileTreeSide.right': '右侧',
-  'settings.openchamber.visual.field.wideChatLayoutAria': '宽聊天布局',
-  'settings.openchamber.visual.field.wideChatLayout': '宽聊天布局',
+  'settings.openchamber.visual.field.chatWidth': '聊天宽度',
+  'settings.openchamber.visual.field.chatWidthInfo': '默认和更宽会将消息保持在居中的一栏中。全宽让消息占满整个聊天区域，输入框保持更宽时的宽度。',
+  'settings.openchamber.visual.option.chatWidth.default.label': '默认',
+  'settings.openchamber.visual.option.chatWidth.wider.label': '更宽',
+  'settings.openchamber.visual.option.chatWidth.full.label': '全宽',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '在同一条回复中，如果助手文本块后面还有工具调用，则显示“复制回答”“保存为图片”和“朗读”操作。',
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],
   ...settingsLayoutI18n['zh-CN'],
+  ...mobileAppSettingsI18n['zh-CN'],
   'settings.page.integrations.title': '集成',
   'settings.agents.page.field.steps': '最大步数',
   'settings.agents.page.field.stepsTooltip': '智能体在一轮中最多可以执行多少个工具步骤。',

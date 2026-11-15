@@ -4,7 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
-import { attachmentWireName } from '@/lib/attachmentIdentity';
+import { attachmentWireName, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
@@ -189,7 +189,8 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    const attachments = useInputStore.getState().attachedFiles;
+    // The files any variant's text cites: a deleted chip drops its file.
+    const attachments = attachmentsCitedIn(variants.map((variant) => variant.text).join('\n'), useInputStore.getState().attachedFiles);
     const config = useConfigStore.getState();
     const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {

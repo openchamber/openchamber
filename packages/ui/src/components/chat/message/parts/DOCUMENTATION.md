@@ -127,14 +127,40 @@ and needs no provider, so a Markdown block rendered for export is unchanged.
 
 ### Why a collapsed user message shares two lines between text and context
 
-Each context item (a quote, a code comment, terminal output) collapses to one
-row, so a message with ten comments stayed ten rows tall, and with the sticky
-user header on those rows stayed over the chat. A collapsed message now gets
-two lines: the text takes one or two, and context rows get what is left
+Each context item (a quote, a code comment, terminal output) collapses to its
+quote line plus a line for the user's comment, so a message with ten comments
+stayed twenty lines tall, and with the sticky user header on those lines stayed
+over the chat. A collapsed message now gets two lines: the text takes one or
+two, and context items get what is left, each shown whole or not at all
 (`contextPartsPastCollapse`). The rest waits behind the message's one show more
 link. The text wins because it is what the user typed. Lines follow the chat's
 width, so `UserTextPart` measures them before paint, and clamping the block by
-height would cut a row in half.
+height would cut an item in half.
+
+### Why a chat quote has no caption
+
+A quote's accent bar already says "this is quoted", and a quote from this chat
+has no source worth naming, so its caption ("Quoted from an earlier message")
+is read to screen readers only and the collapsed line shows the quote itself.
+Code comments, terminal output, pages and PR items keep their caption, since
+the file, terminal or page is information the bar does not carry.
+
+### Why backslash doubling stops at `.` and `?`
+
+A user message reads as typed, but CommonMark treats `\` + punctuation as
+an escape, so `prepareUserMarkdownContent` doubles backslash runs in prose
+before the renderer sees them — only before `.` and `?`, which start no
+Markdown or emoji construct. Code and formulas keep their source: the
+helper parses the message with the bubble's own math and literal-text
+plugins and skips fenced, indented and inline code and every math node,
+because a doubled backslash shows in code and changes a formula (`\.` is
+KaTeX's dot accent, `\text{\.{z}}`). Link targets keep their source too
+(`[f](./a\.txt)` points at `a.txt`): only a link's label is prose, and
+autolinks, bare URLs, images and reference definitions stay whole. A wider set was tried and reverted
+twice: the full punctuation set re-armed intentional escapes (`\*x\*`),
+live links, and math delimiters. `:` feeds emoji shortcodes for the same
+reason. The next reader tempted to widen the set is re-adding one of those
+regressions.
 
 ### Bidirectional prose
 
@@ -151,6 +177,10 @@ without letters keeps `dir="auto"` and `unicode-bidi: plaintext`, and table
 cells and summaries keep plaintext. The message root does not select one
 direction for all its children. Code widgets, diagrams, math and technical
 references remain LTR isolates, including their controls.
+
+Each Markdown table takes the majority direction of its cell prose, excluding
+code, and aligns to that side. Cells retain their own plaintext direction and
+explicit Markdown alignment. Tables without letters stay left to right.
 
 Plain-text user messages resolve each line on its own: the container keeps
 `unicode-bidi: plaintext`, and `plainTextLineDirection.tsx` opens each line with
@@ -199,6 +229,21 @@ run a second Markdown parser. Ordinary code selections copy raw code;
 prose follows the Markdown/plain setting and retains safe rich HTML. The
 desktop `openchamber:copy` event follows the same selection policy.
 
+### How a saved image reaches the user
+
+`saveMessageImageExport` (`message/imageExport.ts`) draws a source on the chat
+background and hands the PNG to the runtime: the VS Code save dialog, the
+native share sheet in the Capacitor app, or a download everywhere else. One
+answer's "Save as image" and a selection of several messages
+(`messageSelection/`) both go through it. The exporter chunk loads before the
+temporary clone is attached, so a slow chunk cannot leave export-only content
+in the page. The download goes through a blob URL, because the desktop app
+titles its save dialog with the download URL and a data URL would put the
+whole image there. A dismissed save dialog or share sheet resolves as
+`canceled`: the caller shows nothing and keeps its state, where it used to
+report a failed image. The VS Code bridge waits on its file dialogs without a
+timeout, since the user can take longer than a request normally may.
+
 ### Why image exports keep prose at the visible column width
 
 The export clone keeps the live message column width, including whole-turn
@@ -246,7 +291,7 @@ use native `data-streamdown` markers.
 #### Why Markdown consumers use the lazy wrapper
 
 `markdownRendererLoader.ts` dynamically imports the renderer and its imports,
-including Streamdown, KaTeX, Shiki and beautiful-mermaid with ELK.
+including Streamdown, KaTeX and beautiful-mermaid with ELK.
 The web and mobile entry points start that import at boot without making the
 first render wait for it.
 Components take `MarkdownRenderer`, `SimpleMarkdownRenderer` or
@@ -363,61 +408,48 @@ rendering keeps its direct-child rules. This CSS alternative still needs its
 own browser performance comparison; the explicit-metadata experiment does not
 establish its invalidation cost.
 
-Markdown code in languages with a `@pierre/highlights` lexer (about 170, every
-common one) is tokenized on the main thread, synchronously, in one pass over
-the whole block with `MARKDOWN_HIGHLIGHTS_THEME`, so the block paints
-highlighted on its first commit. The rest run in `streamdown-code.worker.ts`
-on Shiki/Oniguruma with the same grammar sanitization as the shared code
-worker and `MARKDOWN_SHIKI_THEME`. Until the Highlights import settles, the
-first blocks wait for it and then take the same split. Both themes resolve to the same `--md-*` variables.
-ANSI is the exception: Highlights has a lexer for it, but its tokens drop the
-escape sequences and merge the text around them, so token text no longer
-matches the source. Everything here places tokens by source offset (the packed
-transfer ranges, CodeMirror decorations), so `isHighlightsLanguage` in
-`highlightsEngine.ts` keeps ANSI on Shiki.
-For Shiki languages, complete-line grammar state stays in eight bounded worker
-lineages; edits restart from a matching prefix or a full pass. The client preserves the pre-migration cache
-policy: four recent streaming results, four complete-line snapshots, and a
-2000-entry, 24 MiB estimated completed-result LRU. Language and the existing
-dual-hash content fingerprint key pure highlighting. A single oversized entry
-is retained; no filesystem or runtime-dependent annotations enter this cache.
-Only completed requests coalesce. Streaming results promote to the completed
-cache when the same source settles. Snapshot sequence numbers keep an older
-response from replacing a newer base in the same lineage.
-Streaming requests reuse complete prefix rows and transfer only suffix token
-ranges and palette indexes in two ArrayBuffers. Text is reconstructed from the
-caller's source using UTF-16 offsets, without JSON encode/decode. Whitespace
-tokens may absorb foreground differences but preserve font/background and
-decoration boundaries. `MarkdownCode` owns the React token rows and line numbers,
-using Streamdown's public container and header. A warm lookup renders tokens on
-the first commit; unchanged row arrays skip row rendering. Async results carry
-their input and append lineage, so abandoned contexts and shorter late results
-cannot replace newer displays. Shiki never runs on the main thread:
-unsupported workers, oversized input and failed requests leave readable code.
-Main-thread Highlights results go through the same caches; streaming rows that
-match the previous result of the same block keep their identity. Each dispatched request has a five-second
-deadline. A timeout terminates the worker, caches only the offending failure in
-the same LRU, and replays other pending requests with fresh deadlines. A crash
-or message error ends all pending requests without caching their failure;
-subsequent requests may retry. Work serializes inside the worker, with no new
-main-thread queue admission limit. The existing `openchamber_stream_highlight`
-full-pass flag bypasses incremental reuse. Language-load failure falls back to
-text. Line budgets remain 1200 settled, 300 open-fence, and 200 in VS Code.
+Markdown code is tokenized by `@pierre/highlights` on the main thread,
+synchronously, in one pass over the whole block with
+`MARKDOWN_HIGHLIGHTS_THEME`, so the block paints highlighted on its first
+commit. Colors are the `--md-*` variables, so a theme switch repaints through
+CSS without tokenizing again. `highlightsLanguage` in `highlightsEngine.ts`
+picks the lexer for every consumer: the language's own, a close relative's from
+`LANGUAGE_RELATIVES` (`lib/shiki/languageRelatives.ts`, shared with files and
+diffs), or plain text. Until the Highlights import settles, the first blocks
+show plain text and wait for it. A runtime whose WebAssembly lacks SIMD fails
+the import, and code there stays plain text.
+A fence tagged `ansi` shows its text with the escape sequences removed and no
+colors (`stripAnsi`); the copy button and selection still give the fence's own
+source. Highlights has an ANSI lexer, but its tokens drop the escapes and merge
+the text around them, so they stop matching the source, and file-path marking
+and CodeMirror decorations place tokens by source offset.
+`MarkdownCodeHighlighter` keeps four recent streaming results and a 2000-entry,
+24 MiB estimated completed-result LRU. Language and the dual-hash content
+fingerprint key pure highlighting. A single oversized entry is retained; no
+filesystem or runtime-dependent annotations enter this cache. Streaming results
+promote to the completed cache when the same source settles. Streaming rows
+that match the previous result of the same block keep their identity, so React
+skips them. Whitespace tokens may absorb foreground differences but preserve
+font/background and decoration boundaries. `MarkdownCode` owns the React token
+rows and line numbers, using Streamdown's public container and header. Async
+results carry their input and append lineage, so abandoned contexts and shorter
+late results cannot replace newer displays. Line budgets remain 1200 settled,
+300 open-fence, and 200 in VS Code; a block over its budget renders as plain
+rows.
 Lexical file-path matches have a separate bounded source cache; confirmation
 stays directory/runtime-bound. Empty path results do not trigger another token
 callback, and annotations reuse results only within their resolver instance.
-VS Code loads the bundled worker through its existing webview blob-worker
-boundary. Image export awaits the same token path with a bounded fallback to
-readable source. The code body reads prepared tokens during render, so the final
-flush commits them without DOM readiness markers or an observer.
+Image export awaits the same token path with a bounded fallback to readable
+source. The code body reads prepared tokens during render, so the final flush
+commits them without DOM readiness markers or an observer.
 
 #### Why pending code retains its last result
 
 Like Streamdown's highlighted body, the code body uses plain text on first mount
-and retains the last display while an appended input waits for highlighting.
-It does not splice tokens itself: the worker owns complete-line grammar and token
-reuse. Replacing the entire block with plain rows between worker results discarded
-prefix identity and repeatedly deleted and recreated highlighted tokens.
+and retains the last display while an appended input waits for highlighting,
+which happens only until the Highlights import settles.
+Replacing the entire block with plain rows between results discarded prefix
+identity and repeatedly deleted and recreated highlighted tokens.
 
 A mounted body records the displayed result's actual input after commit. Results
 for intermediate append inputs may advance that display even when newer input is
@@ -425,44 +457,50 @@ pending, so continuous output does not starve updates. Shorter late results cann
 roll it back. Edits, deletions, language changes and plugin/context changes start
 a new lineage; callbacks from abandoned lineages are ignored even if the text
 later returns to an old prefix. Exact cached and policy-driven plain results take
-precedence. Worker failure publishes the requested plain text through the existing
-plugin fallback. This is one mounted component's display state, not a shared cache.
+precedence. Where Highlights cannot run, the plugin publishes the requested
+plain text. This is one mounted component's display state, not a shared cache.
 
-The separate code worker (`markdown-shiki.worker.ts`) remains shared by
-non-Markdown code views for Shiki languages. Their client renders Highlights
-languages on the main thread, and `getCachedHighlightedCode` /
-`getCachedHighlightedLines` answer them synchronously for a highlighted first
-paint.
-CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights' `LiveTokenizer`
-on the main thread, so an edit re-tokenizes only the lines it changed and
-colors land with the keystroke; it uses this worker only for languages without
-a Highlights lexer. Its whole-block HTML, per-line HTML and themed token APIs,
-cache and timeout/replay rules are unchanged. Markdown does not call that
-worker's HTML interfaces. Its `init` message warms Highlights only; Shiki and
-its WebAssembly start on the first language Highlights has no lexer for.
+Code views outside Markdown (`HighlightedCode`,
+`useHighlightedLines`) take whole-block and per-line HTML from
+`highlightedCode.ts`, which renders with Highlights on the main thread and
+memoizes by content fingerprint in a 2000-entry, 24 MiB LRU.
+`getHighlightedCode` / `getHighlightedLines` answer synchronously for a
+highlighted first paint; `highlightCode` / `highlightLines` wait for the import
+first. CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights'
+`LiveTokenizer` on the main thread, so an edit re-tokenizes only the lines it
+changed and colors land with the keystroke. Both follow the same language,
+ANSI and no-SIMD rules as Markdown code.
 
-#### Why Highlights languages run on the main thread without lineages
+#### Why Highlights runs on the main thread without lineages
 
 Highlights tokenizes without regular expressions, about a millisecond per
 100 KB, which is less than a worker round trip; the line budgets cap a block
 well below that. Running it on the main thread removes the plain first frame,
 and re-tokenizing a streamed fence from its first line costs less than keeping
-and matching lineage state. Its lexers are written per
-language and cannot backtrack, so the `template-call` hang behind the
-sanitization does not apply to them. A runtime whose WebAssembly lacks SIMD
-fails the Highlights import, and every language falls back to Shiki.
+and matching lineage state. Its lexers are written per language and cannot
+backtrack, so no request needs a deadline.
 
-#### Why the code plugin uses the application's WASM worker
+#### Why Highlights is the only highlighter and not Highlights with a Shiki fallback
 
-The official code plugin tokenizes both configured themes even when they are
-identical. This application uses one CSS-variable theme, so its worker runs one
-pass and, for Shiki languages, reuses the existing grammar sanitization and
-complete-line state rules. Transferring suffix ranges keeps repeated token strings and
-unchanged rows out of worker replies while preserving native Streamdown tokens.
-Cache eviction, request coalescing, timeout replay and grammar-lineage retention
-follow the pre-migration worker. The payload and its byte estimate change from
-HTML to tokens so React can own the code body; streaming-only prefixes stay in
-the bounded recent results.
+A Shiki/Oniguruma worker used to highlight what Highlights did not: languages
+without a lexer, `ansi` fences, and every language on a runtime without
+WebAssembly SIMD (Safari before 16.4). It was rejected for its cost against
+what it served. The fallback needed two workers, grammar-state resume for
+streamed fences, a five-second deadline with worker restart against grammar
+backtracking, grammar sanitization and a second theme format, and the language
+list alone put Shiki core and the 614 KB Oniguruma engine on the main thread at
+startup. Rare languages now take a relative's lexer or plain text, ANSI output
+is plain text, and a runtime without SIMD shows uncolored code. `@pierre/diffs`
+keeps its own `shiki-js` fallback for files and diffs.
+
+#### Why the code plugin is the application's and not `@streamdown/code`
+
+The official code plugin runs Shiki and tokenizes both configured themes even
+when they are identical. This application colors through one set of CSS
+variables, so its plugin runs one Highlights pass and returns native Streamdown
+tokens that React renders as rows. Streamdown reads only `getThemes` and
+`highlight` from it; its language questions belong to its own code block, which
+`MarkdownCode` replaces.
 
 ### Optional history disclosure
 
@@ -753,7 +791,7 @@ update, with the `shellID`, when the command starts.
 - OpenCode's `opencode` namespace tools (sessions, worktrees, models, MCP resources, schedules, artifacts) run behind Code Mode; an `execute` script that made exactly one such call shows as that tool's row (`soleNamedCall`), titled "OpenCode" with OpenCode's own mark (the `opencode` sprite glyph):
   - The description is the tool's verb once the call succeeded ("Renamed the session · Voice models"), else the tool's name. Success is the call's own status in `metadata.toolCalls`, never the script's: a namespace tool fails its call, and a script can catch that and still finish. History pages keep that metadata, so a reloaded row shows the verb without the result.
   - The expanded row reads the call's answer, the tool's structured output that the script returned (`opencodeToolResult.ts`), against that tool's output schema from the OpenCode repository, and draws it in `OpencodeToolOutput.tsx`; anything else keeps the plain output. While the view shows, the raw input is hidden; the raw answer and a failed call keep it.
-- Selecting a JSON summary, tree, or raw view saves that mode in the persisted UI settings. New and refreshed JSON tool outputs read the saved mode across sessions; missing or invalid preferences use Summary. A summary section's chevron turns on that section's own `<details>` state (`JsonSummarySection`), never on an enclosing one, so a nested row that is still collapsed keeps pointing right while its parent is open.
+- Selecting a JSON summary, tree, or raw view saves that mode in the persisted UI settings. New and refreshed JSON tool outputs read the saved mode across sessions; missing or invalid preferences use Summary. A summary section's chevron turns on that section's own `<details>` state (`JsonSummarySection`), never on an enclosing one, so a nested row that is still collapsed keeps pointing right while its parent is open. A collapsed object row adds a preview of its first two non-identity fields after its label and identity (`{ key: value, … }`, nested containers as `{…}`/`[…]`, empty ones as `{}`/`[]`, capped at 96 characters); the row stays one line and truncates to the available width, and an expanded row shows only its label and identity.
 - `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.
 - A failed `!command` row states its reason while collapsed, after the description and in the error colour, so a red row is not a bare duration. `TimelineNotice` passes it as `failureReason`: for a command that exited on its own, the last non-empty line of its output as the terminal shows it, because that is where sudo or ls prints the problem; for one killed or timed out, one that printed nothing, or one whose output OpenCode truncated (it keeps the start, so the last stored line is not the end), how it ended (`timeout`, `exited (1)`). The line is capped at 300 characters, its tooltip shows what the row cuts off, and the whole line is in the expanded output. An expanded row does not repeat it, because the body already shows the error and output. Agent tool rows get no reason line: a call interrupted by Stop keeps its streamed output, and its last line would read as the failure.
 - The rich tool diff preview lives in `ToolPartDiffPreview.tsx` and is lazy-loaded from `ToolPart`. It is the only tool-card piece that imports the `@pierre/diffs` highlighting stack, keeping that stack out of the eager chat startup graph. While its chunk loads (first rendered diff only) the plain-text patch from `PlainDiffFallback.tsx` renders as the Suspense fallback, mirroring the preview's error fallback. Patches over 256 KiB or 2,000 lines skip rich parsing and use a bounded plain-text preview; navigation keeps the original patch. `ToolPart` itself must not statically import `@pierre/diffs` runtime modules or `@/lib/shiki/appThemeRegistry`.
@@ -778,7 +816,7 @@ update, with the `shellID`, when the command starts.
 - A foreground shell row has the background row's Stop while its call runs with a `shellID` and `sync/background-shells.ts` lists the command (its directory and command text go into the stop). OpenCode 2.x cannot cancel a call the turn waits for, so `stopForegroundShell` (`foregroundShellStop.ts`) moves the session's blocking work to the background with `session.background`, waits for this call's own settle event (`waitForShellSettle`), and then stops the command with `stopBackgroundShells`, note included, so the row ends as the background row reading "stopped". The index's `background` flag gates neither the button nor the wait: a command first seen in a list reads as background while its call may still wait for it, and a removal before the call settled would make it fail as a foreground call with no completion. OpenCode does not store the progress metadata, so a call read back from history (after a page reload) has no `shellID`: that row offers no Stop, as it shows no live output. `session.background` moves everything the turn waits on, so a parallel shell call or subagent goes to the background too and keeps running there, stoppable from its own row. The stop runs outside React, because the row that started it unmounts when the call becomes a background row; a module-level set of commands being stopped keeps both rows, the composer's background commands strip and an extension's `shellStop` (refused with `HOST_REJECTED` in `PluginPane.tsx`) from sending a second stop. A command that ends before or right after it settles is not stopped. When `session.background` finds nothing blocking (the turn ended while the click was on its way) no settle comes, and after 10 s the stop fails with the usual toast; the same happens when the settle falls into a stream gap, and the command then runs on in the background with its row's own Stop.
 - A `subagent` call that went to the background (`background: true`, or moved there with `session.background`) settles at once with `metadata.status: "running"` and the child in `metadata.sessionID`. `SubagentToolPartContent` rebuilds it from the child (`backgroundSubagentPart.ts`): running while the child session is active in `global-session-status`, then finished, failed or stopped from the report OpenCode appends (`findSubagentRun`), with the `in background` header label while it runs, `stopped` after a cancel, and the stop action described for subagent rows above. `ChatContainer` drops that report from the timeline (`keepCommandSubagentReports`), so the subagent stays where it was started instead of reappearing as a new turn at the end. Only reports of `subagent: true` commands, which have no call row, still render as their own `TimelineNotice` turn, and only when the child started inside the loaded history; any other report (a call not loaded yet, an unknown child) stays out of the chat and is reachable from the session's subagent list, so loading older history never makes the chat shift.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
-- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. A pull request wake is one line that opens the pull request and does not expand, since its text only repeats the line. An extension wait's wake is titled by the wait and opens to the extension's report (`summary` in the message metadata), which can run longer than the description's first line. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
+- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. A pull request wake is one line that opens the pull request and does not expand, since its text only repeats the line. An extension wait's wake is titled by the wait and opens to the extension's report (`summary` in the message metadata), which can run longer than the description's first line. The answer to a page an agent showed with `answerLater` is titled by the page and the user's choice and opens to the data the page sent (or the parser's errors for a page that could not be drawn); the row reads the JSON line inside the envelope, because the prose around it is instructions to the agent, and a declined page is one line that does not expand. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
 - Text that draws nothing takes no space (#5215). `lib/invisibleText.ts` supplies the shared test for whitespace and Unicode default-ignorable characters. Part renderers and turn projection use it for whole parts. `MarkdownArrivalBlock` omits an invisible-only streaming block before creating its wrapper; `remarkVisibleBlocks` in `streamdownPlugins.ts` filters top-level source ranges after disclosure reconstruction, including static rendering which bypasses that wrapper. Its source view omits the leading BOM as the parser does, so node offsets still identify the intended text. Both checks use the complete source block, so code fences and joiners inside visible text remain intact. The shared predicate avoids divergent definitions of empty text; CSS `:empty` cannot detect zero-width characters.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).
@@ -820,7 +858,10 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `prepareUserMarkdownContent` used to escape them to entities in the source
   instead; entities are not decoded inside code spans and formulas, so
   `` `a<b` `` showed `a&lt;b`, and a quote escaped to `&quot;` let two shell
-  variables (`$USER ... "$HOME"`) read as one formula.
+  variables (`$USER ... "$HOME"`) read as one formula. Backslash runs
+  before `.` and `?` in prose are doubled there for the same reason
+  (CommonMark would strip them as escapes); code, math and every other
+  `\` + punctuation pair stay as typed — see "Why backslash doubling stops at `.` and `?`" above.
 - Attachment citations: the composer writes `[name.png]` into the text for each
   pasted or picked file. `UserTextPart` gets the message's file names and draws
   each citation of one of them as an inline chip with its file-type icon. The
@@ -832,9 +873,11 @@ Why: only navigation tools use the compact static path; all other tools need obs
   message opens: one resolver (`lib/messages/attachmentPreview.ts`) decides for
   both, and `message/useOpenAttachment.ts` carries it out per runtime. An image
   opens the viewer, text sent inline (a pasted text, a picked text file) the
-  text dialog, a file attached by path (`file://`) the file itself, in the
-  editor in VS Code and a Files tab elsewhere. A citation whose file opens
-  nothing (a PDF sent inline, a folder) stays a label. Only `UserTextPart`
+  text dialog, a PDF sent inline the document dialog (the Files view's PDF
+  preview, `ToolOutputDialog`; not in VS Code, whose webview policy blocks
+  both its frame and pdf.js), a file attached by path (`file://`) the file
+  itself, in the editor in VS Code and a Files tab elsewhere. A citation whose
+  file opens nothing (another binary sent inline, a folder) stays a label. Only `UserTextPart`
   makes chips clickable: `withAttachmentChips` draws labels unless the caller
   passes `isOpenable`, so the composer, the queue and context blocks get no
   dead tab stops. A click that ends a text selection over a chip leaves it

@@ -77,6 +77,7 @@ describe("catalogRefreshTasks", () => {
       const reloads = new Map([
         ["config" as const, ["/workspace/event"]],
         ["agent" as const, ["/workspace/event"]],
+        ["command" as const, ["/workspace/event", "/workspace/command-only"]],
         ["provider" as const, []],
         ["model" as const, []],
         ["skill" as const, []],
@@ -85,11 +86,13 @@ describe("catalogRefreshTasks", () => {
       const triggers = Array.from({ length: 8 }, () => refreshStoresForCatalogKinds(reloads));
       expect(agents.mock.calls.map(([directory]) => directory).sort()).toEqual(["/workspace/ambient", "/workspace/event"]);
       expect(configAgents).toHaveBeenCalledTimes(2);
-      for (const request of [providers, commands, skills, catalog, mcp, plugins]) expect(request).toHaveBeenCalledTimes(1);
+      expect(commands.mock.calls.map(([directory]) => directory).sort()).toEqual(["/workspace/ambient", "/workspace/command-only", "/workspace/event"]);
+      for (const request of [providers, skills, catalog, mcp, plugins]) expect(request).toHaveBeenCalledTimes(1);
       expect(metadata).not.toHaveBeenCalled();
       release();
       await Promise.all(triggers);
-      for (const request of [providers, commands, skills, catalog, mcp, plugins]) expect(request).toHaveBeenCalledTimes(2);
+      for (const request of [providers, skills, catalog, mcp, plugins]) expect(request).toHaveBeenCalledTimes(2);
+      expect(commands).toHaveBeenCalledTimes(6);
       expect(agents).toHaveBeenCalledTimes(4);
       // Settled work is removed: a later file edit still refreshes the lists.
       await refreshStoresForCatalogKinds(reloads);

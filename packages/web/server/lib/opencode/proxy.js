@@ -352,6 +352,22 @@ const SESSION_LIST_ALLOWED_FIELDS = [
   'fork',
 ];
 
+/**
+ * Keys under `metadata.openchamber` that nothing reads any more. Sessions made
+ * before session knowledge moved to OpenCode's instruction entries still carry
+ * the delivered-knowledge signature, about 3 KB each; across a few thousand
+ * sessions it was a third of the list the browser parses and keeps.
+ */
+const RETIRED_SESSION_METADATA_KEYS = ['knowledge_context_delivered'];
+
+const withoutRetiredMetadataKeys = (metadata) => {
+  const openchamber = metadata?.openchamber;
+  if (!openchamber || typeof openchamber !== 'object' || !RETIRED_SESSION_METADATA_KEYS.some((key) => key in openchamber)) return metadata;
+  const kept = { ...openchamber };
+  for (const key of RETIRED_SESSION_METADATA_KEYS) delete kept[key];
+  return { ...metadata, openchamber: kept };
+};
+
 export const sanitizeSessionListItem = (session) => {
   if (!session || typeof session !== 'object' || Array.isArray(session)) {
     return session;
@@ -363,6 +379,8 @@ export const sanitizeSessionListItem = (session) => {
       sanitized[key] = session[key];
     }
   }
+
+  if ('metadata' in sanitized) sanitized.metadata = withoutRetiredMetadataKeys(sanitized.metadata);
 
   // Only the revert marker: the staged file list and its snapshot are what make
   // a reverted session's record large.
@@ -497,7 +515,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
     const ours = stored[session.id];
     if (!ours || typeof ours !== 'object' || Array.isArray(ours)) return session;
-    return { ...session, metadata: ours };
+    return { ...session, metadata: withoutRetiredMetadataKeys(ours) };
   };
 
   const overlaySession = (session, { archived, stored, unreadSince }) => {

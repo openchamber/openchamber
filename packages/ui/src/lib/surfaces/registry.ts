@@ -16,6 +16,7 @@ type BuiltInContextSurfaceId =
   | 'context'
   | 'browser'
   | 'workflows'
+  | 'subagents'
   | 'chat'
   | 'pages';
 
@@ -127,6 +128,14 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'subagents',
+    descriptionKey: 'contextRail.surface.subagents.description',
+    mode: 'subagents',
+    icon: 'ai-agent',
+    labelKey: 'contextPanel.mode.subagents',
+    availability: 'has-content',
+  },
+  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     mode: 'chat',
@@ -135,7 +144,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'has-content',
   },
   {
-    // Pages other people shared by link, opened from a chat (decision 0013).
+    // Pages other people shared by link, opened from a chat.
     id: 'pages',
     descriptionKey: 'contextRail.surface.pages.description',
     mode: 'pages',
@@ -167,6 +176,7 @@ const BUILT_IN_SURFACE_GROUPS = {
   browser: 'tools',
   notes: 'workspace',
   workflows: 'workspace',
+  subagents: 'workspace',
   chat: 'workspace',
   pages: 'workspace',
 } satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
@@ -242,7 +252,7 @@ type VisibleRailSurfacesOptions = {
       or a Workflows tab is open, and never in a build without workflows. Runs
       start from the chat, so hiding it removes no entry point. */
   workflowsShown: boolean;
-  /** The server has received pages other people shared (decision 0018):
+  /** The server has received pages other people shared:
       the `pages` surface lists them, so it shows without a tab open. */
   receivedPagesShown?: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not

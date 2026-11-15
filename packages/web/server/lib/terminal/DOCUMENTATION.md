@@ -9,7 +9,7 @@
 `/api/terminal/ws` is the only terminal data transport. It uses v3 binary JSON control frames and is opened through `openRuntimeWebSocket`, preserving direct, Electron proxy, URL-token authentication, and private-relay routing.
 
 - `attach` registers a connection for one terminal. One socket may attach to many terminals.
-- Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears.
+- Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears. An attach sent with `z: 1` gets that snapshot as a `0x02` frame, the same JSON gzipped, when it is 4 KiB or more; every other frame stays `0x01` JSON. The client asks only where `DecompressionStream` exists, applies frames in arrival order while one is being gunzipped, and after a failed gunzip reconnects and attaches without `z`.
 - A current socket that closes or errors before its initial `open` invalidates its URL-scoped auth token before retrying, so retries mint a fresh token instead of backing off against a rejected upgrade. Hidden or offline clients wait 60 seconds and wake promptly on visibility/online recovery.
 - `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. PTY output arriving within 12 ms is joined into one output frame; reaching 32,768 UTF-16 code units flushes the batch immediately. Output carries the unchanged raw stream plus replay-safe text with terminal query exchanges removed. Pending output flushes before exit, restart, close, force-kill, and attach snapshots, so the snapshot sequence covers its history. A socket is terminated when its next frame would exceed 4 MiB of queued data. Reconnect starts with a fresh snapshot of the latest 512 KiB; output older than that may be unavailable to the disconnected client.
 - Attach registers before capturing the snapshot, buffers concurrent events, drops events represented by the snapshot sequence, then enters live delivery.
@@ -20,6 +20,8 @@
 HTTP remains the authenticated command plane for create, resize, appearance updates, restart, close, and force-kill. There is no SSE output or HTTP input compatibility path.
 
 `GET /api/terminal/sessions` enumerates live sessions (optionally filtered by resolved `cwd`) so clients can adopt terminals their local tab projection does not know about — another device, a new browser tab, or cleared storage. Listings include the effective launch mode and the normalized purpose, but never the command text. `POST /api/terminal/touch` refreshes `lastActivity` for the listed session ids; open clients call it periodically so background tabs, which hold no WebSocket attachment, are not idle-reaped while a client still shows them.
+
+The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessionId, { maxBytes })` to in-process callers such as a server-side agent tool; the sessions route is built from `listTerminals`, so HTTP and in-process listings cannot drift. Both read the same sanitized replay text the `attach` snapshot sends — never raw bytes and never a new HTTP surface. `readTerminal` returns it as plain text (`plain-text.js`): the replay keeps colours, titles, hyperlinks and cursor controls for the panel to redraw, and the read drops every escape and control sequence, applying only carriage return, backspace and erase-in-line so a progress line reads as it finally showed. The conversion happens before the byte cap, so the cap counts readable text. The replay is bounded to 512 KiB per terminal, and a caller's byte cap defaults to 32 KiB and never exceeds 256 KiB; `retainedBytes` is the replay size, controls included. A read only copies in-memory state: it never starts, writes, resizes, or restarts a PTY, never changes `lastActivity`, and never publishes a WebSocket frame, so an attached client's stream is untouched. Exited terminals that are still in the map remain readable.
 
 ## PTY Lifecycle
 
@@ -58,6 +60,10 @@ relay and mobile clients. Consumers coalesce invalidations into authoritative
 list reads and read again on connection and visibility recovery. The old
 five-second loop generated idle requests whenever the header was mounted.
 
+### Why the snapshot is gzipped in the frame and not by the socket
+
+A 512 KiB history is a 450 to 620 KiB JSON frame and gzips to 45 to 155 KiB in a few milliseconds. `permessage-deflate` on the socket would cover direct connections only: the relay host reads the terminal socket over loopback and forwards each message encrypted, and encrypted frames do not compress. Gzip inside the frame crosses every transport. Only the snapshot is compressed, on request, so an older client or server keeps exchanging plain frames and live output is never held back.
+
 ### Why older Bun uses node-pty
 
 bun-pty 0.6.0 imports successfully on Bun below stable 1.4.0 but throws when spawning. Provider selection checks the Bun version before caching the provider, so older Bun, 1.4.0 prereleases, and Node use node-pty. Early 1.4.0 canaries lack the required FFI buffer_length type. node-pty under Bun spawns a shell that never delivers output, so a server on older Bun has no working terminal. `openchamber serve` therefore starts the server on Bun only when `bun --version` passes the same rule, `bunVersionRunsBunPty` in `bun-pty-support.js`, and on Node otherwise (#6322). The update restart reruns the CLI with the server's own runtime, so a CLI running on such a Bun starts the server with `node` from `PATH`. The bun-pty patch retains up to 512 KiB of UTF-8-safe output until the first data listener attaches; 0.6.0 does not yet include that upstream fix.
@@ -69,6 +75,10 @@ A growing pending prefix made an unterminated control string copy and rescan all
 ### Why overflow waits for the terminator
 
 Resetting the parser at the size limit would expose control payload as printable replay text. Discarding the whole oversized sequence through its terminator preserves the replay boundary while raw live output remains unchanged. The 8,192-code-unit limit bounds parser memory separately from the 512 KiB scrollback limit.
+
+### Why reads reuse the replay text and not raw output
+
+`readTerminal` could have kept a second buffer of the exact bytes the PTY emitted, but that would duplicate everything the user typed and every command's output in memory for a feature that only reads. It would also widen exposure: raw bytes still carry terminal query exchanges and control sequences that the replay sanitizer strips, so callers would receive text no client ever sees. Finally, a separate buffer would drift from the snapshot — trimming, restart clearing, and sanitizer changes would have to be mirrored exactly, and any mismatch would show a caller output different from what an attached client replays. Reading the one sanitized history keeps a single source of truth and a single 512 KiB bound; the plain-text pass is applied to the copy a read returns, so the panel's replay and live stream keep their controls.
 
 ## Security And Relay
 

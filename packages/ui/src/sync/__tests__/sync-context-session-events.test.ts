@@ -11,8 +11,12 @@ let runtimeWillChange: (() => void) | null = null
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   mergeSessionDirectoryMetadata: (session: Session) => session,
-  isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
-    existing.title === incoming.title && existing.time?.updated !== incoming.time?.updated
+  isGlobalSessionDeferrableUpdate: (existing: Session, incoming: Session) => (
+    existing.title === incoming.title && (
+      existing.time?.updated !== incoming.time?.updated
+      || existing.cost !== incoming.cost
+      || JSON.stringify(existing.tokens) !== JSON.stringify(incoming.tokens)
+    )
   ),
   useGlobalSessionsStore: {
     getState: () => ({
@@ -28,6 +32,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
       removeSessions: (ids: string[]) => {
         removedSessionIds.push(...ids)
       },
+      noteDeferredSessionUpdate: () => undefined,
       applySessionMutations: (mutations: Array<
         { type: "upsert"; session: Session } | { type: "remove"; sessionId: string }
       >) => {
@@ -50,6 +55,7 @@ mock.module("@/lib/runtime-switch", () => ({
 import {
   applySessionEventsToGlobalSessions,
   applySessionEventToGlobalSessions,
+  readDeferredGlobalUpdates,
 } from "../session-event-router"
 import {
   registerBulkArchiveEchoes,
@@ -110,6 +116,59 @@ describe("applySessionEventToGlobalSessions", () => {
     expect(upsertedSessions).toEqual([])
     applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
     expect(upsertedSessions.map((session) => session.time.updated)).toEqual([30])
+  })
+
+  test("keeps every spend patch of a turn in the update committed at idle", () => {
+    currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
+    const tokens = { input: 3, output: 4, reasoning: 0, cache: { read: 0, write: 0 } }
+
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { cost: 1, time: { updated: 20 } } } })
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { tokens } } })
+
+    expect(upsertedSessions).toEqual([])
+    expect(readDeferredGlobalUpdates().get("ses_1")).toMatchObject({ cost: 1, tokens })
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+    expect(upsertedSessions).toHaveLength(1)
+    expect(upsertedSessions[0]).toMatchObject({ cost: 1, tokens, time: { updated: 20 } })
+    expect(readDeferredGlobalUpdates().size).toBe(0)
+  })
+
+  test("a deferred update keeps what another owner published meanwhile", () => {
+    const initial = buildSession("Initial", { created: 1, updated: 10 })
+    currentSessions = [initial]
+    const tokens = { input: 3, output: 4, reasoning: 0, cache: { read: 0, write: 0 } }
+
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { cost: 1, time: { updated: 20 } } } })
+    // A view lands on the published record while the turn runs.
+    currentSessions = [{ ...initial, time: { ...initial.time, viewed: 8 } }]
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { tokens } } })
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+
+    expect(upsertedSessions).toHaveLength(1)
+    expect(upsertedSessions[0]).toMatchObject({ cost: 1, tokens, time: { updated: 20, viewed: 8 } })
+  })
+
+  test("spend a refresh published meanwhile wins over the deferred spend", () => {
+    const initial = buildSession("Initial", { created: 1, updated: 10 })
+    currentSessions = [initial]
+
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { cost: 1, time: { updated: 20 } } } })
+    currentSessions = [{ ...initial, cost: 2 }]
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+
+    expect(upsertedSessions.map((session) => session.cost)).toEqual([2])
+  })
+
+  test("a structural patch publishes with the spend deferred before it", () => {
+    currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
+
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { cost: 2, time: { updated: 20 } } } })
+    applySessionEventToGlobalSessions({ type: "session.patched", properties: { sessionID: "ses_1", patch: { title: "Renamed" } } })
+
+    expect(upsertedSessions).toHaveLength(1)
+    expect(upsertedSessions[0]).toMatchObject({ title: "Renamed", cost: 2, time: { updated: 20 } })
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+    expect(upsertedSessions).toHaveLength(1)
   })
 
   test("applies substantive session updates immediately", () => {

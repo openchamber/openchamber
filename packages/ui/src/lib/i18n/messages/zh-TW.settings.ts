@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -548,6 +549,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': '對我隱藏',
   'settings.projects.shared.replaceMode': '僅使用我的設定命令，略過儲存庫中的命令',
   'settings.projects.shared.toast.shareFailed': '更新儲存庫設定失敗',
+  'settings.projects.notesTodos.title': '筆記和待辦事項',
+  'settings.projects.notesTodos.inRepository': '將筆記和待辦事項保存在儲存庫中',
+  'settings.projects.notesTodos.inRepositoryDescription': '這台機器會從 .openchamber/notes-todos.json 讀取並儲存它們，讓 Git 可以同步。開啟後，你的筆記和待辦事項會移入該檔案；關閉後，檔案中的項目會複製回這台機器。',
+  'settings.projects.notesTodos.toast.saveFailed': '無法變更筆記和待辦事項的儲存位置',
   'settings.projects.actions.state.loading': '載入中...',
   'settings.projects.actions.state.noDesktopSshForwards': '沒有可用的本機 SSH 轉送。',
   'settings.projects.actions.field.selectIconAria': '選擇圖示',
@@ -1184,6 +1189,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': '智慧代理通知工具',
   'settings.openchamber.tools.field.agentNotifyToolAria': '智慧代理通知工具',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "工作完成或卡住時，智慧代理會通知你。",
+  'settings.openchamber.tools.field.agentTerminalTool': '終端機面板',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': '讓代理程式列出此資料夾的終端機並讀取其輸出。終端機會保留其中輸入的所有內容，包括機密資訊，因此在開啟前會保持關閉。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "專案知識工具",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "專案知識工具",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "讓代理讀取並更新專案的筆記、待辦事項和計畫。",
@@ -2279,6 +2286,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '在終端機檢視顯示 Esc、Ctrl、方向鍵',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Shell 結束時關閉分頁',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '適用於終端機和專案動作。關閉後，分頁會保留輸出，例如開發伺服器停止後的日誌。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '專案動作啟動時開啟終端機',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '關閉後，動作啟動時不會切換側邊面板。輸出仍保留在終端機中該動作的分頁裡。',
   'settings.openchamber.visual.field.fileEditorKeymap': '檔案編輯器鍵位映射',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '預設',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2337,8 +2346,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': '檔案樹位置',
   'settings.openchamber.visual.option.fileTreeSide.left': '左側',
   'settings.openchamber.visual.option.fileTreeSide.right': '右側',
-  'settings.openchamber.visual.field.wideChatLayoutAria': '寬聊天佈局',
-  'settings.openchamber.visual.field.wideChatLayout': '寬聊天佈局',
+  'settings.openchamber.visual.field.chatWidth': '聊天寬度',
+  'settings.openchamber.visual.field.chatWidthInfo': '預設和更寬會將訊息保持在置中的一欄。全寬讓訊息占滿整個聊天區域，輸入框維持更寬時的寬度。',
+  'settings.openchamber.visual.option.chatWidth.default.label': '預設',
+  'settings.openchamber.visual.option.chatWidth.wider.label': '更寬',
+  'settings.openchamber.visual.option.chatWidth.full.label': '全寬',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '行內助理操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '行內助理操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '在同一則回覆中，如果助理文字區塊後方還有工具呼叫，則顯示「複製回答」「儲存為圖片」和「朗讀」操作。',
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   ...settingsLayoutI18n['zh-TW'],
+  ...mobileAppSettingsI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.agents.page.field.steps': '最大步數',
   'settings.agents.page.field.stepsTooltip': '代理在一輪中最多可以執行多少個工具步驟。',

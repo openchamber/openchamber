@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -556,6 +557,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': 'Benim için gizle',
   'settings.projects.shared.replaceMode': 'Yalnızca kendi kurulum komutlarımı kullan, depodakileri atla',
   'settings.projects.shared.toast.shareFailed': 'Depo yapılandırması güncellenemedi',
+  'settings.projects.notesTodos.title': 'Notlar ve yapılacaklar',
+  'settings.projects.notesTodos.inRepository': 'Notları ve yapılacakları depoda tut',
+  'settings.projects.notesTodos.inRepositoryDescription': 'Bu makine onları .openchamber/notes-todos.json dosyasından okur ve oraya kaydeder, böylece Git onları eşitleyebilir. Açmak notlarınızı ve yapılacaklarınızı dosyaya taşır; kapatmak dosyadaki kayıtları bu makineye geri kopyalar.',
+  'settings.projects.notesTodos.toast.saveFailed': 'Notların ve yapılacakların kaydedildiği yer değiştirilemedi',
   'settings.projects.actions.state.loading': 'Yükleniyor...',
   'settings.projects.actions.state.noDesktopSshForwards': 'Kullanılabilir etkin yerel SSH yönlendirmesi yok.',
   'settings.projects.actions.field.selectIconAria': 'Simge seç',
@@ -1231,6 +1236,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Agent bildirim aracı',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Agent bildirim aracı',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "İş bittiğinde ya da takıldıklarında agent'lar size haber verir.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Terminal paneli',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Ajanın bu klasördeki terminalleri listelemesini ve yazdırdıklarını okumasını sağlar. Bir terminal, gizli bilgiler dahil yazılan her şeyi tutar; bu nedenle siz açana kadar kapalı kalır.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Proje bilgisi aracı",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Proje bilgisi aracı",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Ajanlar projenin notlarını, yapılacaklarını ve planlarını okuyup günceller.",
@@ -2289,6 +2296,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Terminal görünümünde Esc, Ctrl ve Ok tuşlarını göster',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Kabuk kapandığında sekmeyi kapat',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Terminallere ve proje eylemlerine uygulanır. Kapalıyken sekme, durduktan sonra bir geliştirme sunucusunun günlüğü gibi çıktısını korur.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Bir proje eylemi başladığında terminali aç',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Kapalıyken eylem yan paneli değiştirmeden başlar. Çıktısı terminaldeki eylem sekmesinde kalır.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Dosya editörü tuş düzeni',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Varsayılan',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2347,8 +2356,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': 'Dosya ağacının tarafı',
   'settings.openchamber.visual.option.fileTreeSide.left': 'Sol',
   'settings.openchamber.visual.option.fileTreeSide.right': 'Sağ',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'Geniş sohbet yerleşimi',
-  'settings.openchamber.visual.field.wideChatLayout': 'Geniş Sohbet Yerleşimi',
+  'settings.openchamber.visual.field.chatWidth': 'Sohbet genişliği',
+  'settings.openchamber.visual.field.chatWidthInfo': 'Varsayılan ve Daha geniş, mesajları ortalanmış bir sütunda tutar. Tam, mesajlar için tüm sohbeti kullanır; mesaj alanı Daha geniş ayarındaki genişlikte kalır.',
+  'settings.openchamber.visual.option.chatWidth.default.label': 'Varsayılan',
+  'settings.openchamber.visual.option.chatWidth.wider.label': 'Daha geniş',
+  'settings.openchamber.visual.option.chatWidth.full.label': 'Tam',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Kod bloğu satırlarını kaydır',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Kod Bloğu Satırlarını Kaydır',
   'settings.openchamber.visual.field.tableCellWrap': 'Tablo Hücrelerini Kaydır',
@@ -2758,6 +2770,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.tr,
   ...extensionsSettingsI18n.tr,
   ...settingsLayoutI18n.tr,
+  ...mobileAppSettingsI18n.tr,
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Kod fusion talimatları',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Sistem başlık çubuğunu kullan',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Uygulamanın yeniden başlatılmasını gerektirir. Pencere, OpenChamber başlığının üstünde masaüstü ortamınızın kendi başlık çubuğunu ve düğmelerini alır.',

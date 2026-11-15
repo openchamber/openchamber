@@ -704,6 +704,33 @@ describe('managed agent tool runtime', () => {
     expect((await runtime.execute({ tool: 'openchamber', input: { action: 'usage.read' }, sessionID: 'ses_a' })).ok).toBe(false);
   });
 
+  it('exposes the terminal panel as its own read-only tool only when switched on', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeTerminal: true });
+    const namespaces = [];
+    const tool = await loadTools(dataDir, 'terminal', {}, [], namespaces);
+
+    expect(Object.keys(tool)).toEqual(['openchamber_terminal']);
+    expect(Object.keys(tool.openchamber_terminal.input.properties.parameters.properties).sort())
+      .toEqual(['directory', 'maxBytes', 'sessionId']);
+    expect(tool.openchamber_terminal.options).toEqual({ codemode: true });
+    // Its catalog line names when to read it, so agents do not read a panel on every task.
+    expect(namespaces).toEqual([expect.objectContaining({ name: 'openchamber_terminal', description: expect.stringContaining('the answer is in a terminal') })]);
+    expect(tool.openchamber_terminal.description.length).toBeLessThanOrEqual(2048);
+
+    await runtime.materializePlugin({ includeControl: true, includeWeb: false, includeMemory: false });
+    expect(await loadTools(dataDir, 'terminal-off')).not.toHaveProperty('openchamber_terminal');
+  });
+
+  it('runs terminal.list from the terminal tool, bare list included, and not from the control tool', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    const result = await runtime.execute({ tool: 'openchamber_terminal', input: { action: 'list' }, sessionID: 'ses_a' });
+
+    expect(result).toMatchObject({ ok: true, action: 'terminal.list' });
+    expect(executeAction).toHaveBeenCalledWith('terminal.list', expect.anything(), undefined, expect.anything());
+    expect((await runtime.execute({ tool: 'openchamber', input: { action: 'terminal.list' }, sessionID: 'ses_a' })).ok).toBe(false);
+  });
+
   it('declares share on render only while sharing is available', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });

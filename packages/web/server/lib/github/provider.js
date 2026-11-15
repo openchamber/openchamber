@@ -1,5 +1,6 @@
 import { githubDescriptor } from './descriptor.js';
 import {
+  getGhCliLoginForHost,
   getGitHubAuthAccounts,
   getGitHubAuthByAccountId,
   getGitHubAuthForHost,
@@ -177,7 +178,7 @@ export function createProvider({
   const readCurrentAccountId = async ({ instance }) => {
     const host = String(instance ?? '').trim().toLowerCase().replace(/\.$/, '') || GITHUB_COM;
     if (await isGhCliActiveForHost(host) && !(await isGhCliDisabledForHost(host))) {
-      const token = await getGhCliToken(host);
+      const token = await getGhCliToken(host, await getGhCliLoginForHost(host));
       if (token) {
         const { octokit: github } = await modules();
         try {

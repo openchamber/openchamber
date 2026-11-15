@@ -1,5 +1,6 @@
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { attachmentBasename } from '@/lib/attachmentIdentity';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizeDroppedPath } from '@/components/chat/composer/attachments/filePaths';
 import type { ToolPopupContent } from '@/components/chat/message/types';
 
@@ -104,7 +105,8 @@ const isFileUrl = (url: string): boolean => url.toLowerCase().startsWith('file:/
  * What opening an attachment of a sent message does:
  * - `external`: an issue or PR reference opens its page.
  * - `popup`: an image opens the image viewer with the message's other images,
- *   text sent inline (a pasted text, a picked text file) opens the text dialog.
+ *   text sent inline (a pasted text, a picked text file) opens the text dialog,
+ *   a PDF sent inline opens the document dialog.
  * - `file`: a file attached by path (`file://`, VS Code attachments and
  *   `@` mentions) opens in the app's file viewer, or the editor in VS Code.
  */
@@ -122,7 +124,8 @@ const imageGalleryOf = (files: readonly AttachmentFile[]) => files.flatMap((part
 /**
  * Resolves what clicking `file` opens; `files` are the message's attachments,
  * the gallery an image opens in. Null when there is nothing the app can show:
- * a PDF or other binary sent inline, a folder, text that does not decode.
+ * a binary sent inline that is not an image or a PDF, a folder, text that
+ * does not decode.
  */
 export const resolveAttachmentOpenTarget = (
     file: AttachmentFile | undefined,
@@ -158,6 +161,16 @@ export const resolveAttachmentOpenTarget = (
                     index: Math.max(0, gallery.findIndex((entry) => entry.url === file.url)),
                 },
             },
+        };
+    }
+
+    if (mime === 'application/pdf') {
+        // VS Code's webview policy allows neither the PDF viewer's frame nor
+        // the blob URL pdf.js reads, so the PDF stays a label there.
+        if (!file.url.startsWith('data:') || isVSCodeRuntime()) return null;
+        return {
+            kind: 'popup',
+            popup: { open: true, title: filename, content: '', document: { url: file.url, filename } },
         };
     }
 

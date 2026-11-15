@@ -20,7 +20,7 @@
     },
     "surface": {
       "background": "#FFFFFF",
-      "foreground": "#454545",
+      "foreground": "#313131",
       "muted": "#f9f9f9",
       "mutedForeground": "#6a6a6a",
       "elevated": "#f5f5f5",
@@ -96,13 +96,12 @@
       "blockquote": "#757575",
       "blockquoteBorder": "#D9D9D9",
       "listMarker": "#66666699",
-      "bold": "#3e3e3e",
-      "italic": "#454545"
+      "italic": "#313131"
     },
     "tools": {
       "border": "#b3b3b347",
       "icon": "#6a6a6a",
-      "title": "#454545",
+      "title": "#313131",
       "description": "#6a6a6a",
       "edit": {
         "addedBackground": "#5a7a5a18",

@@ -23,8 +23,11 @@ import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
 import { resolveModelLanguage } from './model-language.js';
 import { pcm16ToWav } from '../audio.js';
+import { resolveEngineThreads } from './engine-threads.js';
 
 process.title = 'OpenChamber Dictation';
+
+const ENGINE_THREADS = resolveEngineThreads();
 
 const engines = new Map();
 const ttsEngines = new Map();
@@ -75,7 +78,7 @@ function getEngine(modelsDir, modelId, language) {
     modelDir: getLocalSttModelDir(modelsDir, modelId),
     files: spec.files,
     language,
-    numThreads: 2,
+    numThreads: ENGINE_THREADS,
   });
   engines.set(key, created);
   return created;
@@ -116,7 +119,7 @@ function getTtsEngine(modelsDir, modelId) {
     type: spec.type,
     files: spec.files,
     lexicon: spec.lexicon,
-    numThreads: 2,
+    numThreads: ENGINE_THREADS,
   });
   ttsEngines.set(key, created);
   return created;

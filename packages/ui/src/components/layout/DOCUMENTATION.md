@@ -1,13 +1,32 @@
 # Layout
 
-This file covers the header's session tabs. The tab store, its scopes and
-seeding are owned by `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
+This file covers the header's session tabs and the context panel's file tab
+strip and menu. The tab store, its scopes and seeding are owned by
+`stores/DOCUMENTATION.md` (`useSessionTabsStore`).
+
+## Context panel file tab menu
+
+The menu of a file tab in `ContextPanel.tsx` acts on the right-clicked tab,
+including when it is inactive. Copy relative path uses the current project
+directory (`contextPanelPaths.ts`, which also labels same-named tabs); reveal
+shows only where the file tree offers it (`files.revealPath` outside a browser
+client). VS Code does not mount `ContextPanel`, so it has no such menu.
+
+## Context panel file tabs
+
+`ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView` in editor-only mode, which omits that view's own tab row. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
 
 ## Header session tabs
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in
 the web and desktop header while `sessionTabsEnabled` is on. VS Code and the
-setting turned off keep the plain session title (`Header.tsx`).
+setting turned off keep the plain session title (`Header.tsx`). The VS Code
+chat header (`VSCodeHeader` in `VSCodeLayout.tsx`) keeps the title as the
+session switcher and puts a "⋯" menu beside it with Rename only; the other
+session actions stay in the session list. The `rename_current_session`
+shortcut opens the same field there; only the chat header on screen takes it,
+so the compact layout's chat header, mounted behind the sessions list, and a
+new-session draft decline it.
 
 - The store keeps ids and order only. An id whose session is not in the
   loaded list stays stored and does not render, so a partial session list

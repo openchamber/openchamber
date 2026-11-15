@@ -158,22 +158,28 @@ export const fetchListBackedReferencePage = async (
         return { kind: 'page', items: issue ? [toIssueReference(issue)] : [], cursor: null, hasMore: false };
     }
     // An empty query is not sent.
-    const options = { page, state: filter.state, people: filter.people, query: text };
+    const options = { page, state: filter.state, people: filter.people, labels: filter.labels, query: text };
     const result = kind === 'issue'
         ? await reads.issuesList(context, options).then((answer) => ({ ...answer, items: answer.items.map(toIssueReference) }))
         : await reads.changeRequestsList(context, options).then((answer) => ({ ...answer, items: answer.items.map(pullReferenceFromChangeRequest) }));
     return { kind: 'page', items: result.items, cursor: result.hasMore ? String(page + 1) : null, hasMore: result.hasMore };
 };
 
-const toComment = (comment: MergeRequestNote): RepositoryReferenceComment => ({
-    author: author(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt ?? null,
-    url: comment.url,
-    path: comment.path ?? null,
-    line: comment.line ?? null,
-    review: null,
-});
+const toComment = (comment: MergeRequestNote): RepositoryReferenceComment => {
+    const result: RepositoryReferenceComment = {
+        id: comment.id,
+        author: author(comment.author),
+        body: comment.body,
+        createdAt: comment.createdAt ?? null,
+        url: comment.url,
+        path: comment.path ?? null,
+        line: comment.line ?? null,
+        review: null,
+    };
+    if (comment.canUpdate !== undefined) result.canUpdate = comment.canUpdate;
+    if (comment.canDelete !== undefined) result.canDelete = comment.canDelete;
+    return result;
+};
 
 const byCreation = (left: RepositoryReferenceComment, right: RepositoryReferenceComment) => (
     (left.createdAt ?? '').localeCompare(right.createdAt ?? '')

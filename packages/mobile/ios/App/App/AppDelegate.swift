@@ -166,6 +166,20 @@ class BridgeViewController: CAPBridgeViewController {
         // App-local plugin: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift).
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
         bridge?.registerPluginInstance(RuntimeWebSocketPlugin())
+        bridge?.registerPluginInstance(MobileDevTunnelPlugin())
+        bridge?.registerPluginInstance(KeepAwakePlugin())
+        restrictBridgeToMainFrame()
+    }
+
+    /// Capacitor answers its `bridge` message handler from every frame, and
+    /// WebKit exposes the handler to cross-origin frames too. Extension panels
+    /// and the dev-server preview are such frames, running pages the app does
+    /// not control, so only the app's own document may call native plugins.
+    private func restrictBridgeToMainFrame() {
+        guard let handler = (bridge as? CapacitorBridge)?.webViewDelegationHandler else { return }
+        let controller = handler.contentController
+        controller.removeScriptMessageHandler(forName: "bridge")
+        controller.add(MainFrameBridgeHandler(target: handler), name: "bridge")
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -331,5 +345,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, continue: userActivity) { _ in }
+    }
+}
+
+/// Forwards bridge messages of the main frame to Capacitor and drops the rest.
+private final class MainFrameBridgeHandler: NSObject, WKScriptMessageHandler {
+    private weak var target: WKScriptMessageHandler?
+
+    init(target: WKScriptMessageHandler) {
+        self.target = target
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame else { return }
+        target?.userContentController(userContentController, didReceive: message)
     }
 }

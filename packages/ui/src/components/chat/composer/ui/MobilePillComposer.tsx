@@ -31,6 +31,8 @@ import { ComposerAttachmentControls, type ComposerTrackerPicker } from './Compos
 
 export interface MobilePillComposerProps {
     message: string;
+    /** The message as it reads in the composer, attachment chips drawn; the plain text when absent. */
+    messageContent?: React.ReactNode;
     sessionId: string | null;
     newSessionDraftOpen: boolean;
     hasContent: boolean;
@@ -63,6 +65,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         message,
+        messageContent,
         sessionId: currentSessionId,
         newSessionDraftOpen,
         hasContent,
@@ -147,7 +150,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         )}
                     >
                         {message.trim()
-                            ? message
+                            ? messageContent ?? message
                             : currentSessionId || newSessionDraftOpen
                                 ? t('chat.chatInput.placeholder.chatCompact')
                                 : t('chat.chatInput.placeholder.selectSession')}

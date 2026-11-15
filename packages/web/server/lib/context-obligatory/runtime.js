@@ -1,6 +1,7 @@
 import { isRecord } from '../shared/guards.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { sessionParentId } from '../session-lineage.js';
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
 
@@ -72,7 +73,7 @@ export const createContextObligatoryRuntime = ({
 
   const tick = async (sessionId, directory) => {
     const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory });
-    if (session?.parentID) return;
+    if (sessionParentId(session)) return;
     // Pins and the cursor are OpenChamber's, not OpenCode's.
     const stored = { metadata: await readSessionMetadata(sessionId) };
     const state = readContextState(stored);

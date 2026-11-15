@@ -38,6 +38,13 @@ describe("projectSession", () => {
     expect("agent" in session).toBe(false)
   })
 
+  test("a workflow agent nests under the session that ran it, which OpenCode does not know as its parent", () => {
+    const metadata = { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } }
+    expect(projectSession({ ...sessionInfo, metadata }).parentID).toBe("ses_parent")
+    expect(projectSession({ ...sessionInfo, parentID: "ses_opencode", metadata }).parentID).toBe("ses_opencode")
+    expect("parentID" in projectSession({ ...sessionInfo, metadata: { openchamber: { parentID: "ses_parent" } } })).toBe(false)
+  })
+
   test("an untitled session gets an empty title rather than undefined", () => {
     const session = projectSession({ ...sessionInfo, title: undefined })
     expect(session.title).toBe("")
@@ -217,6 +224,16 @@ describe("projectUserParts", () => {
   test("an empty prompt text produces no text part", () => {
     const parts = projectUserParts({ text: "" }, { sessionID: "s", messageID: "m", created: 1 })
     expect(parts).toEqual([])
+  })
+
+  test("skills attached to a stored prompt stay on the message without their text", () => {
+    const attached = projectMessage({
+      id: "msg_u", type: "user", time: { created: 1 }, text: "Follow $demo",
+      skills: [{ id: "demo", name: "Demo", text: "<skill_content>…</skill_content>" }],
+    }, "ses_1")
+    expect(attached.message).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1 }, skills: [{ id: "demo", name: "Demo" }] })
+    const plain = projectMessage({ id: "msg_p", type: "user", time: { created: 2 }, text: "hi" }, "ses_1")
+    expect(plain.message).not.toHaveProperty("skills")
   })
 })
 

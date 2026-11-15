@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { recordLabelWrite } from '@/components/references/labelWrites';
 import type { CachedValue } from '@/components/references/referenceCache';
 import { labelColor, referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
@@ -58,17 +59,26 @@ const MetaValue: React.FC<{ empty: boolean; children: React.ReactNode; picker: R
     );
 };
 
+const recordUnlistedLabelWrite = (reference: RepositoryReference, labels: Label[]) => recordLabelWrite(reference, labels, null);
+
 /** An issue's, discussion's or PR's labels, changed as one set from the repository's labels. */
 export const SourceBoardLabels: React.FC<{
     reference: RepositoryReference;
     context: SourceControlReadContext;
+    /**
+     * The write succeeded and the host now holds exactly `labels`; recorded for
+     * every list by default, a list surface also says where the item stood.
+     */
+    onWritten?: (reference: RepositoryReference, labels: Label[]) => void;
     onChanged: () => void;
-}> = ({ reference, context, onChanged }) => {
+}> = ({ reference, context, onWritten = recordUnlistedLabelWrite, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const [busy, setBusy] = React.useState(false);
     const descriptor = useSourceControlProvider(reference.provider);
     const project = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo };
+    // The repository's labels as the picker last read them, for the colours of added ones.
+    const repositoryLabels = React.useRef<Label[]>([]);
 
     const commit = async (labels: string[]) => {
         setBusy(true);
@@ -82,6 +92,11 @@ export const SourceBoardLabels: React.FC<{
             if (reference.kind === 'pull') await sourceControl.changeRequestSetLabels(payload);
             else if (reference.kind === 'discussion') await sourceControl.discussionSetLabels(payload);
             else await sourceControl.issueSetLabels(payload);
+            onWritten(reference, labels.map((name) => (
+                reference.labels.find((label) => label.name === name)
+                    ?? repositoryLabels.current.find((label) => label.name === name)
+                    ?? { name }
+            )));
         } catch (error) {
             toast.error(t('sourceBoard.toast.labelsFailed', { reference: referenceNumberLabel(reference, descriptor) }), {
                 description: error instanceof Error ? error.message : String(error),
@@ -102,7 +117,10 @@ export const SourceBoardLabels: React.FC<{
                     emptyText={t('sourceBoard.labels.empty')}
                     selected={reference.labels.map((label) => label.name)}
                     selectedChoices={reference.labels.map(labelChoice)}
-                    loadChoices={async () => (await sourceControl.referenceLabels(context, project)).map(labelChoice)}
+                    loadChoices={async () => {
+                        repositoryLabels.current = await sourceControl.referenceLabels(context, project);
+                        return repositoryLabels.current.map(labelChoice);
+                    }}
                     onCommit={(labels) => void commit(labels)}
                     busy={busy}
                 />

@@ -25,6 +25,7 @@ import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -80,6 +81,10 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, i
     // answering it starts a new turn instead of replying to a form.
     const recovered = useRecoveredQuestions(sessionId, directory);
     const recoveredFirst = form ? undefined : recovered[0];
+    // VS Code and the mini chat do not remount on a runtime switch, so the
+    // panel is keyed on the runtime too: a switch starts it over from the new
+    // runtime's draft instead of carrying the old runtime's answers into it.
+    const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
     if (inChat) {
         const first = form ?? recoveredFirst?.form;
         return (
@@ -96,19 +101,21 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, i
         );
     }
     // Keyed on the form id so a different request starts from a clean slate
-    // (and the panels cross-fade instead of swapping content in place).
+    // (and the panels cross-fade instead of swapping content in place), and on
+    // the runtime so a switch never saves one runtime's answers into another's.
     return (
         <AnimatePresence>
             {hidden ? null : form ? (
                 webSearchConsent
                     ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                    : <FormDockPanel key={form.id} form={form} forms={forms} directory={directory} />
+                    : <FormDockPanel key={`${runtimeKey}\u0000${form.id}`} form={form} forms={forms} directory={directory} runtimeKey={runtimeKey} />
             ) : recoveredFirst ? (
                 <FormDockPanel
-                    key={recoveredFirst.form.id}
+                    key={`${runtimeKey}\u0000${recoveredFirst.form.id}`}
                     form={recoveredFirst.form}
                     forms={forms}
                     directory={directory}
+                    runtimeKey={runtimeKey}
                     recovered={recoveredFirst}
                 />
             ) : null}
@@ -121,8 +128,10 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, i
  * question, which brings its card into view. It holds no answers, so it never
  * writes the form's draft. A full dock still shows beside or instead of a card
  * in a chat pinned in the side panel, a session whose transcript is loading and
- * an expanded composer; that dock writes the shared draft from its own state and
- * can overwrite what a card saved, as either of two docks on one form can today.
+ * an expanded composer; that dock writes the shared draft from its own state
+ * when its answers or its step change. A refresh that hands it the same form
+ * again no longer saves, but a second dock whose step moves still saves its
+ * own values over what a card or another dock saved.
  */
 const FormDockPointer: React.FC<{
     sessionId: string | null;
@@ -173,9 +182,11 @@ const FormDockPanel: React.FC<{
     form: FormRequest;
     forms: FormRequest[];
     directory?: string;
+    /** The runtime the panel was mounted for; its draft stays under this key. */
+    runtimeKey: string;
     /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
-}> = ({ form, forms, directory, recovered }) => {
+}> = ({ form, forms, directory, runtimeKey, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     // The sessions of the chat this dock belongs to, which may be a chat of
@@ -187,7 +198,14 @@ const FormDockPanel: React.FC<{
     // A rebuilt pending list hands over a new object with the same content;
     // only fields that actually changed start the answers over.
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
-    const draftScope = React.useMemo(() => formDraftScope(form, recovered?.directory ?? directory), [directory, form, recovered?.directory]);
+    // Keyed on the form's id and session, not the object: a new object of the
+    // same form must not re-run the save below with what this dock holds. The
+    // runtime comes from the mount, so a panel still fading out after a
+    // switch keeps writing under the runtime it belonged to.
+    const draftScope = React.useMemo(
+        () => formDraftScope({ id: form.id, sessionID: form.sessionID }, recovered?.directory ?? directory, runtimeKey),
+        [directory, form.id, form.sessionID, recovered?.directory, runtimeKey],
+    );
     const [restored] = React.useState(() => {
         const draft = loadFormDraft(draftScope);
         return draft?.fieldsSignature === fieldsSignature ? draft : null;
@@ -315,7 +333,7 @@ const FormDockPanel: React.FC<{
         setIsResponding(true);
         try {
             if (recovered) {
-                noteLocalFormCancelled(recovered.form.id);
+                noteLocalFormCancelled(recovered.sessionID, recovered.form.id);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);
             }
@@ -467,7 +485,7 @@ const FormDockPanel: React.FC<{
                 <div onKeyDown={handlePanelKeyDown}>
                     {recovered ? (
                         <div className="typography-micro mx-1.5 mb-1 rounded bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
-                            {t('chat.formCard.recoveredNotice')}
+                            {t(recovered.evidence === 'deferred-on-send' ? 'chat.formCard.deferredNotice' : 'chat.formCard.recoveredNotice')}
                         </div>
                     ) : null}
                     <ScrollableOverlay

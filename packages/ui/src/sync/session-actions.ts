@@ -6,16 +6,21 @@
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
+import { attachmentBasename, withMissingCitations } from "@/lib/attachmentIdentity"
 import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
 import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
-import { useSessionUIStore } from "./session-ui-store"
+import { useSessionUIStore, type SentMessage } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
+  DEFERRED_ANSWER_LEAD_IN,
+  DEFERRED_QUESTION_NOTE,
+  deferredAnswerMetadata,
   formReleaseKey,
   formToolLink,
   formTurnHold,
+  isWaitingQuestionCall,
   noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
@@ -70,7 +75,7 @@ import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
-import { isFormRequestNotFoundError } from "./form-request-error"
+import { isFormAlreadySettledError, isFormRequestNotFoundError } from "./form-request-error"
 import { ConnectionLostError } from "./connection-lost-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
@@ -687,27 +692,48 @@ function descendantRevertCutoff(state: { session: readonly Session[] }, target: 
   return child ? Math.min(child.time.created, target.time.created) : target.time.created
 }
 
-async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
-  for (const { session, directory } of getDescendantSessions(rootId)) {
+async function stageAndReadRevert(sessionId: string, messageId: string, directory: string | null | undefined, assertRuntime: () => void): Promise<Session> {
+  const key = revertKey(sessionId)
+  // The request may reach the server even when its response is lost, so the
+  // session's marker is unknown from here until a session read settles it.
+  unreconciledReverts.add(key)
+  await opencodeClient.stageRevert(sessionId, messageId, { directory })
+  assertRuntime()
+  const reverted = await opencodeClient.getSession(sessionId, directory)
+  assertRuntime()
+  unreconciledReverts.delete(key)
+  return reverted
+}
+
+async function cascadeRevertToDescendants(descendants: DescendantSession[], cutoff: number, assertRuntime: () => void): Promise<void> {
+  for (const { session, directory } of descendants) {
     try {
+      assertRuntime()
       // A running descendant would keep writing messages past the revert
       // boundary, so stop it first for the same reason the parent is aborted.
       await abortDescendantIfBusy(session.id, directory)
+      assertRuntime()
       const messages = await fetchSessionMessages(session.id, directory)
+      assertRuntime()
       // Equal timestamps belong to the reverted side of the boundary. Keeping
       // them would rely on unrelated message IDs to decide chronology.
       const target = firstUserMessageAtOrAfter(messages, cutoff)
       if (!target) continue
-      await opencodeClient.stageRevert(session.id, target.id, { directory })
-      mirrorSessionIntoLiveStores(await opencodeClient.getSession(session.id, directory), directory)
+      const reverted = await stageAndReadRevert(session.id, target.id, directory, assertRuntime)
+      mirrorSessionIntoLiveStores(reverted, directory)
     } catch (error) {
+      assertRuntime()
       console.error(`[session-actions] Failed to cascade revert to descendant ${session.id}:`, error)
     }
   }
 }
 
 /** Cancels a staged revert: the hidden messages come back, in descendants too. */
-export async function clearStagedRevert(sessionId: string): Promise<void> {
+export function clearStagedRevert(sessionId: string): Promise<void> {
+  return runRevertOperation(sessionId, () => clearStagedRevertNow(sessionId))
+}
+
+async function clearStagedRevertNow(sessionId: string): Promise<void> {
   const { directory } = dirStoreForSession(sessionId)
   for (const descendant of getDescendantSessions(sessionId)) {
     if (!descendant.session.revert) continue
@@ -734,9 +760,82 @@ export async function clearStagedRevert(sessionId: string): Promise<void> {
  * prompt's commit deletes it. The `session.revert.committed` event then trims
  * the reverted tail, as it does after another client's prompt.
  */
+type PendingRevert = { rootId: string; runtimeKey: string; affectsDescendants: boolean; promise: Promise<void> }
+const pendingReverts = new Map<string, PendingRevert>()
+const unreconciledReverts = new Set<string>()
+const revertReconciliations = new Map<string, { promise: Promise<void>; isCurrent: () => boolean }>()
+let revertRevision = 0
+
+function revertKey(sessionId: string): string {
+  return JSON.stringify([getRuntimeKey(), sessionId])
+}
+
+function pendingRevertsForSession(sessionId: string): PendingRevert[] {
+  const direct = pendingReverts.get(revertKey(sessionId))
+  const entries = new Set<PendingRevert>()
+  if (direct) entries.add(direct)
+  for (const entry of new Set(pendingReverts.values())) {
+    if (entry.runtimeKey !== getRuntimeKey() || !entry.affectsDescendants || entries.has(entry)) continue
+    if (getDescendantSessions(entry.rootId).some(({ session }) => session.id === sessionId)) entries.add(entry)
+  }
+  return [...entries]
+}
+
+export async function waitForPendingRevert(sessionId: string, directory?: string | null): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  let failure: unknown
+  const key = revertKey(sessionId)
+  while (true) {
+    const pending = pendingRevertsForSession(sessionId)
+    if (pending.length > 0) {
+      const results = await Promise.allSettled(pending.map((entry) => entry.promise))
+      if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+      const failed = results.find((result) => result.status === "rejected")
+      if (failed?.status === "rejected") failure = failed.reason
+      continue
+    }
+    if (unreconciledReverts.has(key)) {
+      let reconciliation = revertReconciliations.get(key)
+      if (!reconciliation) {
+        const revision = revertRevision
+        const targetDirectory = directory ?? getSessionDirectory(sessionId)
+        const read = Promise.resolve().then(async () => {
+          const session = await opencodeClient.getSession(sessionId, targetDirectory)
+          if (!isCurrentRuntime()) throw new Error("Runtime changed while reconciling the revert.")
+          if (revision !== revertRevision || pendingRevertsForSession(sessionId).length > 0) return
+          mirrorSessionIntoLiveStores(session, targetDirectory)
+          unreconciledReverts.delete(key)
+        })
+        const promise = read.finally(() => {
+          if (revertReconciliations.get(key)?.promise === promise) revertReconciliations.delete(key)
+        })
+        reconciliation = { promise, isCurrent: isCurrentRuntime }
+        revertReconciliations.set(key, reconciliation)
+      }
+      try {
+        await reconciliation.promise
+      } catch (error) {
+        if (!isCurrentRuntime()) throw error
+        if (reconciliation.isCurrent()) throw error
+      }
+      if (!isCurrentRuntime()) throw new Error("Runtime changed while reconciling the revert.")
+      continue
+    }
+    if (failure) throw failure
+    return
+  }
+}
+
 export async function commitStagedRevert(sessionId: string, directory?: string | null): Promise<void> {
-  if (!findLiveSession(sessionId)?.revert) return
-  await opencodeClient.commitRevert(sessionId, directory)
+  await waitForPendingRevert(sessionId, directory)
+  await runRevertOperation(sessionId, async () => {
+    if (!findLiveSession(sessionId)?.revert) return
+    await opencodeClient.commitRevert(sessionId, directory)
+  }, false)
+}
+
+export function commitSessionRevert(sessionId: string, directory?: string | null): Promise<void> {
+  return runRevertOperation(sessionId, () => opencodeClient.commitRevert(sessionId, directory), false)
 }
 
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
@@ -2252,6 +2351,8 @@ export async function optimisticSend(input: {
   assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
   assertRuntimeUnchanged()
+  await waitForPendingRevert(input.sessionId, input.directory)
+  assertRuntimeUnchanged()
   input.appendSubmissions?.()
 
   const targetDirectory = input.directory ?? dir()
@@ -2363,7 +2464,7 @@ export async function optimisticSend(input: {
   const commitRevert = revertMessageID
     ? async () => {
         revertCommitSent = true
-        await opencodeClient.commitRevert(input.sessionId, targetDirectory)
+        await commitSessionRevert(input.sessionId, targetDirectory)
         revertCommitted = true
       }
     : undefined
@@ -2820,7 +2921,7 @@ export async function replyToForm(
     // #2448). The later SSE event is a no-op (the reducer only removes when
     // present).
     removeFormRequestFromChildStores(sessionId, formId)
-    noteLocalFormReplied(formId)
+    noteLocalFormReplied(sessionId, formId)
   } catch (error) {
     if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2832,19 +2933,20 @@ export async function replyToForm(
   }
 }
 
-export async function cancelForm(sessionId: string, formId: string): Promise<void> {
+/** A `message` defers the question: it is not marked dismissed and stays recoverable (#5391). */
+export async function cancelForm(sessionId: string, formId: string, message?: string): Promise<void> {
   await waitForConnectionOrThrow()
   // A failed record read throws before the try: nothing was sent, so the form
   // stays pending for a retry.
   const { directory } = await resolveBlockingRequestTarget(sessionId, getRequestReplyDirectory("form", sessionId, formId))
   try {
-    if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
+    if (await opencodeClient.cancelForm(sessionId, formId, directory, message) !== true) {
       throw new Error("Form cancellation failed")
     }
     // A successful cancellation is authoritative; see replyToForm for the
     // lost-SSE-event rationale (issues #2911, #2448).
     removeFormRequestFromChildStores(sessionId, formId)
-    noteLocalFormCancelled(formId)
+    if (message === undefined) noteLocalFormCancelled(sessionId, formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2899,14 +3001,19 @@ function recoveredAnswerSelection(question: RecoveredQuestion): RecoveredAnswerS
   throw new Error("No model is recorded for this question")
 }
 
-/** Uses the normal send path for rollback and ambiguous-failure confirmation. */
+/**
+ * Uses the normal send path for rollback and ambiguous-failure confirmation.
+ * A deferred question's answer opens with a line tying it to the earlier call
+ * and carries the marker that closes the card on the other pages (#5391).
+ */
 export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text: string): Promise<void> {
   const runtimeKey = getRuntimeKey()
   const isCurrentRuntime = captureRuntimeInstance()
+  const deferred = question.evidence === "deferred-on-send"
   await submitRecoveredAnswer(question.form.id, async () => {
     const selection = recoveredAnswerSelection(question)
     await useSessionUIStore.getState().sendMessage(
-      text,
+      deferred ? `${DEFERRED_ANSWER_LEAD_IN}\n\n${text}` : text,
       selection.providerID,
       selection.modelID,
       selection.agent,
@@ -2919,9 +3026,10 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         userInitiated: true,
         queuedGoal: null,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
+        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined,
       },
     )
-    if (isCurrentRuntime()) noteLocalFormReplied(question.form.id)
+    if (isCurrentRuntime()) noteLocalFormReplied(question.sessionID, question.form.id)
   })
 }
 
@@ -2939,19 +3047,21 @@ function openFormReleaseKeys(): Set<string> {
   return keys
 }
 
-const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: () => boolean }>()
+const formToolReads = new Map<string, { read: Promise<boolean>; isCurrentRuntime: () => boolean }>()
 
 /**
  * Read the tool call of an open form whose message is not loaded (#5391). A
  * completed or failed call goes to `releasedForms`, which the send path and
- * the composer's phase both read. Concurrent callers on the same runtime
- * instance share one read; a read from before a switch is never shared, even
- * after switching back. A failed read, one that finishes on another runtime,
- * or one whose form is no longer open records nothing.
+ * the composer's phase both read. Resolves true when the read showed a waiting
+ * question tool call (`isWaitingQuestionCall`), which the send path defers.
+ * Concurrent callers on the same runtime instance share one read; a read from
+ * before a switch is never shared, even after switching back. A failed read,
+ * one that finishes on another runtime, or one whose form is no longer open
+ * records nothing and resolves false.
  */
-function readFormToolLink(form: FormRequest): Promise<void> {
+function readFormToolLink(form: FormRequest): Promise<boolean> {
   const tool = formToolLink(form)
-  if (!tool) return Promise.resolve()
+  if (!tool) return Promise.resolve(false)
   const key = formReleaseKey(form, tool)
   const existing = formToolReads.get(key)
   if (existing?.isCurrentRuntime()) return existing.read
@@ -2959,13 +3069,15 @@ function readFormToolLink(form: FormRequest): Promise<void> {
   const read = (async () => {
     try {
       const { directory } = await resolveBlockingRequestTarget(form.sessionID, getRequestReplyDirectory("form", form.sessionID, form.id))
-      const { parts } = await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)
-      if (!isCurrentRuntime() || formTurnHold(form, { [tool.messageID]: parts }) !== "released") return
+      const parts = { [tool.messageID]: (await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)).parts }
+      if (!isCurrentRuntime()) return false
+      if (formTurnHold(form, parts) !== "released") return isWaitingQuestionCall(form, parts)
       const openKeys = openFormReleaseKeys()
       if (openKeys.has(key)) noteFormToolReleased(key, openKeys)
     } catch (error) {
       console.error("[session-actions] Could not read the tool call of an open form:", error)
     }
+    return false
   })().finally(() => {
     if (formToolReads.get(key)?.read === read) formToolReads.delete(key)
   })
@@ -3007,21 +3119,32 @@ function formCopiesHold(copies: readonly OpenFormCopy[]): "holds" | "released" |
  * round trip. Each is then formally cancelled on the backend, which fires
  * `form.cancelled` for reconciliation.
  *
- * Returns true when at least one form was cancelled. Failures are swallowed (a
- * stranded form must never block the send); a not-found error also clears the
- * stale entry from the child store via {@link cancelForm}. Any other failure
- * puts the form back: the agent is still waiting on it, and no event will bring
- * it back (a subagent's form has no other recovery path, #2448).
+ * `dismissed` is true when at least one form was cancelled. Failures are
+ * swallowed (a stranded form must never block the send); a not-found error
+ * also clears the stale entry from the child store via {@link cancelForm}. Any
+ * other failure puts the form back: the agent is still waiting on it, and no
+ * event will bring it back (a subagent's form has no other recovery path,
+ * #2448).
+ *
+ * With `deferQuestions`, the session's own waiting question tool call
+ * (`isWaitingQuestionCall`) is neither removed nor cancelled: it comes back in
+ * `deferred`, for {@link deferQuestionsAfterSend} once the message is in
+ * (#5391). A subagent's question stays on the plain cancel, since the subagent
+ * never sees the message the note would point it to.
  *
  * Rejecting unblocks the agent's tool without guaranteeing an idle session.
  * The chat caller preserves explicit Steer as a direct send (the inbox takes
  * it while the turn is still active) and queues other follow-ups after
  * dismissal. This helper does not abort the session.
  */
-export async function dismissOpenFormsForSession(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false
+export async function dismissOpenFormsForSession(
+  sessionId: string,
+  options?: { deferQuestions?: boolean },
+): Promise<{ dismissed: boolean; deferred: readonly FormRequest[] }> {
+  const nothing = { dismissed: false, deferred: [] }
+  if (!sessionId) return nothing
   const stores = _childStores
-  if (!stores) return false
+  if (!stores) return nothing
 
   const isCurrentRuntime = captureRuntimeInstance()
   const copiesByForm = new Map<string, OpenFormCopy[]>()
@@ -3044,14 +3167,26 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   }
 
   const unread = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) === "unknown")
+  // Copies a server read showed to be a waiting question tool call: their part may not be in any store yet.
+  const readAsWaitingQuestion = new Set<readonly OpenFormCopy[]>()
   if (unread.length > 0) {
-    await Promise.all(unread.map((copies) => readFormToolLink(copies[0].form)))
+    await Promise.all(unread.map(async (copies) => {
+      if (await readFormToolLink(copies[0].form)) readAsWaitingQuestion.add(copies)
+    }))
     // The stores belong to another server now; none of these forms is on it.
-    if (!isCurrentRuntime()) return false
+    if (!isCurrentRuntime()) return nothing
   }
   // Decided after the reads, so evidence that arrived meanwhile from any copy counts.
-  const toDismiss = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) !== "released")
-  if (toDismiss.length === 0) return false
+  const deferred: FormRequest[] = []
+  const toDismiss: OpenFormCopy[][] = []
+  for (const copies of copiesByForm.values()) {
+    if (formCopiesHold(copies) === "released") continue
+    const deferrable = options?.deferQuestions && copies[0].sessionId === sessionId
+      && (readAsWaitingQuestion.has(copies) || copies.some(({ store, form }) => isWaitingQuestionCall(form, store.getState().part)))
+    if (deferrable) deferred.push(copies[0].form)
+    else toDismiss.push(copies)
+  }
+  if (toDismiss.length === 0) return { dismissed: false, deferred }
 
   // Optimistically clear the forms from the local store so the prompt
   // disappears immediately, before the cancel round-trip.
@@ -3073,7 +3208,38 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
       }
     }),
   )
-  return true
+  return { dismissed: true, deferred }
+}
+
+/**
+ * Cancel each question {@link dismissOpenFormsForSession} deferred, with the
+ * note the question tool hands to the model, once the message it gave way to
+ * was admitted: cancelled first, the model could start its next step before
+ * the message reached the inbox (#5391). Only a send that went out as a plain
+ * prompt to the question's own session (`sent`, from `sendMessage`'s `onSent`) is a
+ * message the note can point to; after a command, a shell command or a send
+ * elsewhere the question stays pending and is answered the normal way.
+ *
+ * A deferred question stays recoverable, so the card comes back answerable
+ * when the call's failure arrives. A not-found or already-settled answer
+ * means it settled meanwhile: the form goes and recovery reconciles it. Any
+ * other failure leaves it pending: the message then waits in the inbox behind
+ * it, and the question is still answered the normal way.
+ */
+export async function deferQuestionsAfterSend(forms: readonly FormRequest[], sent: SentMessage | undefined): Promise<void> {
+  if (sent?.route !== "prompt") return
+  await Promise.all(forms.filter((form) => form.sessionID === sent.sessionId).map(async (form) => {
+    try {
+      await cancelForm(form.sessionID, form.id, DEFERRED_QUESTION_NOTE)
+    } catch (error) {
+      if (error instanceof Error && isFormAlreadySettledError(error)) {
+        removeFormRequestFromChildStores(form.sessionID, form.id)
+        recoverStaleBlockingRequest(form.sessionID)
+      } else if (!isFormRequestNotFoundError(error)) {
+        console.error("[session-actions] Could not defer an open question after a send:", error)
+      }
+    }
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -3089,13 +3255,51 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+function runRevertOperation(sessionId: string, action: () => Promise<void>, includeDescendants = true): Promise<void> {
+  revertRevision += 1
+  const descendants = includeDescendants ? getDescendantSessions(sessionId) : []
+  const sessionIds = [sessionId, ...descendants.map(({ session }) => session.id)]
+  const keys = sessionIds.map(revertKey)
+  const previous = [...new Set(sessionIds.flatMap((id) => pendingRevertsForSession(id).map((entry) => entry.promise)))]
+  const isCurrentRuntime = captureRuntimeInstance()
+  const operation = Promise.resolve().then(async () => {
+    const results = await Promise.allSettled(previous)
+    const failed = results.find((result) => result.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+    await action()
+  })
+  const tracked = operation.finally(() => {
+    for (const key of keys) {
+      if (pendingReverts.get(key)?.promise === tracked) pendingReverts.delete(key)
+    }
+  })
+  const entry = { rootId: sessionId, runtimeKey: getRuntimeKey(), affectsDescendants: includeDescendants, promise: tracked }
+  for (const key of keys) pendingReverts.set(key, entry)
+  return tracked
+}
+
+export function revertToMessage(sessionId: string, messageId: string, options?: { refresh?: boolean }): Promise<void> {
+  return runRevertOperation(sessionId, async () => {
+    const isCurrentRuntime = captureRuntimeInstance()
+    if (options?.refresh) await refetchSessionMessages(sessionId)
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+    await stageRevertToMessage(sessionId, messageId)
+  })
+}
+
+async function stageRevertToMessage(sessionId: string, messageId: string): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const assertRuntime = () => {
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while staging the revert.")
+  }
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
   const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
   const targetMessage = localTarget
     ?? (await findSessionMessageById(sessionId, messageId, directory))
+  assertRuntime()
   if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state
@@ -3107,6 +3311,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       // ignore abort errors
     }
   }
+  assertRuntime()
 
   // Extract message text for prompt restoration.
   const messages = state.message[sessionId] ?? []
@@ -3154,9 +3359,15 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const prevTargetAttachments = useInputStore.getState().getAttachedFiles(restoreIdentity)
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
-  // Restore reverted message text and file attachments to input
-  if (messageText) {
-    useInputStore.getState().setPendingSessionRestore(sessionId, messageText)
+  // Restore reverted message text and file attachments to input. The text
+  // gets a chip for each file it does not cite: a send includes only the
+  // files its text cites, and messages sent before every attachment had a
+  // chip never named theirs.
+  const restoredText = targetMsg?.role === "user"
+    ? withMissingCitations(messageText ?? "", submittedFileParts.filter((part) => part.url).map((part) => ({ filename: attachmentBasename(part.filename ?? "attachment") })))
+    : messageText
+  if (restoredText) {
+    useInputStore.getState().setPendingSessionRestore(sessionId, restoredText)
   }
 
   // Restore file/image attachments from the target message.
@@ -3173,11 +3384,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   try {
     // Descendants go first because OpenCode also restores file snapshots during
     // revert. All sessions share a directory, so the parent's snapshot must win.
-    await cascadeRevertToDescendants(sessionId, descendantRevertCutoff(state, targetMessage))
+    await cascadeRevertToDescendants(getDescendantSessions(sessionId), descendantRevertCutoff(state, targetMessage), assertRuntime)
     // Stage only: the messages disappear behind the revert marker while the
     // dock offers Commit (finalize) or Clear (bring them back).
-    await opencodeClient.stageRevert(sessionId, revertMessageID, { directory })
-    const revertedSession = await opencodeClient.getSession(sessionId, directory)
+    const revertedSession = await stageAndReadRevert(sessionId, revertMessageID, directory, assertRuntime)
     const current = store.getState()
     const updated = [...current.session]
     const idx = updated.findIndex((s) => s.id === sessionId)
@@ -3190,6 +3400,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       fileTreeChanges.unknownChange(directory)
     }
   } catch (err) {
+    if (!isCurrentRuntime()) throw err
     // Rollback: restore removed messages + revert marker
     const current = store.getState()
     const rollback = [...current.session]

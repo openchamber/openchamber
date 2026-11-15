@@ -36,7 +36,6 @@ export const OpenCodeUpdateToast: React.FC = () => {
     toast.dismiss(UPGRADE_TOAST_ID);
     void reloadOpenCodeConfiguration({
       message: t('opencodeUpdate.toast.reload.message'),
-      mode: 'projects',
       scopes: ['all'],
     }).catch(() => undefined);
   }, [t]);

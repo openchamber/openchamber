@@ -11,9 +11,11 @@ import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
+import { createTerminalReadAction } from './terminal-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
+import { isListedAsChild, listedSession } from './listed-session.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 import { z } from 'zod';
 import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploads.js';
@@ -309,6 +311,9 @@ export const createOpenChamberControlService = (dependencies) => {
     isKnowledgeToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
     isSecretToolEnabled = async () => true,
+    // The terminal runtime, read-only (`../terminal/runtime.js`); absent means
+    // the server cannot read a terminal.
+    getTerminalRuntime = null,
     // Where `secret.request` writes what the user saves
     // (`createSecretFiles`); absent means the server cannot take secrets.
     secretFiles = null,
@@ -480,6 +485,7 @@ export const createOpenChamberControlService = (dependencies) => {
     fsPromises: imageFsPromises,
   });
   const readUsage = loadQuota ? createUsageReadAction({ readSettings: readSettingsFromDiskMigrated, loadQuota }) : null;
+  const readTerminal = createTerminalReadAction({ readSettings: readSettingsFromDiskMigrated, getTerminalRuntime });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -619,33 +625,6 @@ export const createOpenChamberControlService = (dependencies) => {
   const FILTERED_PAGE_SIZE = 200;
 
   /**
-   * What `session.list` tells about one session. The OpenCode record runs to
-   * about 750 characters (tokens, cost, permissions, every metadata
-   * namespace), a session in work to about 1,700; this keeps what choosing a
-   * session needs, about 210. `session.status` and `session.messages` read
-   * one session in full.
-   */
-  const listedSession = (record, workEnabled) => {
-    const session = {
-      id: record.id,
-      title: asNonEmptyString(record.title),
-      directory: asNonEmptyString(record.location?.directory) ?? asNonEmptyString(record.directory),
-      updated: record.time?.updated,
-      archived: record.time?.archived,
-      parentID: asNonEmptyString(record.parentID),
-      agent: asNonEmptyString(record.agent),
-      model: record.model,
-      outcome: record.outcome,
-    };
-    if (workEnabled) {
-      session.inWork = workMembership.isInWork(record);
-      session.doneSuggested = workMembership.isDoneSuggested(record);
-    }
-    // A field the record lacks stays out of the answer.
-    return Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined && value !== null));
-  };
-
-  /**
    * `session.list`. Newest first, top-level sessions unless `children`, the
    * caller's directory unless scoped. `inWork` and `busy` read every project
    * when unscoped, as the sidebar and the session status do, and return every
@@ -694,6 +673,7 @@ export const createOpenChamberControlService = (dependencies) => {
       for (const record of page) {
         const id = asNonEmptyString(record?.id);
         if (isHiddenSession(id, record)) continue;
+        if (input.children !== true && isListedAsChild(record)) continue;
         if (id) {
           if (seenSessionIds.has(id)) continue;
           seenSessionIds.add(id);
@@ -706,7 +686,7 @@ export const createOpenChamberControlService = (dependencies) => {
           const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
           if (!terms.every((term) => title.includes(term))) continue;
         }
-        const session = listedSession(record, workEnabled);
+        const session = listedSession(record, workEnabled ? workMembership : null);
         if (inWork && !session.inWork) continue;
         collected.push(session);
         if (full()) break;
@@ -883,7 +863,9 @@ export const createOpenChamberControlService = (dependencies) => {
   const answerPermission = async ({ sessionID, requestID, decision, message }) => {
     const client = await sessionClient(sessionID);
     try {
-      await client.permission.reply({ sessionID, requestID, decision, ...(message ? { message } : {}) });
+      const reply = { sessionID, requestID, decision };
+      if (message) reply.message = message;
+      await client.permission.reply(reply);
     } catch (error) {
       throw asAnswerError(error);
     }
@@ -894,7 +876,9 @@ export const createOpenChamberControlService = (dependencies) => {
     const client = await sessionClient(sessionID);
     try {
       if (!answer) {
-        await client.session.form.cancel({ sessionID, formID, ...(message ? { message } : {}) });
+        const cancellation = { sessionID, formID };
+        if (message) cancellation.message = message;
+        await client.session.form.cancel(cancellation);
         return;
       }
       const form = await client.session.form.get({ sessionID, formID });
@@ -1344,6 +1328,9 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'usage.read') {
         if (!readUsage) throw new OpenChamberControlError('Usage is not available on this server', 503);
         return await readUsage(input, { signal: options.signal });
+      }
+      if (action.startsWith('terminal.')) {
+        return await readTerminal(action, input, contextDirectory);
       }
       if (action === 'secret.request') {
         return await secretRequests.request(input, {

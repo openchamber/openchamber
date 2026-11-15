@@ -16,7 +16,7 @@
 import { z } from "zod"
 
 import type { Message, Metadata, Part, Session, SyntheticMessage, ToolPart } from "./model"
-import { isSubagentTool, subagentSessionId } from "./tools"
+import { isSubagentTool, subagentDescription, subagentSessionId } from "./tools"
 
 export type SubagentRunState = "running" | "completed" | "error" | "cancelled"
 
@@ -98,6 +98,28 @@ export function readBackgroundSubagentChildID(part: ToolPart): string | undefine
   if (part.state.status !== "completed" || !isSubagentTool(part.tool)) return undefined
   const parsed = backgroundCallMetadataSchema.safeParse(part.state.metadata ?? {})
   return parsed.success ? parsed.data.sessionID : undefined
+}
+
+const foregroundCallMetadataSchema = z.object({
+  status: z.enum(["completed", "error", "cancelled"]).optional(),
+  sessionID: z.string().min(1),
+})
+
+export function readForegroundSubagentRun(part: ToolPart): SubagentRun | undefined {
+  if (!isSubagentTool(part.tool)) return undefined
+  if (part.state.status !== "completed" && part.state.status !== "error") return undefined
+  const parsed = foregroundCallMetadataSchema.safeParse(part.state.metadata ?? {})
+  if (!parsed.success) return undefined
+  const text = part.state.status === "completed" ? part.state.output : part.state.output || part.state.error
+  const envelope = text.match(ENVELOPE)
+  const state = part.state.status === "error" ? "error" : parsed.data.status ?? "completed"
+  return {
+    childSessionID: parsed.data.sessionID,
+    state,
+    description: subagentDescription(part.state.input),
+    output: envelope ? envelope[1] : text,
+    reportedAt: part.state.time.end,
+  }
 }
 
 /** The report of one child session among a session's messages. */

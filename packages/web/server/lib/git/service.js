@@ -125,6 +125,10 @@ const rolledBackAttemptFailures = new WeakSet();
 const isReclaimableFailure = (state) => state?.status === WORKTREE_BOOTSTRAP_FAILED
   && !rolledBackAttemptFailures.has(state);
 
+// A folder is gone when nothing is there. ENOTDIR means one of its parents is
+// now a file, which holds no checkout either, so it must not keep a gate shut.
+const isMissingPathError = (error) => error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
+
 const forgetMissingWorktreeFailure = async (key, bootstrapStore) => {
   const current = worktreeBootstrapState.get(key);
   if (rolledBackAttemptFailures.has(current)) return false;
@@ -136,12 +140,24 @@ const forgetMissingWorktreeFailure = async (key, bootstrapStore) => {
       await fsp.lstat(key);
       return false;
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+      if (!isMissingPathError(error)) throw error;
     }
   }
   // A new bootstrap may have published state while removal waited for the store.
   if (worktreeBootstrapState.get(key) === current) worktreeBootstrapState.delete(key);
   return true;
+};
+
+// Asked only about a failure the gate answers from memory: one stat decides
+// whether the folder that failure describes is still there. Any other error,
+// such as a permission problem, leaves the failure in place.
+const directoryIsGone = async (key) => {
+  try {
+    await fsp.lstat(key);
+    return false;
+  } catch (error) {
+    return isMissingPathError(error);
+  }
 };
 
 // Fast creation removed the directory of the attempt that just failed. Its
@@ -6862,7 +6878,23 @@ export async function getWorktreeBootstrapGateStatus(directory, { bootstrapStore
     }
     await load;
   }
-  return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
+  const current = worktreeBootstrapState.get(key);
+  // Memory holds a failure so the gate answers it on every request without
+  // reading the store. Only a failure pays for one stat, because a worktree
+  // removed outside the app leaves its record behind: a folder that no longer
+  // exists holds no checkout to wait for, the same rule as a folder with no
+  // record at all.
+  if (isReclaimableFailure(current) && !await hasActiveWorktreeBootstrap(key)
+    && await directoryIsGone(key)) {
+    try {
+      await forgetMissingWorktreeFailure(key, bootstrapStore);
+    } catch {
+      // The failure stays in memory when its record cannot be released, which
+      // is the answer the gate gave before this check.
+    }
+    return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
+  }
+  return current ?? notBootstrappedHere();
 }
 
 /**

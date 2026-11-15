@@ -64,8 +64,8 @@ export const shareRequestFailure = async (response: Response, fallback: string):
 };
 
 /**
- * Whether the server refused because enterprise mode allows no relay
- * (decision 0005): every share route answers 403 `enterprise_mode` then, and
+ * Whether the server refused because enterprise mode allows no relay:
+ * every share route answers 403 `enterprise_mode` then, and
  * the chat shows no links, PINs or preview.
  */
 export const isSharingTurnedOff = (error: Error): boolean => (

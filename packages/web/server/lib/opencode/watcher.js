@@ -8,6 +8,8 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     onPayload,
     onConnect = null,
+    onDisconnect = null,
+    onWirePayload = null,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -23,7 +25,10 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   // wire payload is translated here rather than in each consumer. An event of
   // an isolated space keeps the space's id beside it: its session lives in that
   // space's OpenCode, never in the host's.
+  // `onWirePayload` sees the untranslated payload too, so a consumer can react
+  // to events the translation drops (an archive, a message write).
   const emitTranslated = (payload, spaceId = null) => {
+    onWirePayload?.(payload, { spaceId });
     for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
   };
 
@@ -79,6 +84,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (status.type === 'error' || status.type === 'initial-error') {
           console.warn('[PushWatcher] disconnected', status.error?.error?.message ?? status.error?.message ?? status.error);
         }
+        if (status.type === 'disconnect' || status.type === 'error' || status.type === 'initial-error') onDisconnect?.();
       });
       globalEventHub.start();
       // A hub a browser already started announced its connect before this subscription.
@@ -104,11 +110,15 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         }
         emitTranslated(payload);
       },
+      onDisconnect() {
+        onDisconnect?.();
+      },
       onError(error) {
         if (signal.aborted) {
           return;
         }
         console.warn('[PushWatcher] disconnected', error?.error?.message ?? error?.message ?? error);
+        onDisconnect?.();
       },
     });
 

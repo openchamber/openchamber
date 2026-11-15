@@ -32,7 +32,7 @@ const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Sharing reaches a relay, so in enterprise mode it exists only on a relay
- * the policy pins (decision 0005). Outside enterprise mode it is always there.
+ * the policy pins. Outside enterprise mode it is always there.
  */
 export const isSharingAvailable = () => !isEnterpriseMode() || pinnedRelayUrl() !== null;
 

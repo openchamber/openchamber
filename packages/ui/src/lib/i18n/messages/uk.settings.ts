@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -551,6 +552,10 @@ export const settingsDict = {
   "settings.projects.shared.actions.hide": "Сховати для мене",
   "settings.projects.shared.replaceMode": "Використовувати лише мої команди налаштування, пропустити ті, що з репозиторію",
   "settings.projects.shared.toast.shareFailed": "Не вдалося оновити конфіг у репозиторії",
+  "settings.projects.notesTodos.title": "Нотатки та завдання",
+  "settings.projects.notesTodos.inRepository": "Зберігати нотатки та завдання в репозиторії",
+  "settings.projects.notesTodos.inRepositoryDescription": "Цей комп’ютер читає і зберігає їх у .openchamber/notes-todos.json, тож Git може їх синхронізувати. Увімкнення переносить ваші нотатки та завдання у файл; вимкнення копіює записи з файлу назад на цей комп’ютер.",
+  "settings.projects.notesTodos.toast.saveFailed": "Не вдалося змінити місце збереження нотаток і завдань",
   "settings.projects.actions.state.loading": "Завантаження...",
   "settings.projects.actions.state.noDesktopSshForwards": "Немає доступних увімкнених локальних переадресацій SSH.",
   "settings.projects.actions.field.selectIconAria": "Вибрати значок",
@@ -1226,6 +1231,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyTool": "Інструмент сповіщень агента",
   "settings.openchamber.tools.field.agentNotifyToolAria": "Інструмент сповіщень агента",
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Агенти сповіщають вас, коли робота готова або вони застрягли.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Панель термінала',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Дозволяє агенту перелічувати термінали цієї теки та читати те, що вони вивели. Термінал зберігає все, що в нього вводили, зокрема секрети, тому це вимкнено, доки ви не ввімкнете.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Інструмент знань проєкту",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Інструмент знань проєкту",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Агенти читають і оновлюють нотатки, завдання та плани проєкту.",
@@ -2401,6 +2408,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.terminalQuickKeysTooltip": "Показати Esc, Ctrl, стрілки в поданні терміналу",
   "settings.openchamber.visual.field.terminalCloseOnExit": "Закривати вкладку, коли шел завершується",
   "settings.openchamber.visual.field.terminalCloseOnExitInfo": "Діє для терміналів і дій проєкту. Коли вимкнено, вкладка зберігає свій вивід, наприклад лог dev-сервера після його зупинки.",
+  "settings.openchamber.visual.field.terminalOpenOnProjectAction": "Відкривати термінал, коли запускається дія проєкту",
+  "settings.openchamber.visual.field.terminalOpenOnProjectActionInfo": "Коли вимкнено, дія запускається без перемикання бічної панелі. Її вивід лишається у вкладці дії в терміналі.",
   "settings.openchamber.visual.field.fileEditorKeymap": "Розкладка клавіш редактора файлів",
   "settings.openchamber.visual.option.fileEditorKeymap.default": "Типова",
   "settings.openchamber.visual.option.fileEditorKeymap.vim": "Vim",
@@ -2459,8 +2468,11 @@ export const settingsDict = {
   "settings.openchamber.visual.field.fileTreeSide": "Бік дерева файлів",
   "settings.openchamber.visual.option.fileTreeSide.left": "Ліворуч",
   "settings.openchamber.visual.option.fileTreeSide.right": "Праворуч",
-  "settings.openchamber.visual.field.wideChatLayoutAria": "Широкий макет чату",
-  "settings.openchamber.visual.field.wideChatLayout": "Широкий макет чату",
+  "settings.openchamber.visual.field.chatWidth": "Ширина чату",
+  "settings.openchamber.visual.field.chatWidthInfo": "Звичайна і Ширша тримають повідомлення в колонці по центру. Повна віддає повідомленням увесь чат, а поле вводу лишається завширшки як у Ширшій.",
+  "settings.openchamber.visual.option.chatWidth.default.label": "Звичайна",
+  "settings.openchamber.visual.option.chatWidth.wider.label": "Ширша",
+  "settings.openchamber.visual.option.chatWidth.full.label": "Повна",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip": "Показує «Скопіювати відповідь», «Зберегти як зображення» та озвучення для текстових блоків асистента, які з’являються перед пізнішими викликами інструментів у тій самій відповіді.",
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
   ...settingsLayoutI18n.uk,
+  ...mobileAppSettingsI18n.uk,
   'settings.page.integrations.title': 'Інтеграції',
   'settings.agents.page.field.steps': 'Максимум кроків',
   'settings.agents.page.field.stepsTooltip': 'Скільки кроків інструментів агент може зробити за один хід, перш ніж зупинитися.',

@@ -37,6 +37,8 @@ export type CodeCommentContext = {
     side?: 'original' | 'modified';
     language: string;
     code: string;
+    /** Set when the file changed under the comment and no longer holds `code`: the text at its lines when it was sent. */
+    changedCode?: string;
     text: string;
     /** The diff a `diff` comment was written on; absent for uncommitted changes and older messages. */
     origin?: DiffCommentOrigin;
@@ -174,8 +176,8 @@ type SessionMessageContext = {
 };
 
 /**
- * A page another person shared by link and PIN, attached from the composer
- * (decision 0013). The part's text is the page wrapped as that person's
+ * A page another person shared by link and PIN, attached from the composer.
+ * The part's text is the page wrapped as that person's
  * content; the link, its key and the PIN are never in it. `receivedId` names
  * the page in the server's store, null when the link had not been read yet.
  */
@@ -265,7 +267,12 @@ export function formatContextText(payload: ContextPartPayload): string {
             }
             const range = `lines ${payload.startLine}-${payload.endLine}`;
             const sideNote = payload.source === 'diff' && payload.side ? ` (${payload.side})` : '';
-            return `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\`\n\n${payload.text}`;
+            const quoted = `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\``;
+            if (payload.changedCode === undefined) return `${quoted}\n\n${payload.text}`;
+            const now = payload.changedCode
+                ? `The file changed after this comment was written, and the quoted code is no longer there. These lines now hold:\n\`\`\`${payload.language}\n${payload.changedCode}\n\`\`\``
+                : 'The file changed after this comment was written, and the quoted code is no longer there.';
+            return `${quoted}\n\n${now}\n\n${payload.text}`;
         }
         case 'terminal':
             return appendTerminalContexts('', [{
@@ -384,6 +391,7 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
                 code: draft.code,
                 text: draft.text,
             };
+            if (draft.changedCode !== undefined) payload.changedCode = draft.changedCode;
             if (draft.source === 'diff' && draft.side) payload.side = draft.side;
             if (draft.source === 'diff' && draft.origin) payload.origin = draft.origin;
             return payload;
@@ -412,6 +420,7 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         side: z.enum(['original', 'modified']).optional(),
         language: z.string(),
         code: z.string(),
+        changedCode: z.string().optional(),
         text: z.string(),
         origin: diffCommentOriginSchema.optional(),
     }),
@@ -639,6 +648,7 @@ export function draftFromContextPayload(
                 language: payload.language,
                 text: payload.text,
             };
+            if (payload.changedCode !== undefined) draft.changedCode = payload.changedCode;
             if (payload.side) draft.side = payload.side;
             if (payload.origin) draft.origin = payload.origin;
             return draft;

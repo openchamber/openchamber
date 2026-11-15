@@ -289,6 +289,16 @@ export function usePrefetchSessionMessages() {
   }, [messageLoader, runtimeKey])
 }
 
+export function useLoadedSessionMessageRecords() {
+  const { childStores, runtimeKey } = useSyncRuntime()
+
+  return useCallback(({ directory, sessionID }: { directory: string; sessionID: string }) => {
+    if (getRuntimeKey() !== runtimeKey) return null
+    const store = childStores.getChild(directory)
+    return store ? buildSessionMessageRecordsSnapshot(store.getState(), sessionID).list : null
+  }, [childStores, runtimeKey])
+}
+
 export function useSessionMessageRecordsForExport() {
   const { childStores, messageLoader, runtimeKey } = useSyncRuntime()
   const touch = useSessionCacheTouch()

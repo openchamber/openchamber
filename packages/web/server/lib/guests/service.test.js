@@ -42,6 +42,11 @@ http.createServer((req, res) => {
     res.end(JSON.stringify({ dataDir: process.env.OPENCHAMBER_SERVICE_DATA_DIR }));
     return;
   }
+  if (req.url === '/state-home') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ stateHome: process.env.XDG_STATE_HOME, unrelated: process.env.OC_TEST_UNRELATED }));
+    return;
+  }
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -67,6 +72,34 @@ afterEach(async () => {
 });
 
 describe('guest service proxy', () => {
+  test('passes XDG_STATE_HOME to the service without passing unrelated variables', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const previousStateHome = process.env.XDG_STATE_HOME;
+    const previousUnrelated = process.env.OC_TEST_UNRELATED;
+    const stateHome = path.join(dir, 'state');
+    process.env.XDG_STATE_HOME = stateHome;
+    process.env.OC_TEST_UNRELATED = 'not inherited';
+    try {
+      const result = await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js' },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/state-home',
+      });
+      expect(JSON.parse(result.body)).toEqual({ stateHome });
+    } finally {
+      if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previousStateHome;
+      if (previousUnrelated === undefined) delete process.env.OC_TEST_UNRELATED;
+      else process.env.OC_TEST_UNRELATED = previousUnrelated;
+      await stopGuestService('docker');
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('gives the service its own data folder, created before the start', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {

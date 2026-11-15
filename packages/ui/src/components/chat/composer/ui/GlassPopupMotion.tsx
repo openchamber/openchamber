@@ -1,7 +1,6 @@
 /**
  * Enter and exit motion for the composer's glass popups: the floating panels
- * (queue, BTW, permission, form), the autocomplete pickers and the
- * context-chip preview.
+ * (queue, BTW, permission, form) and the autocomplete pickers.
  *
  * The wrapper moves; its first child, the glass surface, fades. Opacity stays
  * on the glass itself because an ancestor with opacity below 1 is a backdrop

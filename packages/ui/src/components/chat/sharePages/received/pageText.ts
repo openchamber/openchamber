@@ -3,7 +3,7 @@ import type { ReceivedPage } from '@/lib/received-pages/api';
 /**
  * What the user's own agent reads about a page someone else shared, and the
  * short outline the chip and the card show. The agent gets the page's source
- * wrapped as another person's content (decision 0013): data, never
+ * wrapped as another person's content: data, never
  * instructions, and an answer only the user sends. The link, its key and the
  * PIN never go into this text.
  */

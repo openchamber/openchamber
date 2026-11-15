@@ -5,6 +5,10 @@
 //
 // - The contribution gate: a PR from outside the team needs a linked issue
 //   that is a bug report or a feature request the maintainer marked `accepted`.
+//   An issue labeled `in-house` is built by the core team (the chambermakers,
+//   who hold maintain or admin on the repository): a PR from anyone else that
+//   links one is closed whatever else it links, triage collaborators, trusted
+//   contributors and docs-only changes included.
 // - Visual evidence: screenshots belong in the PR description, never in the
 //   branch, and a PR that changes UI shows one.
 //
@@ -54,6 +58,12 @@ const MISSING_SCREENSHOTS = {
 const GATE_CUTOVER = "2026-10-28T14:00:00Z";
 
 const PASSING_ISSUE_LABELS = ["bug", "accepted"];
+
+const IN_HOUSE_LABEL = {
+  name: "in-house",
+  color: "0e8a16",
+  description: "The team builds this one. Outside PRs that link it are closed.",
+};
 
 const isDocsFile = (file) => {
   if (file.startsWith("packages/docs/")) return true;
@@ -146,12 +156,23 @@ const linkedIssues = async ({ github, owner, repo, pr }) => {
 
 // Returns { exempt } when the gate does not apply to this PR, otherwise
 // { passes, issues } with the linked issues and their labels.
+// { passes: false, issues, inHouse } when a linked issue is one the team builds.
 const evaluateContributionGate = async ({ github, owner, repo, pr, files, workspace }) => {
   if (pr.created_at < GATE_CUTOVER) return { exempt: "opened before the gate" };
   if (pr.draft) return { exempt: "draft" };
   if (pr.user.type === "Bot") return { exempt: "bot" };
-  if (readTrustedContributors(workspace).includes(pr.user.login.toLowerCase())) return { exempt: "trusted contributor" };
+
+  const issues = await linkedIssues({ github, owner, repo, pr });
+  const inHouse = issues.filter((issue) => issue.labels.includes(IN_HOUSE_LABEL.name)).map((issue) => issue.number);
+  // Team membership needs an org permission the app token lacks; the core
+  // team is exactly the maintain/admin role on this repository.
+  if (inHouse.length > 0 && !(await isMaintainer({ github, owner, repo, username: pr.user.login }))) {
+    return { passes: false, issues, inHouse };
+  }
+
   if (await hasRepoAccess({ github, owner, repo, pr })) return { exempt: "collaborator" };
+
+  if (readTrustedContributors(workspace).includes(pr.user.login.toLowerCase())) return { exempt: "trusted contributor" };
 
   // A rename counts by both names, so moving code into a test path is not a test change.
   const paths = files.flatMap(({ filename, previous_filename }) => (previous_filename ? [filename, previous_filename] : [filename]));
@@ -159,7 +180,6 @@ const evaluateContributionGate = async ({ github, owner, repo, pr, files, worksp
     return { exempt: "docs or tests only" };
   }
 
-  const issues = await linkedIssues({ github, owner, repo, pr });
   const passes = issues.some((issue) => issue.labels.some((label) => PASSING_ISSUE_LABELS.includes(label)));
   return { passes, issues };
 };
@@ -219,6 +239,7 @@ module.exports = {
   COMMITTED_MEDIA,
   GATE_LABEL,
   GATE_MARKER,
+  IN_HOUSE_LABEL,
   MISSING_SCREENSHOTS,
   TEAM_LABEL,
   evaluateContributionGate,

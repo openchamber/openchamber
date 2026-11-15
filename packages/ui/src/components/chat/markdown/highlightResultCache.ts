@@ -1,4 +1,4 @@
-// Bounded LRU for the shared Shiki worker client's highlight results.
+// Bounded LRU for highlight results.
 //
 // Unchanged code reuses its highlight result. Keys are short content fingerprints so
 // cache maps do not duplicate large strings. Entry byte sizes are recorded once
@@ -36,7 +36,7 @@ const mix32 = (hash: number): number => {
  * that failure mode: a few thousand same-length entries reach a birthday
  * collision probability worth caring about, and the result would be
  * undiagnosable in the field. Two multiplies per character are free next to
- * Shiki tokenization.
+ * tokenization.
  */
 export const contentFingerprint = (value: string): string => {
   let h1 = 0x811c9dc5;
@@ -47,20 +47,6 @@ export const contentFingerprint = (value: string): string => {
     h2 = Math.imul(h2 ^ code, 0x27220a95);
   }
   return `${value.length.toString(36)}_${mix32(h1).toString(36)}_${mix32(h2).toString(36)}`;
-};
-
-/** Approximate byte cost of token-run lines without JSON.stringify. */
-export const estimateTokenRunsBytes = (
-  lines: ReadonlyArray<ReadonlyArray<readonly [number, string, number]>>,
-): number => {
-  let total = 0;
-  for (const line of lines) {
-    total += 4;
-    for (const run of line) {
-      total += 8 + utf16Bytes(run[1]);
-    }
-  }
-  return total;
 };
 
 export class HighlightResultCache<T> {

@@ -23,6 +23,10 @@ with its named pin lists. How the rows are drawn stays with the row model
   drag anywhere but their controls, as the sidebar's do (`../rowDrag.ts`); in
   the sidebar a section drags by its caption
   (`projects/SortableSidebarSection.tsx`), and both write the same order.
+  It also holds the sidebar's batch size (`sidebarSessionBatchSize`), one
+  number for every limited list: the manager is where sections are arranged,
+  and a number field reads badly in a menu or far away in Settings. A limit
+  per section was rejected as more controls for a need one number covers.
 - `PinToMenu.tsx`, `NewPinListDialog.tsx`, `apps/mobileSidebar/MobilePinToSheet.tsx`:
   Pin to on the row menus, the swipe on the phone, and naming a new list.
 
@@ -46,6 +50,13 @@ with its named pin lists. How the rows are drawn stays with the row model
 - A search lists each match once, in the first section that shows it: while a
   query is applied a work leaves its project, the later sections and the list
   by time.
+- A section of the user's own lists its works by time with no work lifted for
+  its pin: it reads the lifecycle order built without pins
+  (`getTimeOrderedSessions`), since the sidebar's own order puts pinned
+  sessions first by creation date. Pinned and the list by time keep that order.
+  It shows the sidebar's batch of works before Show more (row model,
+  `sessionBatchSize`), so a broad section such as Recent ("Last 7 days") pages
+  instead of listing everything.
 - At most `SIDEBAR_SECTIONS_MAX` sections of the user's own and
   `SIDEBAR_PIN_LISTS_MAX` pin lists. The editor and Pin to stop offering a new
   one at the limit; the normalizer would otherwise drop one the user has.

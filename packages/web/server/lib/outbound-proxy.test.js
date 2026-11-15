@@ -38,7 +38,7 @@ describe('applyOutboundProxyFromEnv', () => {
       import http from 'node:http';
       import assert from 'node:assert/strict';
       const seen = [];
-      const proxy = http.createServer((req, res) => res.end());
+      const proxy = http.createServer((req, res) => { seen.push(req.method + ' ' + req.url); res.end(); });
       proxy.on('connect', (req, socket) => { seen.push('proxy ' + req.url); socket.end('HTTP/1.1 502 Bad Gateway\\r\\n\\r\\n'); });
       const local = http.createServer((req, res) => { seen.push('direct'); res.end('ok'); });
       await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
@@ -48,8 +48,12 @@ describe('applyOutboundProxyFromEnv', () => {
       // HTTPS tunnels through CONNECT on every Node version; plain HTTP became a
       // forward-proxy request in Node 26.
       await fetch('https://upstream.invalid/usage').catch(() => {});
+      await fetch('http://upstream.invalid/usage').catch(() => {});
       assert.equal(await (await fetch('http://127.0.0.1:' + local.address().port + '/')).text(), 'ok');
-      assert.deepEqual(seen, ['proxy upstream.invalid:443', 'direct']);
+      assert.equal(seen.length, 3);
+      assert.equal(seen[0], 'proxy upstream.invalid:443');
+      assert.ok(seen[1] === 'proxy upstream.invalid:80' || seen[1] === 'GET http://upstream.invalid/usage');
+      assert.equal(seen[2], 'direct');
       process.exit(0);
     `], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     expect(result.status, result.stderr).toBe(0);

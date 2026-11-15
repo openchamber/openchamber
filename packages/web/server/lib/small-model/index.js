@@ -10,6 +10,7 @@ import {
   getConfiguredSmallModelRef,
   getDefaultModelInfo,
   getSmallModelClient,
+  getTrustRefusal,
   listModelInfos,
   listProviderInfos,
 } from './client.js';
@@ -436,6 +437,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
         return await send();
       } catch (error) {
         if (generationOptions.deadline.aborted) throw deadlineError(error);
+        const refusal = getTrustRefusal(error);
+        if (refusal) throw refusal;
         if (!isCatalogNotReady(error, resolved)) throw error;
         // OpenCode 2 can resolve a cold catalog before its models arrive.
         // This rejection precedes provider dispatch; other failures must not retry.
@@ -514,7 +517,9 @@ export async function listAuthenticatedProviders(directory) {
     }
     for (const id of enabled) ids.add(id);
     return Array.from(ids);
-  } catch {
+  } catch (error) {
+    const refusal = getTrustRefusal(error);
+    if (refusal) throw refusal;
     return [];
   }
 }

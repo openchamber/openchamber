@@ -433,5 +433,10 @@ export function mapAccount(account, identity) {
     current: Boolean(account.current),
     source: account.source === 'gh-cli' || account.source === 'cli' ? 'cli' : account.source === 'pat' ? 'pat' : 'oauth',
     status: account.status === 'invalid' ? 'invalid' : 'valid',
+    // Whether a binding may pick this account now. A stored credential is
+    // always usable; a gh login only while its host's switch is on, which the
+    // account layer states instead of leaving clients to infer it from the one
+    // `current` account.
+    usable: account.usable !== false,
   };
 }

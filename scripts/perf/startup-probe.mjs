@@ -17,6 +17,9 @@
  *   contenteditable, or a textarea, outside any inert or disabled subtree);
  * - `usable`: all of the above at once, checked in one animation frame;
  * - `sessionRows`: the sidebar shows at least one session row;
+ * - `transcriptPresent` and `transcriptShown` (when asked for): a message of
+ *   the restored session is rendered, and then its reveal has finished
+ *   (`data-timeline-reveal` left the DOM), which is when it can be read;
  * - the app's own `markStartupTrace` marks, enabled through the
  *   `OPENCHAMBER_STARTUP_TRACE` storage flag, with `modelPickerReady` derived
  *   from `ModelControls:ready` reporting providers and a selected model;
@@ -37,7 +40,7 @@ export const STARTUP_PROBE_GLOBAL = "__openchamberStartupProbe"
 // as `overlaySeen: false` rather than as an instant `overlayGone`.
 const OVERLAY_SELECTOR = 'div.fixed.inset-0[class*="splash-background"]'
 
-export const buildStartupProbeSource = ({ modelLabel = null } = {}) => `(() => {
+export const buildStartupProbeSource = ({ modelLabel = null, transcript = false } = {}) => `(() => {
   if (window.${STARTUP_PROBE_GLOBAL}) return
   try { localStorage.setItem("OPENCHAMBER_STARTUP_TRACE", "1") } catch {}
   const marks = {}
@@ -76,9 +79,17 @@ export const buildStartupProbeSource = ({ modelLabel = null } = {}) => `(() => {
     const overlayClear = seen.overlay ? marks.overlayGone !== undefined : marks.reactMounted !== undefined
     if (marks.reactMounted !== undefined && marks.splashGone !== undefined && overlayClear && composer.hittable && composer.editable) set("usable", now)
     if (document.querySelector("[data-session-row]")) set("sessionRows", now)
+    const expectTranscript = ${JSON.stringify(transcript)}
+    if (expectTranscript && marks.transcriptShown === undefined) {
+      const message = [...document.querySelectorAll("[data-message-id]")].find((el) => el.checkVisibility())
+      if (message) {
+        set("transcriptPresent", now)
+        if (!document.querySelector("[data-timeline-reveal]")) set("transcriptShown", now)
+      }
+    }
     const modelLabel = ${JSON.stringify(modelLabel)}
     if (modelLabel && document.querySelector("[data-chat-input-footer]")?.textContent?.includes(modelLabel)) set("modelPickerShown", now)
-    if (marks.usable === undefined || marks.sessionRows === undefined || (modelLabel && marks.modelPickerShown === undefined)) {
+    if (marks.usable === undefined || marks.sessionRows === undefined || (modelLabel && marks.modelPickerShown === undefined) || (expectTranscript && marks.transcriptShown === undefined)) {
       if (now < 120000) requestAnimationFrame(check)
     }
   }

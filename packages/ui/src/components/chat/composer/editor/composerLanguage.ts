@@ -18,7 +18,7 @@ import { Decoration, Direction, EditorView, WidgetType, type DecorationSet } fro
 
 import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, SKILL_CHIP_ICON_HREF } from '@/lib/messages/inlineMessageLinks';
 import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
-import { findAttachmentCitationRanges } from '../../attachmentCitations';
+import { findAttachmentCitationRanges, findLocalFileLinks } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
 import { findWebLinks } from '../referenceLinks';
@@ -89,6 +89,7 @@ function technicalIsolates(ranges: HighlightRange[]): DecorationSet {
 }
 
 const DISMISS_NAME_KEY = 'mentionName';
+const OPEN_TARGET_KEY = 'chipOpen';
 
 /**
  * A reference drawn as the same chip the sent message shows: an attachment
@@ -101,25 +102,43 @@ class ReferenceChipWidget extends WidgetType {
         readonly label: string,
         readonly title: string,
         readonly iconHref: string,
-        readonly isSessionLink = false,
-        /** The mention name a double click dismisses; absent on other chips. */
-        readonly dismissName?: string,
+        readonly options: {
+            /** The mention name a double click dismisses; absent on other chips. */
+            dismissName?: string;
+            /** A cited attachment whose file is gone: drawn dashed and muted. */
+            unavailable?: boolean;
+            /** What a click on the chip opens, as `kind:value`; absent on chips that only take the caret. */
+            openTarget?: string;
+        } = {},
     ) {
         super();
     }
 
+    get dismissName() { return this.options.dismissName; }
+    get unavailable() { return this.options.unavailable === true; }
+    get openTarget() { return this.options.openTarget; }
+
     eq(other: ReferenceChipWidget): boolean {
         return other.label === this.label && other.title === this.title && other.iconHref === this.iconHref
-            && other.isSessionLink === this.isSessionLink && other.dismissName === this.dismissName;
+            && other.dismissName === this.dismissName && other.unavailable === this.unavailable
+            && other.openTarget === this.openTarget;
     }
 
     toDOM(view: EditorView): HTMLElement {
         const doc = view.dom.ownerDocument;
         const chip = doc.createElement('span');
-        chip.className = INLINE_REFERENCE_CHIP_CLASS;
-        // The shared chip has 1px inline margins outside its max-width.
-        if (this.isSessionLink) chip.style.maxWidth = 'calc(100% - 2px)';
+        chip.className = this.unavailable
+            ? `${INLINE_REFERENCE_CHIP_CLASS.replace('text-foreground', 'text-muted-foreground')} border-dashed`
+            : INLINE_REFERENCE_CHIP_CLASS;
+        // A long name truncates well short of the line: a chip as wide as the
+        // line pushed the space after it onto a line of its own, and the caret
+        // past it out of sight. Room for a space and the caret stays beside it.
+        chip.style.maxWidth = 'min(18rem, calc(100% - 2ch))';
         if (this.dismissName !== undefined) chip.dataset[DISMISS_NAME_KEY] = this.dismissName;
+        if (this.openTarget !== undefined) {
+            chip.dataset[OPEN_TARGET_KEY] = this.openTarget;
+            chip.style.cursor = 'pointer';
+        }
         chip.title = this.title;
         const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('class', 'block size-[1.1em] shrink-0');
@@ -180,7 +199,27 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
             const filename = text.slice(range.start + 1, range.end - 1).trim();
             chips.push({
                 ...range,
-                widget: new ReferenceChipWidget(filename, filename, getFileTypeIconHref(filename, { themeVariant })),
+                widget: new ReferenceChipWidget(filename, filename, getFileTypeIconHref(filename, { themeVariant }), { openTarget: `attachment:${filename}` }),
+            });
+        }
+    }
+    const missing = context.missingAttachments;
+    if (missing && missing.names.length > 0 && text.includes('[')) {
+        for (const range of findAttachmentCitationRanges(text, [...missing.names])) {
+            const filename = text.slice(range.start + 1, range.end - 1).trim();
+            chips.push({
+                ...range,
+                widget: new ReferenceChipWidget(filename, `${filename}\n${missing.title}`, getFileTypeIconHref(filename, { themeVariant }), { unavailable: true }),
+            });
+        }
+    }
+    // An image saved as a file is cited by a link to where it was saved.
+    if (text.includes('](')) {
+        for (const link of findLocalFileLinks(text)) {
+            chips.push({
+                start: link.start,
+                end: link.end,
+                widget: new ReferenceChipWidget(link.name, link.path, getFileTypeIconHref(link.name, { themeVariant }), { openTarget: `path:${link.path}` }),
             });
         }
     }
@@ -192,11 +231,11 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
         for (const mention of tokenizeMentions(text, context)) {
             const name = text.slice(mention.start + 1, mention.end);
             if (mention.kind === 'agent') {
-                addToken(mention.start, mention.end, new ReferenceChipWidget(name, titleOf(name), AGENT_CHIP_ICON_HREF, false, dismissable(name.toLowerCase())));
+                addToken(mention.start, mention.end, new ReferenceChipWidget(name, titleOf(name), AGENT_CHIP_ICON_HREF, { dismissName: dismissable(name.toLowerCase()) }));
                 continue;
             }
             const iconHref = /[\\/]$/.test(name) ? FOLDER_CHIP_ICON_HREF : getFileTypeIconHref(name, { themeVariant });
-            addToken(mention.start, mention.end, new ReferenceChipWidget(basename(name), titleOf(name), iconHref, false, dismissable(name)));
+            addToken(mention.start, mention.end, new ReferenceChipWidget(basename(name), titleOf(name), iconHref, { dismissName: dismissable(name) }));
         }
     }
 
@@ -214,7 +253,7 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     if (context.sessionLinkChips?.size) {
         for (const range of findSessionLinks(text, context.sessionLinkOrigins ?? [])) {
             const chip = context.sessionLinkChips.get(sessionLinkKey(range.target));
-            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref) });
         }
     }
 
@@ -222,7 +261,7 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     if (context.referenceLinkChips?.size) {
         for (const range of findWebLinks(text)) {
             const chip = context.referenceLinkChips.get(range.link);
-            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, { openTarget: `link:${range.link}` }) });
         }
     }
 
@@ -331,6 +370,24 @@ const mentionChipDismissal = EditorView.domEventHandlers({
     },
 });
 
+/** A click on a chip that stands for something opens it; the caret still lands beside the chip. */
+const chipOpening = EditorView.domEventHandlers({
+    click(event, view) {
+        const context = view.state.field(languageContextField);
+        const chip = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-chip-open]') : null;
+        const target = chip?.dataset[OPEN_TARGET_KEY];
+        if (!context.onChipOpen || !target || event.detail > 1) return false;
+        const separator = target.indexOf(':');
+        const kind = target.slice(0, separator);
+        const value = target.slice(separator + 1);
+        if (kind === 'attachment') context.onChipOpen({ kind, filename: value });
+        else if (kind === 'path') context.onChipOpen({ kind, path: value });
+        else if (kind === 'link') context.onChipOpen({ kind, url: value });
+        else return false;
+        return true;
+    },
+});
+
 /**
  * The composer language extension. Install once; feed it registry updates with
  * `setLanguageContext`.
@@ -340,5 +397,6 @@ export function composerLanguage(initial: ComposerLanguageContext = EMPTY_CONTEX
         languageContextField.init(() => initial),
         decorationField,
         mentionChipDismissal,
+        chipOpening,
     ];
 }

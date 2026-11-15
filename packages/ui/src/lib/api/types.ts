@@ -21,6 +21,8 @@ import type {
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
   CommentInput,
+  CommentUpdateInput,
+  CommentDeleteInput,
   DiscussionCloseReason,
   DiscussionCommentInput,
   ChangeRequestReviewStateResult,
@@ -62,6 +64,8 @@ import type {
   GitAuxiliaryBindingIntent,
   GitAuxiliaryBindingResult,
   UpdateChangeRequestInput,
+  UpdateIssueInput,
+  UpdateDiscussionInput,
 } from '../source-control/types';
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
@@ -1723,12 +1727,18 @@ export type RepositoryReferenceKind = 'issue' | 'pull' | 'discussion';
 export type RepositoryReferenceState = 'open' | 'closed' | 'merged' | 'all' | 'unanswered';
 /** Whose items a repository list shows; review requests apply to change requests. */
 export type RepositoryReferencePeople = 'any' | 'assigned' | 'created' | 'reviewRequested';
-export type RepositoryReferenceFilter = { state: RepositoryReferenceState; people: RepositoryReferencePeople };
+export type RepositoryReferenceFilter = {
+  state: RepositoryReferenceState;
+  people: RepositoryReferencePeople;
+  /** Only items carrying every one of these labels. */
+  labels: string[];
+};
 
 export type RepositoryReferenceQuery = {
   kind: RepositoryReferenceKind;
   state?: RepositoryReferenceState;
   people?: RepositoryReferencePeople;
+  labels?: string[];
   /** Search text, or a pasted link or number, which names one item of either kind. */
   query?: string;
   cursor?: string | null;
@@ -1795,6 +1805,11 @@ export type RepositoryReferenceComment = {
   body: string;
   createdAt: string | null;
   url: string;
+  /** The host's id for a conversation comment (a discussion comment or its reply), where an edit or delete names it. */
+  id?: string;
+  /** Whether this account may replace or remove this comment; absent when the host does not say. */
+  canUpdate?: boolean;
+  canDelete?: boolean;
   path: string | null;
   line: number | null;
   review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
@@ -1828,6 +1843,13 @@ export type RepositoryReferenceReviewer = {
 /** What the preview adds for one item; too slow to ask for a whole page. */
 export type RepositoryReferenceDetail = {
   number: number;
+  /**
+   * The item's whole description (a discussion's body included), where the host sends
+   * it with the detail; the list body is cut at 20 000 characters.
+   */
+  body?: string;
+  /** Whether this account may replace the item's title and body; absent when the host does not say. */
+  viewerCanUpdate?: boolean;
   /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
   comments: RepositoryReferenceComment[];
   /** How many conversation comments the item has in all. */
@@ -1998,10 +2020,14 @@ export interface SourceControlAPI {
   ): Promise<ChangeRequestStatus>;
   changeRequestCreate(payload: CreateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlCreateMutationResult>>;
   changeRequestUpdate(payload: UpdateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  /** An issue's title and body (`features.issueEdit`). */
+  issueUpdate(payload: UpdateIssueInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestMerge(payload: MergeChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlMergeMutationResult>>;
   changeRequestReady(payload: ReadyChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReadyMutationResult>>;
   changeRequestDraft(payload: DraftChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlDraftMutationResult>>;
   changeRequestComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   /** Opens a thread on a change request: a comment that waits to be resolved (GitLab). */
   changeRequestStartThread(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReplyToThread(payload: ThreadReplyInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
@@ -2014,6 +2040,8 @@ export interface SourceControlAPI {
   changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   issueSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   changeRequestSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
@@ -2022,7 +2050,11 @@ export interface SourceControlAPI {
   discussionComment(payload: DiscussionCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionSetState(payload: SetDiscussionStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   discussionSetAnswer(payload: SetDiscussionAnswerInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  /** A discussion's title and body (`features.discussions`). */
+  discussionUpdate(payload: UpdateDiscussionInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  discussionCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  discussionCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   /**
    * Forgets the server's short-lived answers from this host, so the next
@@ -2037,7 +2069,7 @@ export interface SourceControlAPI {
   referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },
   ): Promise<PageResult<ChangeRequest>>;
   changeRequestContext(
     context: SourceControlReadContext,
@@ -2055,7 +2087,7 @@ export interface SourceControlAPI {
 
   issuesList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },
   ): Promise<PageResult<Issue>>;
   issueGet(
     context: SourceControlReadContext,

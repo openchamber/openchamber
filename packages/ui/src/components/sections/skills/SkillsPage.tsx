@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { toast } from '@/components/ui';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { selectSkillsForDirectory, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { selectSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -53,7 +53,7 @@ import { useI18n } from '@/lib/i18n';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
-import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
@@ -146,7 +146,10 @@ const SkillsInstalledPage: React.FC = () => {
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName, settingsDirectory) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
-  const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
+  // Only a list that has been read can say a selection is gone: Settings in
+  // VS Code opens on a skill before its own tab has read the list.
+  const skillsLoaded = useSkillsStore((state) => selectSkillsLoadedForDirectory(state, settingsDirectory));
+  const hasStaleSelection = Boolean(skillsLoaded && selectedSkillName && !selectedSkill && !skillDraft);
   const isReadOnlySkill = selectedSkill?.path === '<built-in>';
 
   React.useEffect(() => {
@@ -305,18 +308,17 @@ const SkillsInstalledPage: React.FC = () => {
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
     // File-view token colors for code supporting files; markdown stays on lezer.
-    const shikiLanguage = getLanguageFromExtension(filePath);
-    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
+    const highlightLanguage = getLanguageFromExtension(filePath);
+    const useHighlight = Boolean(highlightLanguage) && highlightLanguage !== 'markdown';
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useHighlight ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const languageExtension = languageByExtension(filePath);
     if (languageExtension) {
       extensions.push(languageExtension);
     }
-    if (useShiki && shikiLanguage) {
+    if (useHighlight && highlightLanguage) {
       extensions.push(codeHighlightExtension({
-        language: shikiLanguage,
-        themeName: getThemeRenderName(currentTheme),
-        theme: getCodeTokenTheme(currentTheme),
+        language: highlightLanguage,
+        theme: getCodeTokenTheme(currentTheme).zed,
       }));
     }
     extensions.push(EditorView.lineWrapping);

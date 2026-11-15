@@ -133,6 +133,14 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     updated_at: '2026-10-02T10:00:00Z',
     pull_request: item.pull ? { merged: item.pull.merged } : null,
   });
+  /** Gitea names a pull request's comment in `pull_request_url` and leaves `issue_url` empty. */
+  const commentJson = (item: ForgeItem, comment: ForgeComment) => {
+    const itemUrl = issueJson(item).html_url;
+    return {
+      ...comment, user, html_url: `${itemUrl}#issuecomment-${comment.id}`,
+      issue_url: item.pull ? '' : itemUrl, pull_request_url: item.pull ? itemUrl : '',
+    };
+  };
   const pullJson = (item: ForgeItem) => {
     const pull = item.pull;
     if (!pull) return null;
@@ -264,6 +272,26 @@ export const startFakeForge = async (): Promise<FakeForge> => {
         const list = items.filter((item) => (url.searchParams.get('type') !== 'issues' || !item.pull) && stateFilter(url)(item)).reverse();
         return { status: 200, body: page(list.map(issueJson), url, response) };
       }
+      // A comment by its repository-wide id, the way Gitea addresses it for an edit or delete.
+      if (number === 'comments' && rest.length === 3) {
+        const owner = items.find((entry) => entry.comments.some((comment) => String(comment.id) === action));
+        const index = owner ? owner.comments.findIndex((comment) => String(comment.id) === action) : -1;
+        if (!owner || index < 0) return notFound;
+        if (method === 'GET') return { status: 200, body: commentJson(owner, owner.comments[index]) };
+        if (method === 'PATCH') {
+          const text = textOf((await readBody(request)).body);
+          if (!text) return { status: 422, body: { message: 'body is required' } };
+          owner.comments[index].body = text;
+          writes.push({ method, path });
+          return { status: 200, body: commentJson(owner, owner.comments[index]) };
+        }
+        if (method === 'DELETE') {
+          owner.comments.splice(index, 1);
+          writes.push({ method, path });
+          return { status: 204, body: null };
+        }
+        return notFound;
+      }
       const item = byNumber(number);
       if (!item) return notFound;
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
@@ -277,7 +305,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       if (action === 'comments' && rest.length === 3) {
         if (method === 'GET') {
-          return { status: 200, body: item.comments.map((comment) => ({ ...comment, user, html_url: `${issueJson(item).html_url}#issuecomment-${comment.id}` })) };
+          return { status: 200, body: item.comments.map((comment) => commentJson(item, comment)) };
         }
         if (method === 'POST') {
           const body = await readBody(request);
@@ -287,7 +315,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
           const comment = { id: commentId, body: text, created_at: '2026-10-03T10:00:00Z' };
           item.comments.push(comment);
           writes.push({ method, path });
-          return { status: 201, body: { ...comment, user } };
+          return { status: 201, body: commentJson(item, comment) };
         }
       }
     }

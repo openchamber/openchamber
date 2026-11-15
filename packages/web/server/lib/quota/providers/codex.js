@@ -7,7 +7,9 @@ import {
   toNumber,
   toTimestamp,
   resolveWindowLabel,
-  asNonEmptyString
+  asNonEmptyString,
+  formatCredits,
+  formatMoney
 } from '../utils/index.js';
 import { readCodexCliLogin, signInEmailOf } from './codex-cli.js';
 
@@ -58,10 +60,13 @@ const usageWindowsOf = (payload) => {
   if (credits) {
     const balance = toNumber(credits.balance);
     const unlimited = Boolean(credits.unlimited);
+    // The endpoint reports the balance as an unrounded float. A credits row
+    // is a count, so render it like Copilot's credits: one decimal at most,
+    // thousands separated.
     const label = unlimited
       ? 'Unlimited'
       : balance !== null
-        ? String(balance)
+        ? formatCredits(balance)
         : null;
     windows.credits_balance = toUsageWindow({
       usedPercent: null,
@@ -71,17 +76,18 @@ const usageWindowsOf = (payload) => {
     });
   }
 
-  // Business/enterprise accounts expose a dollar spend cap under
-  // `spend_control.individual_limit`. Surface it as an additive `credits`
-  // window so existing consumers keep working.
+  // Only an explicit USD unit makes this allowance a dollar amount.
   if (payload?.spend_control?.individual_limit) {
     const spendLimit = payload.spend_control.individual_limit;
     const used = toNumber(spendLimit.used);
     const limit = toNumber(spendLimit.limit);
+    const isUsd = spendLimit.unit === 'usd';
     const valueLabel = used !== null && limit !== null
-      ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+      ? isUsd
+        ? `$${formatMoney(used)} / $${formatMoney(limit)}`
+        : `${used.toFixed(0)} / ${limit.toFixed(0)} used`
       : null;
-    windows.credits = toUsageWindow({
+    windows[isUsd ? 'usage' : 'credits'] = toUsageWindow({
       usedPercent: toNumber(spendLimit.used_percent),
       windowSeconds: null,
       resetAt: null,

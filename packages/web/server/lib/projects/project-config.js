@@ -7,6 +7,7 @@ import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
+  NOTES_TODOS_RELATIVE_PATH,
   SHARED_CONFIG_RELATIVE_PATH,
   SHARED_SETUP_KEYS,
   applySharedProjectSetupPatch,
@@ -433,6 +434,7 @@ export const createProjectConfigRuntime = (deps) => {
     path,
     projectsDirPath,
     createTaskID,
+    switchNotesTodosStorage,
   } = deps;
 
   const taskIDFactory = typeof createTaskID === 'function'
@@ -1223,7 +1225,15 @@ export const createProjectConfigRuntime = (deps) => {
       for (const [key, value] of Object.entries(stored)) {
         if (value === undefined) delete merged[key];
       }
-      await writeRawProjectConfigToDisk(projectID, merged);
+      const commit = () => writeRawProjectConfigToDisk(projectID, merged);
+      const enabled = merged.notesTodosInRepository === true;
+      if ((existing.notesTodosInRepository === true) !== enabled && switchNotesTodosStorage) {
+        // The project context module moves the entries and commits the option
+        // under its own lock, so a write cannot land between the two.
+        await switchNotesTodosStorage(projectID, { enabled, file: notesTodosFileOf(projectID, merged), commit });
+      } else {
+        await commit();
+      }
       return mergedProjectSetupOf(projectID, merged);
     });
   };
@@ -1318,6 +1328,25 @@ export const createProjectConfigRuntime = (deps) => {
     return path.join(projectPath, ...relative.split('/'));
   };
 
+  /** Where the repository keeps a project's notes and todos, whether the option is on or not; null without a checkout. */
+  const notesTodosFileOf = (projectID, personalRaw) => {
+    const projectPath = projectPathOf(projectID, personalRaw);
+    return projectPath ? path.join(projectPath, ...NOTES_TODOS_RELATIVE_PATH.split('/')) : null;
+  };
+
+  /**
+   * The repository file that holds a project's notes and todos, or null when
+   * the personal `notesTodosInRepository` option is off. The option is per
+   * machine, so this reads the personal file only.
+   */
+  const resolveNotesTodosFile = async (projectID) => {
+    const personalRaw = await readRawProjectConfigFromDisk(projectID);
+    if (personalRaw.notesTodosInRepository !== true) return null;
+    const file = notesTodosFileOf(projectID, personalRaw);
+    if (!file) throw new Error('project checkout not found');
+    return file;
+  };
+
   return {
     readProjectSetup,
     updateProjectSetup,
@@ -1325,6 +1354,7 @@ export const createProjectConfigRuntime = (deps) => {
     readSharedProjectFile,
     updateSharedProjectEntry,
     resolveSharedPlansDir,
+    resolveNotesTodosFile,
     listScheduledTasks,
     listScheduledWorktreeCleanups,
     saveScheduledWorktreeCleanup,

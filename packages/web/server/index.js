@@ -113,6 +113,7 @@ import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
+import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -134,7 +135,7 @@ import { createExtensionWaitsRuntime } from './lib/extension-waits/runtime.js';
 import { createLaterPages } from './lib/openchamber-control/later-pages.js';
 import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
-import { createWorkflowRuntime } from './lib/workflows/runtime.js';
+import { createWorkflowRuntime, lightenWorkflowRun } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
 import { createSharePagesRuntime } from './lib/share-pages/runtime.js';
 import { createSharePageStore } from './lib/share-pages/store.js';
@@ -754,6 +755,8 @@ const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  // Switching where notes and todos live moves them under the context lock.
+  switchNotesTodosStorage: (projectId, change) => projectContextRuntime.switchNotesTodosStorage(projectId, change),
 });
 
 const projectContextRuntime = createProjectContextRuntime({
@@ -761,6 +764,7 @@ const projectContextRuntime = createProjectContextRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
   resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
+  resolveNotesTodosFile: (projectId) => projectConfigRuntime.resolveNotesTodosFile(projectId),
   onChanged: (projectId) => broadcastOpenChamberUiEvent({
     type: 'openchamber:project-context-changed',
     properties: { projectId },
@@ -1482,7 +1486,7 @@ const workflowAgentSessions = createWorkflowAgentSessions({
   globalEventHub: globalMessageStreamHub,
 });
 const workflowRuntime = createWorkflowRuntime({
-  store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR, lighten: lightenWorkflowRun }),
   agentSessions: workflowAgentSessions,
   postSynthetic: workflowAgentSessions.postSynthetic,
   // Declared further down; only ever called after startup.
@@ -1510,7 +1514,7 @@ const sharePagesRuntime = createSharePagesRuntime({
 void sharePagesRuntime.start().catch((error) => {
   console.warn('[share-pages] failed to start:', error?.message ?? error);
 });
-// Pages other people shared, opened here with their link and PIN (decision 0013).
+// Pages other people shared, opened here with their link and PIN.
 const receivedPagesRuntime = createReceivedPagesRuntime({
   crypto,
   store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
@@ -1560,13 +1564,24 @@ void sessionTodosRuntime.start().catch((error) => {
   console.warn('[session-todos] failed to start:', error?.message ?? error);
 });
 
+const chatDirectoryCleanupRuntime = createChatDirectoryCleanupRuntime({
+  roots: [OPENCHAMBER_CHATS_DIR, path.join(OPENCHAMBER_DEFAULT_CONFIG_ROOT, 'chats')],
+  createClient: () => openCodeSessionClient(''),
+  getOwner: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode || isShuttingDown ? null : openCodeProcess,
+});
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
+  onWirePayload: (payload, { spaceId }) => {
+    if (!spaceId) chatDirectoryCleanupRuntime.observeWirePayload(payload);
+  },
+  onDisconnect: () => chatDirectoryCleanupRuntime.onDisconnected(),
   onPayload: (payload, { spaceId }) => {
+    if (!spaceId) void chatDirectoryCleanupRuntime.processPayload(payload);
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
@@ -1574,6 +1589,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
   onConnect: async () => {
+    void chatDirectoryCleanupRuntime.onConnected();
     const readAt = Date.now();
     const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses();
     if (statuses) sessionRuntime.adoptRunningSessions(Object.keys(statuses), readAt);
@@ -2475,6 +2491,9 @@ const openChamberControlService = createOpenChamberControlService({
   // The module the quota routes load, loaded on the first read: the same
   // instance, extension providers included.
   loadQuota: () => import('./lib/quota/index.js'),
+  // The terminal runtime is created later in startup, so the read takes it
+  // when it is asked for rather than capturing null now.
+  getTerminalRuntime: () => terminalRuntime,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -2531,6 +2550,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   syncToHmrState,
   openCodeWatcherRuntime,
+  chatDirectoryCleanupRuntime,
   sessionAssistRuntime,
   sessionWorkRuntime,
   sessionGoalRuntime,
@@ -2905,7 +2925,7 @@ async function main(options = {}) {
       // The packaged desktop UI (openchamber-ui://) and the dev UI sit on a
       // different origin, so every custom request header must be listed here or
       // the browser refuses the request at preflight, before it reaches a route.
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       // Without it the browser sends a preflight before every request: in the
       // packaged app that was 45% of all requests while idle. Chromium caps

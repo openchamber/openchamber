@@ -1,3 +1,4 @@
+import type { I18nKey } from './en';
 import { settingsDict } from './ar.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -24,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
@@ -61,6 +63,7 @@ import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
+import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 import { tooltipsDiffI18n } from './tooltips-diff.i18n';
@@ -73,7 +76,7 @@ import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
 import { tooltipsPanelI18n } from './tooltips-panel.i18n';
 import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
-export const dict = {
+export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'نماذج Zen',
   'quota.value.requests': 'الطلبات: {count}',
   'quota.value.spent': 'تم إنفاق {spent}',
@@ -200,10 +203,7 @@ export const dict = {
   'chat.message.context.chatQuote': 'مقتبس من رسالة سابقة',
   'chat.message.context.showQuoteSource': 'إظهار في الرسالة الأصلية',
   'chat.message.context.fileQuote': 'تحديد من {file}',
-  'chat.chatInput.chatQuoteContext': 'اقتباسات المحادثة',
   'chat.chatInput.chatQuoteContextRemove': 'إزالة اقتباسات المحادثة',
-  'chat.chatInput.contextPreview.selectedLabel': 'النص المحدد',
-  'chat.chatInput.contextPreview.commentLabel': 'تعليق المستخدم',
   'chat.chatInput.contextPreview.edit': 'تعديل التعليق',
   'chat.chatInput.contextPreview.remove': 'إزالة',
   'chat.message.context.browserAnnotation': 'تعليق توضيحي من المتصفح ({page})',
@@ -212,9 +212,10 @@ export const dict = {
   'chat.message.context.prCheck': 'فحص GitHub PR فاشل ({label})',
   'chat.message.context.mrCheck': 'مهمة خط معالجة GitLab فاشلة ({label})',
   'chat.chatInput.terminalContext': '{terminal}، الأسطر {start}-{end}',
+  'chat.chatInput.context.more': '+{count} أخرى',
+  'chat.chatInput.context.showLess': 'إظهار أقل',
+  'chat.chatInput.attachment.unavailable': 'غير مرفق: فُقد الملف عند إعادة تحميل التطبيق. أرفقه مرة أخرى أو احذف هذه الشريحة.',
   'chat.chatInput.terminalContextRemove': 'إزالة سياق الطرفية',
-  'chat.chatInput.prCommentContext': 'تعليقات PR',
-  'chat.chatInput.mrCommentContext': 'تعليقات MR',
   'chat.chatInput.prCommentContextRemove': 'إزالة سياق تعليقات PR',
   'chat.chatInput.prCheckContext': 'فحوصات PR الفاشلة',
   'chat.chatInput.mrCheckContext': 'مهام خط المعالجة الفاشلة',
@@ -1555,7 +1556,7 @@ export const dict = {
   'contextPanel.browser.waitingForServerHint': 'لا يقبل الاتصالات بعد. ستُحمَّل هذه الصفحة فور أن يبدأ بقبولها.',
   'contextPanel.browser.tunnelFailed': 'تعذّر الوصول إلى خادم التطوير هذا',
   'contextPanel.browser.remoteLoopback.title': '{url} موجود على جهاز OpenChamber',
-  'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق سطح المكتب.',
+  'contextPanel.browser.remoteLoopback.hint': 'لا يمكن لعلامة تبويب في المتصفح فتح الصفحات التي تعمل هناك. افتحها في تطبيق OpenChamber لسطح المكتب أو للهاتف.',
   'contextPanel.browser.tunnelFailedHint': 'يعمل {url} على الجهاز الذي يعمل عليه OpenChamber، وتعذّر فتح الاتصال به. لا يُعرض هنا أي شيء من جهازك أنت.',
   'contextPanel.browser.loadFailedUnknown': 'تعذّر الوصول إلى الصفحة.',
   'contextPanel.browser.crashed': 'توقفت هذه الصفحة عن الاستجابة',
@@ -1564,7 +1565,8 @@ export const dict = {
   'projectActions.toast.multipleServers': 'بدأ تشغيل عدة خوادم — اختر واحدًا في لوحة المتصفح',
   'contextPanel.browser.devServers.justStarted': 'بدأ للتو',
   'contextPanel.browser.devServers.unavailable': 'تعذّر التحقق من خوادم التطوير العاملة.',
-  'contextPanel.browser.devServers.remoteOnly': 'تعمل هذه على الجهاز الذي يستضيف OpenChamber. يتطلب فتحها تطبيق سطح المكتب.',
+  'contextPanel.browser.devServers.remoteOnly': 'تعمل هذه على الجهاز الذي يستضيف OpenChamber. يتطلب فتحها تطبيق سطح المكتب أو تطبيق الهاتف.',
+  'contextPanel.browser.unsafeWebView': 'لا يمكن عرض الصفحات بأمان باستخدام Android System WebView على هذا الهاتف. حدّثه من Google Play.',
   'contextPanel.browser.annotate.toggle': 'إضافة تعليقات على الصفحة',
   'contextPanel.browser.annotate.intro': 'هذا تحديد عليه تعليق توضيحي من المتصفح المدمج في التطبيق.',
   'contextPanel.browser.annotate.attached': 'تم إرفاق التعليق بالمحادثة',
@@ -1809,6 +1811,7 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'قراءة من الذاكرة المؤقتة',
   'contextSidebar.tokens.cacheWrite': 'كتابة إلى الذاكرة المؤقتة',
   'contextSidebar.tokens.cacheHit': 'إصابة الذاكرة المؤقتة',
+  'chat.workStatus.replyCacheHit': 'إصابة الذاكرة المؤقتة (الرد)',
   'contextSidebar.actions.copyJson': 'نسخ JSON',
   'contextSidebar.actions.copy': 'نسخ',
   'contextSidebar.actions.copied': 'تم النسخ',
@@ -2033,6 +2036,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'تعذّر قراءة ملف الخطة',
   'inlineComment.range.lines': 'الأسطر {start}-{end}',
   'inlineComment.range.wholeFile': 'الملف كاملًا',
+  'inlineComment.card.codeChanged': 'تغيّر الكود الذي يشير إليه هذا التعليق',
   'inlineComment.input.placeholder': 'أضف تعليقًا… ({shortcut} للحفظ)',
   'inlineComment.input.placeholderShort': 'أضف تعليقًا…',
   'inlineComment.actions.cancel': 'إلغاء',
@@ -2351,21 +2355,11 @@ export const dict = {
   'session.githubIntegration.tabs.pullRequests': 'طلبات السحب',
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'الفرع مسحوب بالفعل في شجرة عمل (worktree)',
   'session.githubIntegration.validation.failed': 'تعذّر التحقق',
-  'chat.fileAttachment.toast.attachFailed': 'تعذّر إرفاق الملف',
   'chat.fileAttachment.toast.tooLarge': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}). إذا كان ضمن المشروع، فاذكره باستخدام @.',
   'chat.fileAttachment.toast.heicConversionFailed': 'تعذّر تحويل {name} من HEIC إلى JPEG، لذا لم يُرفق. احفظ الصورة بصيغة JPEG وأرفقها مرة أخرى.',
   'chat.fileAttachment.toast.overSendLimit': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}).',
-  'chat.fileAttachment.toast.someFilesSkipped': "تم تخطي بعض الملفات:\n{summary}",
-  'chat.fileAttachment.toast.vscodePickFailed': 'تعذّر اختيار الملفات في VS Code',
-  'chat.fileAttachment.fileFallback': 'ملف',
-  'chat.fileAttachment.skippedFallback': 'تم التخطي',
-  'chat.fileAttachment.actions.attachAria': 'إرفاق ملفات',
-  'chat.fileAttachment.actions.attach': 'إرفاق ملفات',
-  'chat.fileAttachment.actions.removeNamed': 'إزالة {name}',
-  'chat.fileAttachment.actions.removeImage': 'إزالة الصورة',
   'chat.fileAttachment.activeEditor.addFile': 'إضافة file:{name} إلى السياق',
   'chat.fileAttachment.activeEditor.pinSelection': 'تثبيت التحديد في السياق',
-  'chat.fileAttachment.activeEditor.remove': 'إزالة من السياق',
   'chat.fileAttachment.openInDiagram': 'فتح في عرض المخطط',
   'chat.changedFiles.title': 'الملفات المتغيرة',
   'chat.changedFiles.actions.openFileTitle': 'فتح {path}',
@@ -2584,6 +2578,19 @@ export const dict = {
   'chat.messageBody.toast.copied': 'تم النسخ إلى الحافظة',
   'chat.messageBody.actions.savingImage': 'جارٍ حفظ الصورة…',
   'chat.messageBody.actions.saveAsImage': 'حفظ كصورة',
+  'chat.messageSelection.action': 'تحديد الرسائل',
+  'chat.messageSelection.count': 'المحدد: {count}',
+  'chat.messageSelection.empty': 'لم يُحدَّد شيء',
+  'chat.messageSelection.cancel': 'إلغاء',
+  'chat.messageSelection.copyMarkdown': 'نسخ Markdown',
+  'chat.messageSelection.copyMarkdownShort': 'Markdown',
+  'chat.messageSelection.saveImage': 'حفظ الصورة',
+  'chat.messageSelection.saveImageShort': 'صورة',
+  'chat.messageSelection.selectPrompt': 'تحديد الطلب',
+  'chat.messageSelection.selectAnswer': 'تحديد الرد',
+  'chat.messageSelection.toast.copied': 'تم نسخ Markdown',
+  'chat.messageSelection.toast.copyFailed': 'تعذّر النسخ إلى الحافظة',
+  'chat.messageSelection.toast.missing': 'لم تعد بعض الرسائل المحددة موجودة في هذه المحادثة، لذا أُلغي تحديدها. راجع التحديد وحاول مرة أخرى.',
   'chat.messageBody.actions.saveAsPlan': 'حفظ كخطة',
   'chat.messageBody.actions.startNewSession': 'بدء جلسة جديدة من هذه الإجابة',
   'chat.messageBody.actions.startNewMultiRun': 'بدء تشغيل متعدد جديد من هذه الإجابة',
@@ -2619,13 +2626,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'إرسال الرسالة',
   'chat.chatInput.actions.queueMessageAria': 'إضافة الرسالة إلى قائمة الانتظار',
   'chat.chatInput.actions.stopGeneratingAria': 'إيقاف التوليد',
-  'chat.chatInput.linked.byAuthor': 'بواسطة {author}',
-  'chat.chatInput.linked.issue.openInBrowserAria': 'فتح المشكلة في المتصفح',
-  'chat.chatInput.linked.issue.removeAria': 'إزالة المشكلة المرتبطة',
-  'chat.chatInput.linked.pr.openInBrowserAria': 'فتح طلب السحب في المتصفح',
-  'chat.chatInput.linked.mr.openInBrowserAria': 'فتح طلب الدمج في المتصفح',
-  'chat.chatInput.linked.pr.removeAria': 'إزالة طلب السحب المرتبط',
-  'chat.chatInput.linked.mr.removeAria': 'إزالة طلب الدمج المرتبط',
   'chat.chatInput.placeholder.shell': 'أدخل أمر shell…',
   'chat.chatInput.placeholder.chat': 'خطّط أو ابنِ أو اسأل. @ للإشارة، $ للمهارات، / للأوامر',
   'chat.chatInput.placeholder.chatCompact': 'خطّط أو ابنِ أو اسأل',
@@ -2683,9 +2683,7 @@ export const dict = {
   'chat.chatInput.toast.openSessionFirst': 'افتح جلسة أولًا',
   'chat.chatInput.toast.dictationKeptForOriginalSession': 'حُفظ الإملاء كمسودة في الجلسة التي بدأته فيها',
   'chat.chatInput.toast.togglePermissionAutoAcceptFailed': 'تعذّر تبديل القبول التلقائي للأذونات',
-  'chat.chatInput.reviewComments': 'تعليقات المراجعة:',
   'chat.chatInput.reviewCommentsRemove': 'إزالة تعليقات المراجعة',
-  'chat.chatInput.previewAnnotations': 'تعليقات المعاينة:',
   'chat.chatInput.previewContext': 'سياق المعاينة:',
   'chat.chatInput.previewContextRemove': 'إزالة سياق المعاينة',
   'chat.chatInput.projectRoot': 'جذر المشروع',
@@ -3638,6 +3636,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} خطة',
   'chat.workStatus.breakdown.planCountPlural': '{count} خطط',
   'chat.workStatus.linkedPlans.open': 'فتح الخطة {title}',
+  'chat.workStatus.loadedSkills.open': 'فتح المهارة {name}',
   'chat.workStatus.sections.open': 'اختيار الأقسام',
   'chat.workStatus.sections.dialogTitle': 'أقسام اللوحة',
   'chat.workStatus.sections.reorder': 'اسحب {label} لإعادة الترتيب',
@@ -3670,6 +3669,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'انقطع الاتصال بالخادم ({reason}). لم يُرسَل شيء؛ أعد المحاولة بعد عودة الاتصال.',
   'chat.formCard.notConnected': 'لم يتم الاتصال بالخادم بعد. لم يُرسَل شيء؛ أعد المحاولة بعد الاتصال.',
   'chat.formCard.recoveredNotice': 'توقّفت الجولة أثناء الانتظار. سيؤدي الإرسال إلى بدء جولة جديدة مدفوعة.',
+  'chat.formCard.deferredNotice': 'أرسلت رسالة قبل الإجابة. سيؤدي الإرسال إلى إرسال إجابتك في رسالة جديدة.',
   'chat.formDock.progress': '{current} من {total}',
   'chat.formDock.waiting': '{count} أخرى في الانتظار',
   'chat.formDock.back': 'رجوع',
@@ -3905,7 +3905,6 @@ export const dict = {
   'desktopHostSwitcher.startup.fellBackToLocal': 'لم يُفتح اتصالها، لذا بدأ OpenChamber على النسخة المحلية. اتصل بها من مبدّل النسخ عندما يصبح الوصول إليها ممكنًا.',
   'desktopSafeStart.title': 'تعطّل OpenChamber مرارًا',
   'desktopSafeStart.description': 'أُغلقت اللوحات وطُويت المجلدات.',
-  'chat.chatInput.contextPreview.saveEdit': 'حفظ التعليق',
   'chat.chatInput.contextPreview.cancelEdit': 'إلغاء التعديل',
   'sessions.scheduledTasks.dialog.actions.openSession': 'فتح الجلسة',
   'sessions.scheduledTasks.dialog.actions.openSessionAria': 'فتح الجلسة من آخر تشغيل لـ {taskName}',
@@ -3940,6 +3939,7 @@ export const dict = {
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
+  ...connectionHeartbeatI18n.ar,
   ...compactionSettingsI18n.ar,
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
@@ -3976,6 +3976,7 @@ export const dict = {
   ...markdownGithubI18n['ar'],
   ...autocompleteScopeI18n['ar'],
   ...workflowsI18n['ar'],
+  ...subagentsI18n['ar'],
   ...sessionReferencesI18n['ar'],
   ...guestStatusViewI18n['ar'],
   ...tooltipsDiffI18n['ar'],

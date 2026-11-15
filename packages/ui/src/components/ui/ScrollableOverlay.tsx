@@ -1,7 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
-import { ScrollShadow } from "./ScrollShadow";
+import { ScrollShadow, ScrollShadowBands } from "./ScrollShadow";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
@@ -18,6 +18,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
+  /** The opaque colour behind the scroller: the fades become bands in it, not a mask. */
+  scrollShadowSurface?: string;
   /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
   /** Suppress the bottom fade while retaining scroll-state tracking. */
@@ -46,6 +48,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     preventOverscroll = false,
     useScrollShadow = false,
     scrollShadowSize,
+    scrollShadowSurface,
     hideTopScrollShadow = false,
     hideBottomScrollShadow = false,
     userIntentOnly = false,
@@ -70,6 +73,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             as={Component}
             ref={containerRef as React.Ref<HTMLElement>}
             size={scrollShadowSize}
+            surface={scrollShadowSurface}
             hideTopShadow={hideTopScrollShadow}
             hideBottomShadow={hideBottomScrollShadow}
             className={cn(
@@ -101,6 +105,9 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             {children}
           </Component>
         )}
+        {useScrollShadow && scrollShadowSurface ? (
+          <ScrollShadowBands surface={scrollShadowSurface} size={scrollShadowSize} />
+        ) : null}
         <OverlayScrollbar
           containerRef={containerRef}
           minThumbSize={minThumbSize}

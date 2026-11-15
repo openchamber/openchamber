@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -583,6 +584,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': 'Hide for me',
   'settings.projects.shared.replaceMode': 'Use only my setup commands, skip the repository\'s',
   'settings.projects.shared.toast.shareFailed': 'Failed to update the repository config',
+  'settings.projects.notesTodos.title': 'Notes and todos',
+  'settings.projects.notesTodos.inRepository': 'Keep notes and todos in the repository',
+  'settings.projects.notesTodos.inRepositoryDescription': 'This machine reads and saves them in .openchamber/notes-todos.json, so Git can sync them. Turning this on moves your notes and todos into the file; turning it off copies the file\'s entries back to this machine.',
+  'settings.projects.notesTodos.toast.saveFailed': 'Failed to change where notes and todos are saved',
   'settings.projects.actions.state.loading': 'Loading...',
   'settings.projects.actions.state.noDesktopSshForwards': 'No enabled local SSH forwards available.',
   'settings.projects.actions.field.selectIconAria': 'Select icon',
@@ -1258,6 +1263,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Agent notify tool',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Agent notify tool',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Let agents ping you when work is done or they're stuck.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Terminal panel',
+  "settings.openchamber.tools.field.agentTerminalToolSummary": "Let the agent list this folder's terminals and read what they printed. A terminal holds whatever was typed into it, secrets included, so this stays off until you turn it on.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "Project knowledge tool",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Project knowledge tool",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Let agents read and update the project's notes, todos and plans.",
@@ -2451,6 +2458,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Show Esc, Ctrl, arrows in terminal view',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Close the tab when the shell exits',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Applies to terminals and project actions. When off, the tab keeps its output, such as a dev server\'s log after it stops.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Open the terminal when a project action starts',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'When off, the action runs without switching the side panel. Its output stays in the action\'s terminal tab.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'File editor keymap',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Default',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2509,8 +2518,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': 'File tree side',
   'settings.openchamber.visual.option.fileTreeSide.left': 'Left',
   'settings.openchamber.visual.option.fileTreeSide.right': 'Right',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'Wide chat layout',
-  'settings.openchamber.visual.field.wideChatLayout': 'Wide chat layout',
+  'settings.openchamber.visual.field.chatWidth': 'Chat width',
+  'settings.openchamber.visual.field.chatWidthInfo': 'Default and Wider keep messages in a centered column. Full lets messages use the whole chat, while the message field keeps the Wider width.',
+  'settings.openchamber.visual.option.chatWidth.default.label': 'Default',
+  'settings.openchamber.visual.option.chatWidth.wider.label': 'Wider',
+  'settings.openchamber.visual.option.chatWidth.full.label': 'Full',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Wrap code block lines',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Wrap code block lines',
   'settings.openchamber.visual.field.tableCellWrap': 'Wrap table cells',
@@ -2723,6 +2735,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.en,
   ...extensionsSettingsI18n.en,
   ...settingsLayoutI18n.en,
+  ...mobileAppSettingsI18n.en,
   'settings.page.integrations.title': 'Integrations',
   'settings.agents.page.field.steps': 'Max steps',
   'settings.agents.page.field.stepsTooltip': 'How many tool steps the agent may take in one turn before it has to stop.',

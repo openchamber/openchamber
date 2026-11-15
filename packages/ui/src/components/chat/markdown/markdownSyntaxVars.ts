@@ -4,7 +4,7 @@ import { resolveSyntaxTokens } from '@/lib/theme/syntax';
 /**
  * Build the `--md-syntax-*` CSS custom properties for the given app theme.
  * Apply the result as inline styles on the markdown container so the static
- * Shiki theme resolves to the active palette.
+ * Highlights theme resolves to the active palette.
  *
  * Keep this helper independent of highlighter registration so eager code
  * consumers can resolve colors without loading a renderer or diff stack.

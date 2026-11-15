@@ -1,7 +1,8 @@
 import { defineConfig } from "oxlint";
 
-// This config runs only the vendored anti-slop plugin, through `bun run deslop`
-// and the ratchet in `bun run check:changed`. The general-purpose lint is
+// This config runs the rules that have a backlog: the vendored anti-slop plugin
+// and OpenChamber's own ratcheted rules, through `bun run deslop` and the
+// ratchet in `bun run check:changed`. The general-purpose lint is
 // `oxlint.config.ts`, run by `bun run lint`.
 export default defineConfig({
   categories: {
@@ -29,6 +30,7 @@ export default defineConfig({
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+    { name: "openchamber", specifier: "./tools/oxlint/openchamber/index.ts" },
   ],
   rules: {
     "anti-slop/no-chained-type-assertions": "error",
@@ -46,5 +48,10 @@ export default defineConfig({
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "openchamber/no-comments": "error",
+    "openchamber/no-effects-in-components": "error",
+    "openchamber/no-raw-fetch": "error",
+    "openchamber/no-timers": "error",
+    "openchamber/no-wire-client-imports": "error",
   },
 });

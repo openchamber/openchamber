@@ -123,6 +123,8 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
   const agentUsageToolEnabled = useUIStore((state) => state.agentUsageToolEnabled);
   const setAgentUsageToolEnabled = useUIStore((state) => state.setAgentUsageToolEnabled);
+  const agentTerminalToolEnabled = useUIStore((state) => state.agentTerminalToolEnabled);
+  const setAgentTerminalToolEnabled = useUIStore((state) => state.setAgentTerminalToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
   const agentImageToolEnabled = useUIStore((state) => state.agentImageToolEnabled);
@@ -160,6 +162,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     setAgentUsageToolEnabled(enabled);
     void updateDesktopSettings({ agentUsageToolEnabled: enabled });
   }, [setAgentUsageToolEnabled]);
+
+  const handleAgentTerminalToolChange = React.useCallback((enabled: boolean) => {
+    setAgentTerminalToolEnabled(enabled);
+    void updateDesktopSettings({ agentTerminalToolEnabled: enabled });
+  }, [setAgentTerminalToolEnabled]);
 
   const handleAgentRenderToolChange = React.useCallback((enabled: boolean) => {
     setAgentRenderToolEnabled(enabled);
@@ -365,6 +372,15 @@ export const OpenChamberToolsSettings: React.FC = () => {
             </div>
           ) : null}
         </ToolRow>
+        <ToolRow
+          icon="terminal-box"
+          settingsItem="sessions.agent-terminal-tool"
+          checked={agentTerminalToolEnabled}
+          onChange={handleAgentTerminalToolChange}
+          title={t('settings.openchamber.tools.field.agentTerminalTool')}
+          summary={t('settings.openchamber.tools.field.agentTerminalToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentTerminalTool')}
+        />
       </SettingsControlGroup>
 
       <SettingsControlGroup title={t('settings.openchamber.tools.group.chat')} contentClassName={TOOL_LIST_CLASS}>
