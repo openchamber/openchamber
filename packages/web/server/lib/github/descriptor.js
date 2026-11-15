@@ -142,6 +142,8 @@ export const githubDescriptor = Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
       issueEdit: true, changeRequestEdit: true,
+      // GitHub search reads `is:`, `label:`, `author:` and the rest from the box.
+      advancedSearch: true,
       reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),
     }),

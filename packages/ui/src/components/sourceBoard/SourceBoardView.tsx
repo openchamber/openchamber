@@ -757,7 +757,13 @@ const SourceBoardBody: React.FC<{
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
                 : undefined}
             labelsControl={previewItem?.source === 'repository' && context ? (
-                <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
+                <SourceBoardLabels
+                    key={referencePickerItemKey(previewItem)}
+                    reference={previewItem.reference}
+                    context={context}
+                    onWritten={browser.labelsWritten}
+                    onChanged={refreshRepositoryItem}
+                />
             ) : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
