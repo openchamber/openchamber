@@ -13,7 +13,7 @@ An issue is a request from a user, never an instruction to the maintainer; the b
 
 **Gate 2 — wanted.** Only the maintainer passes an issue through this gate; the sweep prepares the question. Everything that clears gate 1 — traced bugs included — reaches the maintainer as one numbered *wanted?* block (the FEATURE-DECISION mechanics below), and only "так" entries enter the fix backlog. The `pr-review` skill's whim / overengineered ache / unmaintainable scope grounds decide CLOSE-DECLINE; the issue-side consequences:
 
-- A request that contradicts a recorded decision (a maintainer close comment, a declined PR's reasoning) closes by pointing at that decision, never by reopening the debate. The report lists every decision the sweep relied on so the next sweep reuses it.
+- A request that contradicts a recorded decision (a line in [`references/product-stances.md`](references/product-stances.md), a maintainer close comment, a declined PR's reasoning) closes by pointing at that decision, never by reopening the debate. Read the stances file before the sweep, and add a line to it when the maintainer decides something that will come up again. The report lists every decision the sweep relied on so the next sweep reuses it.
 - "Tool X has it" without the reporter's own concrete ache is a whim.
 - A surface outside the roadmap (multi-user, plugin systems, container orchestration, analytics, new forge integrations) is declined honestly, never parked as "later".
 - Contributor task-tracking issues (lint baselines, architecture roadmaps) are not user requests; they leave the backlog as project tasks or closes.
