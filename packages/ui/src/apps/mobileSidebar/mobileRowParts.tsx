@@ -86,8 +86,11 @@ export const MobileTwoLineLayout: React.FC<{
       {secondLine}
     </span> : null}
   </>;
-  // 6px above and below, as the desktop's two-line rows.
-  const layoutClass = 'flex min-h-9 min-w-0 flex-1 flex-col gap-1 py-1.5 pe-3 text-start';
+  // 6px above the title line and 8px under the second one: 54px in all, which
+  // is exactly where the 32px chevron at top 22 ends. A shorter row leaves the
+  // chevron hanging past its box, and a row that overflows is its own scroller
+  // on a phone.
+  const layoutClass = 'flex min-h-9 min-w-0 flex-1 flex-col gap-1 pt-1.5 pb-2 pe-3 text-start';
   return (
     <div className="relative flex min-w-0 flex-1">
       {onSelect ? (
@@ -104,7 +107,8 @@ export const MobileTwoLineLayout: React.FC<{
         <div className={layoutClass} style={{ paddingInlineStart: indent }}>{lines}</div>
       )}
       {/* Centred on the second line's first icon: 6px padding, a 20px title
-          line and a 4px gap put that line's middle 38px down. */}
+          line and a 4px gap put that line's middle 38px down, so its 32px box
+          starts at 22 and ends flush with the row's 54px. */}
       {chevron ? (
         <span className="absolute z-10 flex h-8 items-center" style={{ insetInlineStart: indent - 9, top: 22 }}>{chevron}</span>
       ) : null}
