@@ -119,6 +119,38 @@ describe('useCommandsStore', () => {
     ]);
   });
 
+  test('an invalidated batch metadata read cannot publish stale entries', async () => {
+    const pending = deferred<Response>();
+    const started = deferred<void>();
+    let reads = 0;
+    listCommandsImpl = async () => [{ name: 'review' }];
+    batchEntries = async () => {
+      reads += 1;
+      if (reads === 1) {
+        started.resolve();
+        return pending.promise;
+      }
+      return Response.json({ commands: [{ name: 'review', entry: { config: { description: 'fresh' } } }] });
+    };
+    const descriptions: Array<string | undefined> = [];
+    const unsubscribe = useCommandsStore.subscribe(state => descriptions.push(state.commands[0]?.description));
+    try {
+      const first = useCommandsStore.getState().loadCommands();
+      await started.promise;
+      invalidateCommandsLoadCache(activeProjectPath);
+      const refreshed = useCommandsStore.getState().loadCommands();
+      pending.resolve(Response.json({ commands: [{ name: 'review', entry: { config: { description: 'stale' } } }] }));
+      expect(await Promise.all([first, refreshed])).toEqual([true, true]);
+      expect(useCommandsStore.getState().commands[0]?.description).toBe('fresh');
+      expect(descriptions).not.toContain('stale');
+      expect(reads).toBe(2);
+    } finally {
+      pending.resolve(Response.json({ commands: [] }));
+      unsubscribe();
+      batchEntries = null;
+    }
+  });
+
   test('command scope enrichment stays bounded and leaves room for session lists', async () => {
     const release = deferred<void>();
     const started = deferred<void>();
@@ -294,14 +326,14 @@ describe('useCommandsStore', () => {
     expect(selectCommandsForDirectory(useCommandsStore.getState(), '/workspace/project').map(c => c.name)).toEqual(['first']);
   });
 
-  test('successful empty discovery clears only that project and is cached', async () => {
+  test('successful empty discovery clears only that project and allows a fresh read', async () => {
     const commands = [{ name: 'old' }];
     useCommandsStore.setState({ commands, commandsByDirectory: { [activeProjectPath]: commands } });
     expect(await useCommandsStore.getState().loadCommands()).toBe(true);
     expect(selectCommandsForDirectory(useCommandsStore.getState(), activeProjectPath)).toEqual([]);
     expect(useCommandsStore.getState().commands).toEqual([]);
     await useCommandsStore.getState().loadCommands();
-    expect(listCommandsCalls).toBe(1);
+    expect(listCommandsCalls).toBe(2);
   });
 
 

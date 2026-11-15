@@ -27,7 +27,7 @@ import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
 
 const SOURCE = "catalogRefresh";
 
-const agentRefreshDirectories = (eventDirectories: readonly string[]): Array<string | null> => {
+const catalogRefreshDirectories = (eventDirectories: readonly string[]): Array<string | null> => {
   const ambientDirectory = getConfigDirectory();
   const scopedDirectories = Array.from(new Set(
     eventDirectories
@@ -49,12 +49,16 @@ const refreshAgentDirectory = async (directory: string | null): Promise<void> =>
 };
 
 const refreshAgents = async (eventDirectories: readonly string[] = []): Promise<void> => {
-  await Promise.all(agentRefreshDirectories(eventDirectories).map(refreshAgentDirectory));
+  await Promise.all(catalogRefreshDirectories(eventDirectories).map(refreshAgentDirectory));
 };
 
-const refreshCommands = async (): Promise<void> => {
-  invalidateCommandsLoadCache();
-  await useCommandsStore.getState().loadCommands();
+const refreshCommandDirectory = async (directory: string | null): Promise<void> => {
+  invalidateCommandsLoadCache(directory);
+  await useCommandsStore.getState().loadCommands(directory);
+};
+
+const refreshCommands = async (eventDirectories: readonly string[] = []): Promise<void> => {
+  await Promise.allSettled(catalogRefreshDirectories(eventDirectories).map(refreshCommandDirectory));
 };
 
 const refreshSkills = async (): Promise<void> => {
@@ -133,7 +137,7 @@ export function catalogRefreshTasks(
     case "agent":
       return [() => refreshAgents(eventDirectories)];
     case "command":
-      return [refreshCommands];
+      return [() => refreshCommands(eventDirectories)];
     case "skill":
       return [refreshSkills];
     case "plugin":
@@ -159,7 +163,7 @@ export function catalogRefreshTasks(
     // opencode.json included), and OpenChamber's own plugin injection lives
     // in one, so the whole set is re-read.
     case "config":
-      return [() => refreshAgents(eventDirectories), refreshCommands, refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
+      return [() => refreshAgents(eventDirectories), () => refreshCommands(eventDirectories), refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
     // Projects are the sync layer's own slice; nothing in Settings reads them
     // through these stores.
     case "project":
@@ -191,21 +195,33 @@ export async function refreshStoresForCatalogKinds(
   inFlightRefreshes.set(sdk, inFlight);
   const tasks = new Map<string | (() => Promise<void>), () => Promise<void>>();
   const agentDirectories = new Set<string>();
+  const commandDirectories = new Set<string>();
   let agents = false;
+  let commands = false;
   for (const [kind, directories] of reloads) {
     if (kind === "config" || kind === "agent") {
       agents = true;
       for (const directory of directories) agentDirectories.add(directory);
     }
+    if (kind === "config" || kind === "command") {
+      commands = true;
+      for (const directory of directories) commandDirectories.add(directory);
+    }
     const kindTasks = catalogRefreshTasks(kind, directories);
-    // The first config/agent task captures directories; collect it below.
-    for (const task of (kind === "config" || kind === "agent") ? kindTasks.slice(1) : kindTasks) {
+    // Directory-scoped tasks capture their locations; union those below.
+    const scopedTasks = kind === "config" ? 2 : kind === "agent" || kind === "command" ? 1 : 0;
+    for (const task of kindTasks.slice(scopedTasks)) {
       tasks.set(task, task);
     }
   }
   if (agents) {
-    for (const directory of agentRefreshDirectories([...agentDirectories])) {
+    for (const directory of catalogRefreshDirectories([...agentDirectories])) {
       tasks.set(JSON.stringify(["agents", directory]), () => refreshAgentDirectory(directory));
+    }
+  }
+  if (commands) {
+    for (const directory of catalogRefreshDirectories([...commandDirectories])) {
+      tasks.set(JSON.stringify(["commands", directory]), () => refreshCommandDirectory(directory));
     }
   }
   // Credential changes already include the immediate provider read.
