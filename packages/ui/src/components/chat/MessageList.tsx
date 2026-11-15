@@ -14,6 +14,7 @@ import { TurnFold, TurnPagesRow } from './components/LiveTurnActivity';
 import { useTurnFoldContexts } from './components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
 import { MessageSliceContext } from './message/messageSliceContext';
+import { isEmptyTextPart } from './message/partUtils';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
 import { getTurnsWithLaterAssistant, uiPageMessageId } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
@@ -331,6 +332,10 @@ const useTurnMessageRenderer = ({
         return turn.assistantMessages[0]?.info.id;
     }, [streamingAssistantMessageId, turnIsInActiveStream, turn.assistantMessages]);
 
+    const answerTextOpenerId = React.useMemo(() => turn.assistantMessages.find((entry) => (
+        entry.parts.some((part) => part.type === 'text' && !isEmptyTextPart(part))
+    ))?.info.id, [turn.assistantMessages]);
+
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
         // The variant lives on the assistant message that ran with it, not on
@@ -375,6 +380,7 @@ const useTurnMessageRenderer = ({
                     turnId: turn.turnId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
+                    opensAnswerText: message.info.id === answerTextOpenerId,
                     earlierAssistantText: isLastAssistant && turnEarlierAssistantText.length > 0 ? turnEarlierAssistantText : undefined,
                     isLatestTurn: isLastTurn,
                     isWorking: isLastTurn && sessionIsWorking && message.info.id === streamingAssistantMessageId,

@@ -314,3 +314,125 @@
     opacity: 0.35;
   }
 }
+
+/* Selecting messages to share (components/chat/messageSelection). The
+   attribute sits on the transcript while its chat selects. The checkboxes
+   stand in a gutter at the start of the message column: the column keeps its
+   own side padding where the space beside it already holds the gutter, and
+   grows its start padding only by what is missing (a percentage padding
+   resolves against the transcript's width, like the column's own). */
+[data-message-selecting] {
+  --oc-message-selection-gutter: 2.5rem;
+}
+
+[data-message-selecting] .chat-message-column:not(.chat-message-column .chat-message-column) {
+  padding-inline-start: max(
+    calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1)),
+    min(var(--oc-message-selection-gutter), calc(var(--oc-message-selection-gutter) + 24rem - 50%))
+  );
+}
+
+[data-chat-width="wider"] [data-message-selecting] .chat-message-column:not(.chat-message-column .chat-message-column) {
+  padding-inline-start: max(
+    calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1)),
+    min(var(--oc-message-selection-gutter), calc(var(--oc-message-selection-gutter) + 32rem - 50%))
+  );
+}
+
+[data-chat-width="full"] [data-message-selecting] .chat-message-column:not(.chat-message-column .chat-message-column) {
+  padding-inline-start: var(--oc-message-selection-gutter);
+}
+
+@media (min-width: 1024px) {
+  [data-message-selecting] .chat-message-column:not(.chat-message-column .chat-message-column) {
+    padding-inline-start: max(
+      calc(clamp(1rem, 3%, 1.5rem) * var(--padding-scale, 1)),
+      min(var(--oc-message-selection-gutter), calc(var(--oc-message-selection-gutter) + 24rem - 50%))
+    );
+  }
+
+  [data-chat-width="wider"] [data-message-selecting] .chat-message-column:not(.chat-message-column .chat-message-column) {
+    padding-inline-start: max(
+      calc(clamp(1rem, 3%, 1.5rem) * var(--padding-scale, 1)),
+      min(var(--oc-message-selection-gutter), calc(var(--oc-message-selection-gutter) + 32rem - 50%))
+    );
+  }
+}
+
+/* The answer's text box clips what overflows it (on touch screens through
+   mobile.css's !important overflow rule); the checkbox and the tint stand
+   outside it, and flow-root keeps the margins it contained. */
+[data-message-selecting] .message-content-text {
+  overflow: visible;
+  display: flow-root;
+}
+
+:root [data-message-selecting] .chat-message-column .message-content-text.overflow-hidden {
+  overflow: visible !important;
+}
+
+[data-message-selecting] [data-message-select-unit] {
+  position: relative;
+  isolation: isolate;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[data-message-selecting] .oc-message-selection-mark {
+  inset-inline-start: calc(-1 * var(--oc-message-selection-gutter) + 0.25rem);
+}
+
+/* An answer's text takes the tint behind it, a prompt's bubble inside its
+   own background, the way a message reached through a link is marked. */
+[data-message-selecting] [data-message-text-export-source][data-message-select-unit]::before,
+[data-message-selecting] [data-message-select-unit] [data-user-message-bubble]::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  background: transparent;
+  transition: background-color 120ms ease-out;
+}
+
+[data-message-selecting] [data-message-text-export-source][data-message-select-unit]::before {
+  inset: -0.375rem -0.625rem;
+  border-radius: 0.75rem;
+}
+
+[data-message-selecting] [data-message-select-unit] [data-user-message-bubble] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-message-selecting] [data-message-select-unit] [data-user-message-bubble]::before {
+  inset: 0;
+  border-radius: inherit;
+}
+
+@media (hover: hover) {
+  [data-message-selecting] [data-message-text-export-source][data-message-select-unit]:hover::before,
+  [data-message-selecting] [data-message-select-unit]:hover [data-user-message-bubble]::before {
+    background: var(--interactive-hover);
+  }
+}
+
+[data-message-selecting] [data-message-text-export-source][data-message-select-unit]:has(> [data-message-selection-mark="selected"])::before,
+[data-message-selecting] [data-message-select-unit]:has(> [data-message-selection-mark="selected"]) [data-user-message-bubble]::before {
+  background: var(--interactive-selection);
+}
+
+/* What the export leaves out steps back: tool rows, thinking, the footers,
+   rows of a turn that hold no text to share. */
+[data-message-selecting] .message-content-text > :not([data-message-select-unit]),
+[data-message-selecting] [data-message-footer],
+[data-message-selecting] [data-turn-row]:not(:has([data-message-select-unit])),
+[data-message-selecting] .oc-recap-hint {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+[data-message-selecting] [data-user-message-actions],
+[data-message-selecting] [data-message-footer] button {
+  visibility: hidden;
+}

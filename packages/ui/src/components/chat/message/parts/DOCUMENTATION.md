@@ -229,6 +229,21 @@ run a second Markdown parser. Ordinary code selections copy raw code;
 prose follows the Markdown/plain setting and retains safe rich HTML. The
 desktop `openchamber:copy` event follows the same selection policy.
 
+### How a saved image reaches the user
+
+`saveMessageImageExport` (`message/imageExport.ts`) draws a source on the chat
+background and hands the PNG to the runtime: the VS Code save dialog, the
+native share sheet in the Capacitor app, or a download everywhere else. One
+answer's "Save as image" and a selection of several messages
+(`messageSelection/`) both go through it. The exporter chunk loads before the
+temporary clone is attached, so a slow chunk cannot leave export-only content
+in the page. The download goes through a blob URL, because the desktop app
+titles its save dialog with the download URL and a data URL would put the
+whole image there. A dismissed save dialog or share sheet resolves as
+`canceled`: the caller shows nothing and keeps its state, where it used to
+report a failed image. The VS Code bridge waits on its file dialogs without a
+timeout, since the user can take longer than a request normally may.
+
 ### Why image exports keep prose at the visible column width
 
 The export clone keeps the live message column width, including whole-turn
