@@ -5,9 +5,9 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { formatFileSize } from '@/lib/fileSize';
-import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
+import { isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { trackerPresentation } from '@/lib/trackers/presentation';
-import { decodeDataUrlText, getIssueLinkKind, getRepositoryIssueLinkProvider, getTrackerItemLinkProvider, isTextLikeFile, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
+import { getIssueLinkKind, getRepositoryIssueLinkProvider, getTrackerItemLinkProvider, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
@@ -197,17 +197,11 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
       return;
     }
 
-    if (isTextLikeFile(file)) {
-      const text = decodeDataUrlText(file.url);
-      if (text !== null) {
-        onShowPopup({
-          open: true,
-          title: fileName,
-          content: text,
-          language: getLanguageFromExtension(fileName) || undefined,
-        });
-        return;
-      }
+    // Text opens the text dialog and a PDF the document dialog, as compact tiles do.
+    const target = resolveAttachmentOpenTarget(file, [file]);
+    if (target?.kind === 'popup' && !target.popup.image) {
+      onShowPopup({ ...target.popup, title: fileName });
+      return;
     }
 
     onShowPopup({

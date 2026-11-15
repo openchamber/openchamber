@@ -136,24 +136,19 @@ describe('MessageFilesDisplay pasted text files', () => {
     expect(popups[0].image?.mimeType).toBe('image/png');
   });
 
-  test('a pdf chip keeps today\'s behavior', async () => {
-    await renderFiles([file({ mime: 'application/pdf', filename: 'doc.pdf', url: 'data:application/pdf;base64,aGVsbG8=' })], false);
+  for (const compact of [false, true]) {
+    test(`a ${compact ? 'compact ' : ''}pdf sent inline opens the document dialog`, async () => {
+      await renderFiles([file({ mime: 'application/pdf', filename: 'doc.pdf', url: 'data:application/pdf;base64,aGVsbG8=' })], compact);
 
-    const chip = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('doc.pdf'));
-    expect(chip).toBeDefined();
-    await clickChip(chip!);
+      const chip = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('doc.pdf'));
+      expect(chip?.hasAttribute('disabled')).toBe(false);
+      await clickChip(chip!);
 
-    expect(popups).toHaveLength(1);
-    expect(popups[0].content).toBe('');
-    expect(popups[0].image?.filename).toBe('doc.pdf');
-  });
-
-  test('a compact pdf tile has nothing to open, so it is disabled', async () => {
-    await renderFiles([file({ mime: 'application/pdf', filename: 'doc.pdf', url: 'data:application/pdf;base64,aGVsbG8=' })], true);
-
-    const tile = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('doc.pdf'));
-    expect(tile?.hasAttribute('disabled')).toBe(true);
-  });
+      expect(popups).toHaveLength(1);
+      expect(popups[0].image).toBeUndefined();
+      expect(popups[0].document).toEqual({ url: 'data:application/pdf;base64,aGVsbG8=', filename: 'doc.pdf' });
+    });
+  }
 
   test('a compact chip of a file attached by path opens that file instead of an image preview', async () => {
     const opened: Array<{ directory: string; path: string }> = [];

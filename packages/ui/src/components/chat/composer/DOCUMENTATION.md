@@ -547,9 +547,9 @@ caret). There are no thumbnails above the input.
   chip whose file is gone draws dashed with a tooltip saying so, instead of
   turning into bracketed text.
 - A click on a chip opens what it stands for (`onChipOpen` in the language
-  context): an image or a text file in the viewer, a file by path in the file
-  viewer, an item in the Tracker. The caret goes beside a chip by a click next
-  to it or the arrow keys. A chip is at most 18rem wide and leaves room for a
+  context): an image, a text file or a PDF in its dialog, as in a sent message,
+  a file by path in the file viewer, an item in the Tracker. The caret goes
+  beside a chip by a click next to it or the arrow keys. A chip is at most 18rem wide and leaves room for a
   space and the caret beside it, so a long name truncates instead of filling
   the line.
 - The collapsed mobile pill draws the chips in its one line.

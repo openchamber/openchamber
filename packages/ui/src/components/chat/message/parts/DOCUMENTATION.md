@@ -858,9 +858,11 @@ Why: only navigation tools use the compact static path; all other tools need obs
   message opens: one resolver (`lib/messages/attachmentPreview.ts`) decides for
   both, and `message/useOpenAttachment.ts` carries it out per runtime. An image
   opens the viewer, text sent inline (a pasted text, a picked text file) the
-  text dialog, a file attached by path (`file://`) the file itself, in the
-  editor in VS Code and a Files tab elsewhere. A citation whose file opens
-  nothing (a PDF sent inline, a folder) stays a label. Only `UserTextPart`
+  text dialog, a PDF sent inline the document dialog (the Files view's PDF
+  preview, `ToolOutputDialog`; not in VS Code, whose webview policy blocks
+  both its frame and pdf.js), a file attached by path (`file://`) the file
+  itself, in the editor in VS Code and a Files tab elsewhere. A citation whose
+  file opens nothing (another binary sent inline, a folder) stays a label. Only `UserTextPart`
   makes chips clickable: `withAttachmentChips` draws labels unless the caller
   passes `isOpenable`, so the composer, the queue and context blocks get no
   dead tab stops. A click that ends a text selection over a chip leaves it
