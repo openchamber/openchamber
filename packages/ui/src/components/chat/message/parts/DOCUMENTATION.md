@@ -127,14 +127,23 @@ and needs no provider, so a Markdown block rendered for export is unchanged.
 
 ### Why a collapsed user message shares two lines between text and context
 
-Each context item (a quote, a code comment, terminal output) collapses to one
-row, so a message with ten comments stayed ten rows tall, and with the sticky
-user header on those rows stayed over the chat. A collapsed message now gets
-two lines: the text takes one or two, and context rows get what is left
+Each context item (a quote, a code comment, terminal output) collapses to its
+quote line plus a line for the user's comment, so a message with ten comments
+stayed twenty lines tall, and with the sticky user header on those lines stayed
+over the chat. A collapsed message now gets two lines: the text takes one or
+two, and context items get what is left, each shown whole or not at all
 (`contextPartsPastCollapse`). The rest waits behind the message's one show more
 link. The text wins because it is what the user typed. Lines follow the chat's
 width, so `UserTextPart` measures them before paint, and clamping the block by
-height would cut a row in half.
+height would cut an item in half.
+
+### Why a chat quote has no caption
+
+A quote's accent bar already says "this is quoted", and a quote from this chat
+has no source worth naming, so its caption ("Quoted from an earlier message")
+is read to screen readers only and the collapsed line shows the quote itself.
+Code comments, terminal output, pages and PR items keep their caption, since
+the file, terminal or page is information the bar does not carry.
 
 ### Why backslash doubling stops at `.` and `?`
 

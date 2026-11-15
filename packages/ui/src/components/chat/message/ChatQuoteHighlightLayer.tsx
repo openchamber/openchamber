@@ -2,7 +2,7 @@
  * Highlights for chat quotes inside the transcript, painted with the CSS
  * Custom Highlight API so the rendered markdown is never touched.
  *
- * - Marks: every quote waiting in the composer's context chips stays softly
+ * - Marks: every quote waiting in the composer's context rows stays softly
  *   highlighted in its message, so the reader sees where they left off. The
  *   mark the user hovers in the chip preview is drawn stronger.
  * - Reveal: clicking a quote (a chip entry, or a sent quote card) scrolls to

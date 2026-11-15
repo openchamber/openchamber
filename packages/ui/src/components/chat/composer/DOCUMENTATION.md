@@ -38,8 +38,7 @@ dock and the strip returns once it is answered (`btwHoldsDock`).
 The frame also owns the header row through its `header` and `compact` props;
 callers supply controls and content, not their own header padding.
 
-`GlassPopupMotion` gives the frame, the autocomplete pickers and the
-context-chip preview one enter and exit motion, mostly a fade with a short
+`GlassPopupMotion` gives the frame and the autocomplete pickers one enter and exit motion, mostly a fade with a short
 rise from below and no scale (from the wrapper's corner, scaling read as a
 diagonal slide): the wrapper moves, the glass surface fades. Autocomplete
 lists take the `brief` pace (90ms in, 60ms out), since they come and go with
@@ -471,29 +470,34 @@ after a render, then the app restores the text of that render).
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter
 layer by the shadow's blur, and that band painted a flat grey strip over
-whatever was stacked above. This holds for the floating panels and the
-context-chip preview. The box, the mobile pill and the dictation overlay are
-opaque and keep their shadow on a wrapper all the same.
+whatever was stacked above. This holds for the floating panels. The box, the
+mobile pill and the dictation overlay are opaque and keep their shadow on a
+wrapper all the same.
 
-Context chips (review comments, quotes, annotations, terminal selections, PR
-context) sit in the attachment row inside the box, shaped like file and linked
-reference chips. Their preview cannot open inside the box, which clips its
-contents, so `ComposerContextChips` portals it into a
-positioned host outside the box: the autocomplete wrapper on desktop, the
-dictation host on mobile. The preview opens above that host, at the menu level
-(`z-50`), above the docks that share the band above the composer (`z-30`), and
-its scrollable content is capped by the space between the host and the chat
-column's top edge, so a long preview does not hide its entry actions behind the
-chat header.
+Context waiting for the next message (review comments, quotes, annotations,
+terminal selections, PR context) lists as rows inside the box, between the
+attachment row and the input (`ComposerContextRows`), one row per item in the
+order it was added. A row reads like the sent message will: the quote's first
+line, or where it came from, behind the accent bar, then the comment. A click
+opens the row in place with the whole quote and, on desktop, the comment field;
+Enter or a click elsewhere saves, Escape drops the edit. On mobile the click
+opens the comment shell (see "Mobile comment mode"). Four rows show; the rest
+fold behind "+N more", and the unfolded list scrolls inside the box past 40%
+of the window, so the input never leaves the screen.
 
-A mouse opens the preview on hover and a click toggles it; a tap only toggles
-it. The hover handlers are pointer events that act only for
-`pointerType === 'mouse'`: a tap, by finger or by a pen without hover, fires
-its enter right before its `click`, so a
-mouse-hover handler opened the preview and the click closed it again in the
-same tap, and phones could not open it at all. On desktop the preview's pencil
-edits the comment in place; on mobile it opens the comment shell (see "Mobile
-comment mode").
+### Why rows in the box and not chips with a preview
+
+Chips grouped items by kind and opened a stacked preview above the composer on
+hover. Reading what was attached meant hovering each chip, and editing meant
+aiming at a pencil in a panel that closed when the pointer drifted. Rows show
+every item's quote and comment at once, edit with one click, and need no
+portal, hover grace or height cap above the composer.
+
+An annotation's comment is the draft's own text, like every other comment, and
+the prompt the model reads carries no `Comment:` line. The row and the sent
+card read the page and element text out of the prompt
+(`lib/browser/annotationPrompt.ts`); an annotation saved before keeps its
+comment in the prompt and shows it all the same, and editing it moves it out.
 
 ## Layers
 
@@ -1647,12 +1651,13 @@ context part's metadata. `message/ChatQuoteHighlightLayer.tsx` (one per
 to paint with the CSS Custom Highlight API. The store lives outside React state
 and the layer holds all hover and popover state, so none of it re-renders the
 chat column. The
-markdown DOM is never modified. While quotes wait as context chips they stay
-marked in their messages; the one hovered in the chip preview is drawn
+markdown DOM is never modified. While quotes wait as composer rows they stay
+marked in their messages; the one under the pointer in the composer is drawn
 stronger. Resting the mouse on a mark, or tapping it on touch, opens
 `message/ChatQuoteMarkPopover.tsx` with the comment, edit (the selection
 menu's input) and remove; the publisher's callbacks write the draft. Clicking
-a quote in the preview, or the arrow on a sent quote card, scrolls to it
+a quote in an open composer row, the arrow on a folded row, or the quote on a
+sent card (the quote itself is the link, since the original shows it whole) scrolls to it
 through the timeline controller and flashes it. Ranges are
 re-resolved by text and context whenever the marked message re-renders or
 remounts. Offsets only break ties. Quotes sent before anchors existed are
@@ -1705,8 +1710,8 @@ A stale runtime closes the comment without writing to the new runtime.
 Desktop's floating comment input also remains open when the store rejects
 an attachment, using the same localized error.
 
-Editing an attached comment on mobile reuses the same shell. The pencil in the
-context-chip preview calls `openEdit` with the draft's id, quoted text and
+Editing an attached comment on mobile reuses the same shell. A tap on its
+composer row calls `openEdit` with the draft's id, quoted text and
 comment, inside the tap (`flushSync`, for the soft keyboard), and the shell
 opens with the caret after the text, a Save (check) action and Cancel editing
 on its close button. Save goes through the same attach path, but the plan

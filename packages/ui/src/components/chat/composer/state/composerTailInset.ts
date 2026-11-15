@@ -12,7 +12,7 @@
 /**
  * Gap between the last transcript row and the resting composer's top edge,
  * on top of the status row reserve. Generous on purpose: the recap note and
- * the rows docked above the composer (context chips, linked references, the
+ * the rows docked above the composer (context rows, linked references, the
  * queue) land in this band, and a follow glide that trails the live edge
  * should still leave the last line clear of the glass.
  */

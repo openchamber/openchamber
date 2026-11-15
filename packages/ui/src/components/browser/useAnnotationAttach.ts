@@ -39,18 +39,21 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
     }
 
     // The overlay is gone by now, so a refusal would lose the comment and marks.
+    // The comment is the draft's own text, as for every other comment, so the
+    // composer shows and edits it apart from the prompt; the model reads it
+    // after the prompt.
     addInlineCommentDraft(target, {
       source: 'preview-annotation',
       fileLabel: result.payload.pageUrl || result.payload.pageTitle || 'browser',
       startLine: 1,
       endLine: 1,
       code: formatBrowserAnnotationPrompt({
-        payload: result.payload,
+        payload: { ...result.payload, comment: '' },
         screenshotAttached,
         intro: intro ?? t('contextPanel.browser.annotate.intro'),
       }),
       language: 'markdown',
-      text: '',
+      text: result.payload.comment.trim(),
     }, { written: true });
 
     toast.success(t('contextPanel.browser.annotate.attached'));
