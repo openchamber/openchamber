@@ -20,7 +20,13 @@ client). VS Code does not mount `ContextPanel`, so it has no such menu.
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in
 the web and desktop header while `sessionTabsEnabled` is on. VS Code and the
-setting turned off keep the plain session title (`Header.tsx`).
+setting turned off keep the plain session title (`Header.tsx`). The VS Code
+chat header (`VSCodeHeader` in `VSCodeLayout.tsx`) keeps the title as the
+session switcher and puts a "⋯" menu beside it with Rename only; the other
+session actions stay in the session list. The `rename_current_session`
+shortcut opens the same field there; only the chat header on screen takes it,
+so the compact layout's chat header, mounted behind the sessions list, and a
+new-session draft decline it.
 
 - The store keeps ids and order only. An id whose session is not in the
   loaded list stays stored and does not render, so a partial session list
