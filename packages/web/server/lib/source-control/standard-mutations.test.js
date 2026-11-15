@@ -30,14 +30,14 @@ describe('standard mutations', () => {
     const prepare = prepareWith(mutations);
     expect(mutations.routes).toEqual([
       '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
-      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment',
+      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment', '/issues/update',
       '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
     ]);
     const inputs = {
       '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
       '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
       '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
-      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' }, '/issues/update': { title: 'T', body: 'B' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
     };
@@ -45,7 +45,7 @@ describe('standard mutations', () => {
     expect(kinds).toEqual([
       'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-draft', 'change-request-review',
       'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
-      'change-request-comment', 'issue-comment', 'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
+      'change-request-comment', 'issue-comment', 'issue-update', 'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
       'change-request-reviewers',
     ]);
   });
@@ -55,7 +55,7 @@ describe('standard mutations', () => {
       '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
       '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
       '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
-      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' }, '/issues/update': { title: 'T' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
     };
@@ -112,6 +112,8 @@ describe('standard mutations', () => {
       ['/pr/review', { verdict: 'approve' }, numbered],
       ['/pr/comment', { body: 'x'.repeat(11) }, numbered],
       ['/issues/comment', { body: '   ' }, numbered],
+      ['/issues/update', { title: '   ' }, numbered],
+      ['/issues/update', { title: 'T', body: 5 }, numbered],
       ['/issues/state', { state: 'merged' }, numbered],
       ['/pr/labels', { labels: ['a', 'b', 'c', 'd'] }, numbered],
       ['/pr/reviewers', { reviewers: ['alice'] }, numbered],

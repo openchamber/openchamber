@@ -1570,6 +1570,18 @@ describe('contributes.sourceControl', () => {
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
+  test('an edit-capable host declares issueEdit and changeRequestEdit', () => {
+    const result = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { issueEdit: true, changeRequestEdit: true } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.sourceControl?.presentation.features)
+      .toMatchObject({ issueEdit: true, changeRequestEdit: true });
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
   test('submit is the only merge method when present', () => {
     const merge = (methods: string[]) => withSourceControl({ capabilities: { ...sourceControl.capabilities, merge: { methods } } });
     expect(merge(['submit']).ok).toBe(true);

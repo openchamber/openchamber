@@ -22,6 +22,7 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'change-request-review-comment-delete',
   'change-request-review-discard',
   'issue-comment',
+  'issue-update',
   'change-request-state',
   'issue-state',
   'change-request-labels',
@@ -34,6 +35,7 @@ export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'discussion-state',
   'discussion-answer',
   'discussion-labels',
+  'discussion-update',
 ]);
 const KINDS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];

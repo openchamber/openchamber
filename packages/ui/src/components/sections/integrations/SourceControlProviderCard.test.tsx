@@ -177,14 +177,14 @@ describe('SourceControlProviderCard', () => {
       cliDisabled = disabled;
       return { disabled };
     },
-    changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
+    changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected, issueUpdate: unexpected,
     changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestDraft: unexpected, changeRequestComment: unexpected,
     changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
     changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
     changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
     changeRequestReview: unexpected, issueComment: unexpected, changeRequestSetState: unexpected,
     issueSetState: unexpected, changeRequestSetLabels: unexpected, issueSetLabels: unexpected,
-    discussionComment: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected,
+    discussionComment: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected, discussionUpdate: unexpected,
     changeRequestSetReviewers: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
     referenceReviewers: unexpected, changeRequestsList: unexpected, changeRequestContext: unexpected,
     issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected,

@@ -446,4 +446,68 @@ describe('Gitea mutations', () => {
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))
       .resolves.toMatchObject({ state: 'failed' });
   });
+
+  describe('issue updates', () => {
+    const issueTarget = { ...providerTarget, number: fixtures.issue.number };
+    const issuePath = `/repos/alice/app/issues/${fixtures.issue.number}`;
+    const patched = (extra = {}) => ({ ...fixtures.issue, title: 'Startup crash', body: 'Fixed by upgrading.', ...extra });
+
+    it('replaces the title and body through the issue a pull request also is', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched() });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${issuePath}`);
+      expect(patch.body).toEqual({ title: 'Startup crash', body: 'Fixed by upgrading.' });
+    });
+
+    it('sends the title alone when no body is asked for', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched({ body: fixtures.issue.body }) });
+
+      await expect(service.updateIssue({ providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash' }))
+        .resolves.toEqual({});
+      expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ title: 'Startup crash' });
+    });
+
+    it('refuses a response that does not restate the title or body asked for', async () => {
+      const staleTitle = setup({ [`PATCH ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(staleTitle.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+
+      const staleBody = setup({ [`PATCH ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(staleBody.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+    });
+
+    it('refuses a response for another issue number', async () => {
+      const { service } = setup({ [`PATCH ${issuePath}`]: patched({ number: issueTarget.number + 1 }) });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+    });
+
+    it('reconciles the edit only from the values it reads back', async () => {
+      const exact = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(exact.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const titleOnly = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(titleOnly.service.reconcileIssueUpdate(issueTarget, 'Startup crash', undefined))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const otherTitle = setup({ [`GET ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(otherTitle.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const otherBody = setup({ [`GET ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(otherBody.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
 });
