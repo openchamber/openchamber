@@ -30,6 +30,11 @@ runtime rather than inlining it, or the handoff would see two copies.
 Window state is saved only while the main window is not minimized, so transient
 minimized bounds cannot replace the last normal size or maximized state.
 
+Linux startup enables Chromium's speech-dispatcher backend before `ready` for
+Browser read-aloud. It uses the host's `libspeechd` and speech-dispatcher service
+with an installed synthesis module, such as espeak-ng. The shell does not install
+or manage those system services. Windows and macOS keep their native speech backends.
+
 Login-shell environment discovery starts as soon as `main.mjs` runs and
 proceeds asynchronously, so shell startup files run while the window comes up.
 Startup callers share one probe and await its result before reading

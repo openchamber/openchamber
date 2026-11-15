@@ -27,6 +27,10 @@
 
 import type { ReadingPlayback } from './readingAudioFocus';
 
+/** Desktop Linux, not Android: Android webviews also report a Linux platform. */
+const isLinuxDesktopOs = (): boolean => navigator.platform.toLowerCase().startsWith('linux')
+  && !/Android/i.test(navigator.userAgent);
+
 // Extend Window interface for SpeechRecognition
 declare global {
   interface Window {
@@ -445,6 +449,12 @@ class BrowserVoiceService {
 
     // Wait for voices to be available (Chrome requires this)
     const voices = await this.waitForVoices();
+    // On desktop Linux an empty list means no speech backend (speech-dispatcher),
+    // and the reading would stay marked as playing. Other platforms may still
+    // speak with a default voice while the list is empty, so they keep trying.
+    if (voices.length === 0 && isLinuxDesktopOs()) {
+      throw new Error('No browser speech synthesis voices are available');
+    }
 
     // Small delay to ensure audio context is ready
     await new Promise(resolve => setTimeout(resolve, 50));
