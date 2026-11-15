@@ -17,6 +17,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   surfaces through `extras` on `sortContextSurfaces` /
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
   `@openchamber/sdk`.
+- The rail's icons scroll when the window is too short for them, without a
+  scrollbar, with the scroll fades drawn as bands in the rail's background
+  colour (`ScrollShadow` with `surface`), never a mask, which would keep a
+  GPU texture the height of the rail. Its configure button stays under the
+  scroller, always in reach.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one

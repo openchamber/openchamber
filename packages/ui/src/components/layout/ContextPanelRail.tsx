@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollShadow, ScrollShadowBands } from '@/components/ui/ScrollShadow';
 import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
@@ -69,6 +70,7 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useWorkflowsSurfaceShown } from '@/lib/workflows/panel';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
+const RAIL_SCROLL_FADE_PX = 24;
 // Hold the surface-switch modifier for this long before revealing the order
 // number badges on the rail icons.
 const RAIL_NUMBER_HOLD_DELAY_MS = 500;
@@ -473,8 +475,14 @@ export const ContextPanelRail: React.FC = () => {
     <nav
       ref={railRef}
       aria-label={t('contextRail.aria.rail')}
-      className="flex h-full w-11 flex-shrink-0 flex-col items-center gap-2 bg-background py-2"
+      className="flex h-full w-11 flex-shrink-0 flex-col items-center gap-2 bg-background pb-2"
     >
+      <div className="relative flex min-h-0 w-full flex-1 flex-col">
+      <ScrollShadow
+        surface="var(--background)"
+        size={RAIL_SCROLL_FADE_PX}
+        className="scrollbar-none flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto overflow-x-hidden pt-2"
+      >
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
         {groups.map((group, groupIndex) => (
           <React.Fragment key={contextSurfaceGroup(group[0])}>
@@ -542,6 +550,9 @@ export const ContextPanelRail: React.FC = () => {
           </React.Fragment>
         ))}
       </DndContext>
+      </ScrollShadow>
+      <ScrollShadowBands surface="var(--background)" size={RAIL_SCROLL_FADE_PX} />
+      </div>
       {/* Outside the sortable list on purpose: this button takes no digit,
           cannot be dragged, and configures the rail rather than living on it. */}
       <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
