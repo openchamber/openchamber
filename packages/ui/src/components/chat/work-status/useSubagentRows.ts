@@ -36,7 +36,8 @@ export type SubagentRow = {
 type SubagentRowLook = { icon: IconName; color: string | undefined; labelKey: I18nKey | null };
 
 const sessionTokenTotal = (child: Session): number => {
-  const tokens = child.tokens;
+  const tokens: Session['tokens'] | undefined = child.tokens;
+  if (!tokens) return 0;
   return tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.write ?? 0);
 };
 

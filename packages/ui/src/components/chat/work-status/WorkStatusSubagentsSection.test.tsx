@@ -148,6 +148,13 @@ describe('subagent status rows', () => {
     expect(titles()).toEqual(['Newer', 'Older']);
   });
 
+  test('renders a child seeded from the session cache without usage counters', async () => {
+    const { tokens: _tokens, cost: _cost, ...cached } = { ...child, id: 'cached', title: 'Cached' };
+    // SAFETY: the session cache stores records without `cost` and `tokens`, and seeds them as `Session` before bootstrap.
+    await publish({ session: [parent, cached as Session] });
+    expect(rowContent().textContent).toBe('Cached');
+  });
+
   test('keeps a running row above rows whose status is still unknown', async () => {
     const older: Session = { ...child, id: 'older', title: 'Older', time: { created: 2, updated: 2 } };
     const newer: Session = { ...child, id: 'newer', title: 'Newer', time: { created: 3, updated: 3 } };
