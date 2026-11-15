@@ -99,7 +99,7 @@ const SubagentEntry: React.FC<{
   const label = row.child.title?.trim() || t('chat.workStatus.subagent.untitled');
   return (
     <>
-      <SubagentStatusRow row={row} directory={directory} onClick={onToggle} ariaLabel={label} expanded={open} />
+      <SubagentStatusRow row={row} directory={directory} onClick={onToggle} ariaLabel={label} expanded={open} showActivity />
       {open ? <SubagentDetails row={row} parentId={parentId} directory={directory} onOpenSession={onOpenSession} /> : null}
     </>
   );

@@ -17,13 +17,14 @@ import {
   decodeSubagentActivity,
   encodeSubagentActivity,
   readSubagentActivity,
+  subagentAlertInputs,
   toolCallText,
   type SubagentActivity,
 } from './subagentActivity';
 
 type ActivityInputs = { messages: State['message'][string] | undefined; latestParts: State['part'][string] | undefined; status: State['session_status'][string] | undefined; encoded: string };
 
-const useSubagentActivity = (childId: string, directory: string | null): SubagentActivity | null => {
+const useSubagentActivity = (childId: string, directory: string | null, alertsOnly: boolean): SubagentActivity | null => {
   const last = React.useRef<ActivityInputs | null>(null);
   const encoded = useDirectorySync(
     React.useCallback((state: State) => {
@@ -33,10 +34,11 @@ const useSubagentActivity = (childId: string, directory: string | null): Subagen
       const status = state.session_status[childId];
       const previous = last.current;
       if (previous && previous.messages === messages && previous.latestParts === latestParts && previous.status === status) return previous.encoded;
-      const next = encodeSubagentActivity(readSubagentActivity(messages, state.part, status));
+      const activity = readSubagentActivity(messages, state.part, status);
+      const next = encodeSubagentActivity(alertsOnly ? subagentAlertInputs(activity) : activity);
       last.current = { messages, latestParts, status, encoded: next };
       return next;
-    }, [childId]),
+    }, [alertsOnly, childId]),
     directory ?? undefined,
   );
   return React.useMemo(() => decodeSubagentActivity(encoded), [encoded]);
@@ -120,10 +122,10 @@ const useActivityText = (activity: SubagentActivity | null): ActivityText => {
   }
 };
 
-export const SubagentActivityText: React.FC<{ childId: string; directory: string | null; identity: string }> = ({ childId, directory, identity }) => {
-  const activity = useSubagentActivity(childId, directory);
+export const SubagentActivityText: React.FC<{ childId: string; directory: string | null; identity: string; alertsOnly?: boolean }> = ({ childId, directory, identity, alertsOnly }) => {
+  const activity = useSubagentActivity(childId, directory, alertsOnly ?? false);
   const line = useActivityText(activity);
-  if (!line) return <>{identity}</>;
+  if (!line || (alertsOnly && line.tone !== 'warning')) return <>{identity}</>;
   return (
     <>
       <span style={line.tone === 'warning' ? { color: 'var(--status-warning)' } : undefined}>{line.text}</span>

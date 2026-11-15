@@ -117,6 +117,12 @@ const findLastTool = (
   return null;
 };
 
+export const subagentAlertInputs = (activity: SubagentActivity | null): SubagentActivity | null => {
+  if (activity?.kind === 'retry') return activity;
+  if (activity?.kind === 'waiting') return { kind: 'waiting', since: activity.since, last: null };
+  return null;
+};
+
 export const encodeSubagentActivity = (activity: SubagentActivity | null): string => (activity ? JSON.stringify(activity) : '');
 
 export const decodeSubagentActivity = (encoded: string): SubagentActivity | null => {

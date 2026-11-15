@@ -71,7 +71,7 @@ import { useClosingZoneTab } from './useClosingZoneTab';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { beginZoneDrag, cancelZoneDrag, finishZoneDrag, startZoneDragGesture, updateZoneDrag } from './zoneDrag';
 import { setZoneBody, setZoneHeaderSlot } from './zoneHosts';
-import { useOpenWhenSettled } from './useOpenUntilSettled';
+import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { REPOSITORY_KIND_ICONS } from '@/components/references/referencePickerItems';
@@ -360,7 +360,7 @@ const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="
 // Surfaces rendered by the zone itself and remounted on every switch; the
 // rest stay alive in ContextSurfacePanes.
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'workflows' || mode === 'subagents'
+  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -911,8 +911,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'workflows'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><WorkflowsPanel directory={effectiveDirectory || null} /></ContextPanelHeaderSlotProvider>
-            : activeTab?.mode === 'subagents'
-                ? <SubagentsPanel directory={effectiveDirectory || null} />
             : activeTab?.mode === 'pages' && !activeTab.targetPath
                 ? <ReceivedPagesTab />
         : null;
@@ -1264,6 +1262,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // common on macOS); removing it costs a few ms. After the layout effect
   // above, which begins the animation.
   const contentHidden = !isZoneExposed(isOpen, useOpenWhenSettled(isOpen), activeTab?.mode);
+  const contentShown = useOpenUntilSettled(isOpen);
   const panelStyle: React.CSSProperties = {
     [geometry.sizeVariable]: `${size}px`,
     ...(isVertical
@@ -1382,7 +1381,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
-        {activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
+        {activeTab?.mode === 'subagents' ? (contentShown ? <SubagentsPanel directory={effectiveDirectory || null} /> : null)
+          : activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>
       </div>

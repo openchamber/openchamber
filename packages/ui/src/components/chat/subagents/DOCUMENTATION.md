@@ -7,7 +7,8 @@ screen, with what it does now, and under each one what waits on the user, its
 full report and the task it was given. Each subagent's row is the
 work-status section's own (`SubagentStatusRow`): one component, the same
 data from `useSubagentRows`, so the panel and the section never disagree; in
-the panel a press opens the card under the row instead of the chat.
+the panel a press opens the card under the row instead of the chat, and the
+row shows the current tool call, which the section leaves out.
 Workflow agents stay in the Workflows panel.
 
 ## Invariants
@@ -30,6 +31,11 @@ Workflow agents stay in the Workflows panel.
   else the child's own first prompt, read once when the card opens. A prompt
   never changes, so the card does not follow the parent's every part. When
   neither is loaded the Task section is absent.
+- The panel's body is mounted only while its zone shows it: from the moment
+  it opens until its closing animation ends (`useOpenUntilSettled` in
+  `ContextPanel`). A closed zone keeps drawing its last tab under `inert`,
+  which for this surface would keep every row's store selectors running for
+  nothing on screen.
 - The panel exists on web and desktop. The phone and VS Code have no context
   panel; their work-status rows carry the same second line.
 

@@ -16,12 +16,12 @@ const RunningDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
 };
 
-const RowDetail: React.FC<{ row: SubagentRow; directory: string | null }> = ({ row, directory }) => {
+const RowDetail: React.FC<{ row: SubagentRow; directory: string | null; showActivity: boolean }> = ({ row, directory, showActivity }) => {
   const { t } = useI18n();
   if (row.busy && !row.blocked && !row.asked) {
     return (
       <span dir="auto" className="oc-ui-start-align block truncate">
-        <SubagentActivityText childId={row.child.id} directory={row.child.directory || directory} identity={row.identity} />
+        <SubagentActivityText childId={row.child.id} directory={row.child.directory || directory} identity={row.identity} alertsOnly={!showActivity} />
       </span>
     );
   }
@@ -41,7 +41,8 @@ export const SubagentStatusRow: React.FC<{
   onClick?: () => void;
   ariaLabel: string;
   expanded?: boolean;
-}> = ({ row, directory, onClick, ariaLabel, expanded }) => {
+  showActivity?: boolean;
+}> = ({ row, directory, onClick, ariaLabel, expanded, showActivity = false }) => {
   const { t } = useI18n();
   const { child, blocked, asked, busy } = row;
   const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
@@ -59,7 +60,7 @@ export const SubagentStatusRow: React.FC<{
       )}
       label={<span className={row.finished ? 'oc-title-rest' : 'text-foreground'}>{label}</span>}
       labelDir="auto"
-      detail={busy || row.identity || row.finished ? <RowDetail row={row} directory={directory} /> : undefined}
+      detail={busy || row.identity || row.finished ? <RowDetail row={row} directory={directory} showActivity={showActivity} /> : undefined}
       tooltip={report || row.identity ? (
         <span className="flex flex-col gap-0.5">
           {row.identity ? <span>{row.identity}</span> : null}

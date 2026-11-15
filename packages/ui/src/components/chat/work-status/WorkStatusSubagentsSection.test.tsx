@@ -199,7 +199,7 @@ describe('subagent status rows', () => {
     expect(rowContent().querySelector('span[title]')).toBeNull();
   });
 
-  test('says what a working subagent does, and who a finished one was', async () => {
+  test('names who works without the call it makes, and who a finished one was', async () => {
     // The agent is set when OpenCode creates the session.
     const worker: Session = { ...child, id: 'worker', title: 'Worker', agent: 'explore' };
     await publish({
@@ -208,7 +208,9 @@ describe('subagent status rows', () => {
       message: { worker: [{ id: 's1', sessionID: 'worker', role: 'assistant', time: { created: Date.now() }, agent: 'explore', providerID: 'p', modelID: 'm' }] },
       part: { s1: [{ id: 't1', sessionID: 'worker', messageID: 's1', type: 'tool', callID: 't1', tool: 'grep', state: { status: 'running', input: { pattern: 'evaluate' }, time: { start: Date.now() } } }] },
     });
-    expect(rowContent().textContent).toContain('Search Files evaluate · explore');
+    // The call changes too often to read in a row; the panel shows it.
+    expect(rowContent().textContent).toContain('explore');
+    expect(rowContent().textContent).not.toContain('Search Files');
     await publish({
       session_status: { worker: { type: 'idle' } },
       message: {
@@ -233,6 +235,17 @@ describe('subagent status rows', () => {
     await publish({ session: [parent, reader], sessionStatusReady: true, session_status: { reader: { type: 'idle' } } });
     expect(rowContent().textContent).toContain('117.9K');
     expect(rowContent().textContent).not.toContain('2.3M');
+  });
+
+  test('still says when a working subagent has gone silent', async () => {
+    const worker: Session = { ...child, id: 'worker', title: 'Worker', agent: 'explore' };
+    await publish({
+      session: [parent, worker],
+      session_status: { worker: { type: 'busy' } },
+      message: { worker: [{ id: 's1', sessionID: 'worker', role: 'assistant', time: { created: Date.now() - 200_000 }, agent: 'explore', providerID: 'p', modelID: 'm' }] },
+      part: { s1: [] },
+    });
+    expect(rowContent().textContent).toContain('Silent for');
   });
 
   test('opens the Subagents panel from its heading', async () => {

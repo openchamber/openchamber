@@ -6,6 +6,7 @@ import {
   encodeSubagentActivity,
   readSubagentActivity,
   reportFirstLine,
+  subagentAlertInputs,
 } from './subagentActivity';
 
 const step = (id: string, extra: Partial<AssistantMessage> = {}): AssistantMessage => ({
@@ -109,6 +110,17 @@ describe('readSubagentActivity', () => {
     const encoded = encodeSubagentActivity(readSubagentActivity(messages, before, { type: 'busy' }));
     expect(encodeSubagentActivity(readSubagentActivity(messages, after, { type: 'busy' }))).toBe(encoded);
     expect(decodeSubagentActivity(encoded)).toEqual({ kind: 'writing' });
+  });
+});
+
+describe('subagentAlertInputs', () => {
+  test('keeps only what can raise an alert, so a new tool call changes nothing', () => {
+    const first = subagentAlertInputs({ kind: 'tool', tool: 'Read File', detail: 'a.ts', since: 1 });
+    const second = subagentAlertInputs({ kind: 'tool', tool: 'Search Files', detail: 'x', since: 2 });
+    expect(encodeSubagentActivity(first)).toBe(encodeSubagentActivity(second));
+    expect(subagentAlertInputs({ kind: 'waiting', since: 5, last: { tool: 'Read File', detail: 'a.ts' } }))
+      .toEqual({ kind: 'waiting', since: 5, last: null });
+    expect(subagentAlertInputs({ kind: 'retry', attempt: 2, at: 9, error: null })?.kind).toBe('retry');
   });
 });
 

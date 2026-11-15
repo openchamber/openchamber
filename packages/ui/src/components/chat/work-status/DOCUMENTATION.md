@@ -277,8 +277,10 @@ removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
 
-Each row has a second line. A working subagent's says what it does now, then
-its agent and model; a finished one's is how long it ran, then its agent and
+Each row has a second line. A working subagent's is its agent and model, led
+by a retry or by how long it has been silent when either holds (the current
+tool call changes every few seconds, too fast to read in a row, so only the
+Subagents panel shows it); a finished one's is how long it ran, then its agent and
 model; any other row shows the agent and model. The figure that changes
 leads in both, so long agent and model names truncate before it does. The report never takes that
 line: who ran the work is what the row is scanned for, and the report's
@@ -331,7 +333,10 @@ dropped that unused read and the reports never refreshed.
 The row's selector also runs on every flush. It returns the last answer while
 the child's message list, the parts of its newest step and its status are the
 same objects, and a tool call's label is cached per part object, so a large
-patch or script is described once, not once per flush.
+patch or script is described once, not once per flush. In the section the
+selector keeps only what can raise an alert (`subagentAlertInputs`: a retry,
+or a wait with its start), so a new tool call re-renders nothing and the
+one-second clock runs only while a row waits or retries.
 
 #### Why the activity leads the second line
 
