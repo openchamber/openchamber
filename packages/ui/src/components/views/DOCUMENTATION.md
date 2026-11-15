@@ -724,5 +724,6 @@ every frame, an expand with a site open drew 3 to 5 of the animation's 15
 frames in the desktop app. A zone that grows to a size it already knows (an
 expand) publishes it as `data-zone-size`, and the page takes its final width
 before the animation starts, so nothing snaps at the end. A drag has no final
-size: there the page is laid out up to a step wider than what shows and takes
-the exact width on release.
+size: there the page takes the stage's width whenever the stage rests for
+`DRAG_REST_MS`, since a page held wider than its panel until the release read
+as broken.
