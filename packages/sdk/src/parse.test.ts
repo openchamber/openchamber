@@ -1497,7 +1497,7 @@ describe('contributes.sourceControl', () => {
     const parsed = result.manifest.contributes.sourceControl;
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
-      ci: false, comments: false, reviews: false, state: false, labels: false, reviewers: false,
+      ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
       changeRequestPatch: false, liveSummaries: true,
     });
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });

@@ -129,6 +129,8 @@ describe('source control provider descriptors', () => {
       delete features.changeRequestEdit;
       // Nor the search-box qualifiers, newer still.
       delete features.advancedSearch;
+      // Nor the comment edit and delete routes.
+      delete features.commentEdit;
       delete urls.discussion;
       return { ...descriptor, features, urls };
     };

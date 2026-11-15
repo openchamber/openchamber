@@ -826,6 +826,279 @@ describe('canonical GitHub mutations', () => {
       return requests;
     };
 
+    describe('conversation comment edits', () => {
+      const issueTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
+      const discussionTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
+      const commentOf = (overrides = {}) => ({
+        id: 13,
+        body: 'Old text',
+        html_url: 'https://github.com/acme/app/issues/5#issuecomment-13',
+        issue_url: 'https://api.github.com/repos/acme/app/issues/5',
+        user: { id: 1, login: 'actor' },
+        ...overrides,
+      });
+      const commentWrites = (requests) => requests.filter((entry) => entry.method === 'PATCH' || entry.method === 'DELETE');
+      const graphqlWrites = (requests) => requests
+        .filter((entry) => /^mutation/.test(entry.body.query.trim()))
+        .map((entry) => ({ query: entry.body.query, variables: entry.body.variables }));
+
+      it('edits and deletes an issue comment with one REST write each', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.path === '/repos/acme/app/issues/5') return jsonResponse({ number: 5 });
+          if (entry.path !== '/repos/acme/app/issues/comments/13') throw new Error(`Unexpected request ${entry.method} ${entry.path}`);
+          if (entry.method === 'DELETE') return new Response(null, { status: 204 });
+          return jsonResponse(commentOf(entry.method === 'PATCH' ? { body: entry.body.body } : {}));
+        });
+        const { app, store } = makeApp();
+
+        const updated = await request(app).post('/api/source-control/github/issues/comment/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' }).expect(200);
+        const removed = await request(app).post('/api/source-control/github/issues/comment/delete')
+          .send({ ...context(account.accountId, { target: issueTarget, idempotencyKey: 'request-two' }), commentId: '13' }).expect(200);
+
+        expect(updated.body).toMatchObject({
+          status: 'succeeded',
+          target: {
+            repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+            project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+          },
+          replayed: false,
+          result: {},
+        });
+        expect(removed.body).toMatchObject({ status: 'succeeded', replayed: false, result: {} });
+        expect(requests).toEqual([
+          { method: 'GET', path: '/repos/acme/app/issues/5', body: null },
+          { method: 'GET', path: '/repos/acme/app/issues/comments/13', body: null },
+          { method: 'PATCH', path: '/repos/acme/app/issues/comments/13', body: { body: 'Edited text' } },
+          { method: 'GET', path: '/repos/acme/app/issues/5', body: null },
+          { method: 'GET', path: '/repos/acme/app/issues/comments/13', body: null },
+          { method: 'DELETE', path: '/repos/acme/app/issues/comments/13', body: null },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-comment-update', state: 'succeeded', result: {} });
+        expect(store.records.get('request-two')).toMatchObject({ kind: 'issue-comment-delete', state: 'succeeded', result: {} });
+      });
+
+      it('edits and deletes a pull request conversation comment as an issue comment', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.path === '/repos/acme/app/pulls/7') return jsonResponse(pullRequest());
+          if (entry.path !== '/repos/acme/app/issues/comments/13') throw new Error(`Unexpected request ${entry.method} ${entry.path}`);
+          if (entry.method === 'DELETE') return new Response(null, { status: 204 });
+          const comment = {
+            issue_url: 'https://api.github.com/repos/acme/app/issues/7',
+            html_url: 'https://github.com/acme/app/pull/7#issuecomment-13',
+          };
+          if (entry.method === 'PATCH') comment.body = entry.body.body;
+          return jsonResponse(commentOf(comment));
+        });
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/comment/update')
+          .send({ ...context(account.accountId, { target: pullTarget }), commentId: '13', body: 'Edited text' }).expect(200);
+        await request(app).post('/api/source-control/github/pr/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' }), commentId: '13' }).expect(200);
+
+        expect(commentWrites(requests)).toEqual([
+          { method: 'PATCH', path: '/repos/acme/app/issues/comments/13', body: { body: 'Edited text' } },
+          { method: 'DELETE', path: '/repos/acme/app/issues/comments/13', body: null },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-comment-update', state: 'succeeded', result: {} });
+        expect(store.records.get('request-two')).toMatchObject({ kind: 'change-request-comment-delete', state: 'succeeded', result: {} });
+      });
+
+      it('edits and deletes a discussion comment through GraphQL by node id', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          const { query, variables } = entry.body;
+          if (query.includes('discussion(number:')) {
+            return jsonResponse({ data: { repository: { discussion: { id: 'D_five', number: 5, closed: false, labels: { nodes: [] } } } } });
+          }
+          if (query.includes('updateDiscussionComment')) {
+            return jsonResponse({ data: { updateDiscussionComment: { comment: { id: variables.commentId, body: variables.body } } } });
+          }
+          if (query.includes('deleteDiscussionComment')) {
+            return jsonResponse({ data: { deleteDiscussionComment: { clientMutationId: null } } });
+          }
+          return jsonResponse({ data: { node: {
+            __typename: 'DiscussionComment', isAnswer: false, body: 'Old text', replyTo: null,
+            discussion: { number: 5, repository: { name: 'app', owner: { login: 'acme' } } },
+          } } });
+        });
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/discussions/comment/update')
+          .send({ ...context(account.accountId, { target: discussionTarget }), commentId: 'DC_one', body: 'Edited text' }).expect(200);
+        await request(app).post('/api/source-control/github/discussions/comment/delete')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), commentId: 'DC_one' }).expect(200);
+
+        const writes = graphqlWrites(requests);
+        expect(writes.map((write) => write.variables)).toEqual([{ commentId: 'DC_one', body: 'Edited text' }, { id: 'DC_one' }]);
+        expect(writes[0].query).toContain('updateDiscussionComment(input: { commentId: $commentId, body: $body })');
+        expect(writes[0].query).toContain('comment { id body }');
+        expect(writes[1].query).toContain('deleteDiscussionComment(input: { id: $id })');
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'discussion-comment-update', state: 'succeeded', result: {} });
+        expect(store.records.get('request-two')).toMatchObject({ kind: 'discussion-comment-delete', state: 'succeeded', result: {} });
+      });
+
+      it('leaves a delete whose comment read is refused at outcome-unknown', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.body.query.includes('discussion(number:')) {
+            return jsonResponse({ data: { repository: { discussion: { id: 'D_five', number: 5, closed: false, labels: { nodes: [] } } } } });
+          }
+          return jsonResponse({ errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible by integration' }] });
+        });
+        const target = {
+          repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+          project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+        };
+        const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+        const input = { kind: 'discussion-comment-delete', actor, credential: credentialFor(account), target, commentId: 'DC_one' };
+        const store = makeStore([{
+          key: 'request-one', inputDigest: digestMutationInput(input), kind: 'discussion-comment-delete', actor, target, state: 'running',
+        }]);
+        const { app } = makeApp({ store });
+
+        const response = await request(app).post('/api/source-control/github/discussions/comment/delete')
+          .send({ ...context(account.accountId, { target: discussionTarget }), commentId: 'DC_one' }).expect(409);
+
+        expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+        expect(store.records.get('request-one').state).toBe('outcome-unknown');
+        expect(graphqlWrites(requests)).toHaveLength(0);
+      });
+
+      it('refuses a comment of another item and writes nothing', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const elsewhere = commentOf({
+          issue_url: 'https://api.github.com/repos/acme/app/issues/6',
+          html_url: 'https://github.com/acme/app/issues/6#issuecomment-13',
+        });
+        const issueRequests = recordRequests((entry) => (entry.path === '/repos/acme/app/issues/5' ? jsonResponse({ number: 5 }) : jsonResponse(elsewhere)));
+        const { app } = makeApp();
+        const refusedIssue = await request(app).post('/api/source-control/github/issues/comment/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' }).expect(409);
+        expect(refusedIssue.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(commentWrites(issueRequests)).toEqual([]);
+
+        const pullRequests = recordRequests((entry) => (entry.path === '/repos/acme/app/pulls/7' ? jsonResponse(pullRequest()) : jsonResponse(elsewhere)));
+        const { app: pullApp } = makeApp();
+        const refusedPull = await request(pullApp).post('/api/source-control/github/pr/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget }), commentId: '13' }).expect(409);
+        expect(refusedPull.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(commentWrites(pullRequests)).toEqual([]);
+
+        const discussionRequests = recordRequests((entry) => (entry.body.query.includes('discussion(number:')
+          ? jsonResponse({ data: { repository: { discussion: { id: 'D_five', number: 5, closed: false, labels: { nodes: [] } } } } })
+          : jsonResponse({ data: { node: {
+            __typename: 'DiscussionComment', isAnswer: false, replyTo: null,
+            discussion: { number: 6, repository: { name: 'app', owner: { login: 'acme' } } },
+          } } })));
+        const { app: discussionApp } = makeApp();
+        const refusedDiscussion = await request(discussionApp).post('/api/source-control/github/discussions/comment/delete')
+          .send({ ...context(account.accountId, { target: discussionTarget }), commentId: 'DC_other' }).expect(409);
+        expect(refusedDiscussion.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(graphqlWrites(discussionRequests)).toEqual([]);
+      });
+
+      it.each([
+        ['/pr/comment/update', { project: { owner: 'acme', name: 'app' }, number: 7 }],
+        ['/issues/comment/update', issueTarget],
+        ['/discussions/comment/update', discussionTarget],
+      ])('refuses an empty body and a missing comment id on %s without a provider call', async (route, target) => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(() => jsonResponse({}));
+        const { app } = makeApp();
+
+        const empty = await request(app).post(`/api/source-control/github${route}`)
+          .send({ ...context(account.accountId, { target }), commentId: '13', body: '   ' }).expect(400);
+        const missing = await request(app).post(`/api/source-control/github${route}`)
+          .send({ ...context(account.accountId, { target, idempotencyKey: 'request-two' }), body: 'Edited text' }).expect(400);
+
+        expect(empty.body).toEqual({ error: 'body is required', code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT' });
+        expect(missing.body).toEqual({ error: 'commentId is invalid', code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT' });
+        expect(requests).toEqual([]);
+      });
+
+      it("passes GitHub's reason for a refused comment write and records it failed", async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        recordRequests((entry) => {
+          if (entry.path === '/repos/acme/app/issues/5') return jsonResponse({ number: 5 });
+          if (entry.method === 'PATCH') {
+            return jsonResponse({ message: 'Validation Failed', errors: [{ message: 'Body is too long (maximum is 65536 characters)' }] }, 422);
+          }
+          return jsonResponse(commentOf());
+        });
+        const { app, store } = makeApp();
+
+        const refused = await request(app).post('/api/source-control/github/issues/comment/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' }).expect(422);
+
+        expect(refused.body).toEqual({ error: 'Body is too long (maximum is 65536 characters)', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+        expect(store.records.get('request-one')).toMatchObject({ state: 'failed', result: { failureStatus: 422 } });
+      });
+
+      it('replays a repeated comment edit without a second write', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.path === '/repos/acme/app/issues/5') return jsonResponse({ number: 5 });
+          if (entry.method === 'PATCH') return jsonResponse(commentOf({ body: entry.body.body }));
+          return jsonResponse(commentOf());
+        });
+        const { app } = makeApp();
+        const payload = { ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' };
+
+        await request(app).post('/api/source-control/github/issues/comment/update').send(payload).expect(200);
+        const replay = await request(app).post('/api/source-control/github/issues/comment/update').send(payload).expect(200);
+
+        expect(replay.body.replayed).toBe(true);
+        expect(requests.filter((entry) => entry.method === 'PATCH')).toHaveLength(1);
+      });
+
+      it('finishes an interrupted edit or delete only from what the comment reads now', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+        const target = {
+          repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+          project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+        };
+        const running = (kind, input) => makeStore([{
+          key: 'request-one', kind, actor, target, state: 'running',
+          inputDigest: digestMutationInput({ kind, actor, credential: credentialFor(account), target, ...input }),
+        }]);
+
+        // The comment reads as asked: the edit landed, no second write.
+        const doneRequests = recordRequests(() => jsonResponse(commentOf({ body: 'Edited text' })));
+        const { app: doneApp } = makeApp({ store: running('issue-comment-update', { commentId: 13, body: 'Edited text' }) });
+        const done = await request(doneApp).post('/api/source-control/github/issues/comment/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' }).expect(200);
+        expect(done.body.result).toEqual({});
+        expect(commentWrites(doneRequests)).toEqual([]);
+
+        // Someone edited it differently meanwhile: no claim either way.
+        recordRequests(() => jsonResponse(commentOf({ body: 'Edited by a human' })));
+        const { app: unknownApp, store: unknownStore } = makeApp({ store: running('issue-comment-update', { commentId: 13, body: 'Edited text' }) });
+        await request(unknownApp).post('/api/source-control/github/issues/comment/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13', body: 'Edited text' }).expect(409);
+        expect(unknownStore.records.get('request-one').state).toBe('outcome-unknown');
+
+        // The comment reads 404: the delete landed.
+        recordRequests(() => jsonResponse({ message: 'Not Found' }, 404));
+        const { app: goneApp, store: goneStore } = makeApp({ store: running('issue-comment-delete', { commentId: 13 }) });
+        const gone = await request(goneApp).post('/api/source-control/github/issues/comment/delete')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13' }).expect(200);
+        expect(gone.body.result).toEqual({});
+        expect(goneStore.records.get('request-one').state).toBe('succeeded');
+
+        // Still there: never a definite not-applied.
+        recordRequests(() => jsonResponse(commentOf()));
+        const { app: keptApp, store: keptStore } = makeApp({ store: running('issue-comment-delete', { commentId: 13 }) });
+        await request(keptApp).post('/api/source-control/github/issues/comment/delete')
+          .send({ ...context(account.accountId, { target: issueTarget }), commentId: '13' }).expect(409);
+        expect(keptStore.records.get('request-one').state).toBe('outcome-unknown');
+      });
+    });
+
     it('comments on a pull request after checking it belongs to the bound repository', async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
       const requests = recordRequests((entry) => (entry.method === 'GET' ? jsonResponse(pullRequest()) : jsonResponse({ id: 11 }, 201)));

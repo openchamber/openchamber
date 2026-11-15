@@ -742,6 +742,8 @@ export type SourceControlCapabilities = {
   merge: false | { methods: SourceControlMergeMethod[] };
   ci: boolean;
   comments: boolean;
+  /** Replacing and removing a comment, on top of posting one: it gates the edit and delete routes. */
+  commentEdit: boolean;
   reviews: boolean;
   state: boolean;
   labels: boolean;

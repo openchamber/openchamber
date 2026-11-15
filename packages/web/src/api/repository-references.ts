@@ -103,6 +103,10 @@ const referenceCommentFields = {
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+  // A conversation comment's id and what this account may do with it; hosts that do not say leave them out.
+  id: z.string().min(1).optional(),
+  canUpdate: z.boolean().optional(),
+  canDelete: z.boolean().optional(),
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
