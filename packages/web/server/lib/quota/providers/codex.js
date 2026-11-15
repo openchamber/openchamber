@@ -7,7 +7,8 @@ import {
   toNumber,
   toTimestamp,
   resolveWindowLabel,
-  asNonEmptyString
+  asNonEmptyString,
+  formatCredits
 } from '../utils/index.js';
 import { readCodexCliLogin, signInEmailOf } from './codex-cli.js';
 
@@ -58,10 +59,13 @@ const usageWindowsOf = (payload) => {
   if (credits) {
     const balance = toNumber(credits.balance);
     const unlimited = Boolean(credits.unlimited);
+    // The endpoint reports the balance as an unrounded float. A credits row
+    // is a count, so render it like Copilot's credits: one decimal at most,
+    // thousands separated.
     const label = unlimited
       ? 'Unlimited'
       : balance !== null
-        ? String(balance)
+        ? formatCredits(balance)
         : null;
     windows.credits_balance = toUsageWindow({
       usedPercent: null,
