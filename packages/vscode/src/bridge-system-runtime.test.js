@@ -58,6 +58,7 @@ mock.module('./quotaProviders', () => ({
 }));
 mock.module('./opencodeGoQuota', () => ({ fetchOpenCodeGoUsage: mock() }));
 mock.module('./quotaCredentials', () => ({
+  MANAGED_PROVIDERS: ['exe-dev', 'cursor', 'zenmux', 'opendesign'],
   credentialStatus: mock(),
   deleteCredential: mock(),
   importCursorCredential: mock(),
