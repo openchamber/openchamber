@@ -21,6 +21,8 @@ import {
   OPENCHAMBER_SCHEDULE_ACTIONS,
   OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
   OPENCHAMBER_USAGE_ACTIONS,
+  OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+  OPENCHAMBER_TERMINAL_ACTIONS,
   resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
@@ -76,6 +78,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_TERMINAL_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
@@ -91,6 +94,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
@@ -385,6 +389,12 @@ const USAGE_PARAMETER_PROPERTIES = {
   providerId: { type: 'string', description: 'One provider, such as claude or codex, from an earlier read; omit for every configured provider' },
 };
 
+const TERMINAL_PARAMETER_PROPERTIES = {
+  directory: { type: 'string', description: "terminal.list: an absolute folder to list instead of this session's" },
+  sessionId: { type: 'string', description: 'terminal.read: a terminal id from terminal.list' },
+  maxBytes: { type: 'integer', minimum: 1, maximum: 262144, description: 'terminal.read: how much of the end to return, 32768 by default, 262144 at most' },
+};
+
 // How to write a script lives on `script`, read while the agent writes it,
 // for the same reason the page rules live on render's `html`.
 const WORKFLOW_SCRIPT_DESCRIPTION = [
@@ -474,6 +484,11 @@ const SECRET_TOOL_DESCRIPTION = "Ask the user for secrets (API keys, tokens, pas
 const USAGE_TOOL_DESCRIPTION = "Provider usage limits as OpenChamber's Settings > Usage shows them: per provider, each window's used and remaining percent, its length and when it resets, plus plan, per-model windows and credit balances. "
   + "ok false with configured true is a failed read, not zero usage; notConfigured lists providers without a credential. "
   + "Every call asks each provider again, sometimes with several requests, so read once per decision and never poll in a loop. fetchedAt is when the result was built; a provider that is rate limiting answers with its last sample.";
+
+const TERMINAL_TOOL_DESCRIPTION = "Read OpenChamber's terminal panel: the terminals open in a folder and what they printed. "
+  + "Read-only: nothing is typed, started or stopped, and the panel's own sessions are untouched. "
+  + "terminal.list names them, then terminal.read returns the end of one's scrollback as plain text; truncated says older output is no longer held, and maxBytes asks for less. "
+  + "The tool exists only while the user turned it on, because a terminal holds whatever was typed into it, secrets included: read the terminal the question is about, not every one.";
 
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
   + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
@@ -847,6 +862,7 @@ const CODE_MODE_CATALOG_LINES = {
   openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
   openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
   openchamber_usage: 'Provider usage limits and reset times. Read it when the user asks about limits or usage, or when picking a model for work depends on them; never poll',
+  openchamber_terminal: "OpenChamber's terminal panel, read-only: list a folder's terminals and read what one printed. Read it when the answer is in a terminal the user is looking at",
 };
 
 /**
@@ -861,9 +877,9 @@ const CODE_MODE_CATALOG_LINES = {
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }) => {
   const entries = [];
-  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage };
+  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage, openchamber_terminal: includeTerminal };
   for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
     if (included[name]) entries.push(`    tools.namespace(${JSON.stringify({ name, description })})
 `);
@@ -971,6 +987,15 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: USAGE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
       parameters: USAGE_PARAMETER_PROPERTIES,
+      codeMode: true,
+    }));
+  }
+  if (includeTerminal) {
+    entries.push(createToolEntry({
+      name: 'openchamber_terminal',
+      description: TERMINAL_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+      parameters: TERMINAL_PARAMETER_PROPERTIES,
       codeMode: true,
     }));
   }
@@ -1102,13 +1127,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * the running OpenCode reloads the directory it already has configured.
    */
   // `includeShare` adds sharing to the render tool and means nothing without it.
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeWorkflow = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeWorkflow) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeTerminal = false, includeWorkflow = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeTerminal && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 

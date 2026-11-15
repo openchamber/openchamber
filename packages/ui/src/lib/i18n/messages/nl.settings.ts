@@ -1263,6 +1263,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Meldtool voor agents',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Meldtool voor agents',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Agents laten het weten als het werk klaar is of ze vastlopen.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Terminalpaneel',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Laat de agent de terminals van deze map tonen en lezen wat erin is uitgevoerd. Een terminal bewaart alles wat erin is getypt, inclusief geheimen, dus dit blijft uit tot je het inschakelt.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Projectkennis-tool",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Projectkennis-tool",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agents lezen en werken de notities, taken en plannen van het project bij.",

@@ -1317,6 +1317,33 @@ describe('usage.read', () => {
   });
 });
 
+describe('terminal.read', () => {
+  const runtime = {
+    listTerminals: () => [{ sessionId: 'term-1', cwd: '/repo', status: 'running', createdAt: 1, mode: 'interactive', purpose: 'shell' }],
+    readTerminal: (sessionId) => (sessionId === 'term-1' ? { sessionId, cwd: '/repo', status: 'running', exitCode: null, signal: null, createdAt: 1, mode: 'interactive', purpose: 'shell', text: 'ok\n', truncated: false, retainedBytes: 3 } : null),
+  };
+
+  it('lists and reads a terminal while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })),
+      getTerminalRuntime: () => runtime,
+    });
+
+    await expect(service.execute('terminal.list', {}, '/repo')).resolves.toMatchObject({ terminals: [{ sessionId: 'term-1' }] });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).resolves.toMatchObject({ sessionId: 'term-1', text: 'ok\n' });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ getTerminalRuntime: () => runtime });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server has no terminal runtime', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })) });
+    await expect(service.execute('terminal.list', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
 describe('render.page with answerLater', () => {
   const page = '<!doctype html><p>Hi</p>';
   const ask = { html: page, title: 'Pick a layout', answerLater: true };

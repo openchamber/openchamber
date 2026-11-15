@@ -1080,6 +1080,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Narzędzie powiadomień agenta',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Narzędzie powiadomień agenta',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Agenci powiadamiają Cię, gdy skończą lub utkną.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Panel terminala',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Pozwala agentowi wylistywać terminale tego folderu i czytać, co wypisały. Terminal przechowuje wszystko, co w nim wpisano, łącznie z sekretami, więc pozostaje wyłączone, dopóki go nie włączysz.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Narzędzie wiedzy o projekcie",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Narzędzie wiedzy o projekcie",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agenci czytają i aktualizują notatki, zadania i plany projektu.",

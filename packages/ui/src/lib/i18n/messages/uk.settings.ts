@@ -1230,6 +1230,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyTool": "Інструмент сповіщень агента",
   "settings.openchamber.tools.field.agentNotifyToolAria": "Інструмент сповіщень агента",
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Агенти сповіщають вас, коли робота готова або вони застрягли.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Панель термінала',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Дозволяє агенту перелічувати термінали цієї теки та читати те, що вони вивели. Термінал зберігає все, що в нього вводили, зокрема секрети, тому це вимкнено, доки ви не ввімкнете.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Інструмент знань проєкту",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Інструмент знань проєкту",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Агенти читають і оновлюють нотатки, завдання та плани проєкту.",

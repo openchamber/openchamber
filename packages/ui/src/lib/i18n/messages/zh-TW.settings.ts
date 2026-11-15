@@ -1188,6 +1188,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': '智慧代理通知工具',
   'settings.openchamber.tools.field.agentNotifyToolAria': '智慧代理通知工具',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "工作完成或卡住時，智慧代理會通知你。",
+  'settings.openchamber.tools.field.agentTerminalTool': '終端機面板',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': '讓代理程式列出此資料夾的終端機並讀取其輸出。終端機會保留其中輸入的所有內容，包括機密資訊，因此在開啟前會保持關閉。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "專案知識工具",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "專案知識工具",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "讓代理讀取並更新專案的筆記、待辦事項和計畫。",
