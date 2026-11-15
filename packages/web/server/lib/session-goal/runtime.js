@@ -385,7 +385,7 @@ export const createSessionGoalRuntime = ({
 }) => {
   const timers = new Map();
   const inflight = new Set();
-  const sessionReadFailures = new Map();
+  const readAttempts = new Map();
   let stopped = false;
 
   const clearTimer = (sessionId) => {
@@ -594,9 +594,9 @@ export const createSessionGoalRuntime = ({
     if (!isEnabled()) return;
     const maxAutoTurns = getMaxAutoTurns();
 
-    const attempt = sessionReadFailures.get(sessionId) ?? { failures: 0 };
-    sessionReadFailures.set(sessionId, attempt);
-    const isCurrent = () => !stopped && sessionReadFailures.get(sessionId) === attempt;
+    const attempt = readAttempts.get(sessionId) ?? { failures: 0, activityFailures: 0 };
+    readAttempts.set(sessionId, attempt);
+    const isCurrent = () => !stopped && readAttempts.get(sessionId) === attempt;
     const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory })
       .catch((error) => {
         console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
@@ -616,16 +616,30 @@ export const createSessionGoalRuntime = ({
             isCurrent,
           });
         }
-        if (isCurrent()) sessionReadFailures.delete(sessionId);
+        if (isCurrent()) readAttempts.delete(sessionId);
       }
       return;
     }
-    sessionReadFailures.delete(sessionId);
+    attempt.failures = 0;
     // Sub-agent/task sessions never carry user goals — skip them.
     if (typeof session.parentID === 'string' && session.parentID) return;
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
+
+    const retryActivity = async () => {
+      if (!isCurrent()) return;
+      attempt.activityFailures += 1;
+      if (attempt.activityFailures <= SESSION_READ_RETRIES) {
+        armTimer(sessionId, directory, recheckMs * (2 ** (attempt.activityFailures - 1)));
+        return;
+      }
+      await settleGoal({
+        sessionId, directory, goal, status: 'blocked',
+        statusReason: 'Session activity could not be read after repeated attempts. Resume to try again.',
+        isCurrent,
+      });
+    };
 
     // File-backed objectives: the metadata carries only a flag; the objective
     // TEXT lives under the OpenChamber data dir keyed by session id and is
@@ -653,23 +667,34 @@ export const createSessionGoalRuntime = ({
     // again when the child finishes, but a missed parent idle event must not
     // strand the goal.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
+    if (!isCurrent()) return;
     if (!statuses) {
-      armTimer(sessionId, directory, recheckMs);
+      await retryActivity();
       return;
     }
-    if (isWorkingStatus(statuses[sessionId])) return;
+    if (isWorkingStatus(statuses[sessionId])) {
+      attempt.activityFailures = 0;
+      return;
+    }
 
     // OpenCode 2.2.6+ lists the background subagents and images of the whole
     // subagent tree. Child sessions OpenChamber starts itself (workflow agents)
     // are no OpenCode jobs, so running direct children are asked for as well.
     const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (!isCurrent()) return;
     if (backgroundJobs === null) {
-      armTimer(sessionId, directory, recheckMs);
+      await retryActivity();
       return;
     }
     const childrenWorking = backgroundJobs?.some((job) => job.kind !== 'shell')
       || await activityProbe.hasWorkingChildren(sessionId, statuses);
-    if (childrenWorking !== false) {
+    if (!isCurrent()) return;
+    if (childrenWorking === null) {
+      await retryActivity();
+      return;
+    }
+    if (childrenWorking) {
+      attempt.activityFailures = 0;
       armTimer(sessionId, directory, recheckMs);
       return;
     }
@@ -790,8 +815,14 @@ export const createSessionGoalRuntime = ({
       const shells = backgroundJobs
         ? jobs && jobs.filter((job) => job.kind === 'shell')
         : await fetchOwnRunningShells(session, sessionId, directory);
+      if (!isCurrent()) return;
+      if (!shells) {
+        await retryActivity();
+        return;
+      }
+      attempt.activityFailures = 0;
       // A subagent or image the turn just read started holds the audit as well.
-      if (!shells || jobs?.some((job) => job.kind !== 'shell')) {
+      if (jobs?.some((job) => job.kind !== 'shell')) {
         armTimer(sessionId, directory, recheckMs);
         return;
       }
@@ -951,6 +982,7 @@ export const createSessionGoalRuntime = ({
     inflight.delete(sessionId);
     const pending = timers.get(sessionId);
     if (pending && !pending.timer) armTimer(sessionId, pending.directory, pending.quietMs);
+    if (!pending) readAttempts.delete(sessionId);
   };
 
   const armTimer = (sessionId, directory, quietMs) => {
@@ -1001,7 +1033,7 @@ export const createSessionGoalRuntime = ({
     if (stopped || !isWired()) return;
     const goal = parseGoalMetadata({ metadata });
     if (!goal || goal.status !== 'active') {
-      sessionReadFailures.delete(sessionId);
+      readAttempts.delete(sessionId);
       clearTimer(sessionId);
       return;
     }
@@ -1009,7 +1041,7 @@ export const createSessionGoalRuntime = ({
     // tick holds the only pending work, and cancelling it would leave the
     // goal active without a timer.
     if (goal.turnsUsed !== 0 && goal.statusReason !== 'resumed') return;
-    sessionReadFailures.delete(sessionId);
+    readAttempts.delete(sessionId);
     clearTimer(sessionId);
 
     // A patch from the UI names no directory, and the loop needs one to scope
@@ -1065,7 +1097,7 @@ export const createSessionGoalRuntime = ({
     if (aborted) {
       // A tick already in flight reaches its own abort check and pauses the
       // goal there; ending its read attempt now would drop it before that.
-      if (!inflight.has(aborted.sessionId)) sessionReadFailures.delete(aborted.sessionId);
+      if (!inflight.has(aborted.sessionId)) readAttempts.delete(aborted.sessionId);
       clearTimer(aborted.sessionId);
       if (!inflight.has(aborted.sessionId)) {
         inflight.add(aborted.sessionId);
@@ -1082,7 +1114,7 @@ export const createSessionGoalRuntime = ({
 
     const status = extractSessionStatus(payload);
     if (status) {
-      sessionReadFailures.delete(status.sessionId);
+      readAttempts.delete(status.sessionId);
       if (status.type === 'idle') {
         armTimer(status.sessionId, status.directory || directoryHint, idleQuietMs);
       } else {
@@ -1118,7 +1150,7 @@ export const createSessionGoalRuntime = ({
       clearTimeout(timer);
     }
     timers.clear();
-    sessionReadFailures.clear();
+    readAttempts.clear();
   };
 
   return { processPayload, notifyGoalChanged, recoverActiveGoals, stop };
