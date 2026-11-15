@@ -1,8 +1,34 @@
+import { getNormalizedParentDirectory, isFilesystemRoot } from '@/lib/pathNormalization';
+
 const toSlashes = (value: string): string => value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
 
 const ROOTED_PATH = /^(?:~(?:\/|$)|\/|[a-zA-Z]:\/)/;
 
 export const isRootedBrowseQuery = (query: string): boolean => ROOTED_PATH.test(query.trimStart());
+
+const withTrailingSeparator = (value: string): string => (value.endsWith('/') ? value : `${value}/`);
+
+/**
+ * Drops trailing separators from a slash path, keeping a filesystem root
+ * absolute: `/` stays `/`, and a drive keeps its slash (`D:/`, `//?/D:/`),
+ * since bare `D:` means that drive's current folder.
+ */
+export const trimTrailingSeparators = (value: string): string => {
+  const trimmed = value.replace(/\/+$/u, '');
+  if (!trimmed) return value ? '/' : value;
+  return isFilesystemRoot(trimmed) && /:$/u.test(trimmed) ? `${trimmed}/` : trimmed;
+};
+
+/** A child of a slash folder, with exactly one separator between them, roots included. */
+export const joinBrowsePath = (folder: string, name: string): string => `${withTrailingSeparator(trimTrailingSeparators(folder))}${name}`;
+
+/** The folder above a browsed slash path, as a path-field value; none at home or a filesystem root. */
+export const getBrowseParentPath = (value: string): string | null => {
+  const trimmed = trimTrailingSeparators(value.trim());
+  if (!trimmed || trimmed === '~' || isFilesystemRoot(trimmed)) return null;
+  const parent = getNormalizedParentDirectory(trimmed);
+  return parent === null ? null : withTrailingSeparator(parent);
+};
 
 /**
  * What the path field means. A name without a root belongs to the folder being
@@ -16,9 +42,13 @@ export const resolveBrowseQuery = (query: string, browsedFolder: string): string
 type ProjectPlace = { path: string; addedAt?: number };
 
 const parentBrowseQuery = (projectPath: string, homeDirectory: string): string => {
-  const path = toSlashes(projectPath);
-  const parent = path.slice(0, path.lastIndexOf('/'));
+  const path = trimTrailingSeparators(projectPath.trim().replace(/\\/g, '/'));
+  // A project at a filesystem root starts the picker at that root; one
+  // directly under a root starts there too, never above it.
+  if (isFilesystemRoot(path)) return withTrailingSeparator(path);
+  const parent = getNormalizedParentDirectory(path);
   if (!parent) return '~/';
+  if (isFilesystemRoot(parent)) return withTrailingSeparator(parent);
   const home = toSlashes(homeDirectory);
   if (home && parent === home) return '~/';
   if (home && parent.startsWith(`${home}/`)) return `~${parent.slice(home.length)}/`;

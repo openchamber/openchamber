@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { initialBrowseQuery, projectBrowsePlaces, resolveBrowseQuery } from './directoryExplorerStart';
+import { getBrowseParentPath, initialBrowseQuery, joinBrowsePath, projectBrowsePlaces, resolveBrowseQuery, trimTrailingSeparators } from './directoryExplorerStart';
 
 describe('initialBrowseQuery', () => {
   const home = '/Users/me';
@@ -21,6 +21,23 @@ describe('initialBrowseQuery', () => {
   test('keeps a folder outside home absolute, and falls back to the last entry without dates', () => {
     expect(initialBrowseQuery([{ path: '/Users/me/a' }, { path: 'D:\\code\\repo\\' }], home)).toBe('D:/code/');
     expect(initialBrowseQuery([{ path: '/Users/me/repo' }], home)).toBe('~/');
+  });
+
+  test('keeps filesystem roots when the project is at or directly under one', () => {
+    expect(initialBrowseQuery([{ path: 'D:\\' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: 'D:\\repo' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: '/' }], home)).toBe('/');
+    expect(initialBrowseQuery([{ path: '/repo' }], home)).toBe('/');
+    expect(projectBrowsePlaces([{ path: 'D:\\' }], home)).toEqual(['D:/']);
+  });
+
+  test('keeps extended drive roots and UNC share roots when the project is at or directly under one', () => {
+    expect(initialBrowseQuery([{ path: '\\\\?\\D:\\' }], home)).toBe('//?/D:/');
+    expect(initialBrowseQuery([{ path: '\\\\?\\D:\\repo' }], home)).toBe('//?/D:/');
+    expect(initialBrowseQuery([{ path: '\\\\?\\D:\\code\\repo' }], home)).toBe('//?/D:/code/');
+    expect(initialBrowseQuery([{ path: '\\\\server\\share\\' }], home)).toBe('//server/share/');
+    expect(initialBrowseQuery([{ path: '\\\\server\\share\\repo' }], home)).toBe('//server/share/');
+    expect(initialBrowseQuery([{ path: '\\\\?\\UNC\\server\\share\\repo' }], home)).toBe('//?/UNC/server/share/');
   });
 });
 
@@ -62,4 +79,44 @@ describe('resolveBrowseQuery', () => {
     }
     expect(resolveBrowseQuery(' /srv/app', '~/projects/')).toBe('/srv/app');
   });
+});
+
+test('keeps drive roots absolute when preparing a selected path', () => {
+  expect(trimTrailingSeparators('D:/')).toBe('D:/');
+  expect(trimTrailingSeparators('D:///')).toBe('D:/');
+  expect(trimTrailingSeparators('D:/repo/')).toBe('D:/repo');
+  expect(trimTrailingSeparators('/')).toBe('/');
+  expect(trimTrailingSeparators('D:')).toBe('D:/');
+  expect(getBrowseParentPath('D:/')).toBeNull();
+  expect(getBrowseParentPath('D:/repo/')).toBe('D:/');
+});
+
+test('keeps extended drive roots and UNC share roots absolute and offers no parent above them', () => {
+  expect(trimTrailingSeparators('//?/D:/')).toBe('//?/D:/');
+  expect(trimTrailingSeparators('//?/D:/repo/')).toBe('//?/D:/repo');
+  expect(trimTrailingSeparators('//server/share/')).toBe('//server/share');
+  expect(getBrowseParentPath('//?/D:/')).toBeNull();
+  expect(getBrowseParentPath('//?/D:/repo/')).toBe('//?/D:/');
+  expect(getBrowseParentPath('//server/share/')).toBeNull();
+  expect(getBrowseParentPath('//server/share/repo/')).toBe('//server/share/');
+  expect(getBrowseParentPath('//?/UNC/server/share/')).toBeNull();
+  expect(getBrowseParentPath('//?/UNC/server/share/repo/')).toBe('//?/UNC/server/share/');
+});
+
+test('joins a clone destination under any folder with exactly one separator', () => {
+  expect(joinBrowsePath('/', 'repo')).toBe('/repo');
+  expect(joinBrowsePath('D:/', 'repo')).toBe('D:/repo');
+  expect(joinBrowsePath('//?/D:/', 'repo')).toBe('//?/D:/repo');
+  expect(joinBrowsePath('//server/share', 'repo')).toBe('//server/share/repo');
+  expect(joinBrowsePath('//server/share/', 'repo')).toBe('//server/share/repo');
+  expect(joinBrowsePath('/srv/app', 'repo')).toBe('/srv/app/repo');
+});
+
+test('walks up home-relative and Unix paths as before', () => {
+  expect(getBrowseParentPath('~/')).toBeNull();
+  expect(getBrowseParentPath('~/projects/')).toBe('~/');
+  expect(getBrowseParentPath('~/projects/app/')).toBe('~/projects/');
+  expect(getBrowseParentPath('/')).toBeNull();
+  expect(getBrowseParentPath('/srv/')).toBe('/');
+  expect(getBrowseParentPath('/srv/app/')).toBe('/srv/');
 });
