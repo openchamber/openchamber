@@ -366,6 +366,14 @@ button,
   background-color: var(--interactive-selection);
 }
 
+/* With wrapping off the editor scrolls sideways and a block widget is as wide
+   as the longest line. Its content stays at the visible left edge, past the
+   fixed gutter, so a comment field or card never scrolls out of view. */
+.oc-block-widget > * {
+  position: sticky;
+  left: var(--oc-editor-gutter-width, 0px);
+}
+
 .pierre-diff-wrapper {
   --diffs-bg-selection-override: var(--interactive-selection);
   --diffs-bg-selection-background-override: var(--interactive-selection);

@@ -54,6 +54,22 @@ click-outside handler skips it (`isDragReleaseClick`) and the range stays.
 
 Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
 
+### Why the open comment field gets its focus back after a render
+
+A render that rebuilds the rows or the annotations takes the open comment field out of the rendered tree for a moment, and the browser drops its focus. It happens under a person who is typing: an agent's write refreshes the diff, and the virtualized diff is reset for the new content. `PierreDiffViewer` records the focused field before each render it starts and focuses it again in Pierre's post-render callback, only while nothing else has taken the focus since. `CodeMirrorEditor` does the same for a field in a block widget when an update redraws the lines around it, such as a reload from disk in `FilesView`. Keeping the node attached through the render was not available: Pierre resets its container when the content changes, and CodeMirror redraws a widget's node with the lines next to it.
+
+### Why a line comment follows its code and not its line number
+
+A pending comment in `FilesView` and `PierreDiffViewer`, the open field and a saved unsent one, is stored with its line numbers, and an agent's write shifts the lines under it. `useInlineCommentController` finds the lines again each time the content changes (`lib/commentAnchor.ts`): by the text of the commented lines, with the line before and after them telling repeated code apart. It writes the new numbers to the draft store, so the card, the composer row and the prompt all show where the comment is now. When the code is gone the comment stays by a neighbour that survived, the draft carries `changedCode`, the card says so, and the prompt quotes both the code the comment was written on and the code there now.
+
+The search needs only what the draft already stores, so it works after a restart and for a file that changed while it was closed. Mapping old line numbers to new ones through a diff of the two versions was rejected for that reason: it needs the old text at the moment of the change, which a closed file or a patch-only diff does not have.
+
+Each view says which lines it knows. `FilesView` gives none until the file is loaded and non-empty, and a patch says it is partial, so a comment outside its hunks is left alone. An empty or missing side never reads as "the code is gone". A viewer with comments off (a commit in History) gives no lines at all: it shows other content under the same path. A comment the patch does not hold moves into a hunk only when a stored neighbour stands beside the match, since the text alone may be any closing brace. A comment is re-anchored only while its file is shown in one of these views; sent before that, it carries the numbers it had, with its code.
+
+### Why the comment field stays in view when the editor scrolls sideways
+
+With wrapping off a CodeMirror block widget is as wide as the longest line. `CodeMirrorEditor` publishes the visible width as `--oc-editor-width` beside the gutter width, the comment field and cards size to it, and `.oc-block-widget > *` is sticky past the fixed gutter. Sizing from the context panel's width overflowed by the width of the file tree.
+
 ### Why Pierre owns diff line-number selection
 
 `PierreDiffViewer` receives number-column selections through Pierre's

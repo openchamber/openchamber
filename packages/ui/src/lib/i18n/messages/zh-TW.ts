@@ -2114,6 +2114,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '讀取計畫檔案失敗',
   'inlineComment.range.lines': '行 {start}-{end}',
   'inlineComment.range.wholeFile': '整個檔案',
+  'inlineComment.card.codeChanged': '此留言對應的程式碼已變更',
     'inlineComment.input.placeholder': '新增留言...（{shortcut} 儲存）',
   'inlineComment.input.placeholderShort': '新增留言…',
   'inlineComment.actions.cancel': '取消',

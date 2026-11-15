@@ -2099,6 +2099,7 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.toast.readPlanFileFailed": "Не вдалося прочитати файл плану",
   "inlineComment.range.lines": "Рядки {start}-{end}",
   "inlineComment.range.wholeFile": "Весь файл",
+  "inlineComment.card.codeChanged": "Код під цим коментарем змінився",
     "inlineComment.input.placeholder": "Додайте коментар... ({shortcut}, щоб зберегти)",
   "inlineComment.input.placeholderShort": "Додайте коментар...",
   "inlineComment.actions.cancel": "Скасувати",

@@ -2131,6 +2131,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '플랜 파일 읽기 실패',
   'inlineComment.range.lines': '줄 {start}-{end}',
   'inlineComment.range.wholeFile': '파일 전체',
+  'inlineComment.card.codeChanged': '이 댓글이 달린 코드가 변경되었습니다',
     'inlineComment.input.placeholder': '댓글 추가… ({shortcut}로 저장)',
   'inlineComment.input.placeholderShort': '댓글 추가…',
   'inlineComment.actions.cancel': '취소',

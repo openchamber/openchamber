@@ -2127,6 +2127,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '計画ファイルの読み込みに失敗しました',
   'inlineComment.range.lines': '{start}行目～{end}行目',
   'inlineComment.range.wholeFile': 'ファイル全体',
+  'inlineComment.card.codeChanged': 'このコメントの対象コードが変更されました',
     'inlineComment.input.placeholder': 'コメントを追加...（{shortcut}で保存）',
   'inlineComment.input.placeholderShort': 'コメントを追加...',
   'inlineComment.actions.cancel': 'キャンセル',

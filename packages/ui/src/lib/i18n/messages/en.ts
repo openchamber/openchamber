@@ -2131,6 +2131,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Failed to read plan file',
   'inlineComment.range.lines': 'Lines {start}-{end}',
   'inlineComment.range.wholeFile': 'Whole file',
+  'inlineComment.card.codeChanged': 'The code under this comment has changed',
     'inlineComment.input.placeholder': 'Add a comment... ({shortcut} to save)',
   'inlineComment.input.placeholderShort': 'Add a comment...',
   'inlineComment.actions.cancel': 'Cancel',

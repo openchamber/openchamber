@@ -342,10 +342,35 @@ export function CodeMirrorEditor({
     });
   }, []);
 
-  // The gutter width for inline comment widgets. Read in CodeMirror's own
-  // measure phase: read on every update, it forced a layout of the page on
-  // each keystroke and each reconfigure.
+  // The field the user is typing in inside a block widget. An update that
+  // redraws the lines around a widget (a reload from disk, an agent's write)
+  // takes the widget's node out of the document and puts it back, which drops
+  // the field's focus; the update listener gives it back. Tracked from focus
+  // and pointer events because a press on something unfocusable leaves the
+  // field without focusing anything else.
+  const widgetFieldRef = React.useRef<HTMLTextAreaElement | null>(null);
+  React.useEffect(() => {
+    const track = (event: Event) => {
+      const target = event.target;
+      widgetFieldRef.current = target instanceof HTMLTextAreaElement
+        && hostRef.current?.contains(target)
+        && target.closest('.oc-block-widget') ? target : null;
+    };
+    document.addEventListener('focusin', track, true);
+    document.addEventListener('pointerdown', track, true);
+    return () => {
+      document.removeEventListener('focusin', track, true);
+      document.removeEventListener('pointerdown', track, true);
+    };
+  }, []);
+
+  // The gutter width and the visible editor width for inline comment widgets:
+  // with wrapping off a widget's own box is as wide as the longest line, so
+  // it sizes to what is visible. Read in CodeMirror's own measure phase: read
+  // on every update, it forced a layout of the page on each keystroke and
+  // each reconfigure.
   const gutterWidthRef = React.useRef<string | null>(null);
+  const editorWidthRef = React.useRef<string | null>(null);
   // The scrollbar frame stops above bottom panels (the vim status line), so
   // the horizontal thumb sits at the scroller's own bottom edge.
   const bottomPanelsHeightRef = React.useRef<string | null>(null);
@@ -366,6 +391,7 @@ export function CodeMirrorEditor({
         const bottomPanels = measuredView.dom.querySelector('.cm-panels-bottom');
         return {
           gutterWidth: gutters instanceof HTMLElement ? gutters.getBoundingClientRect().width : 0,
+          editorWidth: measuredView.scrollDOM.clientWidth,
           bottomPanelsHeight: bottomPanels instanceof HTMLElement ? bottomPanels.getBoundingClientRect().height : 0,
         };
       },
@@ -376,6 +402,11 @@ export function CodeMirrorEditor({
         if (gutterWidthRef.current !== nextGutterWidth) {
           gutterWidthRef.current = nextGutterWidth;
           host.style.setProperty('--oc-editor-gutter-width', nextGutterWidth);
+        }
+        const nextEditorWidth = `${sizes.editorWidth}px`;
+        if (editorWidthRef.current !== nextEditorWidth) {
+          editorWidthRef.current = nextEditorWidth;
+          host.style.setProperty('--oc-editor-width', nextEditorWidth);
         }
         const nextBottomPanelsHeight = `${sizes.bottomPanelsHeight}px`;
         if (bottomPanelsHeightRef.current !== nextBottomPanelsHeight) {
@@ -432,6 +463,10 @@ export function CodeMirrorEditor({
         vimCompartment.of(createVimModeExtensions(vimMode)),
         keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
+          const widgetField = widgetFieldRef.current;
+          if (widgetField?.isConnected && document.activeElement === document.body) {
+            widgetField.focus({ preventScroll: true });
+          }
           // Edits while detached (a reload, an agent's write) move the text
           // under the remembered scroll position.
           if (update.docChanged && scrollSnapshotRef.current) {

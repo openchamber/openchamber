@@ -43,7 +43,8 @@ import { useI18n } from '@/lib/i18n';
 import { cn, isMacOS } from '@/lib/utils';
 import { hideWhitespaceChanges } from '@/lib/diff/hideWhitespaceChanges';
 import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
-import { getDiffLinesText } from '@/lib/diff/selectedDiffLines';
+import { diffLineSource, getDiffLinesText } from '@/lib/diff/selectedDiffLines';
+import { textLineSource } from '@/lib/commentAnchor';
 import { findWordAtOffset } from '@/lib/diff/findWord';
 import type { DiffFindSide } from '@/lib/diff/diffFind';
 import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
@@ -950,6 +951,14 @@ const PierreDiffViewerBody: React.FC<
     targets: ReadonlyMap<number, HTMLElement>;
   }>(() => ({ fileDiff: undefined, anchors: EMPTY_HUNK_ANCHORS, targets: new Map() }));
 
+  // Comments follow their code when the diff changes: each side is the lines
+  // a comment on it can be found on.
+  const commentLineSources = useMemo(() => (incomingFileDiff
+    ? { additions: diffLineSource(incomingFileDiff, 'additions'), deletions: diffLineSource(incomingFileDiff, 'deletions') }
+    // An empty side is a file that is absent there, or one not loaded yet:
+    // neither says the commented code is gone.
+    : { additions: modified ? textLineSource(modified) : null, deletions: original ? textLineSource(original) : null }
+  ), [incomingFileDiff, modified, original]);
   const diffCommentController = useInlineCommentController<SelectedLineRange>({
     source: 'diff',
     fileLabel: fileName || 'unknown',
@@ -966,6 +975,14 @@ const PierreDiffViewerBody: React.FC<
       end: draft.endLine,
       side: draft.side === 'original' ? 'deletions' : 'additions',
     }),
+    // A range across both sides has two sets of line numbers and stays put.
+    // A viewer without comments (a commit in History) shows other content
+    // under the same path and must not move the working tree's comments.
+    lineSource: (range) => (!enableComments || (range.endSide && range.endSide !== range.side)
+      ? null
+      : commentLineSources[range.side === 'deletions' ? 'deletions' : 'additions']),
+    contentVersion: commentLineSources,
+    onSelectionMoved: (range) => moveSelectionRef.current(range),
   });
 
   const {
@@ -1037,6 +1054,7 @@ const PierreDiffViewerBody: React.FC<
   }, [cancel, fileName, incomingFileDiff, modified, original, review, selectionCrossesSides, selectionSide]);
 
   const selectionRef = useRef<SelectedLineRange | null>(null);
+  const moveSelectionRef = useRef<(range: SelectedLineRange) => void>(() => {});
   const editingDraftIdRef = useRef<string | null>(null);
   const commentTextRef = useRef('');
   // Use a ref to track if we're currently applying a selection programmatically
@@ -1104,8 +1122,57 @@ const PierreDiffViewerBody: React.FC<
     cancel();
   }, [cancel]);
 
+  // Pierre holds its own copy of the selection and paints the selected rows
+  // from it. A selection that did not come from a press on the diff is given
+  // to it here: one that moved with its code, and the open field's after the
+  // diff was rebuilt for new content.
+  const paintSelection = useCallback((range: SelectedLineRange) => {
+    try {
+      isApplyingSelectionRef.current = true;
+      diffInstanceRef.current?.setSelectedLines(range);
+      lastAppliedSelectionRef.current = range;
+    } catch {
+      // The rows are not there to paint; the comment field still moves.
+    } finally {
+      isApplyingSelectionRef.current = false;
+    }
+  }, []);
+  const selectionMovedRef = useRef(false);
+  useEffect(() => {
+    moveSelectionRef.current = (range) => {
+      selectionMovedRef.current = true;
+      setSelection(range);
+    };
+  }, [setSelection]);
+  useEffect(() => {
+    if (!selectionMovedRef.current || !selection) return;
+    selectionMovedRef.current = false;
+    paintSelection(selection);
+  }, [paintSelection, selection]);
+
   const commentHostsRef = useRef(new Map<string, HTMLDivElement>());
+  // A render that rebuilds the rows or an annotation takes the open comment
+  // field out of the rendered tree for a moment, which drops its focus. The
+  // field focused before such a render is kept here, and the post-render
+  // callback gives the focus back.
   const typingFieldRef = useRef<HTMLTextAreaElement | null>(null);
+  const holdTypingField = useCallback(() => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused)) typingFieldRef.current = focused;
+  }, []);
+  // The virtualized diff may render later. A press or a focus anywhere else
+  // meanwhile means the user left the field, so it stops waiting for the focus.
+  useEffect(() => {
+    const release = (event: Event) => {
+      if (event.target !== typingFieldRef.current) typingFieldRef.current = null;
+    };
+    document.addEventListener('focusin', release, true);
+    document.addEventListener('pointerdown', release, true);
+    return () => {
+      document.removeEventListener('focusin', release, true);
+      document.removeEventListener('pointerdown', release, true);
+    };
+  }, []);
   const renderAnnotation = useCallback((annotation: DiffLineAnnotation<DiffAnnotation>) => {
     const div = document.createElement('div');
     div.style.position = 'relative';
@@ -1615,9 +1682,12 @@ const PierreDiffViewerBody: React.FC<
   const handlePostRender = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     if (hasHunkAnchors) captureHunkTargets(node, instance, phase);
     if (phase !== 'unmount' && findMatchesRef.current.length > 0) applyFindHighlights();
+    // A reset reports the old rows' unmount before it renders the new ones.
+    if (phase === 'unmount') return;
     const typing = typingFieldRef.current;
     typingFieldRef.current = null;
-    if (typing?.isConnected && document.activeElement !== typing) typing.focus({ preventScroll: true });
+    // Only while nothing else took the focus since: the user may have moved on.
+    if (typing?.isConnected && document.activeElement === document.body) typing.focus({ preventScroll: true });
   }, [applyFindHighlights, captureHunkTargets, hasHunkAnchors]);
 
   const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
@@ -1755,6 +1825,7 @@ const PierreDiffViewerBody: React.FC<
       )
     );
 
+    holdTypingField();
     if (shouldReset) {
       currentInstance?.cleanUp();
       diffInstanceRef.current = null;
@@ -1762,6 +1833,7 @@ const PierreDiffViewerBody: React.FC<
     }
 
     let instance = diffInstanceRef.current;
+    let rebuiltInstance = false;
     // The Editor font size changed under a mounted diff. The CSS rows follow
     // on their own; the virtualizer gets the new row height through
     // setMetrics, keeping the host and what is attached to it.
@@ -1780,6 +1852,7 @@ const PierreDiffViewerBody: React.FC<
         : new PierreFileDiff(options, workerPool);
       diffInstanceRef.current = instance;
       lastAppliedSelectionRef.current = null;
+      rebuiltInstance = true;
     } else {
       instance.setOptions(options);
       const current: unknown = instance;
@@ -1815,6 +1888,8 @@ const PierreDiffViewerBody: React.FC<
       });
     }
 
+    if (rebuiltInstance && selectionRef.current) paintSelection(selectionRef.current);
+
     const cancelReady = waitForDiffReady(container, () => {
       preserveDone();
       wakeVirtualizer(instance, sharedVirtualizer, forceUpdate);
@@ -1824,7 +1899,7 @@ const PierreDiffViewerBody: React.FC<
       cancelReady();
       preserveDone();
     };
-  }, [diffLineHeight, diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
+  }, [diffLineHeight, diffThemeKey, fileDiff, fileName, holdTypingField, language, modified, options, original, paintSelection, workerPool]);
 
   useEffect(() => {
     const instance = diffInstanceRef.current;
@@ -1843,11 +1918,7 @@ const PierreDiffViewerBody: React.FC<
 
     requestAnimationFrame(() => {
       if (diffInstanceRef.current !== instance) return;
-      // A rebuilt annotation moves its node, and moving a focused field drops
-      // its focus. The virtualized diff renders later, so the post-render
-      // callback gives it back, and only to a field that had it.
-      const focused = document.activeElement;
-      typingFieldRef.current = focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused) ? focused : null;
+      holdTypingField();
       try {
         instance.rerender();
       } catch (err) {
@@ -1855,7 +1926,7 @@ const PierreDiffViewerBody: React.FC<
       }
       forceUpdate();
     });
-  }, [lineAnnotations]);
+  }, [holdTypingField, lineAnnotations]);
 
   useEffect(() => {
     const instance = diffInstanceRef.current;

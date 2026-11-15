@@ -1883,6 +1883,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Échec de la lecture du fichier de plan',
   'inlineComment.range.lines': 'Lignes {start}-{end}',
   'inlineComment.range.wholeFile': 'Fichier entier',
+  'inlineComment.card.codeChanged': 'Le code sous ce commentaire a changé',
     'inlineComment.input.placeholder': 'Ajouter un commentaire... ({shortcut} pour enregistrer)',
   'inlineComment.actions.cancel': 'Annuler',
   'inlineComment.actions.save': 'Enregistrer',

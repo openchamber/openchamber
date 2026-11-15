@@ -2126,6 +2126,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Kan het planbestand niet lezen',
   'inlineComment.range.lines': 'Regels {start}-{end}',
   'inlineComment.range.wholeFile': 'Hele bestand',
+  'inlineComment.card.codeChanged': 'De code onder deze opmerking is gewijzigd',
     'inlineComment.input.placeholder': 'Commentaar toevoegen... ({shortcut} om op te slaan)',
   'inlineComment.input.placeholderShort': 'Commentaar toevoegen...',
   'inlineComment.actions.cancel': 'Annuleren',

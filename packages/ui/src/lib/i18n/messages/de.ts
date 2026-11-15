@@ -1874,6 +1874,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Fehler beim Lesen der Plan-Datei',
   'inlineComment.range.lines': 'Zeilen {start}-{end}',
   'inlineComment.range.wholeFile': 'Ganze Datei',
+  'inlineComment.card.codeChanged': 'Der Code unter diesem Kommentar hat sich geändert',
     'inlineComment.input.placeholder': 'Kommentar hinzufügen... ({shortcut} zum Speichern)',
   'inlineComment.input.placeholderShort': 'Kommentar hinzufügen...',
   'inlineComment.actions.cancel': 'Abbrechen',

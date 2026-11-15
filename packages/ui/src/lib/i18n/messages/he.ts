@@ -2033,6 +2033,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'לא ניתן היה לקרוא את קובץ התוכנית',
   'inlineComment.range.lines': 'שורות {start}-{end}',
   'inlineComment.range.wholeFile': 'הקובץ כולו',
+  'inlineComment.card.codeChanged': 'הקוד שמתחת להערה הזו השתנה',
   'inlineComment.input.placeholder': 'הוספת הערה… ({shortcut} לשמירה)',
   'inlineComment.input.placeholderShort': 'הוספת הערה…',
   'inlineComment.actions.cancel': 'ביטול',

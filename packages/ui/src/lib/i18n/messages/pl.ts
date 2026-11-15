@@ -3003,6 +3003,7 @@ export const dict: Record<I18nKey, string> = {
   'inlineComment.input.placeholderShort': 'Dodaj komentarz...',
   'inlineComment.range.lines': 'Lines {start}-{end}',
   'inlineComment.range.wholeFile': 'Cały plik',
+  'inlineComment.card.codeChanged': 'Kod pod tym komentarzem się zmienił',
   'inlineComment.toast.selectSessionToSave': 'Select a session to save comment',
   'inlineComment.toast.noRoom': 'Nie udało się zapisać komentarza: niewysłane komentarze zajęły całe dostępne miejsce. Wyślij lub usuń część z nich, w tej lub innej sesji, a potem spróbuj ponownie.',
   'mainLayout.mobile.closeDrawerAria': 'Zamknij szufladę',

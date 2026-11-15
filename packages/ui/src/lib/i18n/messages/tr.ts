@@ -1995,6 +1995,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Plan dosyası okunamadı',
   'inlineComment.range.lines': 'Satırlar {start}-{end}',
   'inlineComment.range.wholeFile': 'Dosyanın tamamı',
+  'inlineComment.card.codeChanged': 'Bu yorumun altındaki kod değişti',
   'inlineComment.input.placeholder': 'Yorum ekle... (kaydetmek için {shortcut})',
   'inlineComment.input.placeholderShort': 'Yorum ekle...',
   'inlineComment.actions.cancel': 'İptal',

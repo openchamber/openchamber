@@ -2034,6 +2034,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'تعذّر قراءة ملف الخطة',
   'inlineComment.range.lines': 'الأسطر {start}-{end}',
   'inlineComment.range.wholeFile': 'الملف كاملًا',
+  'inlineComment.card.codeChanged': 'تغيّر الكود الذي يشير إليه هذا التعليق',
   'inlineComment.input.placeholder': 'أضف تعليقًا… ({shortcut} للحفظ)',
   'inlineComment.input.placeholderShort': 'أضف تعليقًا…',
   'inlineComment.actions.cancel': 'إلغاء',
