@@ -1154,10 +1154,11 @@ const parseAuthAccounts = (
     || !isPositiveSafeInteger(account.credentialRevision) || !isNonEmptyString(account.providerUserId)
     || !['available', 'unavailable'].includes(account.providerUserStatus)
     || !isBooleanValue(account.current) || !['oauth', 'pat', 'cli'].includes(account.source)
-    || !['valid', 'invalid'].includes(account.status)) {
+    || !['valid', 'invalid'].includes(account.status)
+    || (account.usable !== undefined && !isBooleanValue(account.usable))) {
     throw new Error('Source control response contained an invalid auth credential');
   }
-  return {
+  const result: SourceControlAuthAccount = {
     id: account.id,
     credentialId: account.credentialId,
     credentialRevision: account.credentialRevision,
@@ -1169,6 +1170,9 @@ const parseAuthAccounts = (
     source: account.source,
     status: account.status,
   };
+  // Absent from older servers: the picker then keeps the current-only rule.
+  if (account.usable !== undefined) result.usable = account.usable;
+  return result;
 });
 
 const parseProviderAuthStatus = (payload: ProviderAuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {

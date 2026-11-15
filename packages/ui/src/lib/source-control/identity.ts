@@ -398,15 +398,17 @@ type ManagedAccountOption = {
  * Whether an identity can answer with this account.
  *
  * The server uses a provider's CLI login for Git transport only where the
- * provider says so (`auth.cliTransport`: the gh CLI), and only while it is the
- * active account in Integrations, so such an account counts only while it is
- * current. Any other CLI login never does: Git transport reads only the
- * credentials OpenChamber stores (the glab login).
+ * provider says so (`auth.cliTransport`: the gh CLI), and only while that login
+ * is usable there: the server says so per account (`usable`, a gh host with its
+ * switch on lists every login it holds), and an account from a server that does
+ * not say counts only while it is current. Any other CLI login never does: Git
+ * transport reads only the credentials OpenChamber stores (the glab login).
  */
 export const accountUsableByIdentity = (
-  account: Pick<SourceControlAuthAccount, 'source' | 'current'>,
+  account: Pick<SourceControlAuthAccount, 'source' | 'current' | 'usable'>,
   cliTransport: boolean,
-): boolean => account.source !== 'cli' || (cliTransport && account.current);
+): boolean => account.source !== 'cli'
+  || (cliTransport && (account.usable ?? account.current));
 
 /**
  * Why an identity's account cannot be used, for its Git Settings row: it names
@@ -417,11 +419,11 @@ export const accountUsableByIdentity = (
  */
 export const unavailableAccountReason = (
   account: SourceControlIdentity & { accountId: string },
-  listedAccounts: Pick<SourceControlAuthAccount, 'source' | 'current'>[] | null,
+  listedAccounts: Pick<SourceControlAuthAccount, 'source' | 'current' | 'usable'>[] | null,
   cliTransport: boolean,
 ): 'cli-not-in-use' | 'gone' => cliTransport
   && account.accountId.includes('#cli:')
-  && !listedAccounts?.some((listed) => listed.source === 'cli' && listed.current)
+  && !listedAccounts?.some((listed) => listed.source === 'cli' && (listed.usable ?? listed.current))
   ? 'cli-not-in-use'
   : 'gone';
 
