@@ -105,8 +105,15 @@ cancels a question the reader never saw. The line is not a collapsed
 and would overwrite what the card saved. The full panel still shows beside or
 instead of a card in three cases: a chat pinned in the side panel (see below),
 a session whose transcript is still loading, and an expanded composer. There
-it can overwrite the card's saved draft, for example when a reconnect hands it
-the same form again, as either of two docks on one form can today.
+it saves the shared draft when its own answers or its step change. Its draft
+key follows the form's id and session, not the form object, so a reconnect
+that hands it the same form again no longer saves over the card's answer or
+another dock's. A second dock whose step moves (Next or Back) still saves its
+own values over the shared draft. The panel is also keyed on the runtime:
+App and MobileApp remount on a runtime switch, VS Code and the desktop mini
+chat do not, and two runtimes can hold a form with the same id, session and directory, so a
+switch starts the panel over from the new runtime's draft instead of saving the
+old runtime's answers into it.
 The setting is device-local, not a
 synced preference: syncing it would need a server-side validator, and a phone
 and a desktop can reasonably want different answers. A chat pinned in the
