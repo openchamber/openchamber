@@ -40,6 +40,7 @@ import {
     type ReferencePickerSelection,
 } from '@/components/references/referencePickerItems';
 import { itemDirectory } from '@/components/references/acrossRepositories';
+import { usePreviewReturnScroll } from '@/components/references/usePreviewReturnScroll';
 import { forgetRepositoryPullStatus, forgetRepositoryPullStatuses, useRepositoryAcrossReferenceList, useTrackerItemDetail, useRepositoryHostProvider, useRepositoryReadContext, useRepositoryReferenceList } from '@/components/references/referenceSources';
 import { openExternalUrl } from '@/lib/url';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -919,6 +920,10 @@ const SourceBoardBody: React.FC<{
     const listWidth = useSourceBoardStore((state) => state.listWidth);
     const splitRef = React.useRef<HTMLDivElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
+    // The phone's list and preview share one scroller: the list's offset is kept
+    // while an item takes its place, and every preview starts at its top.
+    const inPreview = isMobile && Boolean(browser.mobilePreviewKey && previewItem);
+    const mobileScrollRef = usePreviewReturnScroll(inPreview ? browser.mobilePreviewKey : null);
     const [resizing, setResizing] = React.useState(false);
     const clampWidth = (width: number) => {
         const max = Math.max(LIST_MIN_WIDTH, (splitRef.current?.clientWidth ?? 0) * LIST_MAX_FRACTION);
@@ -952,7 +957,6 @@ const SourceBoardBody: React.FC<{
     };
 
     if (isMobile) {
-        const inPreview = Boolean(browser.mobilePreviewKey && previewItem);
         return (
             <>
                 {inPreview ? (
@@ -971,7 +975,7 @@ const SourceBoardBody: React.FC<{
                 {pinnedDiscoveryError && !inPreview ? pinnedDiscoveryError : null}
                 {/* A crash below keeps the header, the only way to close the page on iOS. */}
                 <ErrorBoundary>
-                    <ScrollableOverlay outerClassName="min-h-0 flex-1" className={inPreview ? 'px-4 py-3' : undefined} disableHorizontal>
+                    <ScrollableOverlay ref={mobileScrollRef} outerClassName="min-h-0 flex-1" className={inPreview ? 'px-4 py-3' : undefined} disableHorizontal>
                         {inPreview ? preview : list}
                     </ScrollableOverlay>
                 </ErrorBoundary>
