@@ -32,11 +32,10 @@ import { commentDraftScope } from './referenceCommentDrafts';
 import { useRepositoryReadContext } from './referenceSources';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
-import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips, RowPerson } from './ReferencePickerRow';
+import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
-import { useCopyReferenceLink } from './useCopyReferenceLink';
-import { SourceBoardBase } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { useCopyReferenceLink } from './useCopyReferenceLink'; import { MetaRow, ReferenceAssignees, ReferenceBase } from './ReferenceMetaEditors';
 import {
     repositoryStateLook,
     labelColor,
@@ -93,14 +92,6 @@ const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: R
     );
 };
 
-const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <>
-        <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
-        <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
-    </>
-);
-
-/** An item's state as a tinted pill; `trailing` adds a chevron when the pill opens a menu. */
 export const StatePill: React.FC<{
     icon: React.ComponentProps<typeof Icon>['name'];
     color: string;
@@ -529,14 +520,8 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
-    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : [];
-    const writeRefresh = onWriteRefresh ?? onRefresh;
-    const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
-    const canChangeBase = reference.kind === 'pull'
-        && reference.linked !== true
-        && descriptor.features.baseChange
-        && writeAccess !== false
-        && conversationWriteContext !== null && conversationWriteContext !== undefined;
+    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : []; const writeRefresh = onWriteRefresh ?? onRefresh; const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
+    const canChangeBase = reference.kind === 'pull' && reference.linked !== true && descriptor.features.baseChange && writeAccess !== false && conversationWriteContext != null;
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -804,24 +789,7 @@ const RepositoryPreview: React.FC<{
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                    {descriptor.features.branchHeads ? (
-                                        <span className="inline-flex min-w-0 items-center gap-1 font-mono">
-                                            <span className="truncate">{reference.head}</span>
-                                            <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                            <span className="truncate">{reference.base}</span>
-                                        </span>
-                                    ) : (
-                                        <span className="min-w-0 truncate font-mono">{reference.base}</span>
-                                    )}
-                                    {canChangeBase && conversationWriteContext ? (
-                                        <SourceBoardBase
-                                            pull={reference}
-                                            context={conversationWriteContext}
-                                            onChanged={async () => { await writeRefresh?.(); }}
-                                        />
-                                    ) : null}
-                                </span>
+                                <ReferenceBase pull={reference} branchHeads={descriptor.features.branchHeads} canChange={canChangeBase} context={conversationWriteContext} onChanged={async () => { await writeRefresh?.(); }} />
                             </MetaRow>
                             <PullDetailRows
                                 detail={detail}
@@ -837,11 +805,7 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reference.kind === 'issue' && (assigneesControl || assignees.length > 0) ? (
                         <MetaRow label={t('sourceBoard.assignees.label')}>
-                            {assigneesControl ?? (
-                                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                    {assignees.map((person) => <RowPerson key={person.id} name={person.login} avatarUrl={person.avatarUrl} />)}
-                                </span>
-                            )}
+                            <ReferenceAssignees control={assigneesControl} assignees={assignees} />
                         </MetaRow>
                     ) : null}
                     {labelsControl ? (

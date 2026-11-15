@@ -14,7 +14,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `accounts.js`: auth per instance in the neutral `SourceControlAuthStatus` shape: github.com's device flow and Settings gh switch, an enterprise host's PATs and own gh switch, activation, removal.
 - `gh-cli-logins.js`: a host's gh logins, each with the GitHub account it belongs to (`<host>#cli:<id>`), and the exact login a `#cli:` account id names.
 - `resources.js`: the bound reads (status, lists, context, issues, upstream, branches, labels, reviewer candidates), the reference picker reads, and the change-request head and source behind worktrees, all answering neutral DTOs. It keeps the short PR context cache.
-- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded.
+- `mutations.js`: the durable mutations: `prepare` (GitHub's kinds and digests, byte-identical to the records already stored), `resolveTarget` (preflight against GitHub), `perform`, `reconcile`, `afterSuccess` (drops the target's pull context and the repository's pull lists; the shell calls it best effort after the record is durable, so a cache failure never turns a landed write into `outcome-unknown`), and how failures are classified and worded. `mutations-change-request.js` holds the base, update-branch and rebase writes; `mutations-items.js` holds the assignee set, the issue close reason and its state writes.
 - `mappers.js`: strict checks of GitHub REST payloads and the mappers to neutral DTOs (`Project`, `ChangeRequest`, `Issue`, `IssueComment`, `CI`, users, accounts).
 - `auth.js`: auth storage, multi-account support, client id, scope config.
 - `device-flow.js`: OAuth device flow.
@@ -22,7 +22,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `repo/index.js`: remote URL parsing and directory-to-repo resolution.
 - `pr-status.js`: PR lookup across remotes, forks, and upstreams.
 - `pr-summaries.js`: batched live state for PRs already known by number.
-- `reference-search.js`: issue, PR and discussion pages for the reference picker, and an item's detail.
+- `reference-search.js`: issue, PR and discussion pages for the reference picker, and an item's detail; `detail-query.js` holds the detail GraphQL query and the page limits it interpolates.
 - `checks-summary.js`: the one checks summarizer shared by every PR read.
 - `review-draft.js`: a pull request's review as the diff draws it: the viewer's pending review and the open threads with their lines.
 - `change-request-patch.js`: a pull request's diff and one file's two sides for walkthroughs and the comparison view.
