@@ -83,6 +83,11 @@ test('renders semantic Markdown through native Streamdown code and table compone
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
 });
 
+test('each table wrapper follows its content direction', async () => {
+  await render('| الاسم | القيمة |\n| --- | --- |\n| واحد | اثنان |\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n| 1 | 2 |\n| --- | --- |\n| 3 | 4 |');
+  expect(Array.from(host.querySelectorAll('[data-streamdown="table-wrapper"]'), (wrapper) => wrapper.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'ltr']);
+});
+
 test('legacy quotes cross prose and fenced code in the application renderer', async () => {
   for (const language of ['js', 'JS', '']) {
     const markdown = `Before\n\n\`\`\`${language}\nconst x=1;\n\`\`\`\n\nAfter`;
