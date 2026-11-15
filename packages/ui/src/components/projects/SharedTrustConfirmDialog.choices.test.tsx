@@ -39,6 +39,7 @@ const setup: ProjectSetup = {
     draftStarters: [],
     hiddenSharedActionIds: [],
     sharedTrust: null,
+    notesTodosInRepository: false,
   },
 };
 

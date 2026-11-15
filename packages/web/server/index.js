@@ -754,6 +754,8 @@ const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  // Switching where notes and todos live moves them under the context lock.
+  switchNotesTodosStorage: (projectId, change) => projectContextRuntime.switchNotesTodosStorage(projectId, change),
 });
 
 const projectContextRuntime = createProjectContextRuntime({
@@ -761,6 +763,7 @@ const projectContextRuntime = createProjectContextRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
   resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
+  resolveNotesTodosFile: (projectId) => projectConfigRuntime.resolveNotesTodosFile(projectId),
   onChanged: (projectId) => broadcastOpenChamberUiEvent({
     type: 'openchamber:project-context-changed',
     properties: { projectId },

@@ -15,6 +15,7 @@ interface ContextPayload {
   notes: NotePayload[];
   todos: { id: string; text: string; completed: boolean; createdAt: number; planId?: string; dependsOn?: string[] }[];
   plans: { id: string; file: string; title: string; createdAt: number; pinned: boolean }[];
+  notesTodosStore?: 'local' | 'repository';
 }
 
 const emptyPayload = (): ContextPayload => ({ notes: [], todos: [], plans: [] });
@@ -66,6 +67,7 @@ const handlers = {
   remove: async (): Promise<ContextPayload> => emptyPayload(),
 };
 
+const savedStores: (string | null)[] = [];
 const calls = { fetch: 0, saveTodos: 0, writeTodo: 0, createNote: 0, updateNote: 0, deleteNote: 0, create: 0, update: 0, pinPlan: 0, remove: 0 };
 
 mock.module('@/lib/projectContextApi', () => ({
@@ -73,8 +75,9 @@ mock.module('@/lib/projectContextApi', () => ({
     calls.fetch += 1;
     return handlers.fetch();
   },
-  saveProjectTodos: (_project: unknown, todos: ContextPayload['todos']) => {
+  saveProjectTodos: (_project: unknown, todos: ContextPayload['todos'], todosStore: string | null) => {
     calls.saveTodos += 1;
+    savedStores.push(todosStore);
     return handlers.saveTodos(todos);
   },
   writeProjectTodo: (_project: { path?: string }, change: ProjectTodoChange) => {
@@ -136,6 +139,7 @@ const failWith = (message: string) => async (): Promise<never> => {
 
 beforeEach(() => {
   store().reset();
+  savedStores.length = 0;
   calls.fetch = 0;
   calls.saveTodos = 0;
   calls.writeTodo = 0;
@@ -161,7 +165,7 @@ beforeEach(() => {
 
 describe('getEntry', () => {
   test('returns a stable empty entry for an unknown project', () => {
-    expect(entry()).toEqual({ notes: [], todos: [], plans: [], sharedPlansDir: null, loaded: false, loading: false, error: null });
+    expect(entry()).toEqual({ notes: [], todos: [], plans: [], sharedPlansDir: null, notesTodosStore: null, loaded: false, loading: false, error: null });
   });
 
   test('returns the empty entry for a project without a path', () => {
@@ -320,6 +324,20 @@ describe('load', () => {
 });
 
 describe('saveTodos', () => {
+  test('a whole list names the store it was read from, and a refused one reloads the list', async () => {
+    const todo = { id: 'a', text: 'A', completed: false, createdAt: 1 };
+    handlers.fetch = async () => ({ notes: [], todos: [todo], plans: [], notesTodosStore: 'local' });
+    await store().load(PROJECT);
+    handlers.fetch = async () => ({ notes: [], todos: [{ ...todo, id: 'team' }, todo], plans: [], notesTodosStore: 'repository' });
+    handlers.saveTodos = failWith('Notes and todos moved to another store; reload the list');
+
+    expect(await store().saveTodos(PROJECT, [])).toBe(false);
+    expect(savedStores).toEqual(['local']);
+    await store().load(PROJECT);
+    expect(entry().todos.map((entry) => entry.id)).toEqual(['team', 'a']);
+    expect(entry().notesTodosStore).toBe('repository');
+  });
+
   test('applies optimistically before the request resolves', async () => {
     const gate = deferred<ContextPayload>();
     handlers.saveTodos = () => gate.promise;

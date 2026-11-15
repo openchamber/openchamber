@@ -147,6 +147,7 @@ export const projectSetupViewOf = (raw) => {
     draftStarters: sanitizeDraftStarters(document.draftStarters),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
+    notesTodosInRepository: document.notesTodosInRepository === true,
   };
 };
 
@@ -211,6 +212,12 @@ export const projectSetupPatchToStored = (patch) => {
     if (hash !== null && (typeof hash !== 'string' || !hash.trim())) throw new Error('sharedTrustHash must be a non-empty string or null');
     stored.sharedTrust = hash === null ? undefined : { hash: hash.trim(), trustedAt: Date.now() };
   }
+  if ('notesTodosInRepository' in patch) {
+    if (patch.notesTodosInRepository !== true && patch.notesTodosInRepository !== false) {
+      throw new Error('notesTodosInRepository must be a boolean');
+    }
+    stored.notesTodosInRepository = patch.notesTodosInRepository || undefined;
+  }
   if ('projectPath' in patch) {
     if (typeof patch.projectPath !== 'string') throw new Error('projectPath must be a string');
     const projectPath = patch.projectPath.trim();
@@ -224,6 +231,8 @@ export const projectSetupPatchToStored = (patch) => {
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 /** Where repository plans live unless the shared file's `plansDir` says otherwise. */
 export const DEFAULT_PLANS_DIR = '.openchamber/plans';
+/** Where notes and todos live when the personal `notesTodosInRepository` option is on. */
+export const NOTES_TODOS_RELATIVE_PATH = '.openchamber/notes-todos.json';
 const SHARED_CONFIG_VERSION = 1;
 /**
  * The keys of the shared file the setup writer owns. Every other key
