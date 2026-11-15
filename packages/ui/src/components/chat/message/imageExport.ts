@@ -1,3 +1,5 @@
+import type { Theme } from '@/types/theme';
+
 export const MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE = 'data-message-image-export-exclude';
 
 /** `html-to-image` squashes a canvas past this size instead of failing. */
@@ -92,11 +94,12 @@ export const cloneMessageImageExportSource = (source: HTMLElement): HTMLElement 
 export const buildTurnImageExportSource = async (
     segments: readonly string[],
     syntaxStyle: string | null,
+    options: { width?: number; theme?: Theme } = {},
 ): Promise<HTMLElement> => {
     const { renderMarkdownForExport } = await import('../markdown/renderMarkdownForExport');
     const source = document.createElement('div');
     for (const text of segments) {
-        const markdown = await renderMarkdownForExport(text, { purpose: 'image', syntaxStyle });
+        const markdown = await renderMarkdownForExport(text, { ...options, purpose: 'image', syntaxStyle });
         const segment = document.createElement('div');
         segment.className = 'relative break-words my-1';
         segment.appendChild(markdown);

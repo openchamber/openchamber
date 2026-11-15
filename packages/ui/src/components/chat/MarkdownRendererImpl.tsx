@@ -11,6 +11,7 @@ import {
 } from 'streamdown';
 import type { Pluggable } from 'unified';
 import type { Part } from '@/lib/opencode/model';
+import type { Theme } from '@/types/theme';
 import { cn } from '@/lib/utils';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -287,6 +288,8 @@ export interface MarkdownContentProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
   purpose?: 'copy' | 'image';
+  /** Detached exports have no theme provider. */
+  theme?: Theme;
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
   /** Item text of this repository: `#12`, `@someone` and commit ids link as its host links them. Keep the object stable. */
@@ -295,7 +298,7 @@ export interface MarkdownContentProps {
   emojiShortcodes?: EmojiShortcodes | null;
   /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
   windowed?: boolean;
-  /** `openui-lang` fences draw as UI blocks; only assistant and subagent replies set it. */
+  /** `openui-lang` fences draw as UI blocks in assistant replies and their images. */
   uiBlocks?: boolean;
   /** `svg` fences draw as images; only the Files preview sets it. */
   svgFences?: boolean;
@@ -327,6 +330,7 @@ export function MarkdownContent({
   onShowPopup,
   mermaidControls = defaultMermaidControls,
   purpose,
+  theme: exportTheme,
   preparedHighlights,
   onExportCode,
   repositoryLinks,
@@ -338,7 +342,7 @@ export function MarkdownContent({
   guestLinks = null,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
-  const theme = themeSystem?.currentTheme ?? getDefaultTheme(
+  const theme = exportTheme ?? themeSystem?.currentTheme ?? getDefaultTheme(
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
   );
   const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
@@ -454,9 +458,7 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
-    // Only an assistant or subagent reply on screen draws UI blocks; copies
-    // and image exports keep the block's source.
-    uiBlocks: uiBlocks && !purpose,
+    uiBlocks: uiBlocks && purpose !== 'copy',
     svgFences: svgFences && !purpose,
     settledReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
@@ -466,11 +468,12 @@ export function MarkdownContent({
     mermaidControls,
     onShowPopup,
     onExportCode,
+    preparedHighlights,
     confirmFile,
     code,
   }), [
     directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, theme,
-    mermaidControls, onShowPopup, onExportCode, confirmFile, code,
+    mermaidControls, onShowPopup, onExportCode, preparedHighlights, confirmFile, code,
   ]);
 
   let body = (

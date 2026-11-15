@@ -87,6 +87,7 @@ import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCrea
 import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
 import { hasTextSelectionInside } from '@/lib/textSelection';
 import { DiffCount } from '@/components/ui/diff-count';
+import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 
 
 // Layout containment only. A `translateZ(0)` here once gave every message its
@@ -1286,6 +1287,7 @@ const AssistantMessageBody = React.memo(({
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
+    const theme = useOptionalThemeSystem()?.currentTheme;
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1540,7 +1542,7 @@ const AssistantMessageBody = React.memo(({
                 // their gutter from clipping the last column of a wide table.
                 const exportStyle = document.createElement('style');
                 exportStyle.textContent = `
-                    [data-message-image-export] * { scrollbar-width: none; }
+                    [data-message-image-export] * { scrollbar-width: none; animation: none !important; transition: none !important; }
                     [data-message-image-export] *::-webkit-scrollbar { display: none; }
                 `;
                 wrapper.appendChild(exportStyle);
@@ -1667,7 +1669,10 @@ const AssistantMessageBody = React.memo(({
             const syntaxStyle = messageContentRef.current?.querySelector('[data-markdown-content]')?.getAttribute('style') ?? null;
             let turnSource: HTMLElement;
             try {
-                turnSource = await buildTurnImageExportSource(segments, syntaxStyle);
+                turnSource = await buildTurnImageExportSource(segments, syntaxStyle, {
+                    width: resolveMessageImageExportWidth(messageContentRef.current),
+                    theme,
+                });
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
@@ -1675,7 +1680,7 @@ const AssistantMessageBody = React.memo(({
             }
             await shareMessageAsImage(turnSource);
         },
-        [shareMessageAsImage, t]
+        [shareMessageAsImage, t, theme]
     );
     const shareTurnAsImage = React.useCallback(
         (requestedSourceElement?: HTMLElement | null) => shareTextAsImage(
