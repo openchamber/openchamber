@@ -145,6 +145,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
 
 - `bridge-system-runtime.ts`
+  - Cursor Enterprise quota shares `providers/cursor-summary.js` with the web server for individual dollar allowances when the older APIs expose no billing-cycle meter. Cookie handling, personal scope and cents conversion follow the quota module's "Cursor individual dollar allowance fallback" contract.
   - System/editor/provider/quota/notification/update-check message handlers.
   - `api:notifications:show` hands the webview's notification to `openchamber.internal.showNotification` in `extension.ts`, which shows it through `sessionNotifications.ts` and answers `{ shown }`. Chromium never displays a `new Notification()` from a webview frame, so the extension host is the only place a VS Code notification can come from.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories). A busy entry also carries how long its turn has been running, measured by the extension host, so a webview that attaches later counts the sidebar timer from the turn's start instead of from the moment it opened.

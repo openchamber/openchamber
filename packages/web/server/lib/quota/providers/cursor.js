@@ -3,6 +3,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { readManagedCredential, writeManagedCredential } from '../credentials/providers.js';
+import { fetchCursorSummaryWindow } from './cursor-summary.js';
 import {
   buildResult,
   formatMoney,
@@ -373,6 +374,10 @@ export const fetchQuota = async () => {
       ]);
       const memberSpend = pickTeamMemberSpendByUserId(teamSpend, me?.userId);
       const windows = buildEnterpriseWindows(usage, plan, authUsage, hardLimit, memberSpend);
+      if (!windows.billing_cycle) {
+        const summaryWindow = await fetchCursorSummaryWindow(accessToken).catch(() => null);
+        if (summaryWindow) windows.billing_cycle = summaryWindow;
+      }
       if (!windows.billing_cycle && !windows.on_demand) {
         return buildResult({
           providerId,
