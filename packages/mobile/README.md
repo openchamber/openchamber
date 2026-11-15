@@ -104,6 +104,8 @@ This setup uses a named Cloudflare Tunnel, a hostname such as `oc.example.com`, 
 
 The Service Auth policy still protects actual requests. Preflight requests contain header names but no service-token values, so Access must answer them before the app can send authenticated HTTP requests. Without this configuration, native sign-in can succeed while session loading and chat fail.
 
+Alternatively, turn **Bypass OPTIONS requests to origin** on and let OpenChamber answer preflights: the server allows these headers, including both `CF-Access-Client-*` names, for the app's origins. Actual requests still need the service token and OpenChamber authentication.
+
 To check the preflight without sending credentials:
 
 ```sh
