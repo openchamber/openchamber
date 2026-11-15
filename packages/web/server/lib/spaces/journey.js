@@ -43,7 +43,7 @@ import { z } from 'zod';
 
 import { SpaceError } from './errors.js';
 import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
-import { headerOfPackage, windowUpstreamOf } from './host-providers.js';
+import { headerOfProvider, windowUpstreamOf } from './host-providers.js';
 import { permissionDefaultOf } from './space-permission-default.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
@@ -483,7 +483,7 @@ export function createSpaceJourney({
   const customWindowOf = (definition) => {
     if (!definition) return null;
     const upstream = definition.baseURL === null ? null : windowUpstreamOf(definition.baseURL);
-    const header = headerOfPackage(definition.package);
+    const header = headerOfProvider(definition);
     if (upstream === null || header === null) return null;
     const window = definition.key === null ? { upstream, header: null, secret: null } : { upstream, header, secret: definition.key };
     if (Object.keys(definition.headers).length > 0) window.headers = definition.headers;
@@ -980,7 +980,7 @@ export function createSpaceJourney({
     if (asked.kind === 'custom') {
       const definition = await hostProviders.read(asked.provider, current.record.repository);
       if (!definition) throw new SpaceError('provider_not_found', `${asked.provider} is not a provider of your own in Settings. Add it there, then grant.`);
-      if (headerOfPackage(definition.package) === null) throw new SpaceError('provider_not_supported', `${definition.name} cannot be given through the network filter yet: its SDK reads a key in a way the network filter does not know.`);
+      if (headerOfProvider(definition) === null) throw new SpaceError('provider_not_supported', `${definition.name} cannot be given through the network filter yet: its SDK, or a model's own SDK, reads a key in a way the network filter does not know.`);
       window = customWindowOf(definition);
       if (!window) throw new SpaceError('provider_not_supported', `${definition.name} has no http(s) address in Settings.`);
       grant = { kind: 'custom', id: asked.provider, provider: asked.provider };

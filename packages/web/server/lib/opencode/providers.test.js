@@ -87,16 +87,95 @@ describe('custom provider config persistence', () => {
   });
 
   test('rejects unsupported adapter packages', () => {
-    const result = validateCustomProviderConfig('ok', {
-      name: 'X',
-      npm: '@example/unsupported',
-      env: ['MY_KEY'],
-      options: { baseURL: 'https://api.example.com/v1' },
-      models: { m: { name: 'M' } },
+    for (const packageName of [
+      '@example/unsupported',
+      '@opencode/ai/providers/amazon-bedrock',
+      'aisdk:@opencode/ai/providers/anthropic-compatible',
+    ]) {
+      const result = validateCustomProviderConfig('ok', {
+        name: 'X',
+        package: packageName,
+        env: ['MY_KEY'],
+        settings: { baseURL: 'https://api.example.com/v1' },
+        models: { m: { name: 'M' } },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('@ai-sdk/openai');
+    }
+  });
+
+  test('a form save keeps a built-in model package when reasoning levels change', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        magpie: {
+          name: 'Magpie',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['MAGPIE_KEY'],
+          settings: { baseURL: 'https://magpie.example.com/v1' },
+          models: {
+            'group/claude-opus-5.5': {
+              name: 'Opus',
+              package: '@opencode/ai/providers/anthropic-compatible',
+              variants: [{ id: 'high', settings: { effort: 'high' } }],
+            },
+          },
+        },
+      },
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('@ai-sdk/openai');
+    const { config } = getProviderSources('magpie', projectDir);
+    upsertProviderConfig('magpie', {
+      name: config.name,
+      package: config.package,
+      env: config.env,
+      settings: { baseURL: config.settings.baseURL },
+      models: {
+        'group/claude-opus-5.5': { name: 'Opus', variants: [{ id: 'max', settings: { effort: 'max' } }] },
+      },
+    }, projectDir, 'project');
+
+    expect(readJson(configPath).providers.magpie.models['group/claude-opus-5.5']).toEqual({
+      modelID: 'group/claude-opus-5.5',
+      name: 'Opus',
+      package: '@opencode/ai/providers/anthropic-compatible',
+      variants: [{ id: 'max', settings: { effort: 'max' } }],
+    });
+    expect(config.models['group/claude-opus-5.5'].package).toBe('@opencode/ai/providers/anthropic-compatible');
+  });
+
+  test('built-in provider packages round-trip through source reads and saves', () => {
+    for (const packageName of [
+      '@opencode/ai/providers/openai-compatible',
+      '@opencode/ai/providers/openai-compatible/responses',
+      '@opencode/ai/providers/openai-compatible-responses',
+      '@opencode/ai/providers/openai',
+      '@opencode/ai/providers/openai/chat',
+      '@opencode/ai/providers/openai/responses',
+      '@opencode/ai/providers/anthropic',
+      '@opencode/ai/providers/anthropic-compatible',
+    ]) {
+      const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+      writeJson(configPath, { providers: { native: {
+        name: 'Native',
+        package: packageName,
+        env: ['NATIVE_KEY'],
+        settings: { baseURL: 'https://native.example.com/v1', timeout: 5000 },
+        models: { m: { name: 'M' } },
+      } } });
+
+      const { config } = getProviderSources('native', projectDir);
+      upsertProviderConfig('native', { ...config, name: 'Renamed' }, projectDir, 'project');
+
+      expect(readJson(configPath).providers.native).toEqual({
+        name: 'Renamed',
+        package: packageName,
+        env: ['NATIVE_KEY'],
+        settings: { baseURL: 'https://native.example.com/v1', timeout: 5000 },
+        models: { m: { modelID: 'm', name: 'M' } },
+      });
+    }
   });
 
   test('upsertProviderConfig writes and round-trips project config', () => {
