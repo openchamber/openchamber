@@ -126,6 +126,8 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       // The whole description and the permission to replace it, where the host sends them.
       body: z.string().optional(),
       viewerCanUpdate: z.boolean().optional(),
+      assignees: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).optional(),
+      writeAccess: z.boolean().optional(),
       // A thread's replies are comments without threads of their own.
       comments: z.array(z.object({
         ...referenceCommentFields,
