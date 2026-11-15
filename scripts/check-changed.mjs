@@ -1,21 +1,28 @@
 #!/usr/bin/env node
-// The pre-commit gate for agent work: type-check, lint, dead code, and an
-// anti-slop ratchet over the files the change touches.
+// The pre-commit gate for agent work: type-check, lint, dead code, a ratchet
+// over the files the change touches, and a size limit on them.
 //
-// The anti-slop backlog predates the plugin, so a blanket oxlint run is never
-// clean. The ratchet compares the changed files with their versions at the
+// The ratcheted rules (`oxlint.anti-slop.config.ts`) have a backlog older than
+// the rules, so a blanket oxlint run is never clean. The ratchet compares the changed files with their versions at the
 // base and fails when a rule reports more findings across them than it did
 // there: a change may leave old findings alone, but it cannot add new ones.
 // Totals are per rule over the whole change, so code moved between files
 // (ten private copies of a check folded into one shared helper) is not new.
 //
+// A file the change renamed is compared with its old path, and a file it
+// deleted counts at the base, so splitting or moving a file is not new either.
+//
+// The size limit: a source file over 800 lines cannot be added and cannot grow.
+//
 // The base is where the branch left origin/main, so the comparison covers
 // uncommitted edits and commits not yet in main alike.
 //
-// Usage: bun run check:changed [-- --base <ref>]
+// Usage: bun run check:changed [-- --base <ref>] [-- --ratchet-only]
+// `--ratchet-only` skips type-check, lint and dead code, for CI jobs that run
+// those on their own.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +30,9 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OXLINT_CONFIG = path.join(REPO_ROOT, 'oxlint.anti-slop.config.ts');
 const LINTABLE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
+const SIZE_LIMIT = 800;
+const SIZED_FILE = /^packages\/[^/]+\/.*\.(ts|tsx|js|jsx|mjs|cjs)$/;
+const SIZE_EXEMPT = /(\.(test|spec|vitest|fixture|test-support|bench)\.|\/(__tests__|tests?)\/|\/i18n\/messages\/|\.i18n\.ts$|\.d\.ts$|\.generated\.)/;
 
 const git = (args) => execFileSync('git', args, {
   cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
@@ -39,6 +49,49 @@ const listChangedFiles = (base) => {
   const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n');
   return [...new Set([...tracked, ...untracked])].filter((file) => LINTABLE_FILE.test(file));
 };
+
+/** Old path of every file the change renamed, keyed by its new path. */
+export const parseRenames = (nameStatus) => {
+  const renames = new Map();
+  for (const line of nameStatus.split('\n')) {
+    const [status, from, to] = line.split('\t');
+    if (status?.startsWith('R') && from && to) renames.set(to, from);
+  }
+  return renames;
+};
+
+const listRenames = (base) => parseRenames(git(['diff', '--name-status', '--diff-filter=R', base]));
+
+const listDeletedFiles = (base) => git(['diff', '--name-only', '--diff-filter=D', base])
+  .split('\n').filter((file) => LINTABLE_FILE.test(file));
+
+const readAtBase = (base, file) => {
+  try {
+    return git(['show', `${base}:${file}`]);
+  } catch {
+    return null;
+  }
+};
+
+const countLines = (content) => (content === '' ? 0 : content.replace(/\n$/, '').split('\n').length);
+
+/**
+ * Source files over the size limit that the change added or made longer.
+ * Message catalogs, declarations, generated files and tests have no limit.
+ */
+export const findOversizedGrowth = (sizes) => sizes.filter(({ file, baseLines, currentLines }) => (
+  SIZED_FILE.test(file) && !SIZE_EXEMPT.test(file)
+  && currentLines > SIZE_LIMIT && (baseLines === null || currentLines > baseLines)
+));
+
+const checkFileSizes = (base, files, renames) => findOversizedGrowth(files.map((file) => {
+  const baseContent = readAtBase(base, renames.get(file) ?? file);
+  return {
+    file,
+    baseLines: baseContent === null ? null : countLines(baseContent),
+    currentLines: countLines(readFileSync(path.join(REPO_ROOT, file), 'utf8')),
+  };
+}));
 
 /** Findings counted per file and rule, keyed `file\0rule`. */
 const countFindings = (diagnostics, toRepoPath) => {
@@ -103,19 +156,15 @@ const runOxlint = (files, cwd) => {
   return parseOxlintReport(result.stdout);
 };
 
-const checkAntiSlopRatchet = (base, files) => {
+const checkRatchet = (base, files, renames, deleted) => {
   const current = countFindings(runOxlint(files, REPO_ROOT), (file) => path.relative(REPO_ROOT, path.resolve(REPO_ROOT, file)));
 
   const baseDir = mkdtempSync(path.join(tmpdir(), 'oc-check-changed-'));
   try {
     const baseFiles = [];
-    for (const file of files) {
-      let content;
-      try {
-        content = git(['show', `${base}:${file}`]);
-      } catch {
-        continue; // Added since the base: every finding in it is new.
-      }
+    for (const file of [...files.map((changed) => renames.get(changed) ?? changed), ...deleted]) {
+      const content = readAtBase(base, file);
+      if (content === null) continue; // Added since the base: every finding in it is new.
       const target = path.join(baseDir, file);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, content);
@@ -135,25 +184,42 @@ const runStep = (label, command, args) => {
 };
 
 const main = () => {
-  const base = readBase(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const base = readBase(argv);
+  const ratchetOnly = argv.includes('--ratchet-only');
   const files = listChangedFiles(base);
+  const renames = listRenames(base);
   console.log(`Base ${base.slice(0, 9)}; ${files.length} changed source file(s).`);
 
   const failed = [];
-  if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
-  if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
-  if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+  if (!ratchetOnly) {
+    if (!runStep('type-check', 'bun', ['run', 'type-check'])) failed.push('type-check');
+    if (!runStep('lint', 'bun', ['run', 'lint'])) failed.push('lint');
+    if (!runStep('dead code', 'bun', ['run', 'dead-code'])) failed.push('dead code');
+  }
 
-  console.log('\n▶ anti-slop ratchet');
-  const violations = checkAntiSlopRatchet(base, files);
+  console.log('\n▶ ratchet');
+  const violations = checkRatchet(base, files, renames, listDeletedFiles(base));
   for (const { rule, base: before, current, files: grown } of violations) {
     console.log(`  ${rule}: ${before} → ${current} (grew in ${grown.join(', ')})`);
   }
   if (violations.length > 0) {
-    console.log(`  Run \`bunx oxlint <file>\` for locations. Fix the new findings; the old ones may stay.`);
-    failed.push('anti-slop ratchet');
+    console.log(`  Run \`bunx oxlint -c oxlint.anti-slop.config.ts <file>\` for locations and what to do instead. Fix the new findings; the old ones may stay.`);
+    failed.push('ratchet');
   } else {
     console.log('  No new findings.');
+  }
+
+  console.log('\n▶ file size');
+  const oversized = checkFileSizes(base, files, renames);
+  for (const { file, baseLines, currentLines } of oversized) {
+    console.log(`  ${file}: ${baseLines === null ? 'new file' : baseLines} → ${currentLines} lines (limit ${SIZE_LIMIT})`);
+  }
+  if (oversized.length > 0) {
+    console.log('  Put the new behavior in its own module in the feature\'s folder and import it. Do not make room by deleting unrelated code.');
+    failed.push('file size');
+  } else {
+    console.log('  No file over the limit grew.');
   }
 
   if (failed.length > 0) {
