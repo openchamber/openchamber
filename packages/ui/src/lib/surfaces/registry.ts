@@ -16,6 +16,7 @@ type BuiltInContextSurfaceId =
   | 'context'
   | 'browser'
   | 'workflows'
+  | 'subagents'
   | 'chat'
   | 'pages';
 
@@ -127,6 +128,14 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'subagents',
+    descriptionKey: 'contextRail.surface.subagents.description',
+    mode: 'subagents',
+    icon: 'ai-agent',
+    labelKey: 'contextPanel.mode.subagents',
+    availability: 'has-content',
+  },
+  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     mode: 'chat',
@@ -167,6 +176,7 @@ const BUILT_IN_SURFACE_GROUPS = {
   browser: 'tools',
   notes: 'workspace',
   workflows: 'workspace',
+  subagents: 'workspace',
   chat: 'workspace',
   pages: 'workspace',
 } satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;

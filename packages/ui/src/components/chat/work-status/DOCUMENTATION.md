@@ -229,7 +229,9 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
+| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row); all of it in `useSubagentRows`, shared with the Subagents panel | |
+| Subagent activity and context | the child's own messages and parts in the directory store (`subagentActivity.ts`, `SubagentLive.tsx`), one leaf subscription per row | see *What a subagent is doing* below |
+| Subagent report | the newest `<subagent>` report in the parent: a report message for a background run, the call's own result for a foreground one (`useSubagentReports`) | recomputed when the parent's message list changes (per message, never per streamed part), with each message's and each part array's reports cached; nothing is read while the session has no subagents |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
@@ -275,9 +277,67 @@ removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
 
-Hovering or focusing a row shows its session model's catalog display name,
-falling back to the formatted model ID. Missing model metadata produces no
-tooltip. Model-only session updates invalidate the live-session comparison.
+Each row has a second line. A working subagent's says what it does now, then
+its agent and model; a finished one's is how long it ran, then its agent and
+model; any other row shows the agent and model. The figure that changes
+leads in both, so long agent and model names truncate before it does. The report never takes that
+line: who ran the work is what the row is scanned for, and the report's
+first line sits in the tooltip, the whole report in the panel. The value column
+adds the context fill while the subagent works or waits on the user, muted
+until the header's warning band. The tooltip holds the agent, the model and
+the report line whole. Tokens in the value column are what the subagent spent on its own work:
+input, output, reasoning and cache writes, from its session record. Cache
+reads are left out, as the Workflows panel leaves them out: each step
+re-reads the whole cached prompt, so a 25-step run read 2.2M from cache
+while its own work was 118K. The heading's button opens the Subagents panel
+(`components/chat/subagents`) where a context panel exists; on the phone and
+in VS Code it is absent.
+
+### What a subagent is doing
+
+OpenCode streams a child session's steps and parts into its directory's
+store, whether or not anyone opened the child's chat. That is the parent's
+store until the child moves to another worktree, so the row reads the
+child's own directory, never the panel's. It skips plumbing messages (a
+report from a nested subagent, a system notice) to find the step in progress
+(`getLastConversationMessage`), so a report landing during a long command
+does not turn the command into silence. The row reads
+(`readSubagentActivity`): a running or pending tool call with
+its argument and, after 10 seconds, its own time; reasoning or text still
+streaming; a retry with its countdown; or, when nothing streams and no tool
+runs, a wait since the last progress, shown as the last tool call until it
+passes 90 seconds (`SUBAGENT_SILENCE_MS`) and then as silence in yellow. A
+long command is a running tool, so it never reads as silence. A child that
+started before the window shows only what arrived since: enough for "what
+now", never a step count.
+
+Each row subscribes on its own, with a selector that returns the activity as
+a string. Text streaming into a part changes nothing the row shows, so it
+re-renders nothing; the one-second clock ticks only the line itself.
+
+#### Why reports follow the parent's message list and not the store
+
+A store selector runs on every flush of the directory, streamed parts of any
+session included. Collecting reports there walked the whole parent history
+per flush, so the hook subscribes to the parent's message list instead, whose
+identity changes once per message: a background report is a message, and a
+foreground call's step completes as a message update after its result. An
+earlier version subscribed to a string naming every report source and kept
+it only as a `useMemo` dependency (`void fingerprint`); the React Compiler
+dropped that unused read and the reports never refreshed.
+
+#### Why the activity selector remembers its inputs
+
+The row's selector also runs on every flush. It returns the last answer while
+the child's message list, the parts of its newest step and its status are the
+same objects, and a tool call's label is cached per part object, so a large
+patch or script is described once, not once per flush.
+
+#### Why the activity leads the second line
+
+The agent and model came first in the design, and a real model name ("general
+· DeepSeek V4.1 Flash 1017") left no room for the call, which is the part
+that changes. So the activity leads and the identity truncates first.
 
 ### Turn stats
 
@@ -688,9 +748,9 @@ The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
 just collapsed it.
 
-Its expanded list is capped at eight rows and scrolls independently, so a
-session with many subagents does not crowd every section below it out of the
-panel.
+Its expanded list is capped at eight two-line rows and scrolls independently,
+so a session with many subagents does not crowd every section below it out of
+the panel.
 
 ## Collapsed Usage headline
 
@@ -733,6 +793,7 @@ Rows that name something the app can already show are buttons:
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | The Tracker's branch tab (`openContextPanelTab(dir, { mode: 'pr' })`) |
 | Subagent | that child session's chat tab, read-only |
+| Subagents heading button | the Subagents panel (`openSubagentsPanel`) |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
 | MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`); switching on a `needs_auth` server signs in instead |
