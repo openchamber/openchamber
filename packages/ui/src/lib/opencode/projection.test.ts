@@ -218,6 +218,16 @@ describe("projectUserParts", () => {
     const parts = projectUserParts({ text: "" }, { sessionID: "s", messageID: "m", created: 1 })
     expect(parts).toEqual([])
   })
+
+  test("skills attached to a stored prompt stay on the message without their text", () => {
+    const attached = projectMessage({
+      id: "msg_u", type: "user", time: { created: 1 }, text: "Follow $demo",
+      skills: [{ id: "demo", name: "Demo", text: "<skill_content>…</skill_content>" }],
+    }, "ses_1")
+    expect(attached.message).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1 }, skills: [{ id: "demo", name: "Demo" }] })
+    const plain = projectMessage({ id: "msg_p", type: "user", time: { created: 2 }, text: "hi" }, "ses_1")
+    expect(plain.message).not.toHaveProperty("skills")
+  })
 })
 
 describe("projectMessage (other roles)", () => {

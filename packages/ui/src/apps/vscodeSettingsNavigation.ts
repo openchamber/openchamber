@@ -3,6 +3,7 @@ import { resolveSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import type { VSCodeSettingsNavigation } from '@/lib/settings/vscodeNavigation';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -12,6 +13,7 @@ export const applyVSCodeSettingsNavigation = (navigation: VSCodeSettingsNavigati
   ui.setSettingsProjectPath(navigation.directory ?? null);
   ui.setSettingsProvidersConnectRequested(navigation.connectProvider === true);
   ui.setSettingsProvidersOpenRequested(navigation.providerId ?? null);
+  if (navigation.skillName) useSkillsStore.getState().setSelectedSkill(navigation.skillName);
   if (navigation.snippetDraft) {
     const snippets = useSnippetsStore.getState();
     snippets.setSnippetDraft(navigation.snippetDraft);
@@ -41,6 +43,8 @@ export const connectVSCodeSettingsNavigation = (
       directory: resolveSettingsDirectory(ui.settingsProjectPath, projects.projects, projects.activeProjectId),
       connectProvider: ui.settingsProvidersConnectRequested,
       providerId: ui.settingsProvidersOpenRequested,
+      // The skill the entry point selected, so the tab's Skills page opens on it.
+      skillName: resolveSettingsSlug(page) === 'skills.installed' ? useSkillsStore.getState().selectedSkillName ?? undefined : undefined,
       snippetDraft: draft ? { name: draft.name, scope: draft.scope } : undefined,
     };
     // This flag belongs to an in-page dialog. Leaving it set blocks chat shortcuts.
