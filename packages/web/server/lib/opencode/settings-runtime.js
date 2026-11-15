@@ -79,6 +79,7 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentImageToolEnabled',
   'agentSecretToolEnabled',
   'agentUsageToolEnabled',
+  'agentTerminalToolEnabled',
   'agentWorkflowToolEnabled',
   // The limit failover plugin loads only while one of these is set.
   'fallbackModel',

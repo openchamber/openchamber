@@ -11,6 +11,7 @@ import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
+import { createTerminalReadAction } from './terminal-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
@@ -309,6 +310,9 @@ export const createOpenChamberControlService = (dependencies) => {
     isKnowledgeToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
     isSecretToolEnabled = async () => true,
+    // The terminal runtime, read-only (`../terminal/runtime.js`); absent means
+    // the server cannot read a terminal.
+    getTerminalRuntime = null,
     // Where `secret.request` writes what the user saves
     // (`createSecretFiles`); absent means the server cannot take secrets.
     secretFiles = null,
@@ -480,6 +484,7 @@ export const createOpenChamberControlService = (dependencies) => {
     fsPromises: imageFsPromises,
   });
   const readUsage = loadQuota ? createUsageReadAction({ readSettings: readSettingsFromDiskMigrated, loadQuota }) : null;
+  const readTerminal = createTerminalReadAction({ readSettings: readSettingsFromDiskMigrated, getTerminalRuntime });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -1345,6 +1350,9 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'usage.read') {
         if (!readUsage) throw new OpenChamberControlError('Usage is not available on this server', 503);
         return await readUsage(input, { signal: options.signal });
+      }
+      if (action.startsWith('terminal.')) {
+        return await readTerminal(action, input, contextDirectory);
       }
       if (action === 'secret.request') {
         return await secretRequests.request(input, {

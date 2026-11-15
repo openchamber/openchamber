@@ -2478,6 +2478,9 @@ const openChamberControlService = createOpenChamberControlService({
   // The module the quota routes load, loaded on the first read: the same
   // instance, extension providers included.
   loadQuota: () => import('./lib/quota/index.js'),
+  // The terminal runtime is created later in startup, so the read takes it
+  // when it is asked for rather than capturing null now.
+  getTerminalRuntime: () => terminalRuntime,
 });
 
 const ensureGlobalWatcherStarted = async () => {

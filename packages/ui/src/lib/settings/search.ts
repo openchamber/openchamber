@@ -958,6 +958,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-terminal-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentTerminalTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentTerminalToolSummary',
+    keywords: ['agent', 'tool', 'terminal', 'shell', 'output', 'command', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-image-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentImageTool',

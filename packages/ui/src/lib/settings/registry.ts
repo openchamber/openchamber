@@ -306,6 +306,7 @@ export const SETTINGS_REGISTRY = {
   agentNotifyToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentNotifyToolEnabled', (v) => useUIStore.getState().setAgentNotifyToolEnabled(v)) }),
   agentRenderToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentRenderToolEnabled', (v) => useUIStore.getState().setAgentRenderToolEnabled(v)) }),
   agentUsageToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentUsageToolEnabled', (v) => useUIStore.getState().setAgentUsageToolEnabled(v)) }),
+  agentTerminalToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentTerminalToolEnabled', (v) => useUIStore.getState().setAgentTerminalToolEnabled(v)) }),
   agentImageToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentImageToolEnabled', (v) => useUIStore.getState().setAgentImageToolEnabled(v)) }),
   // `provider/model` of an image model; the server checks the shape.
   agentImageModel: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('agentImageModel', (v) => useUIStore.getState().setAgentImageModel(v)) }),

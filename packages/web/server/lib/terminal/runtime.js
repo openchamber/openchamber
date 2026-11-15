@@ -8,6 +8,7 @@ import {
   readTerminalWsControlFrame,
 } from './terminal-ws-protocol.js';
 import { sanitizeTerminalHistoryChunk } from './history.js';
+import { terminalPlainText } from './plain-text.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
@@ -17,6 +18,8 @@ import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../sec
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
+const DEFAULT_TERMINAL_READ_BYTES = 32 * 1024;
+const MAX_TERMINAL_READ_BYTES = 256 * 1024;
 const HISTORY_SEGMENT_BYTES = 8 * 1024;
 const MAX_SOCKET_BUFFER_BYTES = 4 * 1024 * 1024;
 const OUTPUT_BATCH_MS = 12;
@@ -621,9 +624,10 @@ export function createTerminalRuntime({
       res.status(500).json({ error: error?.message || 'Failed to list terminal shells' });
     }
   });
-  app.get('/api/terminal/sessions', (req, res) => {
-    const rawCwd = typeof req.query?.cwd === 'string' ? req.query.cwd.trim() : '';
-    const cwdFilter = rawCwd ? path.resolve(rawCwd) : null;
+  /** @param {{ directory?: string }} [filter] */
+  const listTerminals = ({ directory } = {}) => {
+    const rawDirectory = directory?.trim();
+    const cwdFilter = rawDirectory ? path.resolve(rawDirectory) : null;
     const list = [];
     for (const session of sessions.values()) {
       if (cwdFilter && path.resolve(session.cwd) !== cwdFilter) continue;
@@ -636,7 +640,58 @@ export function createTerminalRuntime({
         purpose: getSessionPurpose(session),
       });
     }
-    res.json({ sessions: list });
+    return list;
+  };
+
+  // In-process read of the replay text an attach snapshot sends, turned into
+  // plain text before the byte cap so the cap counts readable characters, not
+  // colour codes. It never touches the PTY, `lastActivity`, or any attached
+  // client stream; it only copies what the history ring already holds.
+  const readTerminal = (sessionId, { maxBytes = DEFAULT_TERMINAL_READ_BYTES } = {}) => {
+    const session = sessions.get(sessionId);
+    if (!session) return null;
+    const requestedBytes = Number.isFinite(maxBytes) && maxBytes >= 1 ? Math.floor(maxBytes) : DEFAULT_TERMINAL_READ_BYTES;
+    const limit = Math.min(requestedBytes, MAX_TERMINAL_READ_BYTES);
+    const text = terminalPlainText(historyText(session.history));
+    const bytes = Buffer.from(text);
+    // `appendHistory` clears `original` on the first trim or oversized
+    // replacement, which is the only path that drops retained output. Treating
+    // every such clear as truncation can over-report when the trim removed
+    // nothing (a callback of exactly 512 KiB), but it never under-reports a
+    // dropped byte, so it stays honest at the cost of a false positive.
+    let truncated = session.history.original === null;
+    let start = 0;
+    if (bytes.length > limit) {
+      truncated = true;
+      start = bytes.length - limit;
+      while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
+    }
+    let readText = bytes.subarray(start).toString('utf8');
+    if (start > 0 && bytes[start - 1] !== 0x0a) {
+      // The tail starts mid-line. Resume at the next full line when the tail
+      // holds one; a single unterminated line is returned as it is rather
+      // than as an empty string.
+      const newline = readText.indexOf('\n');
+      if (newline >= 0 && newline + 1 < readText.length) readText = readText.slice(newline + 1);
+    }
+    return {
+      sessionId: session.id,
+      cwd: session.cwd,
+      status: session.status,
+      exitCode: session.exitCode ?? null,
+      signal: session.signal ?? null,
+      createdAt: Number.isInteger(session.createdAt) ? session.createdAt : null,
+      mode: session.mode ?? INTERACTIVE_TERMINAL_MODE,
+      purpose: getSessionPurpose(session),
+      text: readText,
+      truncated,
+      retainedBytes: session.history.bytes,
+    };
+  };
+
+  app.get('/api/terminal/sessions', (req, res) => {
+    const directory = typeof req.query?.cwd === 'string' ? req.query.cwd : undefined;
+    res.json({ sessions: listTerminals({ directory }) });
   });
   app.post('/api/terminal/touch', (req, res) => {
     const rawIds = Array.isArray(req.body?.sessionIds) ? req.body.sessionIds : [];
@@ -789,5 +844,5 @@ export function createTerminalRuntime({
     if (!shutdownPromise) shutdownPromise = stop();
     return shutdownPromise;
   };
-  return { shutdown };
+  return { shutdown, listTerminals, readTerminal };
 }

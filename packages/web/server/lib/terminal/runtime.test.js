@@ -1497,4 +1497,187 @@ describe('terminal runtime', () => {
       expect(harness.processes[0].killed).toBe(false);
     } finally { await harness.runtime.shutdown(); }
   });
+
+  it('lists every terminal and filters the accessor by resolved working directory', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      await create({
+        body: {
+          sessionId: 'term-repo',
+          cwd: '/repo',
+          mode: 'command',
+          command: 'npm run build',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        },
+      }, createResponse());
+      await create({ body: { sessionId: 'term-other', cwd: '/other' } }, createResponse());
+
+      expect(harness.runtime.listTerminals().map((terminal) => terminal.sessionId).sort()).toEqual(['term-other', 'term-repo']);
+      expect(harness.runtime.listTerminals({ directory: '/repo' })).toEqual([
+        {
+          sessionId: 'term-repo',
+          cwd: '/repo',
+          status: 'running',
+          createdAt: expect.any(Number),
+          mode: 'command',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-1' },
+        },
+      ]);
+      expect(harness.runtime.listTerminals({ directory: '/repo/./nested/..' })).toHaveLength(1);
+      expect(harness.runtime.listTerminals({ directory: '/elsewhere' })).toEqual([]);
+      expect(harness.runtime.listTerminals({ directory: '   ' })).toHaveLength(2);
+
+      // The HTTP route is the same list wrapped in `{ sessions }`.
+      const routed = createResponse();
+      harness.routes.get.get('/api/terminal/sessions')({ query: { cwd: '/repo' } }, routed);
+      expect(routed.body).toEqual({ sessions: harness.runtime.listTerminals({ directory: '/repo' }) });
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('reads a terminal history tail through the runtime accessor', async () => {
+    const server = http.createServer();
+    const harness = createHarness({ server });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    let client;
+    try {
+      await harness.routes.post.get('/api/terminal/create')({
+        body: {
+          sessionId: 'readable',
+          cwd: '/repo',
+          purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-read' },
+        },
+      }, createResponse());
+      client = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'readable' }));
+      await client.next('snapshot');
+
+      const output = 'distinctive read output\r\n';
+      harness.processes[0].emitData(output);
+      expect(await client.next('output')).toMatchObject({ s: 'readable', d: output });
+
+      const read = harness.runtime.readTerminal('readable');
+      expect(read).toEqual({
+        sessionId: 'readable',
+        cwd: '/repo',
+        status: 'running',
+        exitCode: null,
+        signal: null,
+        createdAt: expect.any(Number),
+        mode: 'interactive',
+        purpose: { type: 'project-action', actionId: 'build', executionId: 'exec-read' },
+        text: 'distinctive read output\n',
+        truncated: false,
+        retainedBytes: Buffer.byteLength(output),
+      });
+      // A read never writes to the PTY.
+      expect(harness.processes[0].writes).toEqual([]);
+
+      // An exited session stays readable from the same retained history.
+      harness.processes[0].emitExit(7);
+      await client.next('exit');
+      expect(harness.runtime.readTerminal('readable')).toMatchObject({ status: 'exited', exitCode: 7, text: 'distinctive read output\n', truncated: false });
+    } finally {
+      client?.socket.terminate();
+      await harness.runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('returns a line-aligned truncated tail and null for unknown terminals', async () => {
+    const server = http.createServer();
+    const harness = createHarness({ server });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    let client;
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'tail', cwd: '/repo' } }, createResponse());
+      client = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'tail' }));
+      await client.next('snapshot');
+
+      const output = 'alpha\nbravo\ncharlie\n';
+      harness.processes[0].emitData(output);
+      expect(await client.next('output')).toMatchObject({ s: 'tail', d: output });
+
+      const read = harness.runtime.readTerminal('tail', { maxBytes: 16 });
+      expect(read.truncated).toBe(true);
+      expect(read.text).toBe('bravo\ncharlie\n');
+      expect(read.retainedBytes).toBe(Buffer.byteLength(output));
+      expect(harness.runtime.readTerminal('tail', { maxBytes: 14 }).text).toBe('bravo\ncharlie\n');
+
+      expect(harness.runtime.readTerminal('no-such-terminal')).toBeNull();
+    } finally {
+      client?.socket.terminate();
+      await harness.runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('reads plain text without VT controls while the panel replay keeps them', async () => {
+    const server = http.createServer();
+    const harness = createHarness({ server });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    let client;
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'colored', cwd: '/repo' } }, createResponse());
+      client = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'colored' }));
+      await client.next('snapshot');
+
+      const output = '\u001b]0;build \u2014 repo\u0007\u001b]8;;https://example.test\u001b\\link\u001b]8;;\u001b\\\r\n'
+        + '\u001b[1;31merror\u001b[0m: \u001b[32mfailed\u001b[m\r\n'
+        + 'progress 10%\r\u001b[Kdone\r\n'
+        + '\u001b[?25lmarker-7f3a\u001b[?25h\r\n';
+      harness.processes[0].emitData(output);
+      expect(await client.next('output')).toMatchObject({ s: 'colored', d: output });
+
+      const read = harness.runtime.readTerminal('colored');
+      expect(read.text).toBe('link\nerror: failed\ndone\nmarker-7f3a\n');
+      expect(read.text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+
+      // The cap applies to the plain text: 18 bytes of it hold the last two lines.
+      const capped = harness.runtime.readTerminal('colored', { maxBytes: 18 });
+      expect(capped).toMatchObject({ text: 'done\nmarker-7f3a\n', truncated: true, retainedBytes: Buffer.byteLength(output) });
+
+      // A newly attached panel still replays the colours and the title.
+      const panel = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      try {
+        panel.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'colored' }));
+        const snapshot = await panel.next('snapshot');
+        expect(snapshot.history).toContain('\u001b[1;31merror\u001b[0m');
+        expect(snapshot.history).toContain('\u001b]0;build \u2014 repo\u0007');
+      } finally { panel.socket.terminate(); }
+    } finally {
+      client?.socket.terminate();
+      await harness.runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('leaves an attached client stream untouched across a runtime read', async () => {
+    const server = http.createServer();
+    const harness = createHarness({ server });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    let client;
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'attached', cwd: '/repo' } }, createResponse());
+      client = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'attached' }));
+      await client.next('snapshot');
+
+      harness.processes[0].emitData('before read\r\n');
+      expect(await client.next('output')).toMatchObject({ s: 'attached', d: 'before read\r\n' });
+
+      expect(harness.runtime.readTerminal('attached').text).toBe('before read\n');
+      // A read publishes nothing: the client has no queued frame after it.
+      expect(client.messages).toEqual([]);
+
+      harness.processes[0].emitData('after read\r\n');
+      expect(await client.next('output')).toMatchObject({ s: 'attached', d: 'after read\r\n' });
+    } finally {
+      client?.socket.terminate();
+      await harness.runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });

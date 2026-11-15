@@ -1213,6 +1213,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Agenten-Benachrichtigungswerkzeug',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Agenten-Benachrichtigungswerkzeug',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Agenten melden sich, wenn die Arbeit fertig ist oder sie feststecken.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Terminalbereich',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Lässt den Agenten die Terminals dieses Ordners auflisten und lesen, was sie ausgegeben haben. Ein Terminal enthält alles, was eingegeben wurde, auch Geheimnisse, daher bleibt dies aus, bis du es einschaltest.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Projektwissen-Werkzeug",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Projektwissen-Werkzeug",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agenten lesen und pflegen Notizen, Todos und Pläne des Projekts.",

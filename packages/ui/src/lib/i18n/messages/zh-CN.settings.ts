@@ -1230,6 +1230,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': '智能体通知工具',
   'settings.openchamber.tools.field.agentNotifyToolAria': '智能体通知工具',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "工作完成或卡住时，智能体会通知你。",
+  'settings.openchamber.tools.field.agentTerminalTool': '终端面板',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': '让智能体列出此文件夹的终端并读取其输出。终端会保留其中输入的所有内容，包括机密信息，因此在开启前始终保持关闭。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "项目知识工具",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "项目知识工具",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "让智能体读取并更新项目的笔记、待办和计划。",

@@ -202,6 +202,21 @@ export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
 );
 
 /**
+ * The terminal panel, read-only. It is its own tool because a terminal holds
+ * whatever the user typed into it, secrets included: off until the user turns
+ * it on, and then only listing and reading, never typing, starting or
+ * stopping.
+ */
+export const OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'terminal.list', title: 'List terminals', description: "This folder's terminal panels: sessionId, cwd, status, createdAt, mode and purpose, without their output; directory lists another folder's" },
+  { action: 'terminal.read', title: 'Read a terminal', description: 'The output a terminal from terminal.list printed, as plain text end-aligned to a line; maxBytes caps it, truncated says older output was dropped and retainedBytes how much this server still holds' },
+]);
+
+export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
+  OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
  * Workflows are their own tool: fanning a large task out to many agents is a
  * distinct intent with its own scripting guidance, and the tool is off until
  * the user turns it on, so it has to disappear completely.
@@ -259,6 +274,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
+  openchamber_terminal: OPENCHAMBER_TERMINAL_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
@@ -313,6 +329,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_TERMINAL_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

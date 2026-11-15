@@ -1263,6 +1263,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'エージェント通知ツール',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'エージェント通知ツール',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "作業が終わったときや行き詰まったときにエージェントが知らせます。",
+  'settings.openchamber.tools.field.agentTerminalTool': 'ターミナルパネル',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'エージェントがこのフォルダーのターミナルを一覧し、出力された内容を読めるようにします。ターミナルには入力された内容がすべて残り、秘密情報も含まれるため、オンにするまで無効のままです。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "エージェントがプロジェクトのメモ、ToDo、プランを読み書きできます。",

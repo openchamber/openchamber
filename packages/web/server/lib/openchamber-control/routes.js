@@ -1,5 +1,11 @@
 import express from 'express';
+import { OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
 import { asControlError } from './error.js';
+
+// Terminal output reaches an agent only through the managed `openchamber_terminal`
+// tool, whose callback authenticates each OpenCode child. Any client holding the
+// session cookie can reach this route, so it never returns terminal output.
+const AGENT_TOOL_ONLY_ACTIONS = new Set(OPENCHAMBER_TERMINAL_ACTIONS);
 
 export const registerOpenChamberControlRoutes = (app, { controlService, laterPages = null }) => {
   app.post('/api/openchamber/control', express.json({ limit: '1mb' }), async (req, res) => {
@@ -11,6 +17,9 @@ export const registerOpenChamberControlRoutes = (app, { controlService, laterPag
     res.once('close', abortOnDisconnect);
     try {
       const action = typeof req.body?.action === 'string' ? req.body.action : '';
+      if (AGENT_TOOL_ONLY_ACTIONS.has(action)) {
+        return res.status(403).json({ error: `${action} is available only to agents through the openchamber_terminal tool` });
+      }
       const requestInput = req.body?.input;
       const input = requestInput && typeof requestInput === 'object' && !Array.isArray(requestInput)
         ? requestInput

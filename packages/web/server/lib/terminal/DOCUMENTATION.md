@@ -21,6 +21,8 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 
 `GET /api/terminal/sessions` enumerates live sessions (optionally filtered by resolved `cwd`) so clients can adopt terminals their local tab projection does not know about — another device, a new browser tab, or cleared storage. Listings include the effective launch mode and the normalized purpose, but never the command text. `POST /api/terminal/touch` refreshes `lastActivity` for the listed session ids; open clients call it periodically so background tabs, which hold no WebSocket attachment, are not idle-reaped while a client still shows them.
 
+The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessionId, { maxBytes })` to in-process callers such as a server-side agent tool; the sessions route is built from `listTerminals`, so HTTP and in-process listings cannot drift. Both read the same sanitized replay text the `attach` snapshot sends — never raw bytes and never a new HTTP surface. `readTerminal` returns it as plain text (`plain-text.js`): the replay keeps colours, titles, hyperlinks and cursor controls for the panel to redraw, and the read drops every escape and control sequence, applying only carriage return, backspace and erase-in-line so a progress line reads as it finally showed. The conversion happens before the byte cap, so the cap counts readable text. The replay is bounded to 512 KiB per terminal, and a caller's byte cap defaults to 32 KiB and never exceeds 256 KiB; `retainedBytes` is the replay size, controls included. A read only copies in-memory state: it never starts, writes, resizes, or restarts a PTY, never changes `lastActivity`, and never publishes a WebSocket frame, so an attached client's stream is untouched. Exited terminals that are still in the map remain readable.
+
 ## PTY Lifecycle
 
 - IDs are client-provided or generated with `randomUUID()`.
@@ -73,6 +75,10 @@ A growing pending prefix made an unterminated control string copy and rescan all
 ### Why overflow waits for the terminator
 
 Resetting the parser at the size limit would expose control payload as printable replay text. Discarding the whole oversized sequence through its terminator preserves the replay boundary while raw live output remains unchanged. The 8,192-code-unit limit bounds parser memory separately from the 512 KiB scrollback limit.
+
+### Why reads reuse the replay text and not raw output
+
+`readTerminal` could have kept a second buffer of the exact bytes the PTY emitted, but that would duplicate everything the user typed and every command's output in memory for a feature that only reads. It would also widen exposure: raw bytes still carry terminal query exchanges and control sequences that the replay sanitizer strips, so callers would receive text no client ever sees. Finally, a separate buffer would drift from the snapshot — trimming, restart clearing, and sanitizer changes would have to be mirrored exactly, and any mismatch would show a caller output different from what an attached client replays. Reading the one sanitized history keeps a single source of truth and a single 512 KiB bound; the plain-text pass is applied to the copy a read returns, so the panel's replay and live stream keep their controls.
 
 ## Security And Relay
 

@@ -236,6 +236,7 @@ describe('managed OpenCode config file', () => {
       includeImage: false,
       includeSecret: false,
       includeUsage: false,
+      includeTerminal: false,
       includeWorkflow: false,
     });
   });
@@ -327,6 +328,7 @@ describe('managed OpenCode config file', () => {
       includeImage: false,
       includeSecret: false,
       includeUsage: false,
+      includeTerminal: false,
       includeWorkflow: false,
     });
   });
@@ -353,8 +355,22 @@ describe('managed OpenCode config file', () => {
       includeImage: false,
       includeSecret: false,
       includeUsage: true,
+      includeTerminal: false,
       includeWorkflow: false,
     });
+  });
+
+  it('injects the terminal tool only when it is switched on, also as the only tool', async () => {
+    const off = await createHarness({ settings: {} });
+    await off.runtime.buildManagedChildEnv();
+    expect(off.agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeTerminal: false }));
+
+    const { runtime, agentToolRuntime } = await createHarness({
+      settings: { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false, agentTerminalToolEnabled: true },
+    });
+    await runtime.buildManagedChildEnv();
+
+    expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeTerminal: true }));
   });
 
   it('leaves a config file the user owns alone and keeps the restart requirement', async () => {

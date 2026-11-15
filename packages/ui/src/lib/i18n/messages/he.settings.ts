@@ -1262,6 +1262,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'כלי ההתראות של הסוכנים',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'כלי ההתראות של הסוכנים',
   'settings.openchamber.tools.field.agentNotifyToolSummary': 'סוכנים יכולים לשלוח לך התראה כשהעבודה הסתיימה או כשהם תקועים.',
+  'settings.openchamber.tools.field.agentTerminalTool': 'פאנל מסוף',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'מאפשר לסוכן לרשום את המסופים של התיקייה הזו ולקרוא מה הם הדפיסו. מסוף שומר כל מה שהוקלד בו, כולל סודות, ולכן זה נשאר כבוי עד שתפעיל אותו.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "כלי ידע הפרויקט",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "כלי ידע הפרויקט",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "סוכנים יכולים לקרוא ולעדכן את ההערות, המשימות והתוכניות של הפרויקט.",
