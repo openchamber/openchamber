@@ -310,11 +310,14 @@ export const buildAnnotationOverlayScript = (
     // A status such as a model download is cut short, so the comment keeps its room.
     '.rec span:last-child{max-width:120px;overflow:hidden;text-overflow:ellipsis}',
     '.wave{display:block;width:48px;height:16px}',
-    '.dot{width:6px;height:6px;border-radius:50%;background:' + THEME.danger + ';animation:oc-blink 1s steps(2,start) infinite}',
+    // The dot and the spinner step on timers instead of infinite CSS
+    // animations, which draw every frame for as long as they show: the dot
+    // dims every other second, the spinner turns four times a second.
+    '.dot{width:6px;height:6px;border-radius:50%;background:' + THEME.danger + '}',
+    '.dot.dim{opacity:.4}',
+    '@media (prefers-reduced-motion:reduce){.dot.dim{opacity:1}}',
     '.spin{display:flex;width:28px;height:28px;align-items:center;justify-content:center;color:' + THEME.mutedText + '}',
-    '.spin svg{width:16px;height:16px;animation:oc-spin 1s linear infinite}',
-    '@keyframes oc-blink{to{visibility:hidden}}',
-    '@keyframes oc-spin{to{transform:rotate(360deg)}}',
+    '.spin svg{width:16px;height:16px}',
     '[hidden]{display:none !important}'
   ].join('');
   shadow.appendChild(style);
@@ -384,6 +387,8 @@ export const buildAnnotationOverlayScript = (
   var voiceNote = '';
   var voiceStartedAt = 0;
   var voiceTimer = null;
+  var voiceBusyTimer = null;
+  var voiceBusyStep = 0;
   // Enter while the recording runs finishes it, and the annotation goes once
   // the words are in the comment.
   var submitAfterVoice = false;
@@ -477,12 +482,13 @@ export const buildAnnotationOverlayScript = (
 
   var renderVoiceTime = function () {
     if (!voiceText) return;
+    var elapsed = Math.max(0, Math.floor((Date.now() - voiceStartedAt) / 1000));
+    dot.classList.toggle('dim', voicePhase === 'recording' && elapsed % 2 === 1);
     if (voiceNote) {
       voiceText.textContent = voiceNote;
       return;
     }
-    var seconds = Math.max(0, Math.floor((Date.now() - voiceStartedAt) / 1000));
-    voiceText.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    voiceText.textContent = Math.floor(elapsed / 60) + ':' + String(elapsed % 60).padStart(2, '0');
   };
 
   var renderVoice = function () {
@@ -509,6 +515,13 @@ export const buildAnnotationOverlayScript = (
     try { comment.setSelectionRange(caret, caret); } catch (error) { /* field went away */ }
   };
 
+  /** Turns the processing spinner by one eighth. */
+  var stepVoiceBusy = function () {
+    voiceBusyStep = (voiceBusyStep + 1) % 8;
+    var icon = voiceBusy && voiceBusy.firstChild;
+    if (icon) icon.style.transform = 'rotate(' + voiceBusyStep * 45 + 'deg)';
+  };
+
   var applyVoice = function (message) {
     var was = voicePhase;
     voicePhase = message.phase === 'recording' || message.phase === 'processing' ? message.phase : 'idle';
@@ -522,6 +535,15 @@ export const buildAnnotationOverlayScript = (
     if (voicePhase !== 'recording' && voiceTimer) {
       clearInterval(voiceTimer);
       voiceTimer = null;
+    }
+    if (voicePhase === 'processing' && !voiceBusyTimer) {
+      voiceBusyStep = -1;
+      stepVoiceBusy();
+      voiceBusyTimer = setInterval(stepVoiceBusy, 250);
+    }
+    if (voicePhase !== 'processing' && voiceBusyTimer) {
+      clearInterval(voiceBusyTimer);
+      voiceBusyTimer = null;
     }
     renderVoice();
     if (voicePhase !== 'idle') return;
@@ -995,6 +1017,7 @@ export const buildAnnotationOverlayScript = (
     if (host.parentNode) host.parentNode.removeChild(host);
     if (inputLayer && inputLayer.parentNode) inputLayer.parentNode.removeChild(inputLayer);
     if (voiceTimer) clearInterval(voiceTimer);
+    if (voiceBusyTimer) clearInterval(voiceBusyTimer);
     if (voiceBox) {
       try { delete window['${ANNOTATION_RECEIVER}']; } catch (error) { /* non-configurable */ }
     }

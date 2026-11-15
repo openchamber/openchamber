@@ -26,6 +26,7 @@ const projectSetupReads: Array<{ id: string; path: string }> = [];
 const uiState = {
   terminalShell: 'zsh',
   terminalLoginShells: ['zsh'],
+  terminalOpenOnProjectAction: true,
   setSettingsPage: () => undefined,
   setSettingsDialogOpen: () => undefined,
   setSettingsProjectsSelectedId: () => undefined,
@@ -251,6 +252,7 @@ describe('HeaderProjectAction lifecycle', () => {
     detectedDevServer.actionId = undefined;
     mockedDeviceInfo.isMobile = true;
     effectiveDirectory = '/repo';
+    uiState.terminalOpenOnProjectAction = true;
     projectSetupReads.length = 0;
     sessionCounter = 0;
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', icon: 'build' }];
@@ -598,6 +600,25 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0]?.cwd).toBe('/repo-worktree');
     expect(openContextPanelTabCalls).toEqual([{ directory: '/live-host', mode: 'terminal', targetDirectory: '/repo-worktree' }]);
+  });
+
+  test('project action starts without revealing its terminal when the setting is off', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    await renderButton();
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
   });
 
   test('auto-discover without a preview hint settles on an announced localhost URL in context preview only', async () => {
