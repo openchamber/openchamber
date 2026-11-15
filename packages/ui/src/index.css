@@ -932,6 +932,16 @@ svg.animate-spin {
   background: transparent;
 }
 
+/* Clips an element to its own box and rounded corners without making it a
+   scroll container. `overflow: hidden` does, and the touch rules in
+   styles/mobile.css turn every such element into a vertical scroller, where a
+   drag that starts inside it scrolls it instead of the list around it. Without
+   `clip` support the `hidden` line applies, as it did before. */
+.oc-row-clip {
+  overflow: hidden;
+  overflow: clip;
+}
+
 /* Fully hidden scrollbar for small mobile overlays (session switcher etc.)
    where a visible bar reads as chrome noise. Scrolling stays intact. */
 .oc-hide-scrollbar {

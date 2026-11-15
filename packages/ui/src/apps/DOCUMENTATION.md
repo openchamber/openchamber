@@ -40,6 +40,7 @@
 - Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
 - iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
+- A sessions-sheet row is never a scroll container of its own: it clips with `oc-row-clip`, and the two-line row's 54 px box ends flush with the 32 px chevron at `top: 22`, so a drag that starts on a row scrolls the list.
 
 ## Decisions
 
@@ -74,3 +75,7 @@ About twenty shared entry points open Settings through `setSettingsDialogOpen`. 
 ### Why mobile uses the Projects page and not a separate defaults form
 
 The shared page already supports project selection through mobile split-page navigation. Reusing it keeps the defaults controls, search anchors and persistence in one place.
+
+### Why rows clip with `overflow: clip` and not `overflow: hidden`
+
+`styles/mobile.css` rewrites every `.overflow-hidden` element to `overflow-y: auto !important` on a touch layout, so each phone row became a scroll container with its own scroll layer. The detailed row's chevron hung 2 px past the row's box and gave it something to scroll, and the row then swallowed a drag that started on it. `overflow: clip` clips the same way without a scroll box. Browsers without it (iOS 15) keep the `overflow: hidden` fallback, where the row's box fits its content and has nothing to scroll.
