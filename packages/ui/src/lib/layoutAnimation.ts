@@ -147,6 +147,16 @@ export const runWhenLayoutSettled = (task: () => void): void => {
   pending.add(task);
 };
 
+/**
+ * Resolves at once, or once the running animation has ended. For work that
+ * arrives from the network mid-animation and would take a frame or more to
+ * render (a long file's first render): the caller re-checks afterwards that
+ * the result is still wanted.
+ */
+export const whenLayoutSettled = (): Promise<void> => new Promise((resolve) => {
+  runWhenLayoutSettled(resolve);
+});
+
 /** Drops a queued task, for an owner that goes away before the animation ends. */
 export const cancelWhenLayoutSettled = (task: () => void): void => {
   pending.delete(task);

@@ -56,6 +56,7 @@ import {
   viewportForMode,
   viewportSummary,
   type BrowserViewport,
+  viewportSize,
 } from '@/lib/browser/viewport';
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
@@ -63,6 +64,7 @@ import { AnnotationDictation, type AnnotationVoiceChannel } from './AnnotationDi
 import { useAnnotationVoice } from './useAnnotationVoice';
 import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
+import { useSteadyStage } from './useSteadyStage';
 import { deepActiveElement, isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 
 export type BrowserPaneProps = {
@@ -285,7 +287,6 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
    */
   const consoleProblemsRef = React.useRef<Array<{ level: string; message: string; source: string }>>([]);
   const [colorScheme, setColorScheme] = React.useState<BrowserColorScheme>('system');
-  const [stageSize, setStageSize] = React.useState({ width: 0, height: 0 });
   const stageRef = React.useRef<HTMLDivElement | null>(null);
   /** When the current run of retries began, per URL. */
   const retryRef = React.useRef<DevServerWaitRun | null>(null);
@@ -1134,19 +1135,6 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       .catch(() => toast.error(t('contextPanel.browser.clearFailed')));
   }, [partition, t]);
 
-  // The stage is measured rather than assumed: the panel is resizable, and a
-  // viewport that fitted a moment ago may not fit now.
-  React.useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect) setStageSize({ width: rect.width, height: rect.height });
-    });
-    observer.observe(stage);
-    return () => observer.disconnect();
-  }, []);
-
   const applyColorScheme = React.useCallback((scheme: BrowserColorScheme) => {
     setColorScheme(scheme);
     const webview = webviewRef.current;
@@ -1277,6 +1265,9 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [actionRunning, directory, status, watched]);
 
   const failed = navigation.status.kind === 'failed' && !isWaitingForServer ? navigation.status : null;
+  // The stage is measured rather than assumed: the panel is resizable, and a
+  // viewport that fitted a moment ago may not fit now.
+  const stageSize = useSteadyStage(stageRef, webviewRef, viewportSize(viewport) !== null);
   const layout = fitViewport(viewport, stageSize);
 
   // Cmd+R (Ctrl+R off macOS) with the focus in the toolbar. A focused page
@@ -1339,7 +1330,8 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       <div
         ref={stageRef}
         className={cn(
-          'relative min-h-0 flex-1 bg-background',
+          // Clips: the page keeps its width while the stage animates (`useSteadyStage`).
+          'relative min-h-0 flex-1 overflow-hidden bg-background',
           // A sized viewport sits on a backdrop so its edges are visible; at
           // fill there is nothing to frame.
           layout && 'flex items-center justify-center overflow-hidden bg-[var(--surface-muted)]',

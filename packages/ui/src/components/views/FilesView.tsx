@@ -36,7 +36,8 @@ import { FilePathLabel } from './files/FilePathLabel';
 import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
-import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
+import { DetachableEditorMarker, useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
+import { whenLayoutSettled } from '@/lib/layoutAnimation';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { MarkdownPreviewOutline } from './MarkdownPreviewOutline';
 import { createFileContentPoller } from './fileContentPoller';
@@ -2138,7 +2139,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     await readFile(node.path)
-      .then((content) => {
+      .then(async (content) => {
+        // A file that arrives while its zone is still opening renders after
+        // the animation: a long file's first render takes several frames,
+        // and inside the animation it stopped the panel halfway.
+        await whenLayoutSettled();
         if (!isCurrentLoad()) {
           return;
         }
@@ -5244,6 +5249,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} viewRef={editorViewRef} />
               )}
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
+                <DetachableEditorMarker />
                 <FilePositionEditor
                   key={filePositionKey}
                   positionKey={filePositionKey}

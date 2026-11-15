@@ -888,7 +888,9 @@ open when wider than 1 px, so a baseline from before them still measures. The
 `file` surface opens tree-only (240 px) in a project with no file open;
 `--open-file <name>` first opens that root-level file of the project from the
 panel's tree, so every panel toggle shows the editor with it, and a
-`panel-open` whose editor does not show the file afterwards is invalid.
+`panel-open` whose editor does not show the file afterwards is invalid. A file
+that opens rendered (Markdown) has no editor: there the panel's card must hold
+over 2000 characters of it.
 `--surface context` measures a full-width panel. `--method key` presses `mod+b` and
 `mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
 the button for `--hover` ms before a phase, so its tooltip opens there; the
