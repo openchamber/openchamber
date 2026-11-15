@@ -22,9 +22,9 @@ const MAX_FORM_DRAFTS = 50;
 const scopeKey = (scope: FormDraftScope): string =>
   [scope.runtimeKey, scope.directory, scope.sessionID, scope.formID].join('\u0000');
 
-export function formDraftScope(form: { id: string; sessionID: string }, directory?: string): FormDraftScope {
+export function formDraftScope(form: { id: string; sessionID: string }, directory?: string, runtimeKey: string = getRuntimeKey()): FormDraftScope {
   return {
-    runtimeKey: getRuntimeKey(),
+    runtimeKey,
     directory: directory ?? '',
     sessionID: form.sessionID,
     formID: form.id,
