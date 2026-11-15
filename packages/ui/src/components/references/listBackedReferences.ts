@@ -158,7 +158,7 @@ export const fetchListBackedReferencePage = async (
         return { kind: 'page', items: issue ? [toIssueReference(issue)] : [], cursor: null, hasMore: false };
     }
     // An empty query is not sent.
-    const options = { page, state: filter.state, people: filter.people, query: text };
+    const options = { page, state: filter.state, people: filter.people, labels: filter.labels, query: text };
     const result = kind === 'issue'
         ? await reads.issuesList(context, options).then((answer) => ({ ...answer, items: answer.items.map(toIssueReference) }))
         : await reads.changeRequestsList(context, options).then((answer) => ({ ...answer, items: answer.items.map(pullReferenceFromChangeRequest) }));

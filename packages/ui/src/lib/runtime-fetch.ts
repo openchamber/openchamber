@@ -55,8 +55,14 @@ export const addRuntimeProxyHeaders = (url: string, headers: Headers): Headers =
 
 const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   if (!query) return;
-  const entries = query instanceof URLSearchParams ? Array.from(query.entries()) : Object.entries(query);
-  for (const [key, value] of entries) {
+  // A URLSearchParams may name one key more than once on purpose (`label`,
+  // `directory`); `set` would keep only its last value, which is a different
+  // request. A plain object has one value per key, so it still overrides.
+  if (query instanceof URLSearchParams) {
+    for (const [key, value] of query) url.searchParams.append(key, value);
+    return;
+  }
+  for (const [key, value] of Object.entries(query)) {
     if (value === null || value === undefined) continue;
     url.searchParams.set(key, String(value));
   }

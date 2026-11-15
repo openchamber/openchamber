@@ -271,6 +271,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         issueCloseReason: presentation.features.issueCloseReason,
         issueEdit: presentation.features.issueEdit === true,
         changeRequestEdit: presentation.features.changeRequestEdit === true,
+        // The box is a plain search: the standard routes pass it as text only.
+        advancedSearch: false,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

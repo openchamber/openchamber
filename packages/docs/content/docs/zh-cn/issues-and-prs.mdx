@@ -27,12 +27,14 @@ description: 浏览项目的 issue 和拉取请求，或你的 Linear issue，�
 
 在 **Linear** 下，项目选择器会变成团队选择器：选择 **All teams** 或某一个团队。对于只有 **Linear** 的项目，项目选择器会留在团队选择器旁边，方便你切换到其他项目。如果你连接了多个 Linear 工作区，在同一个菜单里切换工作区。连接 Linear 的方法见 [集成](/zh-cn/integrations/)。
 
-搜索支持标题、编号或粘贴的链接。筛选菜单在你选择时保持打开，所以可以组合多个筛选条件。
+搜索支持标题、编号或粘贴的链接。筛选菜单在你选择时保持打开，所以可以组合多个筛选条件。在 GitHub 上，搜索框也接受它自己的限定词（`is:closed`、`label:bug`、`author:@me`），它们优先于菜单中的选择。
 
 GitHub、GitLab、Gitea、Forgejo 和 Gerrit：
 
 - 状态：**Open**、**Closed**、**All**，拉取请求还有 **Merged**
 - 人员：**Anyone**、**Assigned to me**、**Created by me**，拉取请求还有 **Review requested**
+
+**Filter** 菜单还会列出仓库的标签，带有搜索，每个标签各有一个勾选标记；每勾选一个，列表立即收窄。筛选按仓库和标签页分别记住。
 
 Linear：
 

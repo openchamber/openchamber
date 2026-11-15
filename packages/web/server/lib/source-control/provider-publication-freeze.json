@@ -103,7 +103,8 @@
         "changeRequestPatch": true,
         "discussions": true,
         "issueEdit": true,
-        "changeRequestEdit": true
+        "changeRequestEdit": true,
+        "advancedSearch": true
       }
     },
     {
