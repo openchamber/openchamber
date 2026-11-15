@@ -144,6 +144,31 @@ function mutationTable(descriptor) {
       }),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-update'),
     },
+    '/pr/base': {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const base = requestText(input.base);
+        if (!base || base.length > 256) throw invalidMutationContext('base is required and must fit 256 characters');
+        return { base, digest: { base } };
+      },
+      perform: (service, normalized, resolved) => service.setChangeRequestBase({
+        base: normalized.base,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    '/pr/rebase': {
+      kind: 'change-request-rebase',
+      normalize: (_input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        return { digest: {} };
+      },
+      perform: (service, _normalized, resolved) => service.rebaseChangeRequest({ providerTarget: resolved.providerTarget }),
+      reconcile: (service, resolved) => service.reconcileRebaseMutation(resolved.providerTarget, resolved.target.headSha),
+    },
     '/pr/merge': {
       kind: 'change-request-merge',
       normalize: (input, context) => {
@@ -406,6 +431,22 @@ function mutationTable(descriptor) {
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
     };
   }
+  entries['/issues/assignees'] = {
+    kind: 'issue-assignees',
+    normalize: (input, context) => {
+      if (!context.target.number) throw invalidMutationContext('target number is required');
+      const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+      if (names.some((id) => !descriptor.limits.reviewerId.test(id))) throw invalidMutationContext('assignees are invalid');
+      return { names, digest: { assignees: names } };
+    },
+    perform: (service, normalized, resolved) => service.setIssueAssignees({
+      assignees: normalized.names,
+      providerTarget: resolved.providerTarget,
+      targetProject: resolved.target.project,
+      expectedTarget: resolved.target,
+    }),
+    reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+  };
   return entries;
 }
 

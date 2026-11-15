@@ -85,7 +85,7 @@ import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
-import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references'; import { createBranchWrites } from './source-control-branch-writes';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 
 interface ErrorResponse {
@@ -171,7 +171,7 @@ interface UpdateBody extends MutationBody<SourceControlExistingMutationTarget> {
   body?: string;
 }
 
-interface MutationReceiptDTO extends ErrorResponse {
+export interface MutationReceiptDTO extends ErrorResponse {
   status: string;
   actor: { provider: string; instance: string; providerAccountId: string };
   target: {
@@ -188,7 +188,7 @@ interface MutationReceiptDTO extends ErrorResponse {
   result: MutationResultDTO;
 }
 
-interface MutationResultDTO {
+export interface MutationResultDTO {
   merged?: boolean;
   message?: string;
   outcome?: string;
@@ -218,7 +218,7 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
-  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state']; reason?: NonNullable<SetStateInput['reason']> })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
@@ -299,7 +299,7 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+export const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
@@ -448,7 +448,7 @@ const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds'
   return [...ids];
 };
 
-const post = <TResult extends ErrorResponse>(
+export const post = <TResult extends ErrorResponse>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -470,17 +470,17 @@ const hasExactKeys = (value: ExactKeyValue, keys: readonly string[]): boolean =>
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 };
 
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlCreateMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'create',
 ): MutationBody<SourceControlCreateMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext<SourceControlExistingMutationTarget>,
   identity: SourceControlIdentity,
   operation: 'existing',
 ): MutationBody<SourceControlExistingMutationTarget>;
-function mutationBody(
+export function mutationBody(
   payload: SourceControlMutationContext,
   identity: SourceControlIdentity,
   operation: 'create' | 'existing',
@@ -547,7 +547,7 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-const parseMutationReceipt = <TResult>(
+export const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
   identity: SourceControlIdentity,
@@ -595,7 +595,7 @@ const parseMutationReceipt = <TResult>(
   };
 };
 
-const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
+export const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmptyMutationResult => {
   if (!hasExactKeys(result, [])) throw new Error('Source control response contained an invalid mutation result');
   return {};
 };
@@ -884,6 +884,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
     || issue.assignees.some((user) => !hasMatchingIdentity(user, identity)))) {
     throw new Error('Source control response contained invalid issue assignees');
   }
+  if (issue.writeAccess !== undefined && Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access');
   if (issue.labels !== undefined && (!Array.isArray(issue.labels) || issue.labels.some((label) => !label
     || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color))))) {
     throw new Error('Source control response contained invalid issue labels');
@@ -901,6 +902,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.author !== undefined) result.author = issue.author ? parseSourceUser(issue.author, identity) : null;
   if (issue.assignees !== undefined) result.assignees = issue.assignees.map((user) => parseSourceUser(user, identity));
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
+  if (issue.writeAccess !== undefined) { if (Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access'); result.writeAccess = issue.writeAccess; }
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
   return result;
@@ -1559,19 +1561,16 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state }; if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
     issueSetState: async (payload: SetStateInput) => {
-      const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const identity = normalizeIdentity(payload); const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state }; if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
+    ...createBranchWrites(fetch),
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {
@@ -1696,6 +1695,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
       }
+      if (payload.writeAccess !== undefined) { if (!isBooleanValue(payload.writeAccess)) throw new Error('Source control response contained an invalid write access'); result.writeAccess = payload.writeAccess; }
       // A review host's labels, requirements and revisions; absent for every other host.
       if (payload.voteLabels !== undefined) {
         if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');

@@ -7,10 +7,12 @@ import { labelColor, referenceNumberLabel } from '@/components/references/refere
 import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
 import { toast } from '@/components/ui';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useIssueAssigneeCandidates } from '@/hooks/useIssueAssigneeCandidates';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
     Label,
     RepositoryChangeRequestReference,
+    RepositoryIssueReference,
     RepositoryReference,
     RepositoryReferenceDetail,
     RepositoryReferenceReviewer,
@@ -189,5 +191,139 @@ export const SourceBoardReviewers: React.FC<{
         >
             {reviewers.map((person) => <Person key={person.id} person={person} />)}
         </MetaValue>
+    );
+};
+
+const assigneeChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
+    id: person.id,
+    label: person.login,
+    content: <Person person={person} />,
+});
+
+export const SourceBoardAssignees: React.FC<{
+    issue: RepositoryIssueReference;
+    detail: CachedValue<RepositoryReferenceDetail>;
+    context: SourceControlReadContext;
+    onChanged: () => void | Promise<void>;
+}> = ({ issue, detail, context, onChanged }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    const assignees = detail.status === 'ready' ? detail.value.assignees ?? [] : null;
+    const descriptor = useSourceControlProvider(issue.provider);
+    const { owner, repo } = issue.sourceRepo;
+    const { candidates, setCandidates, readFailed: candidateReadFailed, setReadFailed: setCandidateReadFailed } = useIssueAssigneeCandidates(context, owner, repo);
+
+    const commit = async (ids: string[]) => {
+        setBusy(true);
+        try {
+            await sourceControl.issueSetAssignees({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: issue.number },
+                assignees: ids,
+            });
+        } catch (error) {
+            toast.error(t('sourceBoard.assignees.saveFailed', { reference: referenceNumberLabel(issue, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setBusy(false);
+            await onChanged();
+        }
+    };
+
+    if (detail.status === 'error') return null;
+    if (!assignees) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
+    const editable = candidates !== null && (candidates.length > 0 || candidateReadFailed);
+    return (
+        <MetaValue
+            empty={false}
+            picker={editable ? (
+                <SourceBoardChoicePicker
+                    ariaLabel={t('sourceBoard.assignees.edit')}
+                    searchPlaceholder={t('sourceBoard.reviewers.search')}
+                    emptyText={t('sourceBoard.reviewers.empty')}
+                    selected={assignees.map((person) => person.id)}
+                    selectedChoices={assignees.map(assigneeChoice)}
+                    loadChoices={async () => {
+                        try {
+                            const people = await sourceControl.referenceReviewers(context, { owner, repo });
+                            setCandidates(people);
+                            setCandidateReadFailed(false);
+                            return people.map(assigneeChoice);
+                        } catch (error) {
+                            setCandidateReadFailed(true);
+                            throw error;
+                        }
+                    }}
+                    onCommit={(ids) => void commit(ids)}
+                    busy={busy}
+                />
+            ) : null}
+        >
+            {assignees.length === 0
+                ? <span className="text-muted-foreground">{t('sourceBoard.assignees.empty')}</span>
+                : assignees.map((person) => <Person key={person.id} person={person} />)}
+        </MetaValue>
+    );
+};
+
+/** A change request's base branch, picked from the repository's branches where the host can point it elsewhere (`baseChange`). */
+export const SourceBoardBase: React.FC<{
+    pull: RepositoryChangeRequestReference;
+    context: SourceControlReadContext;
+    onChanged: () => void | Promise<void>;
+}> = ({ pull, context, onChanged }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    const descriptor = useSourceControlProvider(pull.provider);
+    const { owner, repo } = pull.sourceRepo;
+
+    const commit = async (base: string) => {
+        setBusy(true);
+        try {
+            await sourceControl.changeRequestSetBase({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: pull.number },
+                base,
+            });
+            await onChanged();
+        } catch (error) {
+            toast.error(t('sourceBoard.base.failed', { reference: referenceNumberLabel(pull, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <SourceBoardChoicePicker
+            single
+            ariaLabel={t('sourceBoard.base.edit')}
+            searchPlaceholder={t('sourceBoard.base.search')}
+            emptyText={t('sourceBoard.base.empty')}
+            selected={[]}
+            loadChoices={async () => {
+                const branches = await sourceControl.projectBranches(context, owner, repo);
+                return branches
+                    .filter((branch) => branch !== pull.base)
+                    .map((branch) => ({
+                        id: branch,
+                        label: branch,
+                        content: (
+                            <span className="flex min-w-0 flex-1 items-center gap-2">
+                                <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
+                                <span className="truncate font-mono">{branch}</span>
+                            </span>
+                        ),
+                    }));
+            }}
+            onCommit={([base]) => void commit(base)}
+            busy={busy}
+        />
     );
 };

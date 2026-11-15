@@ -85,6 +85,14 @@ function mutationOperations() {
       perform: (service, _normalized, resolved) => service.draftChangeRequest(call(resolved)),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
     },
+    '/pr/base': {
+      perform: (service, normalized, resolved) => service.setChangeRequestBase(call(resolved, { base: normalized.base })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    '/pr/update-branch': {
+      perform: (service, normalized, resolved) => service.updateChangeRequestBranch(call(resolved, { expectedHeadSha: normalized.expectedHeadSha })),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBranch(resolved.providerTarget, normalized.expectedHeadSha),
+    },
     '/pr/review': {
       perform: (service, normalized, resolved) => service.reviewChangeRequest(call(resolved, { verdict: normalized.verdict, body: normalized.body })),
       reconcile: unknownOutcome,
@@ -145,6 +153,10 @@ function mutationOperations() {
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
     };
   }
+  operations['/issues/assignees'] = {
+    perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
+    reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+  };
   return operations;
 }
 

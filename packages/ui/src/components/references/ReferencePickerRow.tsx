@@ -40,7 +40,7 @@ const rowAvatarUrl = (url: string): string => {
 };
 
 /** Who an item belongs to: avatar, or the name's initial, then the name. */
-const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
+export const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
     const { broken, onError } = useAvatarImage(avatarUrl);
     return (
         <span className="inline-flex min-w-0 items-center gap-1">

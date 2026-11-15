@@ -152,12 +152,15 @@ const DETAIL_THREAD_COMMENT_LIMIT = 50;
 const DETAIL_QUERY = `
 query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
+    # What this account may do in the repository: base and branch writes need WRITE.
+    viewerPermission
     issueOrPullRequest(number: $number) {
       __typename
       ... on Issue {
         number
         body
         viewerCanUpdate
+        assignees(first: 30) { nodes { login avatarUrl } }
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
       }
       ... on PullRequest {
@@ -367,6 +370,7 @@ const discussionDetailSchema = z.object({
 
 const detailSchema = z.object({
   repository: z.object({
+    viewerPermission: z.string().optional(),
     issueOrPullRequest: z.discriminatedUnion('__typename', [
       z.object({
         __typename: z.literal('Issue'),
@@ -374,6 +378,9 @@ const detailSchema = z.object({
         // Optional so a host that does not send the description or the permission still reads.
         body: z.string().optional(),
         viewerCanUpdate: z.boolean().optional(),
+        assignees: z.object({
+          nodes: z.array(z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() })),
+        }).optional(),
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
       }),
       z.object({
@@ -631,6 +638,9 @@ const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_reques
 
 const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
+const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
+const writeAccessOf = (permission) => (permission === undefined ? undefined : WRITE_PERMISSIONS.has(permission));
+
 // What this account may do with one comment, only when the host answered. A
 // review thread comment carries none: these routes do not change it.
 const commentPermissions = (comment) => {
@@ -684,7 +694,17 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     return entry;
   });
   if (item.__typename === 'Issue') {
-    return { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null };
+    const detail = { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null };
+    const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+    if (writeAccess !== undefined) detail.writeAccess = writeAccess;
+    if (item.assignees !== undefined) {
+      detail.assignees = item.assignees.nodes.map((assignee) => {
+        const mapped = { id: assignee.login, login: assignee.login };
+        if (assignee.avatarUrl) mapped.avatarUrl = assignee.avatarUrl;
+        return mapped;
+      });
+    }
+    return detail;
   }
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
@@ -757,6 +777,8 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     },
   };
   if (stack !== undefined) detail.pull.stack = stack;
+  const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   return detail;
 }
 

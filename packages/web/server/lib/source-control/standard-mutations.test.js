@@ -29,10 +29,10 @@ describe('standard mutations', () => {
     const mutations = createStandardMutations(descriptor);
     const prepare = prepareWith(mutations);
     expect(mutations.routes).toEqual([
-      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
+      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/draft', '/pr/base', '/pr/update-branch', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
       '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment', '/issues/update', '/pr/comment/update', '/issues/comment/update',
       '/pr/comment/delete', '/issues/comment/delete',
-      '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
+      '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers', '/issues/assignees',
     ]);
     const inputs = {
       '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {}, '/pr/draft': {},
@@ -43,14 +43,16 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) }, '/issues/assignees': { assignees: ['1'] },
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
-      'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-draft', 'change-request-review',
+      'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-draft',
+      'change-request-base', 'change-request-update-branch', 'change-request-review',
       'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
       'change-request-comment', 'issue-comment', 'issue-update', 'change-request-comment-update', 'issue-comment-update', 'change-request-comment-delete', 'issue-comment-delete',
       'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
-      'change-request-reviewers',
+      'change-request-reviewers', 'issue-assignees',
     ]);
   });
 
@@ -64,6 +66,7 @@ describe('standard mutations', () => {
       '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
+      '/pr/base': { base: 'develop' }, '/pr/update-branch': { expectedHeadSha: 'a'.repeat(40) }, '/issues/assignees': { assignees: ['1'] },
     };
     for (const entry of [descriptor, giteaDescriptor]) {
       const mutations = createStandardMutations(entry);
@@ -231,5 +234,19 @@ describe('standard mutations', () => {
       expect(() => prepare('/pr/review', { verdict: 'approve', votes: { 'Code-Review': 1 } }, reviewTarget))
         .toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('not votes') }));
     });
+  });
+
+  it('normalizes a base change, a branch update and an assignee set, and refuses the rest', () => {
+    const prepare = prepareWith(createStandardMutations(descriptor));
+    expect(prepare('/pr/base', { base: '  develop  ' }).input).toEqual({ base: 'develop', digest: { base: 'develop' } });
+    expect(prepare('/pr/update-branch', { expectedHeadSha: 'a'.repeat(40) }).input)
+      .toEqual({ expectedHeadSha: 'a'.repeat(40), digest: { expectedHeadSha: 'a'.repeat(40) } });
+    expect(prepare('/issues/assignees', { assignees: ['2', '1'] }).input)
+      .toEqual({ names: ['1', '2'], digest: { assignees: ['1', '2'] } });
+
+    expect(() => prepare('/pr/base', { base: '   ' })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/base', { base: 'x'.repeat(300) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/pr/update-branch', { expectedHeadSha: 'A'.repeat(40) })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => prepare('/issues/assignees', { assignees: ['1', '2', '3'] })).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

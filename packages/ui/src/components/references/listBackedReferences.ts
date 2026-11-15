@@ -279,8 +279,21 @@ export const fetchListBackedReferenceDetail = async (
     if (reference.kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
-        const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);
-        return { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        const [issue, notes] = await Promise.all([
+            reads.issueGet(context, reference.number, project),
+            reads.issueComments(context, reference.number, project),
+        ]);
+        const comments = notes.map(toComment).sort(byCreation);
+        const assignees = (issue?.assignees ?? []).map((person) => ({ id: person.id, login: person.username, avatarUrl: person.avatarUrl }));
+        const detail: RepositoryReferenceDetail = {
+            number: reference.number,
+            comments: comments.slice(-50),
+            commentTotal: comments.length,
+            pull: null,
+        };
+        if (assignees.length > 0) detail.assignees = assignees;
+        if (issue && issue.writeAccess !== undefined) detail.writeAccess = issue.writeAccess;
+        return detail;
     }
     // The size comes from the changed files, which the neutral read only lists with their
     // diffs; the pipeline's totals from its jobs, read only with CI details.
@@ -291,10 +304,12 @@ export const fetchListBackedReferenceDetail = async (
         ...threadedComments([...changeRequestContext.issueComments, ...changeRequestContext.reviewComments]),
         ...(changeRequestContext.verdicts ?? []).map(toVerdict),
     ].sort(byCreation);
-    return {
+    const detail: RepositoryReferenceDetail = {
         number: reference.number,
         comments: comments.slice(-50),
         commentTotal: changeRequestContext.issueComments.length,
         pull: pullDetail(changeRequestContext),
     };
+    if (changeRequestContext.writeAccess !== undefined) detail.writeAccess = changeRequestContext.writeAccess;
+    return detail;
 };

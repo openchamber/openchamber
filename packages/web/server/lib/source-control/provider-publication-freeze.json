@@ -104,6 +104,8 @@
         "discussions": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "baseChange": true,
+        "updateBranch": true,
         "advancedSearch": true,
         "commentEdit": true
       }
@@ -200,6 +202,8 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "baseChange": true,
+        "rebase": true,
         "commentEdit": true
       }
     },
@@ -300,6 +304,8 @@
         "changeRequestPatch": true,
         "issueEdit": true,
         "changeRequestEdit": true,
+        "baseChange": true,
+        "updateBranch": true,
         "commentEdit": true
       }
     }

@@ -646,18 +646,20 @@ export const SourceBoardStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+    writeAccess?: boolean;
+}> = ({ item, context, onChanged, writeAccess }) => {
     if (item.source === 'repository' && item.reference.kind === 'discussion') {
         return <DiscussionStateMenuItems discussion={item.reference} context={context} onChanged={onChanged} />;
     }
-    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} />;
+    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} writeAccess={writeAccess} />;
 };
 
 const ItemStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
     onChanged: () => void;
-}> = ({ item, context, onChanged }) => {
+    writeAccess?: boolean;
+}> = ({ item, context, onChanged, writeAccess }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     // An open issue or PR closes, a closed one reopens; a merged PR stays as it is.
@@ -675,7 +677,7 @@ const ItemStateMenuItems: React.FC<{
         return t(nextState === 'closed' ? `sourceBoard.actions.closePull.${term}` : `sourceBoard.actions.reopenPull.${term}`);
     })();
 
-    const changeState = async () => {
+    const changeState = async (reason?: SetStateInput['reason']) => {
         if (!repositoryItem || !nextState) return;
         const label = referenceNumberLabel(repositoryItem, descriptor);
         try {
@@ -685,6 +687,7 @@ const ItemStateMenuItems: React.FC<{
                 target: { project: { owner: repositoryItem.sourceRepo.owner, name: repositoryItem.sourceRepo.repo }, number: repositoryItem.number },
                 state: nextState,
             };
+            if (reason !== undefined) payload.reason = reason;
             if (repositoryItem.kind === 'pull') await sourceControl.changeRequestSetState(payload);
             else await sourceControl.issueSetState(payload);
             forgetLabelWrite(repositoryItem);
@@ -718,6 +721,30 @@ const ItemStateMenuItems: React.FC<{
         }
     };
 
+    const asksCloseReason = repositoryItem?.kind === 'issue' && nextState === 'closed' && descriptor.features.issueCloseReason;
+
+    const changeBranch = async (action: 'update' | 'rebase') => {
+        if (!openPull) return;
+        const label = referenceNumberLabel(openPull, descriptor);
+        try {
+            const payload = {
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number },
+            };
+            if (action === 'update') await sourceControl.changeRequestUpdateBranch({ ...payload, expectedHeadSha: openPull.headSha });
+            else await sourceControl.changeRequestRebase(payload);
+            toast.success(t(action === 'update' ? 'sourceBoard.actions.branchUpdated' : 'sourceBoard.actions.rebased', { reference: label }));
+        } catch (error) {
+            toast.error(
+                t(action === 'update' ? 'sourceBoard.actions.branchUpdateFailed' : 'sourceBoard.actions.rebaseFailed', { reference: label }),
+                { description: error instanceof Error ? error.message : String(error) },
+            );
+        } finally {
+            onChanged();
+        }
+    };
+
     if (!repositoryItem) return null;
     return (
         <>
@@ -734,10 +761,34 @@ const ItemStateMenuItems: React.FC<{
                     {t('sourceBoard.actions.convertToDraft')}
                 </DropdownMenuItem>
             ) : null}
-            {nextState ? (
+            {asksCloseReason ? (
+                <>
+                    <DropdownMenuItem onSelect={() => void changeState('completed')}>
+                        <Icon name='checkbox-circle' className='size-4 shrink-0' />
+                        {t('sourceBoard.actions.closeIssueCompleted')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void changeState('not_planned')}>
+                        <Icon name='close-circle' className='size-4 shrink-0' />
+                        {t('sourceBoard.actions.closeIssueNotPlanned')}
+                    </DropdownMenuItem>
+                </>
+            ) : null}
+            {nextState && !asksCloseReason ? (
                 <DropdownMenuItem onSelect={() => void changeState()}>
                     <Icon name={nextState === 'open' ? 'arrow-go-back' : repositoryItem.kind === 'pull' ? 'git-close-pull-request' : 'checkbox-circle'} className="size-4 shrink-0" />
                     {stateLabel}
+                </DropdownMenuItem>
+            ) : null}
+            {openPull && !openPull.draft && descriptor.features.updateBranch && writeAccess !== false ? (
+                <DropdownMenuItem onSelect={() => void changeBranch('update')}>
+                    <Icon name="arrow-up-double" className="size-4 shrink-0" />
+                    {t('sourceBoard.actions.updateBranch')}
+                </DropdownMenuItem>
+            ) : null}
+            {openPull && !openPull.draft && descriptor.features.rebase && writeAccess !== false ? (
+                <DropdownMenuItem onSelect={() => void changeBranch('rebase')}>
+                    <Icon name="git-merge" className="size-4 shrink-0" />
+                    {t('sourceBoard.actions.rebase')}
                 </DropdownMenuItem>
             ) : null}
         </>

@@ -23,6 +23,7 @@ import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './proj
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
@@ -31,10 +32,11 @@ import { commentDraftScope } from './referenceCommentDrafts';
 import { useRepositoryReadContext } from './referenceSources';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
-import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
+import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips, RowPerson } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
+import { SourceBoardBase } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import {
     repositoryStateLook,
     labelColor,
@@ -462,6 +464,7 @@ const RepositoryPreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
@@ -473,7 +476,9 @@ const RepositoryPreview: React.FC<{
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     /** Replaces or removes a conversation comment on its host; without it they are read only. */
     commentActions?: ScopedCommentActions;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
@@ -524,6 +529,14 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
+    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : [];
+    const writeRefresh = onWriteRefresh ?? onRefresh;
+    const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
+    const canChangeBase = reference.kind === 'pull'
+        && reference.linked !== true
+        && descriptor.features.baseChange
+        && writeAccess !== false
+        && conversationWriteContext !== null && conversationWriteContext !== undefined;
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
@@ -791,16 +804,24 @@ const RepositoryPreview: React.FC<{
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
-                                {descriptor.features.branchHeads ? (
-                                    <span className="inline-flex max-w-full items-center gap-1 font-mono">
-                                        <span className="truncate">{reference.head}</span>
-                                        <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                        <span className="truncate">{reference.base}</span>
-                                    </span>
-                                ) : (
-                                    // The head is a revision's ref, not a branch: only where it lands reads as one.
-                                    <span className="block truncate font-mono">{reference.base}</span>
-                                )}
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    {descriptor.features.branchHeads ? (
+                                        <span className="inline-flex min-w-0 items-center gap-1 font-mono">
+                                            <span className="truncate">{reference.head}</span>
+                                            <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{reference.base}</span>
+                                        </span>
+                                    ) : (
+                                        <span className="min-w-0 truncate font-mono">{reference.base}</span>
+                                    )}
+                                    {canChangeBase && conversationWriteContext ? (
+                                        <SourceBoardBase
+                                            pull={reference}
+                                            context={conversationWriteContext}
+                                            onChanged={async () => { await writeRefresh?.(); }}
+                                        />
+                                    ) : null}
+                                </span>
                             </MetaRow>
                             <PullDetailRows
                                 detail={detail}
@@ -813,6 +834,15 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reviewersControl && reference.kind === 'pull' ? (
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
+                    ) : null}
+                    {reference.kind === 'issue' && (assigneesControl || assignees.length > 0) ? (
+                        <MetaRow label={t('sourceBoard.assignees.label')}>
+                            {assigneesControl ?? (
+                                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                    {assignees.map((person) => <RowPerson key={person.id} name={person.login} avatarUrl={person.avatarUrl} />)}
+                                </span>
+                            )}
+                        </MetaRow>
                     ) : null}
                     {labelsControl ? (
                         // Shown with no labels too, so some can be added.
@@ -1103,6 +1133,7 @@ export const ReferencePreview: React.FC<{
     /** Replace an issue's or PR's labels, and a PR's reviewers, with ones that change them. */
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    assigneesControl?: React.ReactNode;
     /** Opens the previewed PR's check runs from its checks totals. */
     onOpenChecks?: () => void;
     /** An issue's or PR's comments, pinned above the composer one by one or together. */
@@ -1123,7 +1154,9 @@ export const ReferencePreview: React.FC<{
     revisionChoice?: RevisionChoice;
     /** Saves an edited title and description for the previewed repository item; absent where the item is only read. */
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
+    onWriteRefresh?: () => Promise<void>;
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, conversationWriteContext }) => {
     const { t } = useI18n();
     const reference = item?.source === 'repository' ? item.reference : null;
     const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
@@ -1164,10 +1197,13 @@ export const ReferencePreview: React.FC<{
                     reply={reply}
                     labelsControl={labelsControl}
                     reviewersControl={reviewersControl}
+                    assigneesControl={assigneesControl}
                     onOpenChecks={onOpenChecks}
                     commentAttachments={commentAttachments}
                     stateMenu={stateMenu}
                     onRefresh={onRefresh}
+                    onWriteRefresh={onWriteRefresh}
+                    conversationWriteContext={conversationWriteContext}
                     threadActions={threadActions}
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}

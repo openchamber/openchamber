@@ -77,7 +77,7 @@ import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
 import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, useLinkRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
@@ -762,13 +762,12 @@ const SourceBoardBody: React.FC<{
             onOpenStackLayer={openStackLayer}
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
-            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
-            onSaveText={saveText}
-            threadActions={threadActions}
+            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined} onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined} conversationWriteContext={context ?? undefined}
+            onSaveText={saveText} threadActions={threadActions}
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
-                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
+                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} writeAccess={browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined} />
             ) : undefined}
             commentAttachments={previewItem?.source === 'repository'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
@@ -782,6 +781,7 @@ const SourceBoardBody: React.FC<{
                     onChanged={refreshRepositoryItem}
                 />
             ) : undefined}
+            assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} context={context} onChanged={refreshRepositoryItem} /> : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                     <SourceBoardReviewers

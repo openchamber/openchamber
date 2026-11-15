@@ -1828,6 +1828,36 @@ describe('canonical GitHub mutations', () => {
       expect(store.records.get('request-two')).toMatchObject({ kind: 'issue-state', state: 'succeeded', result: { state: 'open' } });
     });
 
+    it('closes an issue with a reason, and refuses a pull request number on the issue route', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => {
+        if (entry.path.endsWith('/issues/7')) return jsonResponse({ ...pullRequest(), pull_request: { url: 'https://api.github.com/repos/acme/app/pulls/7' } });
+        if (entry.method === 'PATCH') return jsonResponse({ number: 5, state: entry.body.state, state_reason: entry.body.state_reason });
+        return jsonResponse({ number: 5, state: 'open' });
+      });
+      const { app, store } = makeApp();
+      const issueTarget = { project: pullTarget.project, number: 5 };
+
+      const closed = await request(app).post('/api/source-control/github/issues/state')
+        .send({ ...context(account.accountId, { target: issueTarget }), state: 'closed', reason: 'not_planned' }).expect(200);
+      expect(closed.body.result).toEqual({ state: 'closed' });
+      expect(requests.filter((entry) => entry.method === 'PATCH')).toEqual([
+        { method: 'PATCH', path: '/repos/acme/app/issues/5', body: { state: 'closed', state_reason: 'not_planned' } },
+      ]);
+      expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-state', state: 'succeeded' });
+
+      // A reason belongs to closing, and only for an issue.
+      await request(app).post('/api/source-control/github/issues/state')
+        .send({ ...context(account.accountId, { target: issueTarget, idempotencyKey: 'request-two' }), state: 'open', reason: 'completed' }).expect(400);
+      await request(app).post('/api/source-control/github/pr/state')
+        .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), state: 'closed', reason: 'completed' }).expect(400);
+
+      // A pull request on the issue route is refused before anything is written.
+      await request(app).post('/api/source-control/github/issues/state')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 7 }, idempotencyKey: 'request-four' }), state: 'closed' }).expect(409);
+      expect(requests.filter((entry) => entry.method === 'PATCH')).toHaveLength(1);
+    });
+
     it.each([
       ['closed', 'succeeded'],
       ['open', 'failed'],

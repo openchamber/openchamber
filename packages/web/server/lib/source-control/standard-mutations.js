@@ -155,6 +155,26 @@ export function createStandardMutations(descriptor) {
         return { digest: {} };
       },
     },
+    '/pr/base': {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const base = requestText(input.base);
+        if (!base || base.length > TITLE_MAX) throw invalidMutationContext(`base is required and must fit ${TITLE_MAX} characters`);
+        return { base, digest: { base } };
+      },
+    },
+    '/pr/update-branch': {
+      kind: 'change-request-update-branch',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const expectedHeadSha = requestText(input.expectedHeadSha);
+        if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+          throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+        }
+        return { expectedHeadSha, digest: { expectedHeadSha } };
+      },
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {
@@ -238,8 +258,7 @@ export function createStandardMutations(descriptor) {
     ['/pr/labels', 'change-request-labels', 'labels'],
     ['/issues/labels', 'issue-labels', 'labels'],
     ['/pr/reviewers', 'change-request-reviewers', 'reviewers'],
-  ]) {
-    entries[route] = {
+  ]) {    entries[route] = {
       kind,
       normalize: (input, context) => {
         requireNumber(context);
@@ -251,6 +270,15 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
+
+  entries['/issues/assignees'] = {
+    kind: 'issue-assignees',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+      return { names, digest: { assignees: names } };
+    },
+  };
 
   const entryFor = (route) => {
     if (!Object.hasOwn(entries, route)) throw invalidMutationContext('Source control mutation is unsupported');

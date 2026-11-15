@@ -28,7 +28,7 @@ import { readPendingReview } from './review-draft.js';
  */
 
 const ISSUE_KINDS = new Set([
-  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update',
+  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update', 'issue-assignees',
   // A pull request's conversation comments are issue comments to GitHub, so
   // their record kinds are issue kinds too; only their target differs.
   'change-request-comment-update', 'change-request-comment-delete',
@@ -46,6 +46,7 @@ const ownKind = (operation) => ISSUE_KINDS.has(operation) || DISCUSSION_KINDS.ha
 const recordKind = (operation) => (ownKind(operation) ? operation : `change-request-${operation}`);
 const operationOf = (kind) => (ownKind(kind) ? kind : kind.replace(/^change-request-/, ''));
 // What GitHub calls each reason a discussion is closed for.
+const CLOSE_REASON_OF = Object.freeze({ completed: 'completed', not_planned: 'not_planned', duplicate: 'not_planned' });
 const DISCUSSION_CLOSE_REASONS = Object.freeze({ resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' });
 
 /** The route each operation answers on. */
@@ -70,9 +71,12 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/issues/comment/update': 'issue-comment-update',
   '/issues/comment/delete': 'issue-comment-delete',
   '/pr/state': 'state',
+  '/pr/base': 'base',
+  '/pr/update-branch': 'update-branch',
   '/issues/state': 'issue-state',
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels',
+  '/issues/assignees': 'issue-assignees',
   '/pr/reviewers': 'reviewers',
   '/discussions/comment': 'discussion-comment',
   '/discussions/comment/update': 'discussion-comment-update',
@@ -222,6 +226,21 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
       : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
   if (operation === 'ready' || operation === 'draft') return { input: {}, digest: (target) => digestOf({ target }) };
+  if (operation === 'base') {
+    const base = requiredText(body.base, 'base');
+    if (base.length > 256 || base.startsWith('refs/heads/')) throw mutationError('base is invalid');
+    return { input: { base }, digest: (target) => digestOf({ target, base }) };
+  }
+  if (operation === 'update-branch') {
+    const { expectedHeadSha } = body;
+    if (!isProviderString(expectedHeadSha) || !/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+      throw mutationError('expectedHeadSha is invalid');
+    }
+    if (context.target.headSha !== undefined && context.target.headSha !== expectedHeadSha) {
+      throw mutationError('expectedHeadSha does not match the target head');
+    }
+    return { input: { expectedHeadSha }, digest: (target) => digestOf({ target, expectedHeadSha }) };
+  }
   if (operation === 'labels' || operation === 'issue-labels' || operation === 'discussion-labels') {
     const labels = nameList(body.labels, 'labels', limits.labelsMax);
     return { input: { labels }, digest: (target) => digestOf({ target, labels }) };
@@ -268,6 +287,10 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
     const commentId = nodeId(body.commentId, 'commentId');
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
+  if (operation === 'issue-assignees') {
+    const assignees = nameList(body.assignees, 'assignees', limits.reviewersMax);
+    return { input: { assignees }, digest: (target) => digestOf({ target, assignees }) };
+  }
   if (operation === 'reviewers') {
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
     return { input: { reviewers }, digest: (target) => digestOf({ target, reviewers }) };
@@ -275,7 +298,11 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
   if (operation === 'state' || operation === 'issue-state') {
     if (body.state !== 'open' && body.state !== 'closed') throw mutationError('state is invalid');
     const { state } = body;
-    return { input: { state }, digest: (target) => digestOf({ target, state }) };
+    if (body.reason !== undefined && (state === 'open' || operation !== 'issue-state')) throw mutationError('reason is invalid');
+    if (body.reason === undefined) return { input: { state }, digest: (target) => digestOf({ target, state }) };
+    if (body.reason !== 'completed' && body.reason !== 'not_planned') throw mutationError('reason is invalid');
+    const { reason } = body;
+    return { input: { state, reason }, digest: (target) => digestOf({ target, state, reason }) };
   }
   if (operation === 'comment' || operation === 'issue-comment') {
     const text = commentText(body.body, true, limits.commentMaxLength);
@@ -901,6 +928,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     // never sent short of guessing from its text, so the outcome stays unknown.
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
+    if (operation === 'update-branch') {
+      const current = await octokit.rest.pulls.get({ owner: target.project.owner, repo: target.project.name, pull_number: target.number });
+      const pr = requireMutationPullRequest(current?.data, 'GitHub returned an invalid pull request', octokit);
+      return pr.head.sha === input.expectedHeadSha ? unknownOutcome() : { state: 'succeeded', result: {} };
+    }
     const project = target.project;
     // A text edit is only certain when the item reads as asked: a human edit in
     // the crash window looks the same as a write that never landed.
@@ -967,11 +999,18 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (operation === 'reviewers') {
       return sameNames(await requestedReviewers(octokit, project, target.number), input.reviewers) ? { state: 'succeeded', result: {} } : unknownOutcome();
     }
+    if (operation === 'issue-assignees') {
+      const current = await octokit.rest.issues.get({ owner: project.owner, repo: project.name, issue_number: target.number });
+      const logins = requireProviderArray(current?.data?.assignees, 'GitHub returned invalid assignees').map((person) => person?.login);
+      return logins.every(isProviderString) && sameNames(logins, input.assignees) ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
     if (operation === 'issue-state') {
       const current = await octokit.rest.issues.get({ owner: project.owner, repo: project.name, issue_number: target.number });
       const state = current?.data?.state;
       if (state !== 'open' && state !== 'closed') return unknownOutcome();
-      return state === input.state ? { state: 'succeeded', result: { state } } : definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+      if (state !== input.state) return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+      if (input.reason !== undefined && CLOSE_REASON_OF[current?.data?.state_reason] !== input.reason) return unknownOutcome();
+      return { state: 'succeeded', result: { state } };
     }
     const current = await octokit.rest.pulls.get({ owner: project.owner, repo: project.name, pull_number: target.number });
     const pr = requireMutationPullRequest(current?.data, 'GitHub returned an invalid pull request', octokit);
@@ -994,6 +1033,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     } else if (operation === 'draft') {
       if (pr.draft === true) return { state: 'succeeded', result: { draft: true } };
       if (pr.draft === false && pr.state === 'open') return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+    } else if (operation === 'base') {
+      if (pr.base.ref === input.base) return { state: 'succeeded', result: {} };
     }
     return unknownOutcome();
   };
@@ -1164,10 +1205,39 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return setLabels(octokit, project, target.number, input.labels);
       case 'reviewers':
         return setReviewers(octokit, project, target.number, input.reviewers);
+      case 'issue-assignees': {
+        const updated = (await rejected(() => octokit.rest.issues.update({
+          owner: project.owner, repo: project.name, issue_number: target.number, assignees: input.assignees,
+        })))?.data;
+        const answered = requireProviderArray(updated?.assignees, 'GitHub returned invalid assignees').map((person) => person?.login);
+        if (!answered.every(isProviderString) || !sameNames(answered, input.assignees)) {
+          throw invalidProviderPayload('GitHub returned unexpected assignees');
+        }
+        return {};
+      }
       case 'state':
         return setState(() => octokit.rest.pulls.update({ owner: project.owner, repo: project.name, pull_number: target.number, state: input.state }), input.state);
+      case 'base': {
+        const updated = requireMutationPullRequest((await octokit.rest.pulls.update({
+          owner: project.owner, repo: project.name, pull_number: target.number, base: input.base,
+        }))?.data, 'GitHub returned an invalid updated pull request', octokit);
+        if (!sameProject(pullTargetProject(updated), project)
+          || !targetMatches({ ...target, base: input.base }, updated)) {
+          throw invalidProviderPayload('GitHub returned an updated pull request with an unexpected base');
+        }
+        return {};
+      }
+      case 'update-branch':
+        await rejected(() => octokit.rest.pulls.updateBranch({
+          owner: project.owner, repo: project.name, pull_number: target.number, expected_head_sha: input.expectedHeadSha,
+        }));
+        return {};
       case 'issue-state':
-        return setState(() => octokit.rest.issues.update({ owner: project.owner, repo: project.name, issue_number: target.number, state: input.state }), input.state);
+        return setState(() => {
+          const fields = { owner: project.owner, repo: project.name, issue_number: target.number, state: input.state };
+          if (input.reason !== undefined) fields.state_reason = input.reason;
+          return octokit.rest.issues.update(fields);
+        }, input.state);
       case 'issue-update': {
         const updateInput = { owner: project.owner, repo: project.name, issue_number: target.number, title: input.title };
         if (input.body !== undefined) updateInput.body = input.body;

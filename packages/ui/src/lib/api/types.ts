@@ -1,4 +1,4 @@
-import type { WorktreeMetadata } from '@/types/worktree';
+import type { WorktreeMetadata } from '@/types/worktree'; import type { SourceControlWrites } from './source-control-writes';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
@@ -70,7 +70,7 @@ import type {
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
 
-export type * from '../source-control/types';
+export type * from '../source-control/types'; export type { RebaseChangeRequestInput, SetAssigneesInput, UpdateChangeRequestBranchInput } from '../source-control/mutation-writes';
 export type * from '../trackers/types';
 export type {
   GitIdentityProfile,
@@ -1849,7 +1849,7 @@ export type RepositoryReferenceDetail = {
    */
   body?: string;
   /** Whether this account may replace the item's title and body; absent when the host does not say. */
-  viewerCanUpdate?: boolean;
+  viewerCanUpdate?: boolean; assignees?: RepositoryReferenceReviewer[];
   /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
   comments: RepositoryReferenceComment[];
   /** How many conversation comments the item has in all. */
@@ -1881,7 +1881,7 @@ export type RepositoryReferenceDetail = {
     revisions?: ChangeRequestRevision[];
   } | null;
   /** A discussion's: what this account may do with it. Absent for an issue or a change request. */
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
+  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean }; writeAccess?: boolean;
 };
 
 
@@ -1980,7 +1980,7 @@ export class SourceControlInstanceAliasError extends Error {
   }
 }
 
-export interface SourceControlAPI {
+export interface SourceControlAPI extends SourceControlWrites {
   /**
    * The providers the connected server serves, ordered. An authoritative
    * empty list where no provider is served (VS Code); throws on failure.

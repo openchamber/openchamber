@@ -271,9 +271,12 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         startThread: false,
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
-        issueCloseReason: presentation.features.issueCloseReason,
+        issueCloseReason: false,
         issueEdit: presentation.features.issueEdit === true,
         changeRequestEdit: presentation.features.changeRequestEdit === true,
+        baseChange: presentation.features.baseChange === true,
+        updateBranch: presentation.features.updateBranch === true,
+        rebase: false,
         // The box is a plain search: the standard routes pass it as text only.
         advancedSearch: false,
         // The same switch as the capability: it gates the edit and delete routes,

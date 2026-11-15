@@ -259,7 +259,7 @@ const MUTATION_ROUTES = [
   ['/pr/state', 'state'],
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'],
+  ['/issues/labels', 'labels'], ['/issues/assignees', 'issues'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
   ['/pr/review/comment', 'reviewDrafts'],
@@ -272,7 +272,7 @@ const MUTATION_ROUTES = [
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'],
+  ['/discussions/update', 'discussions'], ['/pr/base', 'changeRequests'], ['/pr/update-branch', 'changeRequests'], ['/pr/rebase', 'changeRequests'],
 ];
 
 /**

@@ -58,6 +58,10 @@ const notFound = (message) => Object.assign(new Error(message), { status: 404 })
 const malformed = (message) => new Error(message);
 const seg = (value) => encodeURIComponent(value);
 const repoPath = (repo) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
+const giteaWriteAccess = (raw) => {
+  const push = raw?.permissions?.push;
+  return push === true || push === false ? push : undefined;
+};
 
 function requireMapped(value, message) {
   if (!value) throw malformed(message);
@@ -330,6 +334,19 @@ export function createGiteaResourceService({
 
   const collaborators = (repo) => client.collection(`${repoPath(repo)}/collaborators`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
 
+  const assigneeLogins = async (providerTarget, assignees) => {
+    const repo = targetRepo(providerTarget);
+    const raw = await client.get(`${repoPath(repo)}/issues/${providerTarget.number}`);
+    const users = [...(Array.isArray(raw?.assignees) ? raw.assignees : []), ...(await collaborators(repo))]
+      .filter((user) => Number.isInteger(user?.id) && isString(user?.login));
+    const byId = new Map(users.map((user) => [String(user.id), user.login]));
+    return assignees.map((entry) => {
+      const login = byId.get(entry) ?? (/^\d+$/.test(entry) ? null : entry);
+      if (!login) throw Object.assign(new Error(`${providerLabel} user ${entry} cannot be assigned in this repository`), { status: 422 });
+      return login;
+    });
+  };
+
   /** Pull requests a list names by issue number, read in full. */
   const pullsOfIssues = async (repo, issues, { mergedOnly = false } = {}) => {
     const pulls = await mapLimited(issues, LIST_DETAIL_CONCURRENCY, (issue) => client.get(`${repoPath(repo.project)}/pulls/${issue.number}`));
@@ -495,6 +512,8 @@ export function createGiteaResourceService({
         diff: diffText,
         ci,
       };
+      const writeAccess = giteaWriteAccess(target.raw);
+      if (writeAccess !== undefined) context.writeAccess = writeAccess;
       if (!options.includeTimeline) return context;
       return {
         ...context,
@@ -531,7 +550,10 @@ export function createGiteaResourceService({
 
     async getIssue(directory, number, selector, remote, { linked } = {}) {
       const { target } = await network(directory, selector, remote, { linked });
-      return requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      const writeAccess = giteaWriteAccess(target.raw);
+      if (writeAccess !== undefined) issue.writeAccess = writeAccess;
+      return issue;
     },
 
     async issueComments(directory, number, selector, remote, { linked } = {}) {
@@ -730,6 +752,33 @@ export function createGiteaResourceService({
       return {};
     },
 
+    async setChangeRequestBase({ providerTarget, base, expectedTarget }) {
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}`, { base });
+      if (branchRepoId(raw?.base) !== providerTarget.repoId) throw malformed(`${providerLabel} returned a pull request outside the resolved mutation target`);
+      const request = requirePull(raw, projectOfTarget(providerTarget));
+      const { base: _base, ...expected } = expectedTarget;
+      requireExpected(expected, request);
+      if (request.base !== base) throw malformed(`${providerLabel} returned an unexpected pull request base`);
+      return {};
+    },
+
+    async reconcileChangeRequestBase(providerTarget, base) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      return current.base === base ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
+    async updateChangeRequestBranch({ providerTarget, expectedHeadSha, expectedTarget }) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      requireExpected({ number: expectedTarget.number, headSha: expectedHeadSha }, current);
+      await client.post(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/update?style=merge`);
+      return {};
+    },
+
+    async reconcileChangeRequestBranch(providerTarget, expectedHeadSha) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      return current.headSha !== expectedHeadSha ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
     async updateIssue({ providerTarget, expectedTarget, title, body }) {
       const payload = { title };
       if (body !== undefined) payload.body = body;
@@ -852,6 +901,18 @@ export function createGiteaResourceService({
       return {};
     },
 
+    async setIssueAssignees({ providerTarget, assignees }) {
+      const logins = await assigneeLogins(providerTarget, assignees);
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`, { assignees: logins });
+      const issue = requireIssue(raw, projectOfTarget(providerTarget));
+      if (issue.number !== providerTarget.number) throw malformed(`${providerLabel} answered an issue outside the resolved mutation target`);
+      const answered = (issue.assignees ?? []).map((user) => user.username);
+      if (answered.length !== logins.length || !answered.every((login) => logins.includes(login))) {
+        throw malformed(`${providerLabel} answered an unexpected assignee set`);
+      }
+      return {};
+    },
+
     /**
      * The whole reviewer set by user id. Gitea's API adds and removes review
      * requests by username, so ids are looked up among the collaborators and
@@ -902,6 +963,17 @@ export function createGiteaResourceService({
         ? (Array.isArray(reviewers) ? reviewers.map((user) => String(user?.id)) : null)
         : (Array.isArray(raw?.labels) ? raw.labels.map((label) => label?.name) : null);
       if (!current || current.length !== names.length || !current.every((entry) => names.includes(entry))) return { state: 'outcome-unknown' };
+      return { state: 'succeeded', result: {} };
+    },
+
+    async reconcileIssueAssignees(providerTarget, assignees) {
+      const logins = await assigneeLogins(providerTarget, assignees);
+      const issue = requireIssue(
+        await client.get(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`),
+        projectOfTarget(providerTarget),
+      );
+      const current = (issue.assignees ?? []).map((user) => user.username);
+      if (current.length !== logins.length || !current.every((login) => logins.includes(login))) return { state: 'outcome-unknown' };
       return { state: 'succeeded', result: {} };
     },
 
