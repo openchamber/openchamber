@@ -1367,7 +1367,9 @@ checkout (`onCheckoutHydrated`) evicts the folder's locations before the record
 turns ready, so OpenCode opens the repaired folder afresh. The shared draft
 creator keeps the project directory selected until creation returns, because
 preview paths have no bootstrap state. A directory with no bootstrap state was
-never populated by this server and passes at once. The gate
+never populated by this server and passes at once. A folder that no longer
+exists never holds the gate either: a cached failure answers only while one
+`lstat` still finds the folder. The gate
 reads memory (`getWorktreeBootstrapGateStatus` in `../git/service.js`): the
 durable bootstrap store takes a cross-process file lock per read, which must not
 sit on every proxied request. The first request for a folder in each server

@@ -65,6 +65,37 @@ describe('worktree bootstrap storage', () => {
       .resolves.toMatchObject({ status: 'ready', error: null });
   });
 
+  it('opens the gate for a cached failure once its directory is deleted', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-gate-orphan-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const store = createWorktreeBootstrapStore({ filePath: path.join(directory, 'bootstrap.json') });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+
+    await fs.rmdir(checkout);
+
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+    await expect(store.read(checkout)).resolves.toBeNull();
+  });
+
+  it('keeps failing a cached failure whose directory still exists', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-gate-present-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const store = createWorktreeBootstrapStore({ filePath: path.join(directory, 'bootstrap.json') });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+
+    await expect(store.read(checkout)).resolves.toEqual(failure);
+  });
+
   it('forgets a removed failed checkout on the first gated request after restart', async () => {
     const directory = await temporaryDirectory('worktree-bootstrap-orphan-restart-');
     const checkout = path.join(directory, 'checkout');
