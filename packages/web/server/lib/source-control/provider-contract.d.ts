@@ -342,7 +342,7 @@ export interface ProviderImplementation {
     projectUpstream?(input: ReadInput): Promise<Json>;
     projectBranches?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
     listLabels?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
-    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
+    listReviewerCandidates?(input: ReadInput & { project: ProjectSelector; role?: 'assignee' | 'reviewer' }): Promise<Json>;
     /** The attachment as the provider's fetch Response; the shell checks its type and streams it. */
     readUpload?(input: ReadInput & { project: ProjectSelector; secret: string; filename: string; range?: string; signal: AbortSignal }): Promise<Response>;
     /** `revision` (40-hex) only when the descriptor declares `capabilities.revisions`; absent means the current one. */

@@ -328,7 +328,7 @@ export function createGiteaResourceService({
     });
   };
 
-  const collaborators = (repo) => client.collection(`${repoPath(repo)}/collaborators`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
+  const repoUsers = (repo, kind = 'collaborators') => client.collection(`${repoPath(repo)}/${kind}`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
 
   /** Pull requests a list names by issue number, read in full. */
   const pullsOfIssues = async (repo, issues, { mergedOnly = false } = {}) => {
@@ -362,7 +362,7 @@ export function createGiteaResourceService({
     return comments;
   };
 
-  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, collaborators }),
+  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, repoUsers }),
     async changeRequestStatus(directory, branch, remote) {
       const sources = await resolveDirectoryRepos(directory, remote);
       const targets = await withParents(sources, { requireComplete: true });
@@ -572,10 +572,10 @@ export function createGiteaResourceService({
       });
     },
 
-    /** Collaborators: who can be asked to review. Ids are numeric, as reviewer mutations take them. */
-    async listReviewerCandidates(directory, selector, remote) {
+    /** Collaborators for review, the repository's assignable people for an assignee picker. Ids are numeric, as the mutations take them. */
+    async listReviewerCandidates(directory, selector, remote, { role } = {}) {
       const { target } = await network(directory, selector, remote);
-      return (await collaborators(target.project)).flatMap((user) => {
+      return (await repoUsers(target.project, role === 'assignee' ? 'assignees' : 'collaborators')).flatMap((user) => {
         const mapped = mapGiteaUser(user, identity);
         if (!mapped) return [];
         return [mapped.avatarUrl ? { id: mapped.id, login: mapped.username, avatarUrl: mapped.avatarUrl } : { id: mapped.id, login: mapped.username }];
@@ -862,7 +862,7 @@ export function createGiteaResourceService({
       const repo = targetRepo(providerTarget);
       const raw = await readTargetPull(providerTarget);
       const current = (Array.isArray(raw.requested_reviewers) ? raw.requested_reviewers : []).filter((user) => Number.isInteger(user?.id) && isString(user?.login));
-      const known = new Map([...current, ...(await collaborators(repo))].filter((user) => Number.isInteger(user?.id) && isString(user?.login))
+      const known = new Map([...current, ...(await repoUsers(repo))].filter((user) => Number.isInteger(user?.id) && isString(user?.login))
         .map((user) => [String(user.id), user.login]));
       const wanted = reviewers.map((id) => {
         const login = known.get(id);

@@ -876,20 +876,20 @@ export function registerProviderRoutes(app, {
       });
     }
 
-    // The project's labels and who can review in it, for the board's pickers.
-    for (const [suffix, capability, method] of [
-      ['/references/labels', 'labels', 'listLabels'],
-      ['/references/reviewers', 'reviewers', 'listReviewerCandidates'],
-    ]) {
-      boundRead(capability, suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
-        const read = requireResource(impl, method);
-        const session = await sessionFor(impl, instance, trustedContext.accountId);
-        const project = optionalProject(req);
-        return res.json({ connected: true, items: await read({ session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote }) });
-      }, {
-        validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null),
-      });
-    }
+    // The project's labels, and who can review or be assigned in it, for the board's pickers.
+    boundRead('labels', '/references/labels', async ({ req, res, impl, instance, directory, trustedContext }) => {
+      const read = requireResource(impl, 'listLabels');
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      return res.json({ connected: true, items: await read({ session, directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote }) });
+    }, { validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null) });
+    boundRead('reviewers', '/references/reviewers', async ({ req, res, impl, instance, directory, trustedContext }) => {
+      const read = requireResource(impl, 'listReviewerCandidates');
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      return res.json({ connected: true, items: await read({ session, directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote, role: requestText(req.query?.role) || undefined }) });
+    }, {
+      validate: (req) => (!namesProject(req) ? 'a complete project selector is required'
+        : !['', 'assignee', 'reviewer'].includes(requestText(req.query?.role)) ? 'role must be assignee or reviewer' : null),
+    });
 
     // The reference picker: a searched page of issues or change requests, the
     // same search across several folders, an item's detail, and what colours

@@ -749,3 +749,30 @@ describe('Gitea label filtering', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('Gitea picker candidates', () => {
+  it('reads assignable people for the assignee role when the repository lists no collaborators', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/collaborators': [],
+      'GET /repos/alice/app/assignees': [{ id: 1, login: 'alice' }],
+    });
+
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin')).resolves.toEqual([]);
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin', { role: 'reviewer' })).resolves.toEqual([]);
+    await expect(service.listReviewerCandidates('/repo', upstream, 'origin', { role: 'assignee' }))
+      .resolves.toEqual([{ id: '1', login: 'alice' }]);
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/assignees')).toHaveLength(1);
+  });
+
+  it('assigns a person the repository lists as assignable but not as a collaborator', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1, assignees: [] },
+      'PATCH /repos/alice/app/issues/1': { ...fixtures.issue, number: 1, assignees: [{ id: 1, login: 'alice' }] },
+      'GET /repos/alice/app/collaborators': [],
+      'GET /repos/alice/app/assignees': [{ id: 1, login: 'alice' }],
+    });
+
+    await expect(service.setIssueAssignees({ providerTarget, assignees: ['1'] })).resolves.toEqual({});
+    expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ assignees: ['alice'] });
+  });
+});

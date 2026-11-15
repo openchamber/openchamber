@@ -101,12 +101,14 @@ const show = async (options: ShowOptions = {}) => {
   await setProvider();
   const base = createWebAPIs();
   const calls: SetAssigneesInput[] = [];
+  const roles: Array<'assignee' | 'reviewer' | undefined> = [];
   let changed = 0;
   const apis: RuntimeAPIs = {
     ...base,
     sourceControl: {
       ...base.sourceControl,
-      referenceReviewers: async () => {
+      referenceReviewers: async (_context, _project, role) => {
+        roles.push(role);
         if (options.candidates instanceof Error) throw options.candidates;
         return options.candidates ?? [ada, grace, linus];
       },
@@ -138,7 +140,7 @@ const show = async (options: ShowOptions = {}) => {
       </I18nProvider>,
     );
   });
-  return { calls, changed: () => changed };
+  return { calls, roles, changed: () => changed };
 };
 
 const click = async (element: HTMLElement | null | undefined) => {
@@ -165,6 +167,15 @@ describe('an issue\'s assignees row', () => {
     await show({ assignees: [] });
     expect(host.textContent).toContain('Unassigned');
     expect(pencil()).not.toBeNull();
+  });
+
+  test('keeps the pencil with an empty list when the project names nobody', async () => {
+    const { roles } = await show({ assignees: [], candidates: [] });
+    expect(pencil()).not.toBeNull();
+    await click(pencil());
+    expect(dialog()?.textContent).toContain('No one found');
+    expect(roles.length).toBeGreaterThan(0);
+    expect(roles.every((role) => role === 'assignee')).toBe(true);
   });
 
   test('stays read only when the project will not name who can be assigned', async () => {

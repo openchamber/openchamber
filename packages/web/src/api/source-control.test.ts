@@ -13,11 +13,12 @@ import type {
   UpdateChangeRequestInput,
 } from '@openchamber/ui/lib/api/types';
 import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
+import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { buildManagedAccountOptions } from '@openchamber/ui/lib/source-control/identity';
 import { githubLikeDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor.fixture';
 import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
 
-const runtimeFetchMock = vi.fn(async (): Promise<Response> => Response.json({}));
+const runtimeFetchMock = vi.fn(async (_input: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 const identity: SourceControlIdentity = { provider: 'github', instance: 'https://GitHub.com/' };
 const readContext: SourceControlReadContext = {
   ...identity,
@@ -1121,6 +1122,7 @@ describe('createWebSourceControlAPI', () => {
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }] }))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: '1', login: 'owner' }] }))
       .mockResolvedValueOnce(Response.json({ connected: false }))
       .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'javascript:alert(1)' }] }));
     const project = { owner: 'openchamber', repo: 'openchamber' };
@@ -1130,6 +1132,7 @@ describe('createWebSourceControlAPI', () => {
     await api.changeRequestSetReviewers({ ...mutationContext, reviewers: ['octo'] });
     await expect(api.referenceLabels(readContext, project)).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }]);
     await expect(api.referenceReviewers(readContext, project)).resolves.toEqual([{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }]);
+    await expect(api.referenceReviewers(readContext, project, 'assignee')).resolves.toEqual([{ id: '1', login: 'owner' }]);
     await expect(api.referenceLabels(readContext, project)).rejects.toThrow('not connected');
     await expect(api.referenceReviewers(readContext, project)).rejects.toThrow('invalid user');
 
@@ -1139,6 +1142,8 @@ describe('createWebSourceControlAPI', () => {
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/references/labels', expect.objectContaining({
       query: expect.objectContaining({ toString: expect.any(Function) }),
     }));
+    expect(String(runtimeFetchMock.mock.calls[4][1]?.query)).not.toContain('role=');
+    expect(String(runtimeFetchMock.mock.calls[5][1]?.query)).toContain('role=assignee');
   });
 
   it('keeps credential authority separate from provider actor metadata', async () => {

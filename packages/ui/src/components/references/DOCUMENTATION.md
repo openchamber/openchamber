@@ -535,6 +535,14 @@ preview's footer holds actions instead of what the agent gets.
   set is sent once, when the popup closes, so several clicks are one change;
   a PR's author is not offered as its reviewer unless the provider has
   `features.authorCanReview` (GitLab).
+- Assignees (`SourceBoardAssignees`, the same picker): an issue's row names its
+  current assignees and offers the pencil once the project answered who can be
+  assigned. That read uses `role: 'assignee'`, so an owner-only repository still
+  offers its owner; reviewers keep the default role. An empty candidate list
+  still opens the picker with its empty message, a failed
+  candidate read keeps the pencil and shows the failure there, and a host that
+  does not support the read (`SOURCE_CONTROL_CAPABILITY_UNSUPPORTED`) leaves the
+  row read-only.
 - Reply (`SourceBoardReply`, every repository item): below the activity a
   comment box; on an open PR also Approve and Request changes (needs text),
   for the head commit the preview shows. The box is keyed by the item, so a

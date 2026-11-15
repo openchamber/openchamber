@@ -10,12 +10,12 @@ export const withGiteaWriteAccess = (value, raw) => {
 
 export const giteaItemWrites = ({
   client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId,
-  malformed, requireExpected, readTargetPull, collaborators,
+  malformed, requireExpected, readTargetPull, repoUsers,
 }) => {
   const assigneeLogins = async (providerTarget, assignees) => {
     const repo = targetRepo(providerTarget);
     const raw = await client.get(`${repoPath(repo)}/issues/${providerTarget.number}`);
-    const users = [...(Array.isArray(raw?.assignees) ? raw.assignees : []), ...(await collaborators(repo))]
+    const users = [...(Array.isArray(raw?.assignees) ? raw.assignees : []), ...(await repoUsers(repo)), ...(await repoUsers(repo, 'assignees'))]
       .filter((user) => Number.isInteger(user?.id) && isString(user?.login));
     const byId = new Map(users.map((user) => [String(user.id), user.login]));
     return assignees.map((entry) => {

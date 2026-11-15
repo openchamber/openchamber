@@ -2065,8 +2065,8 @@ export interface SourceControlAPI extends SourceControlWrites {
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   /** One page of a project's labels, for the board's picker. */
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  /** One page of the people who can be asked to review in a project. */
-  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
+  /** One page of the people who can be asked to review in a project, or be assigned in it. */
+  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector, role?: 'assignee' | 'reviewer'): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
     options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },

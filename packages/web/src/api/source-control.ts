@@ -640,15 +640,13 @@ interface RepositoryChoicesDTO extends ErrorResponse {
 
 /** Labels or reviewer candidates of one project in the bound repository's network. */
 const readRepositoryChoices = async (
-  fetch: SourceControlFetch,
-  context: SourceControlReadContext,
-  project: RepositorySelector,
-  path: string,
+  fetch: SourceControlFetch, context: SourceControlReadContext, project: RepositorySelector,
+  path: string, role?: 'assignee' | 'reviewer',
 ): Promise<NonNullable<RepositoryChoicesDTO['items']>> => {
   const identity = normalizeIdentity(context);
   const query = boundReadQuery(context);
-  query.set('owner', project.owner);
-  query.set('repo', project.repo);
+  query.set('owner', project.owner); query.set('repo', project.repo);
+  if (role) query.set('role', role);
   const payload = await request<RepositoryChoicesDTO>(fetch, identity, path, {}, query);
   if (payload.connected !== true) throw new Error(`${providerLabel(identity)} is not connected`);
   if (!Array.isArray(payload.items)) throw new Error('Source control response contained an invalid list');
@@ -1599,7 +1597,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
     referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
-    referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
+    referenceReviewers: async (context, project, role) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers', role)),
     issueComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment', {

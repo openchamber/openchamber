@@ -671,12 +671,18 @@ describe('GET /api/source-control/github/references', () => {
       .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(200);
     const reviewers = await request(app).get('/api/source-control/github/references/reviewers')
       .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(200);
+    const assignees = await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', role: 'assignee' }).expect(200);
 
     expect(labels.body).toEqual({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }] });
     expect(reviewers.body).toEqual({ connected: true, items: [
       { id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' },
       { id: 'hubot', login: 'hubot' },
     ] });
+    expect(assignees.body).toEqual(reviewers.body);
+    const refusedRole = await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', role: 'owner' }).expect(400);
+    expect(refusedRole.body).toEqual({ error: 'role must be assignee or reviewer' });
     const calls = fetch.mock.calls.length;
     await request(app).get('/api/source-control/github/references/labels')
       .query({ ...readContext(project), owner: 'someone', repo: 'else' }).expect(400);

@@ -172,6 +172,7 @@ A host that keeps repository discussions (GitHub) declares `capabilities.discuss
 
 - The reference picker routes take `kind=discussion` (`/references`, `/references/across`, and `/references/detail` with `kind=discussion`, which hands the implementation `kind: 'discussion'` instead of `'item'`). On a provider without the capability they answer `501 SOURCE_CONTROL_CAPABILITY_UNSUPPORTED`. The list filter's `unanswered` state is read only with `kind=discussion`; on every other list an unknown state is `open`, as before.
 - `/discussions/comment`, `/discussions/state`, `/discussions/answer` and `/discussions/labels` are mutation routes gated by the capability, with the record kinds `discussion-comment`, `discussion-state`, `discussion-answer` and `discussion-labels`. Audit records name their target `kind: 'discussion'` (`providerTargetKind` in `audit-storage.js`).
+- `/references/labels` and `/references/reviewers` read the project's label and people pickers (`GET`, capabilities `labels` and `reviewers`; a complete project selector is required). `/references/reviewers` takes an optional `role`: absent or `reviewer` answers reviewer candidates, `assignee` answers the people who can be assigned, and any other value is `400 role must be assignee or reviewer`. A provider that cannot tell the two apart answers the same list; the reviewer answer is unchanged.
 - `readLiveSummaries` takes `discussionRefs` and hands them only to a provider with the capability; any other provider's are left unanswered, which tracked items read as unknown.
 
 ## Open provider ids

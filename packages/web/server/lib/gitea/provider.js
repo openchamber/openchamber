@@ -262,7 +262,7 @@ export function createGiteaFamilyProvider({
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
-      listReviewerCandidates: ({ session, directory, project, remote }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
+      listReviewerCandidates: ({ session, directory, project, remote, role }) => serviceFor(session).listReviewerCandidates(directory, project, remote, { role }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)

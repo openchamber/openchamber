@@ -212,7 +212,7 @@ export const SourceBoardAssignees: React.FC<{
     const assignees = detail.status === 'ready' ? detail.value.assignees ?? [] : null;
     const descriptor = useSourceControlProvider(issue.provider);
     const { owner, repo } = issue.sourceRepo;
-    const { candidates, setCandidates, readFailed: candidateReadFailed, setReadFailed: setCandidateReadFailed } = useIssueAssigneeCandidates(context, owner, repo);
+    const { candidates, setCandidates } = useIssueAssigneeCandidates(context, owner, repo);
 
     const commit = async (ids: string[]) => {
         setBusy(true);
@@ -235,7 +235,7 @@ export const SourceBoardAssignees: React.FC<{
 
     if (detail.status === 'error') return null;
     if (!assignees) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
-    const editable = candidates !== null && (candidates.length > 0 || candidateReadFailed);
+    const editable = candidates !== null;
     return (
         <MetaValue
             empty={false}
@@ -247,15 +247,9 @@ export const SourceBoardAssignees: React.FC<{
                     selected={assignees.map((person) => person.id)}
                     selectedChoices={assignees.map(assigneeChoice)}
                     loadChoices={async () => {
-                        try {
-                            const people = await sourceControl.referenceReviewers(context, { owner, repo });
-                            setCandidates(people);
-                            setCandidateReadFailed(false);
-                            return people.map(assigneeChoice);
-                        } catch (error) {
-                            setCandidateReadFailed(true);
-                            throw error;
-                        }
+                        const people = await sourceControl.referenceReviewers(context, { owner, repo }, 'assignee');
+                        setCandidates(people);
+                        return people.map(assigneeChoice);
                     }}
                     onCommit={(ids) => void commit(ids)}
                     busy={busy}
