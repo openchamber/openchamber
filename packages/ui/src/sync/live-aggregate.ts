@@ -29,6 +29,12 @@ const areSessionsEquivalent = (left: Session, right: Session): boolean => {
     && (left.parentID ?? '') === (right.parentID ?? '')
     && left.model?.id === right.model?.id
     && left.model?.providerID === right.model?.providerID
+    && left.cost === right.cost
+    && left.tokens?.input === right.tokens?.input
+    && left.tokens?.output === right.tokens?.output
+    && left.tokens?.reasoning === right.tokens?.reasoning
+    && left.tokens?.cache?.read === right.tokens?.cache?.read
+    && left.tokens?.cache?.write === right.tokens?.cache?.write
     // A metadata write leaves time.updated alone. By reference: a patch brings
     // a new object, and every other update carries the same one over.
     && left.metadata === right.metadata
