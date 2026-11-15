@@ -261,7 +261,10 @@ composer send the whole queue now, as one visible message (#4746). While a turn
 runs only Enter does this: the send button gives way to Stop until the turn
 ends, and a row's own Send sends just that message. An empty-composer send
 dismisses open permission requests and the forms that hold a turn, as a direct
-composer send does; a row's own Send is queued-only and dismisses nothing.
+composer send does, and defers the session's own waiting question when the send
+goes out as a plain prompt to that session (`sync/DOCUMENTATION.md`, blocking
+requests; a command, or a local prompt command such as `/summary`, leaves it
+pending); a row's own Send is queued-only and dismisses nothing.
 Scheduled items stay visible in the queue rows with reorder and remove, but no
 edit or send action.
 

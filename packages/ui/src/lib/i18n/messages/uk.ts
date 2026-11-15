@@ -3793,6 +3793,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': 'Зʼєднання з сервером втрачено ({reason}). Нічого не надіслано; спробуйте ще раз, коли зʼєднання відновиться.',
   'chat.formCard.notConnected': 'Ще немає зʼєднання з сервером. Нічого не надіслано; спробуйте ще раз, коли зʼєднання встановиться.',
   'chat.formCard.recoveredNotice': 'Хід зупинився під час очікування. Надсилання розпочне новий платний хід.',
+  'chat.formCard.deferredNotice': 'Ви надіслали повідомлення до відповіді. Надсилання передасть вашу відповідь новим повідомленням.',
   'chat.formDock.progress': '{current} з {total}',
   'chat.formDock.waiting': 'ще {count} в черзі',
   'chat.formDock.back': 'Назад',

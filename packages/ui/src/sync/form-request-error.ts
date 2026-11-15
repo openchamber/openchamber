@@ -24,6 +24,13 @@ export function isFormRequestNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * OpenCode settled the form before this reply or cancel arrived (another page
+ * answered it, its turn ended). Decided by the tag OpenCode names: other 409s,
+ * such as a busy session, say nothing about the form.
+ */
+export const isFormAlreadySettledError = (error: Error): boolean => "tag" in error && error.tag === "FormAlreadySettledError"
+
+/**
  * The reply failed because the folder lacks the agent: nothing was submitted,
  * and a retry cannot succeed until the user picks an agent the folder has.
  * Returns that agent's name, or null when something else failed.

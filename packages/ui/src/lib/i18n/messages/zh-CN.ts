@@ -3793,6 +3793,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': '与服务器的连接已断开（{reason}）。未发送任何内容；重新连接后请重试。',
   'chat.formCard.notConnected': '尚未连接到服务器。未发送任何内容；连接后请重试。',
   'chat.formCard.recoveredNotice': '等待期间本轮已停止。提交将开启新一轮付费对话。',
+  'chat.formCard.deferredNotice': '你在回答前发送了一条消息。提交后，你的答案将作为一条新消息发送。',
   'chat.formDock.progress': '第 {current} / {total}',
   'chat.formDock.waiting': '还有 {count} 个等待中',
   'chat.formDock.back': '上一步',

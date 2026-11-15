@@ -3790,6 +3790,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'Sunucuyla bağlantı koptu ({reason}). Hiçbir şey gönderilmedi; bağlantı yeniden kurulunca tekrar deneyin.',
   'chat.formCard.notConnected': 'Henüz sunucuya bağlanılmadı. Hiçbir şey gönderilmedi; bağlantı kurulunca tekrar deneyin.',
   'chat.formCard.recoveredNotice': 'Tur beklerken durdu. Gönder, yeni bir ücretli tur başlatır.',
+  'chat.formCard.deferredNotice': 'Yanıtlamadan önce bir mesaj gönderdiniz. Gönder, yanıtınızı yeni bir mesaj olarak iletir.',
   'chat.formDock.progress': '{current} / {total}',
   'chat.formDock.waiting': '{count} tane daha bekliyor',
   'chat.formDock.back': 'Geri',

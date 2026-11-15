@@ -3792,6 +3792,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': 'サーバーとの接続が切れました（{reason}）。何も送信されていません。再接続後にもう一度お試しください。',
   'chat.formCard.notConnected': 'まだサーバーに接続されていません。何も送信されていません。接続後にもう一度お試しください。',
   'chat.formCard.recoveredNotice': '待機中にターンが停止しました。送信すると、新しい有料ターンが開始します。',
+  'chat.formCard.deferredNotice': '回答する前にメッセージを送信しました。送信すると、回答は新しいメッセージとして送られます。',
   'chat.formDock.progress': '{current} / {total}',
   'chat.formDock.waiting': 'あと {count} 件が待機中',
   'chat.formDock.back': '戻る',

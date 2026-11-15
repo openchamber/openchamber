@@ -3773,6 +3773,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'Connection to the server was lost ({reason}). Nothing was sent; try again once it reconnects.',
   'chat.formCard.notConnected': 'Not connected to the server yet. Nothing was sent; try again once it connects.',
   'chat.formCard.recoveredNotice': 'The turn stopped while waiting. Submit starts a new paid turn.',
+  'chat.formCard.deferredNotice': 'You sent a message before answering. Submit sends your answer as a new message.',
   'chat.formDock.progress': '{current} of {total}',
   'chat.formDock.waiting': '{count} more waiting',
   'chat.formDock.back': 'Back',

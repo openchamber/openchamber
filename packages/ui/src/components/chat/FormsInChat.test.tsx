@@ -18,7 +18,7 @@ rendererWindow.close();
 
 type FormRequest = import('@/lib/opencode/model').FormRequest;
 type FormAnswer = import('@/sync/session-actions').FormAnswer;
-type Call = { kind: 'reply' | 'cancel'; sessionID: string; formID: string; answer?: FormAnswer };
+type Call = { kind: 'reply' | 'cancel' | 'send'; sessionID: string; formID: string; answer?: FormAnswer };
 
 let calls: Call[] = [];
 let pendingForms: FormRequest[] = [];
@@ -38,12 +38,28 @@ mock.module('@/sync/session-actions', () => ({
   ...actualSessionActions,
   replyToForm: async (sessionID: string, formID: string, answer: FormAnswer) => { calls.push({ kind: 'reply', sessionID, formID, answer }); },
   cancelForm: async (sessionID: string, formID: string) => { calls.push({ kind: 'cancel', sessionID, formID }); },
+  sendRecoveredFormAnswer: async (question: RecoveredQuestion) => { calls.push({ kind: 'send', sessionID: question.sessionID, formID: question.form.id }); },
 }));
+const recoverable = await import('@/sync/recoverable-questions');
+type RecoveredQuestion = import('@/sync/recoverable-questions').RecoveredQuestion;
+// The cards a question deferred on send leaves (#5391): the real recovery store decides them, so a
+// local dismissal closes them the way it does in the app.
+const deferredView = {
+  form: {},
+  part: { 'msg-ask': [{
+    id: 'tool-ask', sessionID: 'session-1', messageID: 'msg-ask', callID: 'call-1', tool: 'question', type: 'tool' as const,
+    state: { status: 'error' as const, input: {}, error: recoverable.DEFERRED_QUESTION_NOTE, errorType: 'tool.execution', time: { start: 1, end: 2 } },
+  }] },
+};
+const useDeferredQuestions = () => {
+  const recovery = recoverable.useRecoverableQuestionsStore();
+  return React.useMemo(() => recoverable.deriveRecoveredQuestions(deferredView, recovery, new Set(['session-1'])), [recovery]);
+};
 const actualSync = await import('@/sync/sync-context');
 mock.module('@/sync/sync-context', () => ({
   ...actualSync,
   useScopedBlockingForms: () => React.useSyncExternalStore(subscribePendingForms, () => pendingForms),
-  useRecoveredQuestions: () => [],
+  useRecoveredQuestions: useDeferredQuestions,
   useSessions: () => [],
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -135,6 +151,7 @@ describe('questions in the chat', () => {
     calls = [];
     pendingForms = [question('form-1', 'Pick a color')];
     resetFormDrafts();
+    recoverable.resetRecoverableQuestions();
     dom = installDom();
     root = createRoot(dom.container);
   });
@@ -401,6 +418,35 @@ describe('questions in the chat', () => {
       expect(noteIn('runtime-b')).toBe('answer for b');
     } finally {
       switchRuntimeEndpoint({ apiBaseUrl: previousBaseUrl, runtimeKey: previousKey });
+    }
+  });
+
+  // A question deferred on send: dismissing its card closes it and its draft here, and sends nothing,
+  // so the agent never gets an answer the user did not give.
+  test('dismissing a deferred card in the dock or the chat closes it and sends nothing', async () => {
+    const deferred = (): FormRequest => ({ ...noteOnly(), id: 'form-deferred', metadata: { kind: 'question', tool: { messageID: 'msg-ask', id: 'tool-ask' } } });
+    const deferredNote = () => loadFormDraft(formDraftScope({ id: 'form-deferred', sessionID: 'session-1' }, '/project'))?.values.note;
+    for (const [surface, view, dismiss] of [
+      ['dock', <FormDock sessionId="session-1" directory="/project" hidden={false} />, en['chat.questionCard.dismiss']],
+      ['chat', <TranscriptForms sessionId="session-1" directory="/project" />, en['chat.formCard.cancel']],
+    ] as const) {
+      recoverable.resetRecoverableQuestions();
+      resetFormDrafts();
+      calls = [];
+      pendingForms = [];
+      recoverable.noteQuestionFormSnapshot('/project', [deferred()]);
+      await render(view);
+      expect(dom.container.textContent?.includes(en['chat.formCard.deferredNotice'])).toBe(true);
+      await type(dom.container, `${surface} draft`);
+      expect(deferredNote()?.text).toBe(`${surface} draft`);
+
+      await click(button(dom.container, dismiss));
+      expect(calls).toEqual([]);
+      expect(deferredNote()).toBeUndefined();
+      expect(recoverable.useRecoverableQuestionsStore.getState().outcomes.get('form-deferred')).toBe('dismissed');
+      // The dock's panel fades out through its exit animation, so the closed list is checked, not the DOM.
+      expect([surface, recoverable.deriveRecoveredQuestions(deferredView, recoverable.useRecoverableQuestionsStore.getState(), new Set(['session-1']))]).toEqual([surface, []]);
+      await render(null);
     }
   });
 

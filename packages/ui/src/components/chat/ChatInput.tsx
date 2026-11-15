@@ -12,7 +12,7 @@ import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey
 import { readEffortRevision } from '@/lib/modelEfforts';
 import { selectAutoReviewRunning, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { DraftSendError, useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
+import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type SentMessage } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type ComposerAddress, type SyntheticContextPart } from '@/sync/input-store';
@@ -133,7 +133,7 @@ import { PastedSessionIds, sessionLinkOverPastedId, type PastedSessionIdRange } 
 import { bareSessionId, findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
-import { findCatalogModel, type Session } from '@/lib/opencode/model';
+import { findCatalogModel, type FormRequest, type Session } from '@/lib/opencode/model';
 import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, type ComposerReferenceHandoff } from './composer/pendingComposerReferences';
 import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
@@ -2355,24 +2355,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // btw mode: the child fork's blocking prompts are answered inside the
         // panel; the composer send goes straight to the fork (routeMessage
         // queues if the fork's own turn is busy).
+        let deferredQuestions: readonly FormRequest[] = [];
         if (currentSessionId && !queuedOnly && !isBtwActive && !commandPlan) {
             // Sending is authoritative for blocking prompts: deny pending
             // permissions and dismiss the open forms that hold a turn in the
             // session subtree (a form whose tool call ended stays). The
             // deny/clear vanishes the card instantly (optimistic); rejecting
-            // unblocks the agent's tool but does NOT end its turn.
-            const [deniedPermissions, dismissedForms] = await Promise.all([
+            // unblocks the agent's tool but does NOT end its turn. The
+            // session's own waiting question is deferred instead, after the
+            // send below (#5391); a shell command is no message to defer to.
+            const [deniedPermissions, forms] = await Promise.all([
                 sessionActions.dismissOpenPermissionsForSession(currentSessionId),
-                sessionActions.dismissOpenFormsForSession(currentSessionId),
+                sessionActions.dismissOpenFormsForSession(currentSessionId, { deferQuestions: inputMode !== 'shell' }),
             ]);
             // An explicit Steer goes straight to the session inbox, which
             // takes it while the turn is still active. Any other send would
             // race with that run, so it is queued; the queued-message auto-send
             // hook delivers it once the session returns to idle (#1740, #3369).
-            if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
+            // A deferred question still holds the session's turn, so the queue
+            // would never deliver: the message goes to the inbox instead, even
+            // when a subagent's request was dismissed alongside it.
+            if ((deniedPermissions || forms.dismissed) && delivery !== 'steer' && forms.deferred.length === 0) {
                 void handleQueueMessage();
                 return;
             }
+            deferredQuestions = forms.deferred;
         }
 
         // Action commands change session or UI state and send nothing. The
@@ -2464,6 +2471,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             queuedGoal?: QueuedMessageGoal | null;
             recordEffort?: boolean;
             effortRevision?: number;
+            onSent?: (route: SentMessage) => void;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2480,6 +2488,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // BTW and queued-only sends carry their own saved configuration and
         // leave the main composer's remembered level alone.
         sendMessageOptions = { ...sendMessageOptions, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
+        let sent: SentMessage | undefined;
+        if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };
 
         // Queued messages resolved their mentions when they were queued; only
         // the composer's own text can still name a file to read.
@@ -2801,6 +2811,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             sendMessageOptions,
         );
         void sendPromise.then(() => {
+            // The message is admitted, so the question's note can follow it; a failed send defers nothing,
+            // and the route decides whether it was a message to the question's session at all.
+            if (deferredQuestions.length > 0 && getRuntimeKey() === submitRuntimeKey) {
+                void sessionActions.deferQuestionsAfterSend(deferredQuestions, sent);
+            }
             if (isBtwActive) return;
             // On a draft there is no session yet in this closure: the send path
             // creates one and makes it current before resolving, so the id is

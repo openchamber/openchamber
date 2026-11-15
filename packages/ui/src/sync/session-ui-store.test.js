@@ -537,6 +537,31 @@ describe('sendMessage captured target', () => {
     expect(calls[0].directory).toBe('/captured/project');
   });
 
+  // The send path defers a waiting question only after a plain prompt reached its session (#5391).
+  test('reports the route the send took and the session it went to', async () => {
+    const target = { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' };
+    const send = async (content, inputMode = 'normal') => {
+      let sent;
+      await useSessionUIStore.getState().sendMessage(
+        content, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, inputMode, { target, onSent: (route) => { sent = route; } },
+      );
+      return sent;
+    };
+    const listCommands = spyOn(opencodeClient, 'listCommands').mockImplementation(async () => [{ name: 'goal-route-test' }]);
+    const sendCommand = spyOn(opencodeClient, 'sendCommand').mockImplementation(async () => {});
+    const shellSession = spyOn(opencodeClient, 'shellSession').mockImplementation(async () => 'msg');
+    try {
+      expect(await send('hello')).toEqual({ route: 'prompt', sessionId: 'session-captured' });
+      expect(await send('/goal-route-test pause')).toEqual({ route: 'command', sessionId: 'session-captured' });
+      expect(await send('pwd', 'shell')).toEqual({ route: 'shell', sessionId: 'session-captured' });
+      expect([calls.length, sendCommand.mock.calls.length, shellSession.mock.calls.length]).toEqual([1, 1, 1]);
+    } finally {
+      listCommands.mockRestore();
+      sendCommand.mockRestore();
+      shellSession.mockRestore();
+    }
+  });
+
   test('does not send a captured target through a different runtime', async () => {
     let error = null;
     try {

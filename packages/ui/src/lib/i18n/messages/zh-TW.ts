@@ -3792,6 +3792,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': '與伺服器的連線已中斷（{reason}）。未傳送任何內容；重新連線後請再試一次。',
   'chat.formCard.notConnected': '尚未連線到伺服器。未傳送任何內容；連線後請再試一次。',
   'chat.formCard.recoveredNotice': '等待期間本輪已停止。提交將開啟新一輪付費對話。',
+  'chat.formCard.deferredNotice': '你在回答前傳送了一則訊息。送出後，你的答案會以一則新訊息傳送。',
   'chat.formDock.progress': '第 {current} / {total}',
   'chat.formDock.waiting': '還有 {count} 個等待中',
   'chat.formDock.back': '上一步',

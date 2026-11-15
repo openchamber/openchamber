@@ -46,7 +46,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
-import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteDeferredAnswersLoaded, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
 import { subscribeSessionAdmission } from "./session-admission"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
@@ -2962,6 +2962,15 @@ export function SyncProvider(props: {
   useEffect(() => {
     if (syncStoresMadeBeforeMount === syncStoresRef.current) syncStoresMadeBeforeMount = null
   }, [])
+  // A deferred question's marked answer that arrives by a history or inbox read closes its card
+  // for good, so the card stays closed once that message leaves the loaded window (#5391).
+  useEffect(() => {
+    const noteLoadedAnswers = () => {
+      for (const store of childStores.children.values()) noteDeferredAnswersLoaded(store.getState().message)
+    }
+    noteLoadedAnswers()
+    return childStores.subscribeAllSelected((state) => state.message, noteLoadedAnswers)
+  }, [childStores])
   const runtimeKey = getRuntimeKey()
   const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: opencodeClient, runtimeKey })

@@ -181,6 +181,8 @@ export async function routeMessage(params: {
   appendSubmissions?: () => void
   delivery?: 'steer'
   skills?: SkillMentions
+  /** Stored on the prompt's user message; the command and shell routes take none. */
+  metadata?: Metadata
   /**
    * What the request waits for: the session being created from a draft, its
    * project knowledge being written into it. A prompt's message appears
@@ -356,6 +358,7 @@ export async function routeMessage(params: {
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
         files: sendFiles,
         context: context.length > 0 ? context : undefined,
+        metadata: params.metadata,
         delivery: params.delivery,
         messageId: messageID,
         directory: sendDirectory(),
@@ -367,6 +370,9 @@ export async function routeMessage(params: {
   })
   return 'prompt'
 }
+
+/** The route a send to an existing session took, for callers that act on what reached it (#5391). */
+export type SentMessage = { route: 'command' | 'prompt' | 'shell'; sessionId: string }
 
 type CapturedSendTarget = {
   runtimeKey: string
@@ -386,6 +392,10 @@ type SendMessageOptions = {
   delivery?: 'steer'
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
+  /** Stored on the user message of a prompt to an existing session (a deferred question's answer marker). */
+  metadata?: Metadata
+  /** Told the route a send to an existing session took, once it went out. */
+  onSent?: (sent: SentMessage) => void
   /**
    * A queued message carries its own goal intent. Set (a goal or `null`), it
    * replaces the composer's armed goal, which belongs to the composer text.
@@ -2544,6 +2554,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         appendSubmissions,
         delivery: options?.delivery,
         skills: options?.skills,
+        metadata: options?.metadata,
         ready: knowledgeSync,
         additionalParts: additionalParts?.map((p) => ({
           text: p.text,
@@ -2564,6 +2575,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }
         throw error
       })
+      if (targetSessionId) options?.onSent?.({ route: routed, sessionId: targetSessionId })
       if (routed !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
         rememberEffort(providerID, modelID, variant ?? null, effortRevision)
       }
