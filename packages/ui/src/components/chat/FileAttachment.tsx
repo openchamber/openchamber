@@ -221,8 +221,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
   if (compact) {
     // One strip for everything the message carries, images and files alike:
     // tiles of one height, scrolled sideways when they do not fit, each
-    // opening what it shows.
-    const tileClass = 'relative flex-none snap-start h-14 rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring';
+    // opening what it shows. The height takes a file's two lines of name and
+    // its type line, and scales with the text size.
+    const tileClass = 'relative flex-none snap-start h-16 rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring';
     return (
       <ScrollableOverlay outerClassName={cn('overlay-scrollbar-wrapper--no-gutter -mx-1 w-auto', className ?? 'mt-1.5')} className="px-1 py-0.5" fillContainer={false}>
         <div className="flex snap-x snap-mandatory gap-1.5">
@@ -232,7 +233,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
             const issueLinkKind = getIssueLinkKind(file);
             const isImage = Boolean(file.mime?.startsWith('image/') && file.url) && !issueLinkKind;
             const sizeText = formatFileSize(file.size);
-            const ext = fileName.split('.').pop() || '';
+            const ext = fileName.includes('.') ? fileName.split('.').pop() ?? '' : '';
+            // A file tile reads like a small page: its name on top, what it is below.
+            const kindText = [issueLinkKind ? null : ext.toUpperCase() || null, sizeText || null].filter(Boolean).join(' · ');
             const open = openTarget
               ? (event: React.MouseEvent) => openAttachment(openTarget, issueLinkKind ? event : undefined)
               : undefined;
@@ -245,29 +248,29 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                     disabled={!open}
                     aria-label={fileName}
                     className={cn(tileClass, isImage
-                      ? 'w-14 bg-muted/10 cursor-zoom-in'
-                      : 'oc-tile flex w-36 flex-col justify-center gap-0.5 px-2 text-start enabled:hover:text-foreground disabled:cursor-default')}
+                      ? 'w-16 bg-muted/10 cursor-zoom-in'
+                      : 'oc-tile flex w-36 flex-col justify-between px-2 py-1 text-start enabled:hover:text-foreground disabled:cursor-default')}
                   >
                     {isImage && file.url ? (
                       <StatusImage
                         src={file.url}
                         alt={fileName}
                         variant="thumbnail"
-                        className="h-full w-full"
+                        className="absolute inset-0 h-full w-full"
                         imgClassName="h-full w-full object-cover"
                         lazy
                       />
                     ) : (
                       <>
-                        <span className="flex min-w-0 items-center gap-1.5">
+                        <span dir="auto" className="line-clamp-2 [overflow-wrap:anywhere] typography-meta leading-tight text-foreground">{fileName}</span>
+                        <span className="flex min-w-0 items-center gap-1">
                           {issueLinkKind ? (
-                            <IssueLinkIcon file={file} kind={issueLinkKind} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <IssueLinkIcon file={file} kind={issueLinkKind} className="h-3 w-3 shrink-0 text-muted-foreground" />
                           ) : (
-                            <FileTypeIcon filePath={fileName} extension={ext} className="h-3.5 w-3.5 shrink-0" />
+                            <FileTypeIcon filePath={fileName} extension={ext} className="h-3 w-3 shrink-0" />
                           )}
-                          <span dir="auto" className="min-w-0 truncate typography-meta text-foreground">{fileName}</span>
+                          {kindText ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{kindText}</span> : null}
                         </span>
-                        {sizeText ? <span className="typography-micro text-muted-foreground">{sizeText}</span> : null}
                       </>
                     )}
                   </button>
