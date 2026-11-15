@@ -150,6 +150,15 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **A send-time check against the server never blocks the send**: when the session read before `/compact` or a model-only form reply fails, the action still goes out with the picked model stated explicitly ([#6543](https://github.com/openchamber/openchamber/pull/6543)).
 - **SVG in the Markdown preview draws on a white canvas in both themes** ([#6675](https://github.com/openchamber/openchamber/pull/6675)).
 - **A session may watch several pull requests at once**; Work Status lists them with Stop all ([#6684](https://github.com/openchamber/openchamber/pull/6684)).
+- **Shift+Enter on an empty list item ends the list** in the composer, removing the marker; a nested item outdents ([#6903](https://github.com/openchamber/openchamber/pull/6903), [#6900](https://github.com/openchamber/openchamber/issues/6900)).
+- **A saved turn image draws UI blocks as they appear on screen**; only extension frames keep their source ([#6799](https://github.com/openchamber/openchamber/pull/6799), [#6783](https://github.com/openchamber/openchamber/issues/6783)).
+- **Desktop SSH on Linux asks before accepting an unknown host key**, the way SSH itself does ([#6822](https://github.com/openchamber/openchamber/pull/6822)).
+- **The dev-server preview on a phone is native-app only**: hosted mobile cannot reach the server's localhost, so the tab is not offered there ([#6884](https://github.com/openchamber/openchamber/pull/6884)).
+- **A slash command sent while an agent's question is open waits for the answer**; the question is not cancelled ([#6960](https://github.com/openchamber/openchamber/pull/6960)).
+- **Keep-awake "while working" holds the screen during a permission request**, and lets it sleep while a session waits on a PR, an extension or a background command ([#6913](https://github.com/openchamber/openchamber/pull/6913)).
+- **Turning on repository storage for project notes and todos moves the existing entries there**; the user never lands on an empty list ([#6940](https://github.com/openchamber/openchamber/pull/6940)).
+- **Workflow run data is not read while workflows are off** ([#6998](https://github.com/openchamber/openchamber/pull/6998)).
+- **No automatic "start Build?" prompt after a Plan turn**: a plan is rarely done in one turn, so the question after every turn is noise ([#6910](https://github.com/openchamber/openchamber/pull/6910)).
 
 ## Message templates
 
