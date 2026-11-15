@@ -54,6 +54,7 @@ const setupWith = (options: {
     draftStarters: [],
     hiddenSharedActionIds: options.hidden ?? [],
     sharedTrust: null,
+    notesTodosInRepository: false,
   },
 });
 

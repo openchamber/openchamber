@@ -91,7 +91,17 @@ interface ProjectContextData {
   plans: ProjectPlanLink[];
   /** Absolute path of the team's shared plans folder when the project has one. */
   sharedPlansDir: string | null;
+  /** Where these notes and todos were read from; a whole-list write names it back. */
+  notesTodosStore: ProjectNotesTodosStore | null;
 }
+
+/**
+ * Opaque server token for the store the notes and todos were read from
+ * (OpenChamber's own data or the repository's `.openchamber/notes-todos.json`);
+ * every switch of the store changes it.
+ */
+export type ProjectNotesTodosStore = string;
+const NOTES_TODOS_STORE_TOKEN = /^(local|repository):/;
 
 interface ProjectPlanContent extends ProjectPlanLink {
   body: string;
@@ -186,11 +196,13 @@ const parseContext = (payload: unknown): ProjectContextData => {
   if (!record || typeof record !== 'object') {
     throw new Error('Malformed project context response');
   }
+  const store = record.notesTodosStore ?? null;
   return {
     notes: Array.isArray(record.notes) ? record.notes : [],
     todos: Array.isArray(record.todos) ? record.todos : [],
     plans: Array.isArray(record.plans) ? record.plans.map(toPlanLink) : [],
     sharedPlansDir: typeof record.sharedPlansDir === 'string' ? record.sharedPlansDir : null,
+    notesTodosStore: store !== null && NOTES_TODOS_STORE_TOKEN.test(store) ? store : null,
   };
 };
 
@@ -208,14 +220,20 @@ export const fetchProjectContext = async (
   return parseContext(await response.json());
 };
 
+/**
+ * Replace the whole list. `store` is where the list was read from: the server
+ * refuses the write when the project switched stores since, instead of
+ * putting one store's list into the other.
+ */
 export const saveProjectTodos = async (
   project: ProjectRef,
   todos: ProjectTodoItem[],
+  store: ProjectNotesTodosStore | null,
 ): Promise<ProjectContextData> => {
   const response = await runtimeFetch(`${basePath(requireProjectId(project))}/todos`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ todos }),
+    body: JSON.stringify(store ? { todos, store } : { todos }),
   });
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, 'Failed to save project todos'));

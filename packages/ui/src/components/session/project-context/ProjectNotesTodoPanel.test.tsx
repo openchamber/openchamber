@@ -54,7 +54,7 @@ for (const [name, value] of Object.entries({
 }
 
 type Context = Awaited<ReturnType<typeof fetchProjectContext>>;
-const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null });
+const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null, notesTodosStore: 'local' });
 const peerNote: ProjectNote = {
   id: 'peer-note', body: 'Peer note', source: 'manual', pinned: false, createdAt: 1, updatedAt: 1,
 };
