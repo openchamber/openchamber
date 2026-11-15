@@ -32,6 +32,16 @@ export const staticImportClosure = (bundle: Bundle, fileName: string): string[] 
   return [...seen];
 };
 
+/**
+ * Whether a chunk holds the module. Rollup keys modules by ids with forward
+ * slashes on every platform, while `path.resolve` gives backslashes on
+ * Windows, so both sides are compared with forward slashes.
+ */
+export const chunkHasModule = (modules: object, moduleId: string): boolean => {
+  const target = moduleId.replace(/\\/g, '/');
+  return Object.keys(modules).some((id) => id.replace(/\\/g, '/') === target);
+};
+
 export const preloadScript = (hrefs: readonly string[], protocols: readonly string[]): string =>
   `if(${JSON.stringify(protocols)}.indexOf(location.protocol)!==-1){${JSON.stringify(hrefs)}.forEach(function(h){var l=document.createElement("link");l.rel="modulepreload";l.crossOrigin="";l.href=h;document.head.appendChild(l)})}`;
 
@@ -54,7 +64,7 @@ export const preloadAppGraph = (options: {
       handler(_html, context) {
         const bundle = context.bundle;
         if (!bundle || !context.chunk || !context.filename.endsWith(`/${options.document}`)) return;
-        const app = Object.values(bundle).find((chunk) => chunk.type === 'chunk' && Object.hasOwn(chunk.modules, options.appModule));
+        const app = Object.values(bundle).find((chunk) => chunk.type === 'chunk' && chunkHasModule(chunk.modules, options.appModule));
         if (!app) {
           this.error(`preloadAppGraph: no chunk for ${options.appModule}`);
         }
