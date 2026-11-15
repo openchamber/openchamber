@@ -605,8 +605,7 @@ Clicks sidebar session rows with real mouse input and measures, per click:
 - `content`: messages that were not rendered before are rendered (a timeline kept
   in the DOM under `display: none` counts as not rendered). They may still
   be invisible: a freshly opened timeline stays at opacity 0 while renderers
-  hold their provisional first paint (`data-timeline-reveal="pending"`), then
-  fades in;
+  hold their provisional first paint (`data-timeline-reveal="pending"`);
 - `visible`: every new message that intersects the chat viewport has an
   effective opacity (its own times every ancestor's) of 1, checked once per
   animation frame. This is when the user sees the session, and it does not

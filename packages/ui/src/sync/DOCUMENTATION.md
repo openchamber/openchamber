@@ -1665,9 +1665,10 @@ and its transcript back into it.
 
 A session whose messages are not in memory at the click keeps the previous
 timeline on screen while they load (up to 400ms), then swaps straight to the
-finished view; the skeleton appears only when loading takes longer. A session
-the user waited for fades in (100ms); one that was ready appears in the same
-frame. The sidebar prefetches the row on either side of the open session shortly
+finished view; the skeleton appears only when loading takes longer. The
+finished view appears without a fade, whether it was waited for or ready: it is
+already in place, and a fade only delayed the moment it could be read (about
+100 ms of a 210 ms switch). The sidebar prefetches the row on either side of the open session shortly
 after it settles, and a row the mouse rests on or keyboard focus reaches for
 180ms (`useSessionHoverPrefetch`), so most switches are warm. Both share one
 queue with a concurrency cap; VS Code does neither.
@@ -1677,8 +1678,8 @@ the session the timeline shows (`components/chat/chatColumnSession.ts`), not
 the live selection: read live, they re-shaped a commit ahead of the swap
 (a taller draft, chips, a working chip) and the outgoing timeline, pinned to
 its end, jumped before it was replaced. The reveal effect below runs once per
-gate for the same reason — `revealWaited` flips for the outgoing session at
-the click, and re-running on it hid that timeline before the next one mounted.
+gate for the same reason: re-running it for the outgoing session hid that
+timeline before the next one mounted.
 
 The timeline's first paint for a session is atomic. `ChatContainer` owns a
 `TimelineRevealGate` per session key (`components/chat/timelineRevealGate.ts`).

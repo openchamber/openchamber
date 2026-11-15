@@ -39,12 +39,6 @@ const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
 const TIMELINE_SETTLE_CAP_MS = 300;
-// The first timeline of a launch is usually the session restored on startup.
-// It appears as soon as it is in place; the fade is for a session the user
-// switched to and watched load.
-let launchTimelineRevealed = false;
-// Mirrors the oc-chat-hydration-reveal duration in index.css.
-const TIMELINE_REVEAL_FADE_MS = 100;
 // After a turn starts or ends, how long the transcript settles before an
 // overgrown history is cut back: past the scroll hook's 2 s send glide and
 // 1 s turn-end glide windows.
@@ -274,7 +268,6 @@ type ChatViewportProps = {
     onScrollbarDrag: () => void;
     endPinningReleased: boolean;
     /** The user waited for this session (held or fetched); reveal it with a fade. */
-    revealWaited: boolean;
     revealGate: TimelineRevealGate;
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
@@ -320,7 +313,6 @@ const ChatViewport = React.memo(({
     scrollToBottom,
     onScrollbarDrag,
     endPinningReleased,
-    revealWaited,
     revealGate,
     isProgrammaticFollowActive,
     showLoadOlderButton,
@@ -476,19 +468,12 @@ const ChatViewport = React.memo(({
     // Opening a session paints the timeline as one finished picture: the root
     // stays invisible only until the viewport is in place (the scroll hook's
     // hold) and the list's measured heights settle, then everything appears
-    // together. Markdown does not hold it: its first paint already has the
-    // final geometry and highlighting only recolours code. A session the user
-    // waited for fades in once as a whole.
+    // together, without a fade: it is already in place, and a fade only
+    // delays the moment it can be read. Markdown does not hold it: its first
+    // paint already has the final geometry and highlighting only recolours code.
     const timelineRootRef = React.useRef<HTMLDivElement | null>(null);
     const endPinningReleasedRef = React.useRef(endPinningReleased);
     endPinningReleasedRef.current = endPinningReleased;
-    // Read through a ref: the effect runs once per gate (per opened session).
-    // `revealWaited` flips for the session still on screen the moment another
-    // one is selected — before the deferred swap mounts it — and re-running
-    // the effect then would hide the outgoing timeline for the frames until
-    // the new one arrives.
-    const revealWaitedRef = React.useRef(revealWaited);
-    revealWaitedRef.current = revealWaited;
     React.useLayoutEffect(() => {
         const root = timelineRootRef.current;
         if (!root || !showingTranscript) return;
@@ -496,19 +481,16 @@ const ChatViewport = React.memo(({
         let finished = false;
         let timer: number | null = null;
         let frame: number | null = null;
-        let fadeTimer: number | null = null;
         // Revealed once the geometry has settled: after the last hold the
         // list still lays rows out from its own measurements over a few
         // frames, so the timeline stays hidden — pinned to the end on every
         // frame — until the content height has held still for two frames,
         // then shows already sitting on the end. The settle is bounded so a
         // list that keeps growing (images, late tool output) still appears.
-        const reveal = (fade: boolean) => {
+        const reveal = () => {
             if (finished) return;
             finished = true;
             if (timer !== null) window.clearTimeout(timer);
-            const fadeIn = fade && launchTimelineRevealed;
-            launchTimelineRevealed = true;
             const startedAt = performance.now();
             let lastHeight = -1;
             let stableFrames = 0;
@@ -529,28 +511,7 @@ const ChatViewport = React.memo(({
                     frame = window.requestAnimationFrame(settle);
                     return;
                 }
-                if (!fadeIn) {
-                    root.removeAttribute('data-timeline-reveal');
-                    return;
-                }
-                root.setAttribute('data-timeline-reveal', 'fading');
-                // The fade is a filled opacity animation, and a filled
-                // animation keeps the root a stacking context for as long
-                // as the attribute stays. That would trap the overlay
-                // scrollbar (z-30) under the composer slot (z-10): the thumb
-                // paints over the composer band but cannot be grabbed there.
-                // Drop the attribute once the fade has run (or immediately
-                // under reduced motion, where the animation never fires).
-                const clearFade = (event?: AnimationEvent) => {
-                    // Child entrance animations bubble here too.
-                    if (event && event.target !== root) return;
-                    if (fadeTimer !== null) window.clearTimeout(fadeTimer);
-                    fadeTimer = null;
-                    root.removeEventListener('animationend', clearFade);
-                    root.removeAttribute('data-timeline-reveal');
-                };
-                root.addEventListener('animationend', clearFade);
-                fadeTimer = window.setTimeout(clearFade, TIMELINE_REVEAL_FADE_MS * 2);
+                root.removeAttribute('data-timeline-reveal');
             };
             frame = window.requestAnimationFrame(settle);
         };
@@ -561,17 +522,16 @@ const ChatViewport = React.memo(({
             if (finished) return;
             revealGate.close();
             if (revealGate.holds === 0) {
-                reveal(revealWaitedRef.current);
+                reveal();
                 return;
             }
-            revealGate.onEmpty = () => reveal(true);
-            timer = window.setTimeout(() => reveal(true), revealGate.capMs);
+            revealGate.onEmpty = reveal;
+            timer = window.setTimeout(reveal, revealGate.capMs);
         });
         return () => {
             finished = true;
             if (timer !== null) window.clearTimeout(timer);
             if (frame !== null) window.cancelAnimationFrame(frame);
-            if (fadeTimer !== null) window.clearTimeout(fadeTimer);
             revealGate.onEmpty = null;
         };
     }, [revealGate, scrollRef, showingTranscript]);
@@ -693,7 +653,6 @@ const ChatViewport = React.memo(({
         && prev.onScrollbarDrag === next.onScrollbarDrag
         && prev.onListMetricsChange === next.onListMetricsChange
         && prev.endPinningReleased === next.endPinningReleased
-        && prev.revealWaited === next.revealWaited
         && prev.revealGate === next.revealGate
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.showLoadOlderButton === next.showLoadOlderButton
@@ -919,19 +878,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         const timer = window.setTimeout(() => setExpiredHoldSessionId(liveSessionId), SESSION_SWITCH_HOLD_MS);
         return () => window.clearTimeout(timer);
     }, [holdPreviousTimeline, liveSessionId]);
-    // A session the user waited for (not in memory at the click) fades in; one
-    // that was ready appears in the same frame. Decided once per selection so
-    // a later, warm visit to the same session is instant again.
-    const lastLiveSessionIdRef = React.useRef<string | null | undefined>(undefined);
-    const waitedSessionIdRef = React.useRef<string | null>(null);
-    if (liveSessionId !== lastLiveSessionIdRef.current) {
-        lastLiveSessionIdRef.current = liveSessionId;
-        waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
-    }
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
     shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
-    const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
 
     const clearMaterializedDraftSession = useSessionUIStore((s) => s.clearMaterializedDraftSession);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -1991,7 +1940,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             scrollToBottom={resumeToLatestInstant}
             onScrollbarDrag={onManualNavigation}
             endPinningReleased={userOwnsScroll}
-            revealWaited={revealWaited}
             revealGate={revealGate}
             isProgrammaticFollowActive={isFollowingProgrammatically}
             showLoadOlderButton={showLoadOlderButton}
