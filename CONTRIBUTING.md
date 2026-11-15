@@ -7,7 +7,7 @@ Every pull request links an issue, and which issue depends on the change.
 - **Bug fix.** Open a [bug report](https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml), or find the existing one, and put `Fixes #N` in the PR description. You don't need to wait for anyone.
 - **New feature or a change to how something behaves.** Open a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml) and wait. Building starts after the maintainer marks it `accepted`. Write it in a few sentences of your own: what you were trying to do, what got in your way, what you'd want instead. A long generated write-up with headings, implementation plans and file lists isn't read.
 
-A pull request without a linked bug report or accepted feature request is closed automatically with the `needs-accepted-issue` label. It reopens on its own once its description links one (`Fixes #N`, or `Part of #N` for one piece of a larger feature), or once the linked feature request gets `accepted`. Pull requests that only change documentation or tests don't need an issue.
+A pull request without a linked bug report or accepted feature request is closed automatically with the `needs-accepted-issue` label. It reopens on its own once its description links one (`Fixes #N`, or `Part of #N` for one piece of a larger feature), or once the linked feature request gets `accepted`. Pull requests that only change documentation or tests don't need an issue. An issue labeled `in-house` is one I'm building myself, so a pull request from outside the core team that links it is closed too.
 
 **What counts as a feature request?** Anything where two reasonable people
 could disagree about whether it should exist or how it should behave. In
