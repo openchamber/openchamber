@@ -28,6 +28,8 @@ const state = {
   generate: () => ({ text: 'generated' }),
   requests: [],
   generateErrors: [],
+  trustRefusal: false,
+  trustAll: false,
   // Holds each /api/experimental/generate/text response open, so a client-side
   // deadline can fire mid-request.
   generateDelayMs: 0,
@@ -69,6 +71,10 @@ beforeAll(async () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(payload));
     };
+    if (state.trustAll) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
+    }
     if (url.pathname === '/api/model') return send({ location: LOCATION, data: state.models });
     if (url.pathname === '/api/model/default') return send({ location: LOCATION, data: state.defaultModel });
     if (url.pathname === '/api/provider') return send({ location: LOCATION, data: state.providers });
@@ -89,6 +95,10 @@ beforeAll(async () => {
       return send({ location: LOCATION, data: agent });
     }
     if (url.pathname === '/api/experimental/generate/text') {
+      if (state.trustRefusal) {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
+      }
       const error = state.generateErrors.shift();
       if (error) {
         res.writeHead({ ModelNotFoundError: 404, ServiceUnavailableError: 503 }[error._tag] ?? 400, { 'content-type': 'application/json' });
@@ -117,6 +127,8 @@ beforeEach(() => {
   state.generate = () => ({ text: 'generated' });
   state.requests = [];
   state.generateErrors = [];
+  state.trustRefusal = false;
+  state.trustAll = false;
   state.generateDelayMs = 0;
   configureOpenCodeRuntimeProviders({
     buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
@@ -1033,6 +1045,53 @@ describe('small model routes', () => {
 
 
 describe('small model failure response', () => {
+  it('reports a folder trust refusal instead of blaming the model', async () => {
+    let generate;
+    registerSmallModelRoutes({ get() {}, post(_path, handler) { generate = handler; } }, {
+      getSmallModelService: async () => ({ generateSmallModelText }),
+    });
+    state.trustRefusal = true;
+    let status;
+    let payload;
+    const response = { status(value) { status = value; return response; }, json(value) { payload = value; } };
+    await generate({ body: { prompt: 'commit', model: 'anthropic/claude-haiku-4-5', directory: '/proj' } }, response);
+    expect(status).toBe(403);
+    expect(payload.code).toBe('opencode_trust_required');
+    expect(payload.error).toContain('/proj');
+  });
+
+  it('reports trust refusal during model resolution without an explicit model', async () => {
+    state.trustAll = true;
+    await expect(generateSmallModelText({ prompt: 'commit', directory: '/proj' })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'opencode_trust_required',
+      message: expect.stringContaining('/proj'),
+    });
+    expect(state.requests.some((request) => request.path === '/api/experimental/generate/text')).toBe(false);
+  });
+
+  it('preserves the trust refusal on the model preview route', async () => {
+    let preview;
+    registerSmallModelRoutes({ get(_path, handler) { preview = handler; }, post() {} }, {
+      getSmallModelService: async () => ({ describeSmallModel, listAuthenticatedProviders }),
+    });
+    state.trustAll = true;
+    let status;
+    let payload;
+    const response = { status(value) { status = value; return response; }, json(value) { payload = value; } };
+    await preview({ query: { directory: '/proj' } }, response);
+    expect(status).toBe(403);
+    expect(payload).toMatchObject({ code: 'opencode_trust_required', directory: '/proj' });
+  });
+
+  it('preserves trust refusal from the provider list when the model catalog is cached', async () => {
+    expect(await listAuthenticatedProviders('/proj')).toEqual(['anthropic']);
+    state.trustAll = true;
+    await expect(listAuthenticatedProviders('/proj')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'opencode_trust_required',
+    });
+  });
   it('preserves the model-specific reason without advice to change settings', async () => {
     let generate;
     registerSmallModelRoutes({
@@ -1084,6 +1143,49 @@ describe('small model failure response', () => {
     };
     return { response, read: () => ({ status, payload }) };
   };
+
+  it.each(['direct', 'wrapped'])('preserves a %s trust refusal in both routes', async (wrapping) => {
+    const refusal = Object.assign(new Error('Open /proj and trust its configuration.'), {
+      statusCode: 403,
+      code: 'opencode_trust_required',
+      directory: '/proj',
+    });
+    const fail = async () => {
+      throw wrapping === 'wrapped' ? new Error('Fetch failed', { cause: refusal }) : refusal;
+    };
+    const handlers = [];
+    registerSmallModelRoutes({
+      get(_path, handler) { handlers.push(handler); },
+      post(_path, handler) { handlers.push(handler); },
+    }, {
+      getSmallModelService: async () => ({ describeSmallModel: fail, generateSmallModelText: fail }),
+    });
+    for (const handler of handlers) {
+      const { response, read } = respond();
+      await handler({ query: { directory: '/proj' }, body: { prompt: 'commit', directory: '/proj' } }, response);
+      expect(read()).toEqual({
+        status: 403,
+        payload: { error: refusal.message, code: refusal.code, directory: refusal.directory },
+      });
+    }
+  });
+
+  it('keeps other 403 failures separate from folder trust refusals', async () => {
+    const generate = registerWithFailure(Object.assign(new Error('Access denied'), {
+      statusCode: 403,
+      code: 'access_denied',
+      directory: '/proj',
+    }));
+    const { response, read } = respond();
+    await generate({ body: { prompt: 'commit' } }, response);
+    expect(read()).toEqual({
+      status: 403,
+      payload: {
+        error: 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.',
+        code: 'access_denied',
+      },
+    });
+  });
 
   it('surfaces a generation-timeout as its own message with status 504', async () => {
     const message = 'ollama/qwen2.5:latest did not finish within the 490s budget for this prompt size';

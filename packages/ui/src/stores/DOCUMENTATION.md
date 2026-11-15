@@ -217,7 +217,10 @@ minute, refetched only while the control that asks is open; a config change
 or malformed fetch keeps the previous answer: an unreachable server is not
 evidence that the model went away. Callers with a graceful fallback (a note kept
 verbatim, a reply spoken in full) do not consult it; they silence the 404 on
-`requestSmallModel` instead.
+`requestSmallModel` instead. A folder-trust refusal (403
+`opencode_trust_required`) on `requestSmallModel` shows the server's
+instructions for the folder, never the model-settings advice: the model is fine,
+the folder is paused.
 
 ### UI state stores
 
