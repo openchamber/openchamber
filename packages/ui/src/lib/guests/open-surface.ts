@@ -2,6 +2,7 @@ import type { HostRequestErrorCode } from '@openchamber/sdk';
 
 import { isPluginContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { openMobileWorkspace, type MobileWorkspaceRequest } from '@/lib/mobileWorkspaceTabs';
+import { isCapacitorApp } from '@/lib/platform';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { shownContextModes } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -42,6 +43,8 @@ const phoneTabFor = (mode: ContextPanelMode): MobileWorkspaceRequest | null => {
       return { tab: 'terminal' };
     case 'notes':
       return { tab: 'notes' };
+    case 'browser':
+      return isCapacitorApp() ? { tab: 'preview' } : null;
     default:
       return null;
   }

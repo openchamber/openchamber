@@ -31,6 +31,7 @@
 		D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A2 /* ShortcutRequests.swift */; };
 		D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A1 /* RuntimeWebSocket.swift */; };
 		D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */; };
+		D0F2000000000000000000B3 /* MobileDevTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A3 /* MobileDevTunnel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,6 +96,7 @@
 		D0E1000000000000000000A2 /* ShortcutRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRequests.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A1 /* RuntimeWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocket.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocketTask.swift; sourceTree = "<group>"; };
+		D0F1000000000000000000A3 /* MobileDevTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileDevTunnel.swift; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -163,6 +165,7 @@
 				D0E1000000000000000000A2 /* ShortcutRequests.swift */,
 				D0F1000000000000000000A1 /* RuntimeWebSocket.swift */,
 				D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */,
+				D0F1000000000000000000A3 /* MobileDevTunnel.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */,
@@ -386,6 +389,7 @@
 				D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */,
 				D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */,
 				D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */,
+				D0F2000000000000000000B3 /* MobileDevTunnel.swift in Sources */,
 				D0B2000000000000000000B3 /* PushClearing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

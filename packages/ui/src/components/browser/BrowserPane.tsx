@@ -39,6 +39,8 @@ import {
   toDisplayUrl,
 } from '@/lib/browser/devTunnel';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { isCapacitorApp } from '@/lib/platform';
+import { isPreviewFrameGuard, pushPreviewFrameGuard } from '@/lib/router/backGuard';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
@@ -79,6 +81,10 @@ export type BrowserPaneProps = {
   tabID: string;
   /** The session whose agent opened this tab; null for the user's own tab. */
   ownerSessionId: string | null;
+  /** The mobile preview can return to its discovered dev-server list. */
+  showHome?: boolean;
+  /** Let the mobile shell give page history priority over closing its workspace. */
+  registerBackHandler?: (handler: (() => boolean) | null) => void;
   /** Whether the tab is the one shown in an open panel of the project on screen. */
   visible: boolean;
 };
@@ -1414,7 +1420,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
  * opaque to us here: no navigation events, no annotation, no console. The
  * toolbar reflects that instead of offering controls that would silently fail.
  */
-const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, visible }) => {
+const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, visible, showHome = false, registerBackHandler }) => {
   const { t } = useI18n();
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
@@ -1422,7 +1428,14 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
 
   const [address, setAddress] = React.useState(startUrl);
   const [loadedUrl, setLoadedUrl] = React.useState(resolveIframeBrowserUrl(startUrl, directory));
-  const [unreachableUrl, setUnreachableUrl] = React.useState(isRemoteWebLoopbackUrl(startUrl, directory) ? startUrl : '');
+  const [unreachableUrl, setUnreachableUrl] = React.useState(
+    !isCapacitorApp() && isRemoteWebLoopbackUrl(startUrl, directory) ? startUrl : '',
+  );
+  const [tunnelFailedUrl, setTunnelFailedUrl] = React.useState('');
+  const [resolvingTunnel, setResolvingTunnel] = React.useState(false);
+  const navigationId = React.useRef(0);
+  // The mobile preview's history guard for the page on screen (`pushPreviewFrameGuard`).
+  const frameGuard = React.useRef<{ id: string; url: string } | null>(null);
   const insideSpace = spaceIdOfDirectory(directory) !== null;
   const spaceMark = useSpaceMarkLabel(directory);
   const [history, setHistory] = React.useState<string[]>(startUrl ? [startUrl] : []);
@@ -1447,13 +1460,45 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
     [visitedAddresses, address],
   );
 
+  // A mobile iframe loads from a phone-local TCP listener. Resolving that
+  // listener is async, unlike a public URL; a stale resolution must not
+  // replace the page selected later.
+  const loadAddress = React.useCallback((url: string) => {
+    const requestId = ++navigationId.current;
+    setLoadedUrl('');
+    setUnreachableUrl('');
+    setTunnelFailedUrl('');
+    setResolvingTunnel(false);
+    if (!isCapacitorApp() || !isRemoteWebLoopbackUrl(url, directory)) {
+      const resolved = resolveIframeBrowserUrl(url, directory);
+      setLoadedUrl(resolved);
+      setUnreachableUrl(resolved ? '' : url);
+      return;
+    }
+    setResolvingTunnel(true);
+    void resolveBrowsableUrl(url, directory).then((resolved) => {
+      if (requestId !== navigationId.current) return;
+      setLoadedUrl(resolved);
+      setResolvingTunnel(false);
+    }).catch(() => {
+      if (requestId !== navigationId.current) return;
+      setTunnelFailedUrl(url);
+      setResolvingTunnel(false);
+    });
+  }, [directory]);
+
+  React.useEffect(() => {
+    if (startUrl && isCapacitorApp() && isRemoteWebLoopbackUrl(startUrl, directory)) {
+      loadAddress(startUrl);
+    }
+    return () => { navigationId.current += 1; };
+  }, [directory, loadAddress, startUrl]);
+
   const navigate = React.useCallback((value: string) => {
     const next = normalizeBrowserUrl(value);
     if (next === BLANK_URL) return;
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next, directory);
-    setLoadedUrl(iframeUrl);
-    setUnreachableUrl(iframeUrl ? '' : next);
+    loadAddress(next);
     persistUrl(next);
     // The page is opaque here, so there is no load event and no title to wait
     // for; what was asked for is the only thing this runtime can record.
@@ -1467,18 +1512,98 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
       setHistoryIndex(kept.length);
       return [...kept, next];
     });
-  }, [directory, historyIndex, persistUrl, recordHistoryVisit]);
+  }, [directory, historyIndex, loadAddress, persistUrl, recordHistoryVisit]);
+
+  const goHome = React.useCallback(() => {
+    // Cancel a pending tunnel resolution before returning to discovery.
+    navigationId.current += 1;
+    frameGuard.current = null;
+    setAddress('');
+    setLoadedUrl('');
+    setUnreachableUrl('');
+    setTunnelFailedUrl('');
+    setResolvingTunnel(false);
+    setHistoryIndex(-1);
+    if (tabsDirectory && tabID) setContextPanelTabTargetPath(tabsDirectory, tabID, '');
+  }, [setContextPanelTabTargetPath, tabID, tabsDirectory]);
 
   const goTo = React.useCallback((index: number) => {
     const next = history[index];
     if (!next) return;
     setHistoryIndex(index);
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next, directory);
-    setLoadedUrl(iframeUrl);
-    setUnreachableUrl(iframeUrl ? '' : next);
+    loadAddress(next);
     persistUrl(next);
-  }, [directory, history, persistUrl]);
+  }, [history, loadAddress, persistUrl]);
+
+  // One step back through the addresses opened here; from the first one, the
+  // server list.
+  const stepBack = React.useCallback(() => {
+    if (showHome && historyIndex === 0) goHome();
+    else goTo(historyIndex - 1);
+  }, [goHome, goTo, historyIndex, showHome]);
+
+  // The mobile preview (the one that takes the shell's Back) goes back through
+  // the page's own navigations first. They are invisible to this opaque frame
+  // but sit in the WebView's history above the guard pushed for the page, so
+  // the WebView walks them; once it walks off the guard, `popstate` takes the
+  // preview's own step. See `pushPreviewFrameGuard`.
+  const tracksFrameHistory = Boolean(registerBackHandler);
+  const stepBackRef = React.useRef(stepBack);
+  React.useEffect(() => {
+    stepBackRef.current = stepBack;
+  }, [stepBack]);
+
+  React.useEffect(() => {
+    if (!tracksFrameHistory || !loadedUrl) return;
+    const current = frameGuard.current;
+    if (current?.url === loadedUrl && isPreviewFrameGuard(current.id)) return;
+    const id = crypto.randomUUID();
+    pushPreviewFrameGuard(id);
+    frameGuard.current = { id, url: loadedUrl };
+  }, [loadedUrl, tracksFrameHistory]);
+
+  React.useEffect(() => {
+    if (!tracksFrameHistory) return;
+    // The page's own steps fire `popstate` inside the frame only, so one here
+    // means the WebView walked off the guard. Its state is not read: after the
+    // page went back across a full load, WebKit reports the guard's state on
+    // the entry under it.
+    const handlePopState = () => {
+      if (!frameGuard.current) return;
+      frameGuard.current = null;
+      stepBackRef.current();
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [tracksFrameHistory]);
+
+  const goBack = React.useCallback(() => {
+    const current = frameGuard.current;
+    if (loadedUrl && current && isPreviewFrameGuard(current.id)) {
+      window.history.back();
+      return;
+    }
+    stepBack();
+  }, [loadedUrl, stepBack]);
+
+  // On the phone a reload resolves the address again: a listener the system
+  // took away while the app was in the background is replaced by a new one.
+  const reload = React.useCallback(() => {
+    const current = history[historyIndex];
+    if (current && isCapacitorApp() && isRemoteWebLoopbackUrl(current, directory)) loadAddress(current);
+    else bumpReload();
+  }, [directory, history, historyIndex, loadAddress]);
+
+  React.useEffect(() => {
+    if (!registerBackHandler) return;
+    registerBackHandler(() => {
+      if (historyIndex < 0) return false;
+      goBack();
+      return true;
+    });
+    return () => registerBackHandler(null);
+  }, [goBack, historyIndex, registerBackHandler]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
@@ -1486,20 +1611,32 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
         address={address}
         onAddressChange={setAddress}
         onSubmit={navigate}
+        onHome={showHome ? goHome : undefined}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
-        onBack={() => goTo(historyIndex - 1)}
+        onBack={goBack}
         onForward={() => goTo(historyIndex + 1)}
-        onReload={bumpReload}
+        onReload={reload}
         onOpenExternal={() => void openExternalUrl(loadedUrl || address)}
         addressMark={addressMarkOf(directory, address, spaceMark ?? t('contextPanel.browser.spaceAddress'))}
-        canOpenExternal={!unreachableUrl}
-        canGoBack={historyIndex > 0}
-        canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
+        canOpenExternal={!unreachableUrl && !tunnelFailedUrl && !(isCapacitorApp() && isRemoteWebLoopbackUrl(address, directory))}
+        canGoBack={historyIndex > 0 || (showHome && historyIndex === 0)}
+        canGoForward={historyIndex < history.length - 1}
         isLoading={false}
       />
       <div className="relative min-h-0 flex-1 bg-background">
-        {unreachableUrl ? (
+        {tunnelFailedUrl ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            <span className="typography-ui-header text-foreground">{t('contextPanel.browser.tunnelFailed')}</span>
+            <span className="typography-micro text-muted-foreground">
+              {t(insideSpace ? 'contextPanel.browser.spaceTunnelFailedHint' : 'contextPanel.browser.tunnelFailedHint', { url: tunnelFailedUrl })}
+            </span>
+          </div>
+        ) : resolvingTunnel ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background">
+            <Spinner className="size-5 text-muted-foreground" aria-label={t('common.loading')} />
+          </div>
+        ) : unreachableUrl ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
             {insideSpace ? (
               <Icon name="instance" className="size-8 text-muted-foreground opacity-70" aria-hidden="true" />
