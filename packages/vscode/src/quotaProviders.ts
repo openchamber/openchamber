@@ -16,6 +16,7 @@ import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/l
 import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
 import { readCodexCliLogin, signInEmailOf } from '../../web/server/lib/quota/providers/codex-cli.js';
 import { formatCredits } from '../../web/server/lib/quota/utils/formatters.js';
+import { fetchCursorSummaryWindow } from '../../web/server/lib/quota/providers/cursor-summary.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -2653,6 +2654,10 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
         post('aiserver.v1.DashboardService/GetMe').catch(() => null),
       ]);
       const windows = cursorEnterpriseWindows(usage, plan, authUsage, hardLimit, cursorTeamMemberSpend(teamSpend, me?.userId));
+      if (!windows.billing_cycle) {
+        const summaryWindow = await fetchCursorSummaryWindow(accessToken).catch(() => null);
+        if (summaryWindow) windows.billing_cycle = summaryWindow;
+      }
       if (!windows.billing_cycle && !windows.on_demand) {
         return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: 'No active Cursor subscription' });
       }
