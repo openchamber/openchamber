@@ -204,8 +204,8 @@ mock.module("@/lib/opencode/client", () => ({
         replyCalls.push({ method: "selection.apply", params: { sessionID: sessionId, selection, directory } })
       }
     }),
-    cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null) => {
-      replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory } })
+    cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null, message?: string) => {
+      replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory, message } })
       if (formCancelError) throw formCancelError
       return true
     }),
@@ -255,6 +255,7 @@ type RecordedSend = {
   variant?: string | null
   queuedGoal?: null
   target?: { runtimeKey: string; sessionId: string; directory: string }
+  metadata?: Metadata
 }
 const sendMessageCalls: RecordedSend[] = []
 let sendMessageBehavior: () => Promise<void> = async () => {}
@@ -289,9 +290,9 @@ mock.module("./session-ui-store", () => ({
         additionalParts?: void,
         variant?: string | null,
         inputMode?: void,
-        options?: { userInitiated?: boolean; queuedGoal?: null; target?: { runtimeKey: string; sessionId: string; directory: string } },
+        options?: { userInitiated?: boolean; queuedGoal?: null; target?: { runtimeKey: string; sessionId: string; directory: string }; metadata?: Metadata },
       ) => {
-        sendMessageCalls.push({ content, providerID, modelID, agent, variant, queuedGoal: options?.queuedGoal, target: options?.target })
+        sendMessageCalls.push({ content, providerID, modelID, agent, variant, queuedGoal: options?.queuedGoal, target: options?.target, metadata: options?.metadata })
         await sendMessageBehavior()
       },
     }),
@@ -582,9 +583,9 @@ import { agentUnavailableFrom, isFormRequestNotFoundError } from "./form-request
 import { INITIAL_STATE } from "./types"
 import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus, ToolPart } from "@/lib/opencode/model"
+import type { Message, Metadata, Part, Session, SessionStatus, ToolPart } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
-import { noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { DEFERRED_ANSWER_LEAD_IN, DEFERRED_QUESTION_NOTE, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
 import { serializeFormAnswerAsMarkdown } from "../components/chat/formSerializers"
 
@@ -4130,7 +4131,7 @@ describe("form dismissal clears pending state without the SSE echo (issues #2911
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     // The optimistic clear already removed it before the round-trip; the
@@ -4381,7 +4382,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
@@ -4407,7 +4408,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     const rejectCalls = replyCalls.filter((call) => call.method === "form.cancel")
@@ -4432,7 +4433,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     const cancelCalls = replyCalls.filter((call) => call.method === "form.cancel")
@@ -4460,7 +4461,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    const dismissed = await dismissOpenFormsForSession("session-a")
+    const { dismissed } = await dismissOpenFormsForSession("session-a")
 
     expect(dismissed).toBe(true)
     // The agent is still waiting on both forms, so each goes back to the store it came from.
@@ -4483,7 +4484,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
       expect(store.getState().form["session-a"]).toEqual([form])
       expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
     }
@@ -4502,7 +4503,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
       expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
       expect(store.getState().form["session-a"]).toBe(undefined)
     }
@@ -4520,7 +4521,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
     expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
     expect(store.getState().form["session-a"]).toEqual([released])
   })
@@ -4536,7 +4537,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
     expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-bad"])
     expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(0)
   })
@@ -4551,7 +4552,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(store.getState().form["session-child"]).toEqual([childForm])
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
   })
@@ -4567,7 +4568,7 @@ describe("dismissOpenFormsForSession", () => {
     const { formTurnHold } = await import("./recoverable-questions")
     expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "session.message")).toEqual([
       { method: "session.message", params: { sessionID: "session-a", messageID: "msg-tool", directory: "/test/project" } },
     ])
@@ -4578,7 +4579,7 @@ describe("dismissOpenFormsForSession", () => {
 
     // A second send needs no second read.
     replyCalls.length = 0
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls).toHaveLength(0)
   })
 
@@ -4598,7 +4599,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
       expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-old"])
       expect(store.getState().form["session-a"]).toBe(undefined)
       expect(useRecoverableQuestionsStore.getState().releasedForms.size).toBe(0)
@@ -4620,7 +4621,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", stale], ["/test/project/wt", fresh]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
     expect(fresh.getState().form["session-a"]).toEqual([form])
     expect(stale.getState().form["session-a"]).toEqual([form])
@@ -4639,7 +4640,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", first], ["/test/project/wt", second]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(reads).toBe(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(first.getState().form["session-a"]).toEqual([form])
@@ -4663,8 +4664,8 @@ describe("dismissOpenFormsForSession", () => {
     const sendB = dismissOpenFormsForSession("session-a")
     await new Promise((resolve) => setTimeout(resolve, 0))
     answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-race", "session-a", "completed")]))
-    expect(await sendA).toBe(false)
-    expect(await sendB).toBe(false)
+    expect((await sendA).dismissed).toBe(false)
+    expect((await sendB).dismissed).toBe(false)
     expect(reads).toBe(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(store.getState().form["session-a"]).toEqual([form])
@@ -4683,7 +4684,7 @@ describe("dismissOpenFormsForSession", () => {
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", unloaded], ["/test/project/wt", other]]), () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(unloaded.getState().form["session-a"]).toEqual([form])
   })
@@ -4711,7 +4712,7 @@ describe("dismissOpenFormsForSession", () => {
         return messageWithParts(sessionID, messageID, [buildToolPart("q-old", sessionID, "completed")])
       }
 
-      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(false)
       expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
       expect(oldStore.getState().form["session-a"]).toEqual([unloaded, holding])
       expect(newStore.getState().form["session-a"]).toEqual([unloaded, holding])
@@ -4743,7 +4744,7 @@ describe("dismissOpenFormsForSession", () => {
     // Both reads find the call completed; only the send's own read may count.
     const completed = messageWithParts("session-a", "msg-tool", [buildToolPart("q-aba", "session-a", "completed")])
     for (const answer of answers) answer(completed)
-    expect(await send).toBe(false)
+    expect((await send).dismissed).toBe(false)
     expect(answers).toHaveLength(2)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     expect(reloadedStore.getState().form["session-a"]).toEqual([form])
@@ -4787,7 +4788,7 @@ describe("dismissOpenFormsForSession", () => {
       const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
       setActionRefs(createChildStores([["/test/project", parentStore], ["/test/project/child", childStore]]), () => "/test/project")
 
-      expect(await dismissOpenFormsForSession(parent.id)).toBe(true)
+      expect((await dismissOpenFormsForSession(parent.id)).dismissed).toBe(true)
       const cancelled = replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.sessionID)
       expect(parentStore.getState().form[parent.id]).toBeUndefined()
       if (childStatus === "running") {
@@ -4816,11 +4817,163 @@ describe("dismissOpenFormsForSession", () => {
     // A send while that read is out waits for it instead of reading again.
     const send = dismissOpenFormsForSession("session-a")
     answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-first", "session-a", "completed")]))
-    expect(await send).toBe(false)
+    expect((await send).dismissed).toBe(false)
     expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(1)
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
     const { formTurnHold } = await import("./recoverable-questions")
     expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
+  })
+
+  // #5391: the session's own waiting question gives way to the message and stays open until the send resolves.
+  test("with deferQuestions, leaves the session's own waiting question in place and returns it", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [question] },
+      part: { "msg-tool": [{ ...buildToolPart("q-ask", "session-a", "running"), tool: "question" }] },
+    })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: false, deferred: [question] })
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+
+    // Without the option (a shell command) the same question is cancelled as before.
+    expect(await dismissOpenFormsForSession("session-a")).toEqual({ dismissed: true, deferred: [] })
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-ask"])
+  })
+
+  test("with deferQuestions, a question whose call only a server read shows waiting is deferred too", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    // Forms can load before the message history: no part in the store.
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [question] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    sessionMessageRead = (sessionID, messageID) => messageWithParts(sessionID, messageID, [{ ...buildToolPart("q-ask", sessionID, "running"), tool: "question" }])
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: false, deferred: [question] })
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+
+    // A running call of another tool is no question to defer: cancelled as before.
+    sessionMessageRead = (sessionID, messageID) => messageWithParts(sessionID, messageID, [buildToolPart("q-ask", sessionID, "running")])
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: true, deferred: [] })
+  })
+
+  test("with deferQuestions, a subagent's question and a form without a question call are cancelled as before", async () => {
+    const question = buildLinkedForm("q-ask", "session-a")
+    const childQuestion = buildLinkedForm("q-child", "session-child", "msg-child")
+    const consent: FormRequest = { ...buildForm("q-consent", "session-a"), metadata: { kind: "websearch.provider" } }
+    const store = createStore({}, {
+      session: [sessionFixture("session-a"), { ...sessionFixture("session-child"), parentID: "session-a" }],
+      form: { "session-a": [question, consent], "session-child": [childQuestion] },
+      part: {
+        "msg-tool": [{ ...buildToolPart("q-ask", "session-a", "running"), tool: "question" }],
+        "msg-child": [{ ...buildToolPart("q-child", "session-child", "running", "msg-child"), tool: "question" }],
+      },
+    })
+    for (const session of store.getState().session) sessionRecords.set(session.id, session)
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a", { deferQuestions: true })).toEqual({ dismissed: true, deferred: [question] })
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID).sort()).toEqual(["q-child", "q-consent"])
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(store.getState().form["session-child"]).toBe(undefined)
+  })
+})
+
+describe("deferQuestionsAfterSend", () => {
+  const question = buildLinkedForm("q-ask", "session-a")
+  const promptToSessionA = { route: "prompt", sessionId: "session-a" } as const
+  const questionStore = () => createStore({}, {
+    session: [sessionFixture("session-a")],
+    form: { "session-a": [question] },
+  })
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    formCancelError = null
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/test/project", [question])
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+  })
+
+  test("cancels with the note and keeps the question recoverable", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params)).toEqual([
+      { sessionID: "session-a", formID: "q-ask", directory: "/test/project", message: DEFERRED_QUESTION_NOTE },
+    ])
+    expect(store.getState().form["session-a"]).toBe(undefined)
+    // A local dismissal would veto the card; a deferral must not.
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+  })
+
+  test("a failed cancel leaves the question pending", async () => {
+    const store = questionStore()
+    formCancelError = Object.assign(new Error("session.form.cancel failed (500): unexpected status"), { status: 500 })
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(store.getState().form["session-a"]).toEqual([question])
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("q-ask")).toBe(false)
+  })
+
+  // Only a plain prompt to the question's own session is the message the note announces.
+  test("after a command, a shell command or a send elsewhere the question stays pending", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    for (const sent of [
+      { route: "command", sessionId: "session-a" },
+      { route: "shell", sessionId: "session-a" },
+      { route: "prompt", sessionId: "session-b" },
+      undefined,
+    ] as const) {
+      await deferQuestionsAfterSend([question], sent)
+    }
+
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-a"]).toEqual([question])
+  })
+
+  test("a question another page answered meanwhile (409 FormAlreadySettledError) is removed; another 409 leaves it", async () => {
+    const store = questionStore()
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    // Shaped as client.ts normalizeOpencodeError builds it from OpenCode 2.3.0's tagged body.
+    formCancelError = Object.assign(new Error("session.form.cancel failed (409): SessionBusyError"), { status: 409, tag: "SessionBusyError" })
+    await deferQuestionsAfterSend([question], promptToSessionA)
+    expect(store.getState().form["session-a"]).toEqual([question])
+
+    formCancelError = Object.assign(new Error("session.form.cancel failed (409): Form already settled: q-ask"), {
+      status: 409, tag: "FormAlreadySettledError", detail: "Form already settled: q-ask",
+    })
+    await deferQuestionsAfterSend([question], promptToSessionA)
+    expect(store.getState().form["session-a"]).toBe(undefined)
+  })
+
+  test("a question that settled meanwhile is removed without an error", async () => {
+    const store = questionStore()
+    formCancelError = Object.assign(new Error("form.cancel failed (404): FormNotFoundError"), { status: 404 })
+    const { setActionRefs, deferQuestionsAfterSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await deferQuestionsAfterSend([question], promptToSessionA)
+
+    expect(store.getState().form["session-a"]).toBe(undefined)
   })
 })
 
@@ -5167,6 +5320,18 @@ describe("sendRecoveredFormAnswer", () => {
     expect(sendMessageCalls[0]?.content).toContain('# Questions')
     expect(sendMessageCalls[0]?.content).toContain('**Answer:** Red')
     expect(sendMessageCalls[0]?.content).toContain('{"q0":"Red"}')
+  })
+
+  test("a deferred question's answer opens with the lead-in and carries the marker", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+
+    await sendRecoveredFormAnswer({ ...question, evidence: "deferred-on-send" }, "the answer")
+
+    expect(sendMessageCalls.map((call) => [call.content, call.metadata])).toEqual([
+      [`${DEFERRED_ANSWER_LEAD_IN}\n\nthe answer`, { openchamber: { deferredAnswer: { formID: "frm_recovered" } } }],
+    ])
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
   })
 
   test("a rejected send keeps the question recoverable", async () => {

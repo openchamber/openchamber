@@ -3773,6 +3773,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'De verbinding met de server is verbroken ({reason}). Er is niets verzonden; probeer het opnieuw zodra de verbinding hersteld is.',
   'chat.formCard.notConnected': 'Nog niet verbonden met de server. Er is niets verzonden; probeer het opnieuw zodra er verbinding is.',
   'chat.formCard.recoveredNotice': 'De beurt is tijdens het wachten gestopt. Verzenden start een nieuwe betaalde beurt.',
+  'chat.formCard.deferredNotice': 'U hebt een bericht verstuurd voordat u antwoordde. Versturen stuurt uw antwoord als nieuw bericht.',
   'chat.formDock.progress': '{current} van {total}',
   'chat.formDock.waiting': 'nog {count} in de wachtrij',
   'chat.formDock.back': 'Terug',

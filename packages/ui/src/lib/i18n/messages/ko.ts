@@ -3792,6 +3792,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': '서버 연결이 끊어졌습니다({reason}). 아무것도 전송되지 않았습니다. 다시 연결되면 다시 시도하세요.',
   'chat.formCard.notConnected': '아직 서버에 연결되지 않았습니다. 아무것도 전송되지 않았습니다. 연결되면 다시 시도하세요.',
   'chat.formCard.recoveredNotice': '대기 중 턴이 중지되었습니다. 제출하면 새로운 유료 턴이 시작됩니다.',
+  'chat.formCard.deferredNotice': '답변하기 전에 메시지를 보냈습니다. 제출하면 답변이 새 메시지로 전송됩니다.',
   'chat.formDock.progress': '{total} 중 {current}',
   'chat.formDock.waiting': '{count}개 더 대기 중',
   'chat.formDock.back': '뒤로',

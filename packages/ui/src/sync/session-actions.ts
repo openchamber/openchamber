@@ -10,12 +10,16 @@ import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
 import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
-import { useSessionUIStore } from "./session-ui-store"
+import { useSessionUIStore, type SentMessage } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
+  DEFERRED_ANSWER_LEAD_IN,
+  DEFERRED_QUESTION_NOTE,
+  deferredAnswerMetadata,
   formReleaseKey,
   formToolLink,
   formTurnHold,
+  isWaitingQuestionCall,
   noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
@@ -70,7 +74,7 @@ import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
-import { isFormRequestNotFoundError } from "./form-request-error"
+import { isFormAlreadySettledError, isFormRequestNotFoundError } from "./form-request-error"
 import { ConnectionLostError } from "./connection-lost-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
@@ -2820,7 +2824,7 @@ export async function replyToForm(
     // #2448). The later SSE event is a no-op (the reducer only removes when
     // present).
     removeFormRequestFromChildStores(sessionId, formId)
-    noteLocalFormReplied(formId)
+    noteLocalFormReplied(sessionId, formId)
   } catch (error) {
     if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2832,19 +2836,20 @@ export async function replyToForm(
   }
 }
 
-export async function cancelForm(sessionId: string, formId: string): Promise<void> {
+/** A `message` defers the question: it is not marked dismissed and stays recoverable (#5391). */
+export async function cancelForm(sessionId: string, formId: string, message?: string): Promise<void> {
   await waitForConnectionOrThrow()
   // A failed record read throws before the try: nothing was sent, so the form
   // stays pending for a retry.
   const { directory } = await resolveBlockingRequestTarget(sessionId, getRequestReplyDirectory("form", sessionId, formId))
   try {
-    if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
+    if (await opencodeClient.cancelForm(sessionId, formId, directory, message) !== true) {
       throw new Error("Form cancellation failed")
     }
     // A successful cancellation is authoritative; see replyToForm for the
     // lost-SSE-event rationale (issues #2911, #2448).
     removeFormRequestFromChildStores(sessionId, formId)
-    noteLocalFormCancelled(formId)
+    if (message === undefined) noteLocalFormCancelled(sessionId, formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2899,14 +2904,19 @@ function recoveredAnswerSelection(question: RecoveredQuestion): RecoveredAnswerS
   throw new Error("No model is recorded for this question")
 }
 
-/** Uses the normal send path for rollback and ambiguous-failure confirmation. */
+/**
+ * Uses the normal send path for rollback and ambiguous-failure confirmation.
+ * A deferred question's answer opens with a line tying it to the earlier call
+ * and carries the marker that closes the card on the other pages (#5391).
+ */
 export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text: string): Promise<void> {
   const runtimeKey = getRuntimeKey()
   const isCurrentRuntime = captureRuntimeInstance()
+  const deferred = question.evidence === "deferred-on-send"
   await submitRecoveredAnswer(question.form.id, async () => {
     const selection = recoveredAnswerSelection(question)
     await useSessionUIStore.getState().sendMessage(
-      text,
+      deferred ? `${DEFERRED_ANSWER_LEAD_IN}\n\n${text}` : text,
       selection.providerID,
       selection.modelID,
       selection.agent,
@@ -2919,9 +2929,10 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         userInitiated: true,
         queuedGoal: null,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
+        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined,
       },
     )
-    if (isCurrentRuntime()) noteLocalFormReplied(question.form.id)
+    if (isCurrentRuntime()) noteLocalFormReplied(question.sessionID, question.form.id)
   })
 }
 
@@ -2939,19 +2950,21 @@ function openFormReleaseKeys(): Set<string> {
   return keys
 }
 
-const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: () => boolean }>()
+const formToolReads = new Map<string, { read: Promise<boolean>; isCurrentRuntime: () => boolean }>()
 
 /**
  * Read the tool call of an open form whose message is not loaded (#5391). A
  * completed or failed call goes to `releasedForms`, which the send path and
- * the composer's phase both read. Concurrent callers on the same runtime
- * instance share one read; a read from before a switch is never shared, even
- * after switching back. A failed read, one that finishes on another runtime,
- * or one whose form is no longer open records nothing.
+ * the composer's phase both read. Resolves true when the read showed a waiting
+ * question tool call (`isWaitingQuestionCall`), which the send path defers.
+ * Concurrent callers on the same runtime instance share one read; a read from
+ * before a switch is never shared, even after switching back. A failed read,
+ * one that finishes on another runtime, or one whose form is no longer open
+ * records nothing and resolves false.
  */
-function readFormToolLink(form: FormRequest): Promise<void> {
+function readFormToolLink(form: FormRequest): Promise<boolean> {
   const tool = formToolLink(form)
-  if (!tool) return Promise.resolve()
+  if (!tool) return Promise.resolve(false)
   const key = formReleaseKey(form, tool)
   const existing = formToolReads.get(key)
   if (existing?.isCurrentRuntime()) return existing.read
@@ -2959,13 +2972,15 @@ function readFormToolLink(form: FormRequest): Promise<void> {
   const read = (async () => {
     try {
       const { directory } = await resolveBlockingRequestTarget(form.sessionID, getRequestReplyDirectory("form", form.sessionID, form.id))
-      const { parts } = await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)
-      if (!isCurrentRuntime() || formTurnHold(form, { [tool.messageID]: parts }) !== "released") return
+      const parts = { [tool.messageID]: (await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)).parts }
+      if (!isCurrentRuntime()) return false
+      if (formTurnHold(form, parts) !== "released") return isWaitingQuestionCall(form, parts)
       const openKeys = openFormReleaseKeys()
       if (openKeys.has(key)) noteFormToolReleased(key, openKeys)
     } catch (error) {
       console.error("[session-actions] Could not read the tool call of an open form:", error)
     }
+    return false
   })().finally(() => {
     if (formToolReads.get(key)?.read === read) formToolReads.delete(key)
   })
@@ -3007,21 +3022,32 @@ function formCopiesHold(copies: readonly OpenFormCopy[]): "holds" | "released" |
  * round trip. Each is then formally cancelled on the backend, which fires
  * `form.cancelled` for reconciliation.
  *
- * Returns true when at least one form was cancelled. Failures are swallowed (a
- * stranded form must never block the send); a not-found error also clears the
- * stale entry from the child store via {@link cancelForm}. Any other failure
- * puts the form back: the agent is still waiting on it, and no event will bring
- * it back (a subagent's form has no other recovery path, #2448).
+ * `dismissed` is true when at least one form was cancelled. Failures are
+ * swallowed (a stranded form must never block the send); a not-found error
+ * also clears the stale entry from the child store via {@link cancelForm}. Any
+ * other failure puts the form back: the agent is still waiting on it, and no
+ * event will bring it back (a subagent's form has no other recovery path,
+ * #2448).
+ *
+ * With `deferQuestions`, the session's own waiting question tool call
+ * (`isWaitingQuestionCall`) is neither removed nor cancelled: it comes back in
+ * `deferred`, for {@link deferQuestionsAfterSend} once the message is in
+ * (#5391). A subagent's question stays on the plain cancel, since the subagent
+ * never sees the message the note would point it to.
  *
  * Rejecting unblocks the agent's tool without guaranteeing an idle session.
  * The chat caller preserves explicit Steer as a direct send (the inbox takes
  * it while the turn is still active) and queues other follow-ups after
  * dismissal. This helper does not abort the session.
  */
-export async function dismissOpenFormsForSession(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false
+export async function dismissOpenFormsForSession(
+  sessionId: string,
+  options?: { deferQuestions?: boolean },
+): Promise<{ dismissed: boolean; deferred: readonly FormRequest[] }> {
+  const nothing = { dismissed: false, deferred: [] }
+  if (!sessionId) return nothing
   const stores = _childStores
-  if (!stores) return false
+  if (!stores) return nothing
 
   const isCurrentRuntime = captureRuntimeInstance()
   const copiesByForm = new Map<string, OpenFormCopy[]>()
@@ -3044,14 +3070,26 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   }
 
   const unread = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) === "unknown")
+  // Copies a server read showed to be a waiting question tool call: their part may not be in any store yet.
+  const readAsWaitingQuestion = new Set<readonly OpenFormCopy[]>()
   if (unread.length > 0) {
-    await Promise.all(unread.map((copies) => readFormToolLink(copies[0].form)))
+    await Promise.all(unread.map(async (copies) => {
+      if (await readFormToolLink(copies[0].form)) readAsWaitingQuestion.add(copies)
+    }))
     // The stores belong to another server now; none of these forms is on it.
-    if (!isCurrentRuntime()) return false
+    if (!isCurrentRuntime()) return nothing
   }
   // Decided after the reads, so evidence that arrived meanwhile from any copy counts.
-  const toDismiss = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) !== "released")
-  if (toDismiss.length === 0) return false
+  const deferred: FormRequest[] = []
+  const toDismiss: OpenFormCopy[][] = []
+  for (const copies of copiesByForm.values()) {
+    if (formCopiesHold(copies) === "released") continue
+    const deferrable = options?.deferQuestions && copies[0].sessionId === sessionId
+      && (readAsWaitingQuestion.has(copies) || copies.some(({ store, form }) => isWaitingQuestionCall(form, store.getState().part)))
+    if (deferrable) deferred.push(copies[0].form)
+    else toDismiss.push(copies)
+  }
+  if (toDismiss.length === 0) return { dismissed: false, deferred }
 
   // Optimistically clear the forms from the local store so the prompt
   // disappears immediately, before the cancel round-trip.
@@ -3073,7 +3111,38 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
       }
     }),
   )
-  return true
+  return { dismissed: true, deferred }
+}
+
+/**
+ * Cancel each question {@link dismissOpenFormsForSession} deferred, with the
+ * note the question tool hands to the model, once the message it gave way to
+ * was admitted: cancelled first, the model could start its next step before
+ * the message reached the inbox (#5391). Only a send that went out as a plain
+ * prompt to the question's own session (`sent`, from `sendMessage`'s `onSent`) is a
+ * message the note can point to; after a command, a shell command or a send
+ * elsewhere the question stays pending and is answered the normal way.
+ *
+ * A deferred question stays recoverable, so the card comes back answerable
+ * when the call's failure arrives. A not-found or already-settled answer
+ * means it settled meanwhile: the form goes and recovery reconciles it. Any
+ * other failure leaves it pending: the message then waits in the inbox behind
+ * it, and the question is still answered the normal way.
+ */
+export async function deferQuestionsAfterSend(forms: readonly FormRequest[], sent: SentMessage | undefined): Promise<void> {
+  if (sent?.route !== "prompt") return
+  await Promise.all(forms.filter((form) => form.sessionID === sent.sessionId).map(async (form) => {
+    try {
+      await cancelForm(form.sessionID, form.id, DEFERRED_QUESTION_NOTE)
+    } catch (error) {
+      if (error instanceof Error && isFormAlreadySettledError(error)) {
+        removeFormRequestFromChildStores(form.sessionID, form.id)
+        recoverStaleBlockingRequest(form.sessionID)
+      } else if (!isFormRequestNotFoundError(error)) {
+        console.error("[session-actions] Could not defer an open question after a send:", error)
+      }
+    }
+  }))
 }
 
 // ---------------------------------------------------------------------------

@@ -3674,6 +3674,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'انقطع الاتصال بالخادم ({reason}). لم يُرسَل شيء؛ أعد المحاولة بعد عودة الاتصال.',
   'chat.formCard.notConnected': 'لم يتم الاتصال بالخادم بعد. لم يُرسَل شيء؛ أعد المحاولة بعد الاتصال.',
   'chat.formCard.recoveredNotice': 'توقّفت الجولة أثناء الانتظار. سيؤدي الإرسال إلى بدء جولة جديدة مدفوعة.',
+  'chat.formCard.deferredNotice': 'أرسلت رسالة قبل الإجابة. سيؤدي الإرسال إلى إرسال إجابتك في رسالة جديدة.',
   'chat.formDock.progress': '{current} من {total}',
   'chat.formDock.waiting': '{count} أخرى في الانتظار',
   'chat.formDock.back': 'رجوع',

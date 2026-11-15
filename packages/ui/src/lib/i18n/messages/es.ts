@@ -3793,6 +3793,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.connectionLostReason': 'Se perdió la conexión con el servidor ({reason}). No se envió nada; vuelve a intentarlo cuando se reconecte.',
   'chat.formCard.notConnected': 'Todavía no hay conexión con el servidor. No se envió nada; vuelve a intentarlo cuando se conecte.',
   'chat.formCard.recoveredNotice': 'El turno se detuvo durante la espera. Enviar inicia un nuevo turno de pago.',
+  'chat.formCard.deferredNotice': 'Enviaste un mensaje antes de responder. Enviar manda tu respuesta como un mensaje nuevo.',
   'chat.formDock.progress': '{current} de {total}',
   'chat.formDock.waiting': '{count} más en espera',
   'chat.formDock.back': 'Atrás',

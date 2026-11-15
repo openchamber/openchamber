@@ -3791,6 +3791,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'La connexion au serveur a été perdue ({reason}). Rien n’a été envoyé ; réessayez une fois la connexion rétablie.',
   'chat.formCard.notConnected': 'Pas encore connecté au serveur. Rien n’a été envoyé ; réessayez une fois la connexion établie.',
   'chat.formCard.recoveredNotice': 'Le tour s\'est arrêté pendant l\'attente. Envoyer lance un nouveau tour payant.',
+  'chat.formCard.deferredNotice': 'Vous avez envoyé un message avant de répondre. Envoyer transmet votre réponse dans un nouveau message.',
   'chat.formDock.progress': '{current} sur {total}',
   'chat.formDock.waiting': '{count} de plus en attente',
   'chat.formDock.back': 'Retour',

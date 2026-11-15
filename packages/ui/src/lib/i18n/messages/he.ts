@@ -3674,6 +3674,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'החיבור לשרת אבד ({reason}). לא נשלח דבר; נסה שוב אחרי שהחיבור יחזור.',
   'chat.formCard.notConnected': 'עדיין אין חיבור לשרת. לא נשלח דבר; נסה שוב אחרי שהחיבור ייווצר.',
   'chat.formCard.recoveredNotice': 'התור נעצר בזמן ההמתנה. שליחה תתחיל תור חדש בתשלום.',
+  'chat.formCard.deferredNotice': 'שלחת הודעה לפני שענית. שליחה תעביר את התשובה שלך כהודעה חדשה.',
   'chat.formDock.progress': '{current} מתוך {total}',
   'chat.formDock.waiting': 'עוד {count} ממתינות',
   'chat.formDock.back': 'חזרה',

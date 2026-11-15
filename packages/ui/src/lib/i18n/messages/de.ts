@@ -3790,6 +3790,7 @@ export const dict = {
   'chat.formCard.connectionLostReason': 'Die Verbindung zum Server wurde unterbrochen ({reason}). Es wurde nichts gesendet; versuchen Sie es erneut, sobald die Verbindung wieder steht.',
   'chat.formCard.notConnected': 'Noch nicht mit dem Server verbunden. Es wurde nichts gesendet; versuchen Sie es erneut, sobald die Verbindung steht.',
   'chat.formCard.recoveredNotice': 'Der Lauf wurde während des Wartens beendet. Absenden startet einen neuen kostenpflichtigen Lauf.',
+  'chat.formCard.deferredNotice': 'Sie haben vor der Antwort eine Nachricht gesendet. Absenden schickt Ihre Antwort als neue Nachricht.',
   'chat.formDock.progress': '{current} von {total}',
   'chat.formDock.waiting': '{count} weitere warten',
   'chat.formDock.back': 'Zurück',
