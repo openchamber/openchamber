@@ -1012,8 +1012,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }), { id: `attachment-modalities:${modelKey}` });
     }, [attachedFiles, currentModelId, currentModelMetadata, currentProviderId, t]);
 
+    // An image opens the image viewer, a text file (a pasted text, a JSON
+    // file) the text dialog, as the same chip in a sent message does.
     const handleShowAttachmentPreview = React.useCallback((content: ToolPopupContent) => {
-        if (!content.image) return;
         setAttachmentPreview(content);
         setImagePreviewOpen(true);
     }, [setImagePreviewOpen]);
