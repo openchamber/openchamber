@@ -648,6 +648,18 @@ export function createGiteaResourceService({
       return {};
     },
 
+    async updateIssue({ providerTarget, expectedTarget, title, body }) {
+      const payload = { title };
+      if (body !== undefined) payload.body = body;
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`, payload);
+      const issue = requireIssue(raw, projectOfTarget(providerTarget));
+      requireExpected({ number: expectedTarget.number }, issue);
+      if (issue.title !== title || (body !== undefined && (issue.body ?? '') !== body)) {
+        throw malformed(`${providerLabel} returned an unexpected issue title or body`);
+      }
+      return {};
+    },
+
     /**
      * Merges only the head that was reviewed: `head_commit_id` makes Gitea
      * refuse with 409 once the branch moved. Gitea checks mergeability
@@ -706,6 +718,14 @@ export function createGiteaResourceService({
       const current = raw?.merged === true ? 'merged' : raw?.state;
       if (current === state) return { state: 'succeeded', result: { state } };
       if (current === 'open' || current === 'closed') return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
+      return { state: 'outcome-unknown' };
+    },
+
+    async reconcileIssueUpdate(providerTarget, title, body) {
+      const issue = requireIssue(await client.get(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`), projectOfTarget(providerTarget));
+      const bodyMatches = body === undefined || (issue.body ?? '') === body;
+      if (issue.title === title && bodyMatches) return { state: 'succeeded', result: {} };
+      // An edit made since reads exactly like one that never landed.
       return { state: 'outcome-unknown' };
     },
 

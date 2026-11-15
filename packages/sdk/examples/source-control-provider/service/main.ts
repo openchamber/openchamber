@@ -785,6 +785,12 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       await api(call, 'PATCH', `${repo}/pulls/${providerTarget.number}`, { body: payload });
       return {};
     }
+    case 'issue-update': {
+      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
+      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
+      await api(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: payload });
+      return {};
+    }
     case 'change-request-merge': {
       // `head_commit_id` makes the forge refuse once the branch moved past the head the user saw.
       const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
@@ -830,6 +836,12 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       // The forge shows the edit, or it shows something else: an edit of its own since, or the write never landed.
       const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
       const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
+      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    }
+    case 'issue-update': {
+      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
+      const landed = data.title === text(normalized, 'title')
+        && (!Object.hasOwn(normalized, 'body') || (data.body ?? '') === text(normalized, 'body'));
       return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
     }
     case 'change-request-merge': {

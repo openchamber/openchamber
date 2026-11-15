@@ -245,6 +245,25 @@ function mutationTable(descriptor) {
       },
       reconcile: unknownOutcome,
     },
+    '/issues/update': {
+      kind: 'issue-update',
+      normalize: (input, context) => {
+        const title = requestText(input.title);
+        if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
+        const normalized = { title };
+        if (isString(input.body)) normalized.body = input.body;
+        normalized.digest = { title, body: normalized.body ?? null };
+        return normalized;
+      },
+      perform: (service, normalized, resolved) => service.updateIssue({
+        title: normalized.title,
+        body: normalized.body,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized),
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {

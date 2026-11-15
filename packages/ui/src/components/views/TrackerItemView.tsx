@@ -20,6 +20,7 @@ import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl,
 import { useLinkRepository } from '@/components/sourceBoard/boardRepository';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { updateRepositoryItemText } from '@/components/sourceBoard/updateItemText';
 import { useBoardRevalidation } from '@/components/sourceBoard/useBoardRevalidation';
 import { Button } from '@/components/ui/button';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
@@ -234,6 +235,11 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
 
     const item: ReferencePickerItem = { source: 'repository', reference };
     const pull = reference.kind === 'pull' ? reference : null;
+    // An edit of the item's title and description: the host's own edit, then the item read again.
+    const saveText = writeContext ? async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, writeContext, reference, input);
+        await refreshItem();
+    } : undefined;
     return (
         <>
             <ReferencePreview
@@ -252,6 +258,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
+                onSaveText={saveText}
                 threadActions={threadActions}
                 stateMenu={reference.state !== 'merged' && writeContext
                     && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (

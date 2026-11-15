@@ -62,6 +62,8 @@ import type {
   GitAuxiliaryBindingIntent,
   GitAuxiliaryBindingResult,
   UpdateChangeRequestInput,
+  UpdateIssueInput,
+  UpdateDiscussionInput,
 } from '../source-control/types';
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
@@ -1828,6 +1830,13 @@ export type RepositoryReferenceReviewer = {
 /** What the preview adds for one item; too slow to ask for a whole page. */
 export type RepositoryReferenceDetail = {
   number: number;
+  /**
+   * The item's whole description (a discussion's body included), where the host sends
+   * it with the detail; the list body is cut at 20 000 characters.
+   */
+  body?: string;
+  /** Whether this account may replace the item's title and body; absent when the host does not say. */
+  viewerCanUpdate?: boolean;
   /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
   comments: RepositoryReferenceComment[];
   /** How many conversation comments the item has in all. */
@@ -1998,6 +2007,8 @@ export interface SourceControlAPI {
   ): Promise<ChangeRequestStatus>;
   changeRequestCreate(payload: CreateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlCreateMutationResult>>;
   changeRequestUpdate(payload: UpdateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  /** An issue's title and body (`features.issueEdit`). */
+  issueUpdate(payload: UpdateIssueInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestMerge(payload: MergeChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlMergeMutationResult>>;
   changeRequestReady(payload: ReadyChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReadyMutationResult>>;
   changeRequestDraft(payload: DraftChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlDraftMutationResult>>;
@@ -2022,6 +2033,8 @@ export interface SourceControlAPI {
   discussionComment(payload: DiscussionCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionSetState(payload: SetDiscussionStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   discussionSetAnswer(payload: SetDiscussionAnswerInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  /** A discussion's title and body (`features.discussions`). */
+  discussionUpdate(payload: UpdateDiscussionInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   /**

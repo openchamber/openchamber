@@ -265,6 +265,19 @@ describe('extension source-control descriptors', () => {
     expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
   });
 
+  it('publishes the text edits an extension declares, and none it does not', () => {
+    const declared = build({
+      presentation: {
+        ...contribution().presentation,
+        features: { authorCanReview: false, issueCloseReason: false, issueEdit: true, changeRequestEdit: true },
+      },
+    });
+    const published = publicProviderDescriptor(declared, 3, declared.extension);
+    expect(published.features).toMatchObject({ issueEdit: true, changeRequestEdit: true });
+    const undeclared = publicProviderDescriptor(build(), 3, build().extension);
+    expect(undeclared.features).toMatchObject({ issueEdit: false, changeRequestEdit: false });
+  });
+
   it('is visible through the process-wide facade once attached', () => {
     const descriptor = build();
     sourceControlProviderDescriptors.attachExtension(descriptor);

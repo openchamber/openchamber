@@ -922,6 +922,48 @@ describe('GitLab comments and reviews', () => {
       .resolves.toMatchObject({ state: 'failed' });
   });
 
+  it('edits an issue title and description and reconciles from the answered issue', async () => {
+    const editIssue = vi.fn(async (_id, _iid, update) => ({
+      iid: 3, title: update.title, description: update.description, web_url: origin + '/me/repo/-/issues/3', state: 'opened',
+    }));
+    const showIssue = vi.fn(async () => ({
+      iid: 3, title: 'Bug, revised', description: 'Steps to reproduce', web_url: origin + '/me/repo/-/issues/3', state: 'opened',
+    }));
+    const { service } = setup({ Issues: { ...setup().client.Issues, edit: editIssue, show: showIssue } });
+    const project = { id: '1', owner: 'me', name: 'repo' };
+
+    await expect(service.updateIssue({
+      title: 'Bug, revised',
+      body: 'Steps to reproduce',
+      providerTarget: { projectId: '1', number: 3 },
+      targetProject: project,
+      expectedTarget: { project, number: 3 },
+    })).resolves.toEqual({});
+    expect(editIssue).toHaveBeenLastCalledWith('1', 3, { title: 'Bug, revised', description: 'Steps to reproduce' });
+
+    // Without a body the description is left as it is, not cleared.
+    await expect(service.updateIssue({
+      title: 'Bug, revised', providerTarget: { projectId: '1', number: 3 }, targetProject: project,
+    })).resolves.toEqual({});
+    expect(editIssue).toHaveBeenLastCalledWith('1', 3, { title: 'Bug, revised' });
+
+    editIssue.mockResolvedValueOnce({
+      iid: 3, title: 'Another title', description: 'Steps to reproduce', web_url: origin + '/me/repo/-/issues/3', state: 'opened',
+    });
+    await expect(service.updateIssue({
+      title: 'Bug, revised', body: 'Steps to reproduce', providerTarget: { projectId: '1', number: 3 }, targetProject: project,
+    })).rejects.toThrow('unexpected issue');
+
+    await expect(service.reconcileIssueUpdate({ projectId: '1', number: 3 }, { title: 'Bug, revised', body: 'Steps to reproduce' }))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+    showIssue.mockResolvedValueOnce({
+      iid: 3, title: 'Bug, revised', description: 'Other steps', web_url: origin + '/me/repo/-/issues/3', state: 'opened',
+    });
+    // A differing value cannot tell another edit from a write that never landed.
+    await expect(service.reconcileIssueUpdate({ projectId: '1', number: 3 }, { title: 'Bug, revised', body: 'Steps to reproduce' }))
+      .resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
   it('comments on merge requests and on issues in the bound project', async () => {
     const mrNote = vi.fn(async () => ({ id: 8 }));
     const issueNote = vi.fn(async () => ({ id: 9 }));
