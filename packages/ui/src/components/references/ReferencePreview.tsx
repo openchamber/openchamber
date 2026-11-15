@@ -26,7 +26,10 @@ import { useSourceControlProvider } from '@/lib/source-control/providers/registr
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
-import { ReferenceComments, type ReferenceThreadActions } from './ReferenceComments';
+import { ReferenceComments, type ReferenceCommentActions, type ReferenceThreadActions, type ScopedCommentActions } from './ReferenceComments';
+import { commentDraftScope } from './referenceCommentDrafts';
+import { useRepositoryReadContext } from './referenceSources';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
 import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
@@ -274,7 +277,8 @@ const CommentsSection: React.FC<{
     now: number;
     attachments?: CommentAttachments;
     threadActions?: ReferenceThreadActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions }) => {
+    commentActions?: ScopedCommentActions;
+}> = ({ state, total, activity = false, now, attachments, threadActions, commentActions }) => {
     const { t } = useI18n();
     const shown = state.status === 'ready' ? state.value.filter((entry) => entry.kind === 'comment').length : 0;
     return (
@@ -309,7 +313,7 @@ const CommentsSection: React.FC<{
             ) : state.value.length === 0 ? (
                 <p className="typography-meta text-muted-foreground">{t('references.picker.preview.commentsEmpty')}</p>
             ) : (
-                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} />
+                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
             )}
         </section>
     );
@@ -467,7 +471,9 @@ const RepositoryPreview: React.FC<{
     revisionChoice?: RevisionChoice;
     /** Saves an edited title and description; absent where the item is only read. */
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText }) => {
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ScopedCommentActions;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
@@ -488,6 +494,9 @@ const RepositoryPreview: React.FC<{
                 context: location ?? (comment.review && comment.review !== 'commented' ? t(REVIEW_VERDICT_KEYS[comment.review]) : null),
                 location,
             };
+            if (comment.id !== undefined) item.id = comment.id;
+            if (comment.canUpdate !== undefined) item.canUpdate = comment.canUpdate;
+            if (comment.canDelete !== undefined) item.canDelete = comment.canDelete;
             if (comment.answer) item.answer = comment.answer;
             if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
@@ -877,7 +886,7 @@ const RepositoryPreview: React.FC<{
                 ) : null}
             </div>
 
-            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} />
+            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} />
             {reply}
         </PreviewFrame>
     );
@@ -1106,16 +1115,28 @@ export const ReferencePreview: React.FC<{
     onRefresh?: () => Promise<void>;
     /** Answer and resolve a PR's review threads, or answer a discussion's comments and choose its answer; without it they are read only. */
     threadActions?: ReferenceThreadActions;
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ReferenceCommentActions;
     /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     /** A change's revisions to pick the shown one from, where the host keeps revisions. */
     revisionChoice?: RevisionChoice;
     /** Saves an edited title and description for the previewed repository item; absent where the item is only read. */
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText }) => {
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
-    const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
-    const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
+    const reference = item?.source === 'repository' ? item.reference : null;
+    const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
+    const links = useReferenceLinks(directory, reference);
+    // A host that cannot change a comment publishes no route for it; the
+    // per-comment flags stay the second gate (whose comment it is).
+    const commentWrites = useSourceControlProvider(reference?.provider ?? null).features.commentEdit;
+    // The account that writes the folder's comments, so another one never
+    // opens this one's unsaved rewrite.
+    const readContext = useRepositoryReadContext(reference ? directory : null);
+    const commentAccount = readContext && readContext !== 'missing'
+        ? [readContext.provider, readContext.instance, readContext.accountId].join('\u0000')
+        : '';
     if (!item) {
         return (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
@@ -1151,6 +1172,7 @@ export const ReferencePreview: React.FC<{
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}
                     onSaveText={onSaveText}
+                    commentActions={commentWrites && commentActions ? { ...commentActions, draftScope: commentDraftScope(getRuntimeKey(), directory, commentAccount, item.reference.url) } : undefined}
                 />
             </ReferenceLinksContext.Provider>
         </ReferenceMarkdownRewriteContext.Provider>

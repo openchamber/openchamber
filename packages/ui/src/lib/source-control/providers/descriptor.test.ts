@@ -45,7 +45,7 @@ describe('source-control provider descriptors', () => {
       issueEdit: false, changeRequestEdit: false,
       // Every server older than the field served change-request diffs.
       changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,
     });
   });
 

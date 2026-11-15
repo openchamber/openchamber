@@ -26,6 +26,7 @@ import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
 import { IDLE_PULL_STATUS, readyValue, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import {
     canChangeDiscussionState,
     DEFAULT_REPOSITORY_FILTER,
@@ -83,6 +84,7 @@ import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
 import { updateRepositoryItemText } from './updateItemText';
+import { deleteRepositoryComment, updateRepositoryComment } from './updateItemComment';
 import { useBoardRevalidation } from './useBoardRevalidation';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
@@ -672,6 +674,20 @@ const SourceBoardBody: React.FC<{
         await refreshRepositoryItem();
     } : undefined;
     const threadActions = useThreadActions(previewItem?.source === 'repository' ? previewItem.reference : null, context, refreshRepositoryItem);
+    // Editing or removing one of the item's conversation comments: the host's
+    // own change, then the item and the list read again.
+    const commentActions: ReferenceCommentActions | undefined = writableReference && previewItem?.source === 'repository' && previewItem.reference.linked !== true ? {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id }, body);
+            await refreshRepositoryItem();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id });
+            await refreshRepositoryItem();
+        },
+    } : undefined;
     // The preview's refresh button, for a change made on the host's own site,
     // which the server's short-lived answers would otherwise hide for up to
     // half a minute: the shown item alone, its state and checks included.
@@ -749,6 +765,7 @@ const SourceBoardBody: React.FC<{
             onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
             onSaveText={saveText}
             threadActions={threadActions}
+            commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
                 <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />

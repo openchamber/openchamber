@@ -28,6 +28,12 @@ export interface ProviderCapabilities {
   merge: false | { methods: MergeMethod[] };
   ci: boolean;
   comments: boolean;
+  /**
+   * The host replaces and removes a conversation comment. Absent means no:
+   * posting a comment says nothing about editing one, and an extension that
+   * only posts must not inherit the two routes.
+   */
+  commentEdit?: boolean;
   reviews: boolean;
   state: boolean;
   labels: boolean;
@@ -131,6 +137,12 @@ export interface ProviderDescriptor {
        * (`is:open`, `label:bug`, `author:@me`), so the box is documented as one.
        */
       advancedSearch?: boolean;
+      /**
+       * The host accepts an edit or a delete of a conversation comment, with
+       * `canUpdate` / `canDelete` on the comment saying whose it may be.
+       * Absent means no: posting a comment is not permission to change one.
+       */
+      commentEdit?: boolean;
     };
   };
   /** GitHub only, declarative: the `/api/github` aliases its routes keep. */

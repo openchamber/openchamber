@@ -61,7 +61,11 @@ type GiteaPull = GiteaIssue & {
   merge_base?: string;
 };
 type GiteaChangedFile = { filename: string; status?: string; additions?: number; deletions?: number; changes?: number };
-type GiteaComment = { id: number; body: string; html_url?: string; user?: GiteaUser; created_at?: string; updated_at?: string };
+type GiteaComment = {
+  id: number; body: string; html_url?: string; user?: GiteaUser; created_at?: string; updated_at?: string;
+  /** The issue's HTML address; empty on a pull request comment, which names it in `pull_request_url`. */
+  issue_url?: string; pull_request_url?: string;
+};
 type GiteaBranch = { name: string };
 type GiteaVersion = { version: string };
 
@@ -174,7 +178,11 @@ type ChangeRequest = Identity & Dated & {
   state: 'open' | 'closed' | 'merged'; draft: boolean; base: string; head: string; headSha: string;
   author: User | null; labels: []; mergeable?: boolean; mergeableState?: 'clean' | 'dirty';
 };
-type Comment = Identity & Dated & { id: string; url: string; body: string; author: User | null };
+type Comment = Identity & Dated & {
+  id: string; url: string; body: string; author: User | null;
+  /** Whether the signed-in account may replace or remove it; both say so rather than being left out. */
+  canUpdate?: boolean; canDelete?: boolean;
+};
 type ChangedFile = {
   path: string; status: 'added' | 'removed' | 'renamed' | 'modified';
   additions?: number; deletions?: number; changes?: number; patch?: string;
@@ -273,6 +281,12 @@ const mapComment = (call: Call, raw: GiteaComment, fallbackUrl: string): Comment
   const comment: Comment = {
     ...call.identity, id: String(raw.id), url: raw.html_url ?? fallbackUrl, body: raw.body, author: mapUser(call, raw.user),
   };
+  // Only the author's own comment carries the two write flags; anyone else's says so
+  // rather than leaving OpenChamber to guess.
+  const mine = call.session.user !== null && raw.user !== undefined
+    && call.session.user.login.toLowerCase() === raw.user.login.toLowerCase();
+  comment.canUpdate = mine;
+  comment.canDelete = mine;
   stamp(comment, raw);
   return comment;
 };
@@ -757,6 +771,23 @@ const readResolved = (input: Input): Resolved => {
   };
 };
 
+/**
+ * A comment's address, once the forge says it sits on the resolved issue or
+ * pull request. Comment ids are repository-wide on Gitea, so an id from
+ * another item would otherwise be changed while this one is recorded.
+ */
+const itemCommentPath = async (call: Call, providerTarget: ProviderTarget, commentId: string): Promise<string> => {
+  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
+  const { data } = await api<GiteaComment>(call, 'GET', path);
+  const href = (data.issue_url || data.pull_request_url || '').toLowerCase();
+  const item = `${call.identity.instance.replace(/\/+$/, '')}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
+  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
+  if (!match || Number(match[1]) !== providerTarget.number) {
+    throw new CallError('The comment is not on this item', 409, 'SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+  }
+  return path;
+};
+
 const perform = async (call: Call, input: Input): Promise<SourceControlMutationResult> => {
   const kind = text(input, 'kind');
   const normalized = objectOf(input, 'input');
@@ -803,6 +834,14 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
     case 'change-request-comment':
     case 'issue-comment':
       await api(call, 'POST', `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, 'body') } });
+      return {};
+    case 'change-request-comment-update':
+    case 'issue-comment-update':
+      await api(call, 'PATCH', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')), { body: { body: text(normalized, 'body') } });
+      return {};
+    case 'change-request-comment-delete':
+    case 'issue-comment-delete':
+      await api(call, 'DELETE', await itemCommentPath(call, providerTarget, text(normalized, 'commentId')));
       return {};
     case 'change-request-state':
     case 'issue-state': {
