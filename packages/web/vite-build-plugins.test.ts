@@ -3,7 +3,7 @@ import { transformWithEsbuild } from 'vite';
 
 import { escapeRegexLiterals, escapeRemainingWide } from './vite-one-byte-chunks';
 import { dictionaryLocale, localeSliceId, sliceLocale } from './vite-locale-slices';
-import { preloadScript, staticImportClosure } from './vite-preload-app-graph';
+import { chunkHasModule, preloadScript, staticImportClosure } from './vite-preload-app-graph';
 
 const evaluate = (expression: string) => new Function(`return ${expression}`)();
 const WIDE = /[Ā-\u{10FFFF}]/u;
@@ -113,5 +113,13 @@ describe('preloadAppGraph', () => {
     };
     expect(run('openchamber-ui:')).toEqual(['modulepreload /assets/app.js']);
     expect(run('https:')).toEqual([]);
+  });
+
+  test('a Windows path finds the module Rollup keys with forward slashes', () => {
+    const module = { code: null, originalLength: 0, renderedLength: 0, removedExports: [], renderedExports: [] };
+    const modules = { 'D:/a/openchamber/packages/ui/src/main.tsx': module };
+    expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\main.tsx')).toBe(true);
+    expect(chunkHasModule(modules, 'D:\\a\\openchamber\\packages\\ui\\src\\other.tsx')).toBe(false);
+    expect(chunkHasModule({ '/repo/packages/ui/src/main.tsx': module }, '/repo/packages/ui/src/main.tsx')).toBe(true);
   });
 });
