@@ -1,7 +1,16 @@
 # Layout
 
-This file covers the header's session tabs. The tab store, its scopes and
-seeding are owned by `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
+This file covers the header's session tabs and the context panel's file tab
+menu. The tab store, its scopes and seeding are owned by
+`stores/DOCUMENTATION.md` (`useSessionTabsStore`).
+
+## Context panel file tab menu
+
+The menu of a file tab in `ContextPanel.tsx` acts on the right-clicked tab,
+including when it is inactive. Copy relative path uses the current project
+directory (`contextPanelPaths.ts`, which also labels same-named tabs); reveal
+shows only where the file tree offers it (`files.revealPath` outside a browser
+client). VS Code does not mount `ContextPanel`, so it has no such menu.
 
 ## Header session tabs
 

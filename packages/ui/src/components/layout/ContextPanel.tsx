@@ -16,8 +16,12 @@ import { type RepositoryUrlMatcher, useRepositoryUrlMatcher } from '@/lib/source
 import { type TrackerUrlMatcher, useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
-import { isDesktopShell } from '@/lib/desktop';
+import { isBrowserClientRuntime, isDesktopShell } from '@/lib/desktop';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
+import { getRelativePathLabel } from './contextPanelPaths';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { toast } from '@/components/ui';
 
 // Heavy views stay on-demand (same as MainLayout): importing GitView or the
 // plan statically pulls their stacks into the eager startup graph even when
@@ -29,7 +33,7 @@ import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabelKey } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
@@ -111,18 +115,6 @@ const clampWidth = (width: number, maxWidth: number): number => {
 const maxPanelWidth = (availableWidth: number | null): number => {
   if (availableWidth === null) return Number.POSITIVE_INFINITY;
   return Math.max(CONTEXT_PANEL_MIN_WIDTH, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
-};
-
-const getRelativePathLabel = (filePath: string | null, directory: string): string => {
-  if (!filePath) {
-    return '';
-  }
-  const normalizedFile = filePath.replace(/\\/g, '/');
-  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (normalizedDir && normalizedFile.startsWith(normalizedDir + '/')) {
-    return normalizedFile.slice(normalizedDir.length + 1);
-  }
-  return normalizedFile;
 };
 
 const getModeLabel = (
@@ -462,6 +454,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
   const { t, direction } = useI18n();
+  const { files, runtime } = useRuntimeAPIs();
   const isRtl = direction === 'rtl';
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(effectiveDirectory || null));
@@ -976,6 +969,16 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         return null;
       }
       const { id, index, allIds, close } = args;
+      const filePath = tabs.find((tab) => tab.id === id && tab.mode === 'file')?.targetPath;
+      const copyPath = (value: string, relative: boolean) => {
+        void copyTextToClipboard(value).then((result) => {
+          if (result.ok) {
+            toast.success(t(relative ? 'filesView.toast.relativePathCopied' : 'sidebarFilesTree.toast.pathCopied'));
+          } else {
+            toast.error(t('sidebarFilesTree.toast.copyFailed'));
+          }
+        });
+      };
       const closeOthers = () => closeContextPanelTabs(directoryKey, allIds.filter((tabId) => tabId !== id));
       // "Left" and "right" name the screen sides; in RTL the earlier tabs are on the right.
       const before = allIds.slice(0, index);
@@ -988,6 +991,24 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       const nothingToRight = isRtl ? index === 0 : index === allIds.length - 1;
       return (
         <>
+          {filePath && (
+            <>
+              <ContextMenuItem onClick={() => copyPath(filePath, false)}>
+                <Icon name="link" className="me-2 size-4" /> {t('sidebarFilesTree.menu.copyPath')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => copyPath(getRelativePathLabel(filePath, effectiveDirectory), true)}>
+                <Icon name="file-copy-2" className="me-2 size-4" /> {t('filesView.tree.menu.copyRelativePath')}
+              </ContextMenuItem>
+              {files.revealPath && !isBrowserClientRuntime(runtime.platform) && (
+                <ContextMenuItem onClick={() => {
+                  void files.revealPath?.(filePath).catch(() => toast.error(t('sidebarFilesTree.toast.revealFailed')));
+                }}>
+                  <Icon name="folder-received" className="me-2 size-4" /> {t(getRevealLabelKey())}
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+            </>
+          )}
           <ContextMenuItem onClick={close}>
             <Icon name="close" className="me-2 size-4" />
             {t('contextPanel.tab.menu.close')}
@@ -1020,7 +1041,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         </>
       );
     },
-    [activeTab, closeContextPanelTabs, directoryKey, isRtl, t],
+    [activeTab, closeContextPanelTabs, directoryKey, effectiveDirectory, files, isRtl, runtime.platform, t, tabs],
   );
 
   // A tab dragged out of the strip moves its whole surface to a zone.
