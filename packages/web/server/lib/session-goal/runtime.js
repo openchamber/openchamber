@@ -32,6 +32,7 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { sessionParentId } from '../session-lineage.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -621,8 +622,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
     attempt.failures = 0;
-    // Sub-agent/task sessions never carry user goals — skip them.
-    if (typeof session.parentID === 'string' && session.parentID) return;
+    if (sessionParentId(session)) return;
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;

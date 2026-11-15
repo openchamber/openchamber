@@ -15,6 +15,7 @@ import { createTerminalReadAction } from './terminal-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
+import { isListedAsChild, listedSession } from './listed-session.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 import { z } from 'zod';
 import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploads.js';
@@ -624,33 +625,6 @@ export const createOpenChamberControlService = (dependencies) => {
   const FILTERED_PAGE_SIZE = 200;
 
   /**
-   * What `session.list` tells about one session. The OpenCode record runs to
-   * about 750 characters (tokens, cost, permissions, every metadata
-   * namespace), a session in work to about 1,700; this keeps what choosing a
-   * session needs, about 210. `session.status` and `session.messages` read
-   * one session in full.
-   */
-  const listedSession = (record, workEnabled) => {
-    const session = {
-      id: record.id,
-      title: asNonEmptyString(record.title),
-      directory: asNonEmptyString(record.location?.directory) ?? asNonEmptyString(record.directory),
-      updated: record.time?.updated,
-      archived: record.time?.archived,
-      parentID: asNonEmptyString(record.parentID),
-      agent: asNonEmptyString(record.agent),
-      model: record.model,
-      outcome: record.outcome,
-    };
-    if (workEnabled) {
-      session.inWork = workMembership.isInWork(record);
-      session.doneSuggested = workMembership.isDoneSuggested(record);
-    }
-    // A field the record lacks stays out of the answer.
-    return Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined && value !== null));
-  };
-
-  /**
    * `session.list`. Newest first, top-level sessions unless `children`, the
    * caller's directory unless scoped. `inWork` and `busy` read every project
    * when unscoped, as the sidebar and the session status do, and return every
@@ -699,6 +673,7 @@ export const createOpenChamberControlService = (dependencies) => {
       for (const record of page) {
         const id = asNonEmptyString(record?.id);
         if (isHiddenSession(id, record)) continue;
+        if (input.children !== true && isListedAsChild(record)) continue;
         if (id) {
           if (seenSessionIds.has(id)) continue;
           seenSessionIds.add(id);
@@ -711,7 +686,7 @@ export const createOpenChamberControlService = (dependencies) => {
           const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
           if (!terms.every((term) => title.includes(term))) continue;
         }
-        const session = listedSession(record, workEnabled);
+        const session = listedSession(record, workEnabled ? workMembership : null);
         if (inWork && !session.inWork) continue;
         collected.push(session);
         if (full()) break;

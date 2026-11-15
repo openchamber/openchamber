@@ -18,6 +18,7 @@ const permissionRuleSchema = z.object({ action: z.string(), resource: z.string()
 const sessionSchema = z.object({
   id: z.string().min(1),
   model: z.object({ id: z.string().min(1), providerID: z.string().min(1), variant: z.string().optional() }).nullish(),
+  location: z.object({ directory: z.string().min(1) }).nullish(),
   permissions: z.array(permissionRuleSchema).optional(),
 });
 const usageSessionSchema = z.object({
@@ -49,18 +50,21 @@ const parseModelRef = (value) => {
 };
 
 /**
- * The mark on every workflow agent's session. A run can start a hundred
- * agents, so the sidebar leaves sessions with this kind out of its subagent
- * rows (`packages/ui/src/lib/sessionWorkflowMetadata.ts`); the run's card and
- * the Workflows panel list them instead.
+ * The mark on every workflow agent's session, with the session that ran it.
+ * A run can start a hundred agents, so the sidebar leaves sessions with this
+ * kind out of its subagent rows (`packages/ui/src/lib/sessionWorkflowMetadata.ts`);
+ * the run's card and the Workflows panel list them instead. `parentID` is the
+ * lineage OpenChamber reads in place of OpenCode's (`../session-lineage.js`).
  */
-const WORKFLOW_AGENT_METADATA = Object.freeze({ openchamber: Object.freeze({ kind: 'workflow-agent' }) });
+const workflowAgentMetadata = (parentSessionId) => ({ openchamber: { kind: 'workflow-agent', parentID: parentSessionId } });
 
 /**
- * Workflow agents are OpenCode child sessions of the session that started the
- * run, so the user can open any of them from the run's card. One agent is one
- * session and one turn; a JSON answer that does not match its schema gets a
- * follow-up prompt in the same session.
+ * Workflow agents are sessions linked to the session that started the run by
+ * metadata, so the user can open any of them from the run's card. They carry
+ * no OpenCode `parentID`: OpenCode would report each one's idle into the
+ * parent and wake it for a model turn. One agent is one session and one turn;
+ * a JSON answer that does not match its schema gets a follow-up prompt in the
+ * same session.
  */
 export const createWorkflowAgentSessions = ({
   buildOpenCodeUrl,
@@ -187,7 +191,7 @@ export const createWorkflowAgentSessions = ({
   };
 
   /**
-   * Creates the agent's session under `parentSessionId` and runs `text` in it.
+   * Creates the agent's session for `parentSessionId` and runs `text` in it.
    * `onSession(sessionId)` hears the id as soon as the session exists, so a
    * stop can interrupt it. Its checkpoint must resolve before any prompt; a
    * rejected checkpoint leaves the already-created empty child in OpenCode.
@@ -198,25 +202,25 @@ export const createWorkflowAgentSessions = ({
     const client = await getClient(directory);
     let modelRef = model ? parseModelRef(model) : null;
     if (model && !modelRef) throw new Error(`model must be provider/model or provider/model#variant, got ${model}`);
-    const parent = modelRef && allowTools.length === 0
-      ? null
-      : sessionSchema.safeParse(await client.session.get({ sessionID: parentSessionId }).catch(() => null));
-    // Like a subagent: without a model of its own the agent runs on the
-    // session that started the run.
-    if (!modelRef && parent?.success && parent.data.model) modelRef = parent.data.model;
-    const request = { parentID: parentSessionId, title, metadata: WORKFLOW_AGENT_METADATA };
+    // The agent copies what a child session would inherit from the parent:
+    // its folder, its rules, and its model when the agent names none. An agent
+    // whose parent cannot be read does not start, so it never runs on rules
+    // looser than the parent's.
+    const parent = sessionSchema.parse(await client.session.get({ sessionID: parentSessionId }));
+    if (!modelRef && parent.model) modelRef = parent.model;
+    const request = {
+      title,
+      metadata: workflowAgentMetadata(parentSessionId),
+      location: { directory: parent.location?.directory || directory },
+    };
     if (agent) request.agent = agent;
     if (modelRef) request.model = modelRef;
-    // A child given permissions of its own no longer inherits its parent's, so
-    // they come first and the allows, read last, win. Without the parent's
-    // rules nothing is set: the agent keeps them and answers in plain text,
-    // which the prompt allows for.
-    if (allowTools.length > 0 && parent?.success) {
-      request.permissions = [
-        ...(parent.data.permissions ?? []),
-        ...allowTools.map((tool) => ({ action: tool, resource: '*', effect: 'allow' })),
-      ];
-    }
+    // The allows come after the parent's rules, so they win.
+    const permissions = [
+      ...(parent.permissions ?? []),
+      ...allowTools.map((tool) => ({ action: tool, resource: '*', effect: 'allow' })),
+    ];
+    if (permissions.length > 0) request.permissions = permissions;
     const created = sessionSchema.parse(await client.session.create(request));
     await onSession(created.id);
     if (signal.aborted) throw new WorkflowAgentStopped();

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { sessionParentId } from '../session-lineage.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import { pullRequestNotificationTitle } from './pull-request-locales.js';
@@ -599,9 +600,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     const session = await fetchSessionRecord(sessionId, directory, spaceId);
     if (!session) return undefined;
-    const parentID = typeof session.parentID === 'string' && session.parentID.length > 0
-      ? session.parentID
-      : null;
+    const parentID = sessionParentId(session);
     setCachedSessionParentId(sessionId, directory, spaceId, parentID);
     return parentID;
   };

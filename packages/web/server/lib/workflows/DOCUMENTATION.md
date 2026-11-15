@@ -16,9 +16,10 @@ saves one. The app hides the Workflows panel, its rail entry and work-status
 section, reads no runs, and a past run's card says workflows are off
 (`packages/ui/src/lib/workflows/availability.ts`).
 
-Workflow agents' sessions carry `metadata.openchamber.kind = 'workflow-agent'`.
-The sidebar leaves them out of its subagent rows (one run can start a hundred);
-the run's card and the Workflows panel open them.
+Workflow agents' sessions carry `metadata.openchamber.kind = 'workflow-agent'`
+and `metadata.openchamber.parentID`, the session that ran them. The sidebar
+leaves them out of its subagent rows (one run can start a hundred); the run's
+card and the Workflows panel open them.
 
 ## Ownership
 
@@ -27,12 +28,13 @@ the run's card and the Workflows panel open them.
   agent that wrote the script.
 - `sandbox.js`: runs a body in a worker thread, inside a vm context that sees
   only `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()` and `args`.
-- `agent-session.js`: one workflow agent is one OpenCode child session of the
-  proposing session (`parentID`), prompted once and awaited until its turn
-  ends; a schema correction is a follow-up prompt in the same session. An
-  agent asked for a schema answer gets its parent's permission rules plus an
-  allow for `openchamber_workflow_answer`. Also posts the report as a synthetic
-  message.
+- `agent-session.js`: one workflow agent is one session linked to the
+  proposing session by metadata, prompted once and awaited until its turn
+  ends; a schema correction is a follow-up prompt in the same session. The
+  agent copies what a child would inherit from the proposing session: its
+  folder, its permission rules, and its model when the call names none. An
+  agent asked for a schema answer also gets an allow for
+  `openchamber_workflow_answer`. Also posts the report as a synthetic message.
 - `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
 - `store.js`: run files under `<data-dir>/workflow-runs/`, one per run. A
   settled run (finished, report delivered) stays in memory only as
@@ -242,13 +244,28 @@ so it runs the same from the source tree under Bun, from `node_modules` under
 Node, and from inside the desktop app's asar archive, where a worker file path
 would not load.
 
-### Why agents are child sessions of the proposing session
+### Why agents are linked by metadata and not OpenCode's `parentID`
 
-OpenCode lists them as that session's subagents, so they are visible, open
-like any subagent, and their cost rolls up into the session. A child session
-lives at its parent's location, so agents share the session's directory: there
-is no isolated copy per agent yet, and a script that edits files gives each
-agent files of its own.
+OpenCode 2.3 reports every busy period of a child session into its parent as a
+`<subagent>` message and wakes the parent for a model turn, with no opt-out
+(`subagent.notify` was removed in #63413). As OpenCode children, a run of 60
+agents woke the proposing session 60 times, each for an empty "completed
+without a text response" notice, while the run already reports once at its
+end. So an agent has no OpenCode `parentID`, and OpenChamber reads the
+metadata link as its parent everywhere it asks "is this a subsession, and of
+what": `sessionParentId` in `../session-lineage.js` on the server (auto-accept
+inheritance, notifications, In work, assists, the agent tool's session list,
+search) and the projection in the UI (`packages/ui/src/lib/sessionWorkflowMetadata.ts`),
+so they nest, archive and roll up cost as before. `hasWorkingChildren` in
+`../opencode/session-activity.js` counts a running agent, and a running
+subagent of an idle one, for its parent, so a goal audit or a turn-end
+notification still waits for the run. A send that restores an archived
+session finds its archived agents by the same link
+(`../openchamber-sessions/routes.js`). Usage statistics are OpenCode's own
+aggregate, which classifies sessions by `parentID` alone, so there an agent
+counts as a top-level session and its prompts as user prompts. An agent
+lives at the proposing session's directory: there is no isolated copy per
+agent yet, and a script that edits files gives each agent files of its own.
 
 ### Why replay keys on the prompt and not on the call's position
 

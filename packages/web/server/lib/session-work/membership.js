@@ -5,6 +5,7 @@
 import path from 'path';
 import { z } from 'zod';
 import { isPinnedMetadata, readWork } from './state.js';
+import { sessionParentId } from '../session-lineage.js';
 
 /**
  * Sessions that are not the user's own work: a review of another session, a
@@ -25,7 +26,7 @@ export const createWorkMembership = ({ chatRoots = [] } = {}) => {
 
   /** A top-level project session that is not a review, a `/btw` question or a scheduled run; archived or not. */
   const canBeInWork = (session) => Boolean(session)
-    && !session.parentID
+    && !sessionParentId(session)
     && !isChatDirectory(sessionDirectory(session))
     && !notWorkSessionSchema.safeParse(session.metadata).success;
 
@@ -35,7 +36,7 @@ export const createWorkMembership = ({ chatRoots = [] } = {}) => {
    * not pinned, open.
    */
   const isInWork = (session) => Boolean(session)
-    && !session.parentID
+    && !sessionParentId(session)
     && !session.time?.archived
     && !isChatDirectory(sessionDirectory(session))
     && !isPinnedMetadata(session.metadata)

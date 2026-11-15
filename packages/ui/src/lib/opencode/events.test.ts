@@ -40,6 +40,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.created of a workflow agent names the session that ran it as the parent", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.created",
+      durable,
+      data: {
+        sessionID: "ses_agent",
+        projectID: "proj_1",
+        location: { directory: "/repo" },
+        slug: "agent",
+        version: "2.3.0",
+        metadata: { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } },
+      },
+    })
+    expect(event?.type === "session.created" && event.properties.info.parentID).toBe("ses_parent")
+  })
+
   test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
     const forked = translateWireEvent({
       ...base,

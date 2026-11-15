@@ -33,7 +33,7 @@ import {
   type StructuredError,
   type TokenUsageInfo,
 } from "./model"
-import { projectInboxMessage, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
+import { projectInboxMessage, sessionParentID, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
 import { runningShellFromWire, type RunningShell, type ShellEnd } from "./background-shell"
 
 // ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.created": {
       const info: Session = compact({
         id: event.data.sessionID,
-        parentID: event.data.parentID,
+        parentID: sessionParentID(event.data),
         projectID: event.data.projectID,
         directory: event.data.location.directory,
         subpath: event.data.subpath,

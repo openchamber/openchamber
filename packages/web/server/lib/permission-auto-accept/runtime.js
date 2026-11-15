@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PERMISSION_MODES, isAutoAnsweringMode, isPermissionMode, toPermissionMode } from './modes.js';
+import { sessionParentId } from '../session-lineage.js';
 
 const SETTINGS_KEY = 'permissionAutoAccept';
 const DEFAULT_MODE_SETTINGS_KEY = 'permissionDefaultMode';
@@ -172,9 +173,8 @@ export function createPermissionAutoAcceptRuntime({
     // v2 session updates are partial (a rename carries only the title), so a
     // field the update does not name keeps what an earlier record said.
     const previous = sessions.get(info.id);
-    const parentID = typeof info.parentID === 'string' && info.parentID
-      ? info.parentID
-      : (previous?.parentID !== undefined ? previous.parentID : (complete ? null : undefined));
+    const parentID = sessionParentId(info)
+      ?? (previous?.parentID !== undefined ? previous.parentID : (complete ? null : undefined));
     // v2 keeps the directory on `location`; translated events already flatten it.
     const directory = typeof info.directory === 'string' && info.directory
       ? info.directory

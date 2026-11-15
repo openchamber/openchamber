@@ -41,6 +41,7 @@ import {
   type Vcs,
 } from "./model"
 import { formatModelSelection, parseModelSelection } from "../modelIdentifier"
+import { workflowAgentParentId } from "../sessionWorkflowMetadata"
 
 /** One item of an assistant message's ordered content. */
 export type AssistantContentItem = SessionMessageAssistant["content"][number]
@@ -50,10 +51,14 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
+export const sessionParentID = (record: { parentID?: string; metadata?: Session["metadata"] }): string | undefined => (
+  record.parentID ?? workflowAgentParentId(record.metadata)
+)
+
 export function projectSession(info: SessionInfo): Session {
   return compact({
     id: info.id,
-    parentID: info.parentID,
+    parentID: sessionParentID(info),
     projectID: info.projectID,
     directory: info.location.directory,
     subpath: info.subpath,

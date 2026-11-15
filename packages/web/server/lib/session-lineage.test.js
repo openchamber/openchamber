@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSessionLineage } from './session-lineage.js';
+import { createSessionLineage, sessionParentId } from './session-lineage.js';
 
 const created = (sessionID, parentID) => ({
   type: 'session.created',
@@ -41,5 +41,21 @@ describe('session lineage', () => {
     const lineage = createSessionLineage();
     lineage.observe({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
     expect(lineage.isChild('ses_1')).toBeUndefined();
+  });
+});
+
+describe('sessionParentId', () => {
+  const link = (parentID) => ({ openchamber: { kind: 'workflow-agent', parentID } });
+
+  it("reads OpenCode's parent first, then a workflow agent's link to the session that ran it", () => {
+    expect(sessionParentId({ id: 'ses_child', parentID: 'ses_parent' })).toBe('ses_parent');
+    expect(sessionParentId({ id: 'ses_agent', metadata: link('ses_run') })).toBe('ses_run');
+    expect(sessionParentId({ id: 'ses_agent', parentID: 'ses_parent', metadata: link('ses_run') })).toBe('ses_parent');
+  });
+
+  it('treats any other session as top-level', () => {
+    for (const record of [null, {}, { id: 'ses_root' }, { id: 'ses_root', parentID: '' }, { metadata: { openchamber: { parentID: 'ses_x' } } }, { metadata: link('') }]) {
+      expect(sessionParentId(record)).toBeNull();
+    }
   });
 });

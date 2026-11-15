@@ -27,6 +27,7 @@ import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history
 import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 import { createWorkMembership } from './membership.js';
+import { sessionParentId } from '../session-lineage.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -178,7 +179,7 @@ export function createSessionWorkRuntime({
    */
   const workSession = async (client, sessionId, signal) => {
     const session = await client.session.get({ sessionID: sessionId }, { signal });
-    if (session?.id === sessionId) lineage?.remember(sessionId, session.parentID ?? null);
+    if (session?.id === sessionId) lineage?.remember(sessionId, sessionParentId(session));
     return session?.id === sessionId && canBeInWork(session) ? session : null;
   };
 

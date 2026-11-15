@@ -14,6 +14,7 @@
  */
 
 import { z } from 'zod';
+import { sessionParentId } from '../session-lineage.js';
 
 const PAGE_SIZE = 100;
 const SESSION_PAGE_SIZE = 200;
@@ -28,6 +29,7 @@ const isTag = (error, tag) => error?._tag === tag;
 const sessionSchema = z.object({
   id: z.string().min(1),
   parentID: z.string().nullish(),
+  metadata: z.unknown().optional(),
   title: z.string().nullish(),
   location: z.object({ directory: z.string() }).partial().nullish(),
   time: z.object({ created: z.number(), updated: z.number(), archived: z.number().nullish() }).partial().nullish(),
@@ -229,7 +231,7 @@ export const createMessageSearchIndexer = ({
       throw error;
     }
     if ((deletedLifecycleSessions.get(sessionId) ?? 0) > startedAtRevision) return;
-    if (session.parentID) {
+    if (sessionParentId(session)) {
       store.deleteSession(sessionId);
       return;
     }
@@ -383,7 +385,7 @@ export const createMessageSearchIndexer = ({
         const page = sessionPageSchema.parse(await client.session.list({ parentID: null, limit: SESSION_PAGE_SIZE, ...(cursor ? { cursor } : { order: 'desc' }) }));
         for (const record of page.data) {
           const session = sessionSchema.safeParse(record);
-          if (session.success && !session.data.parentID) listed.set(session.data.id, session.data);
+          if (session.success && !sessionParentId(session.data)) listed.set(session.data.id, session.data);
         }
         const next = page.cursor?.next ?? null;
         if (!next || page.data.length < SESSION_PAGE_SIZE) break;

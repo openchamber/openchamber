@@ -14,6 +14,7 @@ import { sessionEventResultSchema } from '@openchamber/sdk/schemas';
 
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { sessionParentId } from '../session-lineage.js';
 
 /**
  * Session events for extension services (`contributes.sessionEvents`): the
@@ -88,7 +89,6 @@ const directoryOf = (payload, directory) => {
   return isText(directory) && directory !== 'global' ? directory : null;
 };
 
-const parentIdOf = (record) => (isText(record?.parentID) ? record.parentID : null);
 const titleOf = (record) => (isText(record?.title) ? record.title : null);
 const recordDirectoryOf = (record) => (isText(record?.location?.directory) ? record.location.directory : null);
 
@@ -350,12 +350,12 @@ export const createExtensionSessionEvents = ({
       record = await loading.pending;
       // A move or deletion during the read invalidates this cache entry too.
       if (parentCache.get(sessionId) === loading) {
-        if (record) parentCache.set(sessionId, { at: now(), parentId: parentIdOf(record), directory: recordDirectoryOf(record) });
+        if (record) parentCache.set(sessionId, { at: now(), parentId: sessionParentId(record), directory: recordDirectoryOf(record) });
         else parentCache.delete(sessionId);
       }
     }
     if (stopped) return [];
-    const parentId = record ? parentIdOf(record) : parentCache.get(sessionId)?.parentId ?? null;
+    const parentId = record ? sessionParentId(record) : parentCache.get(sessionId)?.parentId ?? null;
     const linked = linkedItemsOf(await readMetadata(sessionId));
     if (stopped) return [];
     const event = {
