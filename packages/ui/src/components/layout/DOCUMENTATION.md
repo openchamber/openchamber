@@ -1,7 +1,7 @@
 # Layout
 
 This file covers the header's session tabs and the context panel's file tab
-menu. The tab store, its scopes and seeding are owned by
+strip and menu. The tab store, its scopes and seeding are owned by
 `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
 
 ## Context panel file tab menu
@@ -11,6 +11,10 @@ including when it is inactive. Copy relative path uses the current project
 directory (`contextPanelPaths.ts`, which also labels same-named tabs); reveal
 shows only where the file tree offers it (`files.revealPath` outside a browser
 client). VS Code does not mount `ContextPanel`, so it has no such menu.
+
+## Context panel file tabs
+
+`ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView` in editor-only mode, which omits that view's own tab row. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
 
 ## Header session tabs
 
