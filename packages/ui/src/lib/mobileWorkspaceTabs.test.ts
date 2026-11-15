@@ -3,6 +3,25 @@ import { describe, expect, test } from 'bun:test';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, stripMobileWorkspaceTabs, withReceivedPagesTab } from './mobileWorkspaceTabs';
 
 describe('mobile workspace tabs', () => {
+  test('the native app adds the browser before Project knowledge, also to an order saved without it', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { Capacitor: { isNativePlatform: () => true }, location: { protocol: 'https:' } },
+    });
+    try {
+      expect(orderMobileWorkspaceTabs([])).toEqual(['status', 'changes', 'files', 'terminal', 'preview', 'notes']);
+      expect(orderMobileWorkspaceTabs(['notes', 'status', 'changes', 'files', 'terminal'])).toEqual(['preview', 'notes', 'status', 'changes', 'files', 'terminal']);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'window', descriptor);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
+  test('hosted mobile never offers the browser and drops it from a saved order', () => {
+    expect(orderMobileWorkspaceTabs(['preview', 'files'])).toEqual(['status', 'changes', 'files', 'terminal', 'notes']);
+  });
+
   test('a saved order keeps its tabs and places tabs it does not name where they go by default', () => {
     expect(orderMobileWorkspaceTabs(['terminal', 'gone', 'changes', 'terminal'])).toEqual(['status', 'files', 'terminal', 'changes', 'notes']);
     expect(orderMobileWorkspaceTabs([])).toEqual(['status', 'changes', 'files', 'terminal', 'notes']);
