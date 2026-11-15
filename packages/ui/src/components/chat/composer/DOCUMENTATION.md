@@ -1834,9 +1834,11 @@ the Ctrl/Cmd+Enter send behavior.
 
 Shift+Enter at the end of a numbered item continues the list: the next line
 carries the following number with the same indentation and delimiter (`1.` →
-`2.`, `1)` → `2)`). Anywhere else Shift+Enter is the plain newline above,
-including numbered text inside a code fence: `text.ts` reads fences through
-`matchFenceOpen` and `isFenceClose`, the same boundaries the highlighter uses,
+`2.`, `1)` → `2)`). On an item with no text the key ends the list instead: the
+marker and its indentation are removed, so a nested item leaves the list too,
+and the caret stays on the empty line. Anywhere else Shift+Enter is the plain
+newline above, including numbered text inside a code fence: `text.ts` reads
+fences through `matchFenceOpen` and `isFenceClose`, the same boundaries the highlighter uses,
 so an unclosed fence runs to the end of the prompt.
 `getOrderedListContinuationEdit` in `text.ts` owns that rule and runs inside the
 same markdown-source branch as auto-pairing, so autocomplete and Alt/Option+Enter
