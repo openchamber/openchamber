@@ -122,30 +122,6 @@ const readSmallBlobs = async (query, candidates, limits, label) => {
 };
 
 /**
- * `git ls-tree -rlz --full-tree HEAD` as path -> object, type and size. With
- * it, `scanLfsFiles` reads sizes from one tree listing instead of resolving
- * every `HEAD:<path>` through `cat-file --batch-check`, which walks the tree
- * once per file and took most of a pull's time on a repository of thousands.
- */
-export function parseTreeObjects(treeOutput) {
-  const text = boundedText(treeOutput, LFS_DISCOVERY_LIMITS.maxFilesBytes, 'Tree listing');
-  if (text && !text.endsWith('\0')) throw lfsError('Tree listing is incomplete');
-  const entries = new Map();
-  for (const record of text.split('\0')) {
-    if (!record) continue;
-    // A record without a size column says nothing about the object's size:
-    // that path is left to `cat-file --batch-check`.
-    const match = record.match(/^[0-7]{6} (blob|commit|tree) ([0-9a-f]{40}(?:[0-9a-f]{24})?) +(-|0|[1-9][0-9]*)\t([^]+)$/);
-    if (!match) {
-      if (!/^[0-7]{6} (blob|commit|tree) [0-9a-f]{40}(?:[0-9a-f]{24})?\t/.test(record)) throw lfsError('Tree listing is invalid');
-      continue;
-    }
-    entries.set(match[4], { type: match[1], oid: match[2], size: match[3] === '-' ? 0 : Number(match[3]) });
-  }
-  return entries;
-}
-
-/**
  * Every tracked file is checked, and every pointer-sized blob that claims to be
  * an LFS pointer is validated. The result keeps only bounded evidence: up to
  * `maxPublicRecords` attribute records and `maxPointerSamples` pointer samples.
@@ -153,30 +129,39 @@ export function parseTreeObjects(treeOutput) {
  * repository with thousands of LFS files is scanned in the same memory as one
  * with a handful.
  */
-export async function scanLfsFiles(filesOutput, query, gitlinkPaths = [], treeObjects = null) {
+export function createLfsFileScanner(query, gitlinkPaths = []) {
   const limits = LFS_DISCOVERY_LIMITS;
-  const text = boundedText(filesOutput, limits.maxFilesBytes, 'Tracked files output');
-  if (text && !text.endsWith('\0')) throw lfsError('Tracked files output is incomplete');
   const gitlinks = new Set(gitlinkPaths);
   const attributes = [];
   let attributesBytes = 0;
   const pointerSamples = [];
   const prefix = Buffer.from('version https://git-lfs.github.com/spec/');
-  for (let offset = 0; offset < text.length;) {
+
+  const scanBatch = async (files, objects) => {
+    if (!Array.isArray(files) || !files.length) return;
     const batch = [];
     let batchBytes = 0;
-    while (offset < text.length && batch.length < limits.fileBatchSize) {
-      const end = text.indexOf('\0', offset);
-      const file = validateRepositoryPath(text.slice(offset, end));
+    for (const value of files) {
+      const file = validateRepositoryPath(value);
       const bytes = Buffer.byteLength(file) + 32;
       if (bytes > limits.maxBatchBytes) throw lfsError('Tracked path exceeds its byte limit', 'LFS_DISCOVERY_LIMIT_EXCEEDED');
-      if (batchBytes + bytes > limits.maxBatchBytes) break;
-      offset = end + 1;
-      if (gitlinks.has(file)) continue;
-      batch.push(file);
-      batchBytes += bytes;
+      if (batch.length >= limits.fileBatchSize || batchBytes + bytes > limits.maxBatchBytes) {
+        await scanBatch(batch, objects);
+        batch.length = 0;
+        batchBytes = 0;
+      }
+      if (!gitlinks.has(file)) {
+        batch.push(file);
+        batchBytes += bytes;
+      }
     }
-    if (!batch.length) continue;
+    if (!batch.length) return;
+    // The index listing names each file's object, so sizes are asked by object id.
+    const entries = batch.map((file) => {
+      const entry = objects?.get(file);
+      if (!entry) throw lfsError('Tracked file has no object id');
+      return entry;
+    });
     const output = await query(['check-attr', '--stdin', '-z', 'filter'], Buffer.from(`${batch.join('\0')}\0`));
     const selected = parseAttributes(output, limits);
     const fields = output.toString('utf8').split('\0');
@@ -193,26 +178,17 @@ export async function scanLfsFiles(filesOutput, query, gitlinkPaths = [], treeOb
 
     // Query sizes without reading blobs. Only pointer-sized blobs enter the
     // bounded content query; Git LFS pointers fit within 1 KiB.
-    // The records `cat-file --batch-check` gives for `HEAD:<path>`, taken from
-    // the tree listing where it has the path; only the paths it lacks are
-    // asked of Git, so their answer is still the authoritative one.
-    const unlisted = batch.filter((file) => !treeObjects?.has(file));
-    const asked = unlisted.length
-      ? boundedText(await query(['cat-file', '--batch-check'],
-        Buffer.from(`${unlisted.map((file) => `HEAD:${file}`).join('\n')}\n`)), limits.maxBatchBytes, 'Git object metadata').split('\n')
-      : [''];
-    if (asked.pop() !== '' || asked.length !== unlisted.length) throw lfsError('Git object metadata is incomplete');
-    let askedIndex = 0;
-    const metadata = `${batch.map((file) => {
-      const entry = treeObjects?.get(file);
-      return entry ? `${entry.oid} ${entry.type} ${entry.size}` : asked[askedIndex++];
-    }).join('\n')}\n`;
+    const metadata = boundedText(await query(['cat-file', '--batch-check'],
+      Buffer.from(`${entries.map((entry) => entry.oid).join('\n')}\n`)), limits.maxBatchBytes, 'Git object metadata');
     const records = metadata.split('\n');
     if (records.pop() !== '' || records.length !== batch.length) throw lfsError('Git object metadata is incomplete');
     const candidates = [];
     for (let index = 0; index < records.length; index += 1) {
       const match = records[index].match(/^([0-9a-f]{40}(?:[0-9a-f]{24})?) (blob|commit) (0|[1-9][0-9]*)$/);
-      if (!match || !Number.isSafeInteger(Number(match[3]))) throw lfsError('Git object metadata is invalid');
+      if (!match || match[1] !== entries[index].oid || match[2] !== entries[index].type
+        || !Number.isSafeInteger(Number(match[3]))) {
+        throw lfsError('Git object metadata is invalid');
+      }
       if (match[2] === 'blob' && Number(match[3]) <= limits.maxPointerBytes) {
         candidates.push({ path: batch[index], oid: match[1], size: Number(match[3]) });
       }
@@ -220,7 +196,7 @@ export async function scanLfsFiles(filesOutput, query, gitlinkPaths = [], treeOb
     // Attributes are evidence, not an exhaustive list of pointer paths.
     const selectedPaths = new Set(selected);
     candidates.sort((left, right) => Number(selectedPaths.has(right.path)) - Number(selectedPaths.has(left.path)));
-    if (!candidates.length) continue;
+    if (!candidates.length) return;
     for (const { candidate, content } of await readSmallBlobs(query, candidates, limits, 'Git object')) {
       if (content.subarray(0, prefix.length).equals(prefix)) {
         parseLfsPointer(content);
@@ -229,8 +205,12 @@ export async function scanLfsFiles(filesOutput, query, gitlinkPaths = [], treeOb
         }
       }
     }
-  }
-  return { attributesOutput: attributes.join(''), pointerSamples, pointerScanComplete: true };
+  };
+
+  return Object.freeze({
+    scanBatch,
+    result: () => ({ attributesOutput: attributes.join(''), pointerSamples, pointerScanComplete: true }),
+  });
 }
 
 export function parseLfsPointer(content, { maxBytes = LFS_DISCOVERY_LIMITS.maxPointerBytes } = {}) {
