@@ -1,0 +1,81 @@
+---
+title: Strony agenta
+description: Pozwól agentowi pokazywać wykresy i makiety w czacie, pytać Cię na stronie i wysyłać stronę współpracownikowi po odpowiedź.
+---
+
+# Strony agenta
+
+Agent może narysować stronę prosto w czacie: wykres, tabelę, diagram, makietę interfejsu albo krótki formularz. Może poprosić Cię tam o wybór opcji, a gdy odpowiedź musi dać ktoś inny, wysłać tę samą stronę współpracownikowi przez link i PIN.
+
+## Poproś o stronę
+
+Mów do agenta zwykłym językiem. Na przykład:
+
+- „Pokaż trzy warianty układu jako makiety i daj mi wybrać jeden”.
+- „Przedstaw wyniki testów na wykresie”.
+- „Zapytaj mnie, którą z tych migracji uruchomić jako pierwszą”.
+
+Strona pojawia się w czacie, w ramce bez dostępu do Twoich plików. **Otwórz na pełnym ekranie** pokazuje ją w większym rozmiarze, a **Pobierz jako HTML** zapisuje kopię.
+
+## Odpowiedz na stronie
+
+Gdy agent pyta Cię o coś na stronie, czat pokazuje **Czeka na twoją odpowiedź na stronie**. Wybierz opcję lub wypełnij pola, a potem naciśnij przycisk wysyłania na samej stronie. Agent dostaje Twoją odpowiedź, a strona pokazuje, co wybrałeś.
+
+- **Odmów** mówi agentowi, że nie wybierzesz. Agent nie wybiera za Ciebie.
+- Możesz też odpowiedzieć słowami: napisz w czacie, a agent przeczyta Twoją wiadomość.
+
+### Odpowiedz później
+
+Agent nie zawsze musi na Ciebie czekać. Może pokazać stronę i pracować dalej. Strona pozostaje otwarta, dopóki nie odpowiesz, nawet po zakończeniu kroku agenta albo restarcie aplikacji. Twoja odpowiedź trafia do sesji jako osobny wiersz i ponownie uruchamia agenta, jeśli był bezczynny.
+
+## Udostępnij stronę współpracownikowi
+
+Gdy odpowiedź musi dać ktoś inny, na przykład współpracownik albo menedżer, poproś agenta, żeby wysłał im stronę:
+
+- „Zapytaj Julię i Denisa, który z tych dwóch projektów wolą”.
+
+1. Agent tworzy osobny link dla każdej osoby. Karta pod jego wiadomością pokazuje każde imię z przyciskami **Kopiuj link** i **Kopiuj PIN**.
+2. Wyślij każdej osobie jej link i PIN samodzielnie, w dowolnym komunikatorze.
+3. Osoba otwiera link w przeglądarce, wpisuje PIN i odpowiada na stronie. Nie potrzebuje do tego OpenChamber.
+4. Jej odpowiedź wraca do sesji, która pytała, a Ty dostajesz powiadomienie. Agent ją czyta i pracuje dalej.
+
+Karta pokazuje, kiedy każda osoba otworzyła stronę i kiedy odpowiedziała. **Otwórz** na karcie pokazuje Ci stronę tak, jak widzą ją oni, a Twoje otwarcie nie liczy się jako ich.
+
+### Jak działają udostępnione linki
+
+- Każda osoba odpowiada raz, a odpowiedź jest ostateczna.
+- Link działa do dwóch dni roboczych, sobota i niedziela się nie liczą. Jeśli potrzebujesz krótszego czasu, poproś o niego agenta.
+- **Anuluj link** w menu osoby na karcie wycofuje jej link.
+- Zbyt wiele błędnych PIN-ów blokuje link.
+- OpenChamber nie sprawdza, kto odpowiada: może to zrobić każdy, kto ma link i PIN. Imię na karcie to to, które podałeś agentowi.
+- Strona i odpowiedź są przesyłane w postaci zaszyfrowanej. Usługa udostępniania przechowuje tylko zaszyfrowaną kopię i usuwa ją, gdy odpowiedź do Ciebie dotrze. Link bez PIN-u niczego nie otwiera.
+- Strony przechodzą przez usługę udostępniania OpenChamber albo przez Twój własny relay, jeśli skonfigurujesz go w [Private Relay](/pl/private-relay/).
+
+## Otwórz stronę, którą ktoś Ci udostępnił
+
+Z OpenChamber możesz otworzyć udostępnioną stronę w aplikacji, żeby Twój własny agent ją przeczytał i pomógł Ci zdecydować:
+
+1. Wklej link do pola wiadomości w czacie. Zamieni się w chip z polem na PIN.
+2. Wpisz PIN, napisz swoje pytanie i wyślij. Agent dostaje treść strony razem z Twoją wiadomością, oznaczoną jako treść innej osoby.
+3. Pod Twoją wiadomością **Otwórz** pokazuje stronę w panelu bocznym, a na telefonie na pełnym ekranie. Odpowiedz przyciskiem wysyłania na samej stronie.
+
+Agent może zaproponować odpowiedź, ale wysłać ją możesz tylko Ty. Link i PIN nigdy nie trafiają do modelu.
+
+**Udostępnione strony** w panelu bocznym pokazują wszystkie otrzymane strony, od najnowszych, z ich statusem. Na telefonie to karta w szufladzie obszaru roboczego. **Dodaj do czatu** na otwartej stronie dołącza ją do wiadomości, którą piszesz.
+
+## Włączanie i wyłączanie
+
+Strony agenta są domyślnie włączone. Aby je wyłączyć, otwórz **Ustawienia → Ogólne → Narzędzia OpenChamber** i wyłącz **Wykresy i makiety**.
+
+## Pamiętaj
+
+- Strony agenta wymagają własnego serwera OpenCode uruchamianego przez OpenChamber, tak jak [Narzędzie sterowania dla agentów](/pl/agent-control-tool/).
+- W rozszerzeniu VS Code udostępnione linki pozostają zwykłym tekstem, a strona, na którą agent prosi o odpowiedź później, wyświetla się bez elementów do odpowiadania. Odpowiedz w aplikacji desktopowej lub webowej.
+- W trybie enterprise udostępnianie działa tylko przez własny relay Twojej organizacji. Bez niego agent w ogóle nie dostaje opcji udostępniania. Zobacz [Bezpieczeństwo](/pl/security/).
+
+## Powiązane
+
+- [Narzędzie sterowania dla agentów](/pl/agent-control-tool/)
+- [Private Relay](/pl/private-relay/)
+- [Powiadomienia](/pl/notifications/)
+- [Bezpieczeństwo](/pl/security/)

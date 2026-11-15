@@ -1,0 +1,81 @@
+---
+title: Agent Pages
+description: Let an agent show charts and mockups in the chat, ask you on a page, and send a page to a teammate for their answer.
+---
+
+# Agent Pages
+
+An agent can draw a page right in the chat: a chart, a table, a diagram, an interface mockup or a short form. It can ask you to pick an option there, and when the answer has to come from someone else, it can send the same page to a teammate by link and PIN.
+
+## Ask for a page
+
+Ask the agent in plain language. For example:
+
+- "Show me the three layout options as mockups and let me pick one."
+- "Put the test results in a chart."
+- "Ask me which of these migrations to run first."
+
+The page appears in the chat, in a frame that can't reach your files. **Open full screen** shows it larger, and **Download as HTML** saves a copy.
+
+## Answer a page
+
+When the agent asks you something on a page, the chat shows **Waiting for your answer on the page**. Pick an option or fill in the fields, then press the page's send button. The agent gets your answer, and the page shows what you chose.
+
+- **Decline** tells the agent you won't choose. It doesn't pick for you.
+- You can also answer in words: write in the chat, and the agent reads your message.
+
+### Answer later
+
+The agent doesn't always need to wait for you. It can show a page and keep working. The page stays open until you answer, even after the agent's turn ends or the app restarts. Your answer arrives in the session as its own row and starts the agent again if it was idle.
+
+## Share a page with a teammate
+
+When the answer has to come from someone else, such as a colleague or a manager, ask the agent to send them the page:
+
+- "Ask Yulia and Denis which of these two designs they prefer."
+
+1. The agent makes one link per person. A card under its message lists each name with **Copy link** and **Copy PIN**.
+2. Send each person their link and PIN yourself, in any messenger.
+3. The person opens the link in a browser, enters the PIN and answers on the page. They don't need OpenChamber for that.
+4. Their answer comes back into the session that asked, with a notification for you. The agent reads it and carries on.
+
+The card shows when each person opened the page and when they answered. **Open** in the card shows you the page as they see it, and your own look doesn't count as their opening.
+
+### How shared links work
+
+- Each person answers once, and the answer is final.
+- A link works for up to two working days, with Saturday and Sunday not counted. Ask the agent for a shorter time if you need one.
+- **Cancel link** in a person's menu on the card withdraws their link.
+- Too many wrong PINs lock the link.
+- OpenChamber doesn't check who answers: anyone with the link and the PIN can. The name on the card is the one you gave the agent.
+- The page and the answer travel encrypted. The sharing service keeps only the encrypted copy and deletes it once the answer reaches you. The link without its PIN opens nothing.
+- Pages go through OpenChamber's sharing service, or through your own relay when you set one up in [Private Relay](/private-relay/).
+
+## Open a page someone shared with you
+
+With OpenChamber you can open a shared page in the app, so your own agent can read it and help you decide:
+
+1. Paste the link into the chat input. It turns into a chip with a PIN field.
+2. Enter the PIN, write your question and send. The agent gets the page's content with your message, marked as another person's content.
+3. Under your message, **Open** shows the page in the side panel, or full screen on a phone. Answer with the page's own send button.
+
+The agent can suggest an answer, but only you can send it. The link and the PIN never reach the model.
+
+**Shared pages** in the side panel lists every page you received, newest first, with its status. On a phone it's a tab in the workspace drawer. **Add to chat** on an open page attaches it to the message you're writing.
+
+## Turn it on or off
+
+Agent pages are on by default. To turn them off, open **Settings → General → OpenChamber Tools** and switch off **Charts and mockups**.
+
+## Keep in mind
+
+- Agent pages need OpenChamber's own OpenCode server, like the [Agent Control Tool](/agent-control-tool/).
+- In the VS Code extension, shared links stay plain text, and a page the agent asks you to answer later shows without answer controls. Answer it in the desktop or web app.
+- In enterprise mode, sharing works only through your organization's own relay. Without one, the agent isn't offered sharing at all. See [Security](/security/).
+
+## Related
+
+- [Agent Control Tool](/agent-control-tool/)
+- [Private Relay](/private-relay/)
+- [Notifications](/notifications/)
+- [Security](/security/)

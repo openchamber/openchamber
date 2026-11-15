@@ -1,0 +1,81 @@
+---
+title: Agent sayfaları
+description: Bir agent'ın sohbette grafik ve taslak göstermesini, size bir sayfada soru sormasını ve yanıt için bir sayfayı ekip arkadaşınıza göndermesini sağlayın.
+---
+
+# Agent sayfaları
+
+Bir agent doğrudan sohbette bir sayfa çizebilir: bir grafik, bir tablo, bir diyagram, bir arayüz taslağı ya da kısa bir form. Orada sizden bir seçenek seçmenizi isteyebilir. Yanıtın başka birinden gelmesi gerektiğinde aynı sayfayı bağlantı ve PIN ile bir ekip arkadaşınıza gönderebilir.
+
+## Sayfa isteyin
+
+Agent'a sade bir dille sorun. Örneğin:
+
+- "Üç yerleşim seçeneğini taslak olarak göster ve birini seçmeme izin ver."
+- "Test sonuçlarını bir grafiğe dök."
+- "Bu migration'lardan hangisinin önce çalışacağını bana sor."
+
+Sayfa sohbette, dosyalarınıza erişemeyen bir çerçeve içinde görünür. **Tam ekran aç** sayfayı daha büyük gösterir, **HTML olarak indir** ise bir kopyasını kaydeder.
+
+## Bir sayfayı yanıtlayın
+
+Agent size bir sayfada bir şey sorduğunda sohbette **Sayfada yanıtın bekleniyor** görünür. Bir seçenek seçin ya da alanları doldurun, ardından sayfanın gönder düğmesine basın. Agent yanıtınızı alır ve sayfa neyi seçtiğinizi gösterir.
+
+- **Reddet**, agent'a seçim yapmayacağınızı bildirir. Agent sizin yerinize seçmez.
+- Sözlü de yanıt verebilirsiniz: sohbete yazın, agent mesajınızı okur.
+
+### Daha sonra yanıtlayın
+
+Agent'ın her zaman sizi beklemesi gerekmez. Bir sayfa gösterip çalışmaya devam edebilir. Sayfa, agent'ın turu bittikten ya da uygulama yeniden başladıktan sonra bile siz yanıtlayana kadar açık kalır. Yanıtınız oturuma ayrı bir satır olarak gelir ve agent boştaysa onu yeniden başlatır.
+
+## Bir sayfayı ekip arkadaşınızla paylaşın
+
+Yanıtın bir iş arkadaşı ya da yönetici gibi başka birinden gelmesi gerektiğinde agent'tan sayfayı onlara göndermesini isteyin:
+
+- "Yulia ve Denis'e bu iki tasarımdan hangisini tercih ettiklerini sor."
+
+1. Agent her kişi için bir bağlantı oluşturur. Mesajının altındaki bir kart her ismi **Bağlantıyı kopyala** ve **PIN'i kopyala** ile listeler.
+2. Her kişiye bağlantısını ve PIN'ini herhangi bir mesajlaşma uygulamasıyla kendiniz gönderin.
+3. Kişi bağlantıyı bir tarayıcıda açar, PIN'i girer ve sayfada yanıtlar. Bunun için OpenChamber'a ihtiyacı yoktur.
+4. Yanıtı, soruyu soran oturuma size bir bildirimle birlikte geri gelir. Agent onu okur ve devam eder.
+
+Kart, her kişinin sayfayı ne zaman açtığını ve ne zaman yanıtladığını gösterir. Karttaki **Aç**, sayfayı onların gördüğü gibi size gösterir. Sizin bakmanız onların açması sayılmaz.
+
+### Paylaşılan bağlantılar nasıl çalışır
+
+- Her kişi bir kez yanıtlar ve yanıt kesindir.
+- Bir bağlantı en fazla iki iş günü çalışır. Cumartesi ve pazar sayılmaz. Daha kısa bir süreye ihtiyacınız varsa agent'tan isteyin.
+- Karttaki bir kişinin menüsündeki **Bağlantıyı iptal et** o kişinin bağlantısını geri çeker.
+- Çok sayıda yanlış PIN bağlantıyı kilitler.
+- OpenChamber kimin yanıtladığını denetlemez: bağlantıya ve PIN'e sahip herkes yanıtlayabilir. Karttaki isim, agent'a sizin verdiğiniz isimdir.
+- Sayfa ve yanıt şifreli olarak iletilir. Paylaşım hizmeti yalnızca şifreli kopyayı tutar ve yanıt size ulaşınca onu siler. PIN'i olmayan bağlantı hiçbir şey açmaz.
+- Sayfalar OpenChamber'ın paylaşım hizmetinden ya da [Özel Relay](/tr/private-relay/) içinde kendi relay'inizi kurduysanız onun üzerinden geçer.
+
+## Biri sizinle paylaştığı bir sayfayı açın
+
+OpenChamber ile paylaşılan bir sayfayı uygulamada açabilirsiniz. Böylece kendi agent'ınız onu okuyup karar vermenize yardım edebilir:
+
+1. Bağlantıyı sohbet giriş alanına yapıştırın. Bağlantı, PIN alanı olan bir çipe dönüşür.
+2. PIN'i girin, sorunuzu yazın ve gönderin. Agent, sayfanın içeriğini mesajınızla birlikte, başka bir kişinin içeriği olarak işaretlenmiş şekilde alır.
+3. Mesajınızın altındaki **Aç**, sayfayı yan panelde, telefonda ise tam ekranda gösterir. Sayfanın kendi gönder düğmesiyle yanıtlayın.
+
+Agent bir yanıt önerebilir, ama yanıtı yalnızca siz gönderebilirsiniz. Bağlantı ve PIN modele asla ulaşmaz.
+
+Yan paneldeki **Paylaşılan sayfalar**, aldığınız her sayfayı en yenisi üstte olacak şekilde durumuyla birlikte listeler. Telefonda çalışma alanı çekmecesinde bir sekmedir. Açık bir sayfadaki **Sohbete ekle**, sayfayı yazdığınız mesaja ekler.
+
+## Açın veya kapatın
+
+Agent sayfaları varsayılan olarak açıktır. Kapatmak için **Ayarlar → Genel → OpenChamber Araçları** bölümünü açın ve **Grafikler ve taslaklar** ayarını kapatın.
+
+## Akılda tutun
+
+- Agent sayfaları, [Agent kontrol aracı](/tr/agent-control-tool/) gibi OpenChamber'ın kendi OpenCode sunucusunu gerektirir.
+- VS Code eklentisinde paylaşılan bağlantılar düz metin olarak kalır ve agent'ın daha sonra yanıtlamanızı istediği bir sayfa yanıt kontrolleri olmadan görünür. Onu masaüstü ya da web uygulamasında yanıtlayın.
+- Kurumsal modda paylaşım yalnızca kuruluşunuzun kendi relay'i üzerinden çalışır. Böyle bir relay yoksa agent'a paylaşım hiç sunulmaz. Bkz. [Güvenlik](/tr/security/).
+
+## İlgili
+
+- [Agent kontrol aracı](/tr/agent-control-tool/)
+- [Özel Relay](/tr/private-relay/)
+- [Bildirimler](/tr/notifications/)
+- [Güvenlik](/tr/security/)
