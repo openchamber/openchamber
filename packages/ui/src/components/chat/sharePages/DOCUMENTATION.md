@@ -2,7 +2,7 @@
 
 ## Ownership
 
-What the author sees of a page the agent shared with other people (`openchamber_render` with `share`, decisions 0003 to 0006): the card drawn in place of the call (`SharedPageCard.tsx`), the document it builds for the recipients (`shareDocument.ts`, with the `ui` renderer from `share-document/`), and the questions it lists (`questions.ts`). The server keeps the group, the links, PINs, openings and answers (`packages/web/server/lib/share-pages`); the answer's row in the timeline is `lib/share-pages/answer.ts` and `TimelineNotice`.
+What the author sees of a page the agent shared with other people (`openchamber_render` with `share`): the card drawn in place of the call (`SharedPageCard.tsx`), the document it builds for the recipients (`shareDocument.ts`, with the `ui` renderer from `share-document/`), and the questions it lists (`questions.ts`). The server keeps the group, the links, PINs, openings and answers (`packages/web/server/lib/share-pages`); the answer's row in the timeline is `lib/share-pages/answer.ts` and `TimelineNotice`.
 
 ## Invariants
 
@@ -12,11 +12,11 @@ What the author sees of a page the agent shared with other people (`openchamber_
 - The questions come from the page's own fields (label, else the card's title, else the field's name); an `html` page shows the agent's one-line `share.summary`.
 - Each recipient row says where the link stands (preparing, not opened, opened at, answered at, locked, expired, cancelled, failed) and the time left while it is open. Copy link and Copy PIN show only for an open link; Cancel sits in the row's menu and asks first.
 - VS Code has no OpenChamber server to keep links, so the card there says sharing is unavailable instead of reading.
-- In enterprise mode without a relay the policy allows (decision 0005), every share route answers 403 `enterprise_mode`. On that answer, from the group read or any action, the card drops the group and shows the page as an ordinary render with one muted line that the organization's policy turns sharing off: no links, PINs or preview. Any other failure keeps the group already shown. The policy store cannot tell whether a pinned relay keeps sharing on (the relay address stays on the server), so a change of `useEnterpriseMode` only makes the card read the group again, and the server's answer decides.
+- In enterprise mode without a relay the policy allows, every share route answers 403 `enterprise_mode`. On that answer, from the group read or any action, the card drops the group and shows the page as an ordinary render with one muted line that the organization's policy turns sharing off: no links, PINs or preview. Any other failure keeps the group already shown. The policy store cannot tell whether a pinned relay keeps sharing on (the relay address stays on the server), so a change of `useEnterpriseMode` only makes the card read the group again, and the server's answer decides.
 
 ## Received pages
 
-`received/` is the other end (decision 0013): a page someone else shared, opened in the recipient's app. The server keeps the link's key and makes every relay call (`packages/web/server/lib/share-pages`, *Receiving side*); this side knows a page by its `receivedId`.
+`received/` is the other end: a page someone else shared, opened in the recipient's app, so their own agent can explain it before they answer. The server keeps the link's key and makes every relay call (`packages/web/server/lib/share-pages`, *Receiving side*); this side knows a page by its `receivedId`.
 
 - A whole share link on a relay the server reports (`GET /api/openchamber/received-pages/config`) loses its key as it lands, typed or pasted, also over a selection: the link without its key stays in the text as the page's chip (a `shared-page` composer reference with that `link`), and the link with its key goes to the server once. The page's card (`SharedPageCardDialog` around `SharedPageChip`) opens at once, since the page needs its PIN, and again on a click on the chip. The card has no remove button: the page leaves the message when its chip leaves the text, like any attachment. The sent text leaves the keyless link out (`withoutSharedPageLinks`): the message carries the page as its card and content. VS Code and enterprise mode without a relay report no relays, so a link stays text. Whatever way a link stays in text, its key is cut wherever text leaves the composer (`withoutShareLinkKeys`): the sent message, the queue, the saved draft and the server's drafts. A send waits for a chip's link to reach the server, so the message names the page.
 - The chip asks the server for the share's state before the PIN and shows locked, expired, answered or withdrawn at once; the PIN boxes take a one-time-code fill, a paste and Backspace. The right PIN shows the title and the outline: the questions of a `ui` page, else an `html` page's headings, else its summary.
@@ -28,6 +28,33 @@ What the author sees of a page the agent shared with other people (`openchamber_
 - A summary never names a lone button that only sends the fields (`pageAnswerNamesButton`): "Send · send" said nothing, in the chat, the recipient's tab and the author's card.
 
 ## Decisions
+
+### Why the card shows a summary and not the page
+
+A shared page can run to about an A4 page of context; drawn in full in the
+card it would push the conversation away. The card lists the title, the
+recipients and the questions, and Open shows the whole page on demand.
+
+### Why the author sends the link and not the agent
+
+How a link reaches a person is up to the user, so the agent never gets the
+link or PIN and does not send them through Slack, Telegram or other tools.
+Accounts with in-app notifications are the planned replacement for this step.
+
+### Why a received page opens in the app and not in the browser panel
+
+The browser panel can open a share link, but it would ask for the PIN a
+second time, show a page cut off from the card and the agent, and keep
+another copy of the key in browser history. A tool the agent calls with a PIN
+card was rejected too: it costs an extra turn and asks for the PIN later than
+the moment the recipient has it. Drawing the whole page inline in the chat
+pushes the conversation away, as on the author's side.
+
+### Why the recipient's agent never fills in the answer
+
+An approval depends on the answer being the person's own. The agent may
+suggest an answer; only the page's own Send, pressed by the recipient, posts
+it.
 
 ### Why cancel is in a menu
 

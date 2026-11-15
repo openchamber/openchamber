@@ -30,3 +30,11 @@ The renderer reads the theme, the language, the calendar settings and the projec
 ### Why the string table is generated
 
 The app loads one locale's dictionary at a time, megabytes each; a page has no store to load them into and should carry only what it shows. The keys are read off the source the bundle is built from, so the table follows the renderer without a hand-kept list.
+
+### Why the width is per page and not per block
+
+A `ui` page that takes an answer reads in a 48rem column; one the recipients only read (`expectAnswer: false`, a report with tables and charts) gets 64rem. Wider blocks scroll sideways inside themselves. A 48rem text column with tables and charts breaking out wider was rejected: a page is built from cards, a table inside a card cannot break out, so the widths would look uneven. One width for every kind of page leaves either questionnaires sprawling on wide screens or reports cramped. An `html` page gets the full width and sets its own reading width, as in the chat.
+
+### Why the share is generic and named by `kind`
+
+The relay's share (ciphertext, expiry, PIN gate, openings, an answer slot only when the page asks for one) is not specific to questions: read-only pages, and later hosted walkthroughs, take the same path. So the link host and routes are neutral (`share.openchamber.dev`, `/p/<id>#<key>`) and name no single use. The share carries one plaintext field about its content, `kind` (questionnaire, page, walkthrough), so the PIN screen can say whether it opens a question or a document; a fully opaque PIN screen could not.

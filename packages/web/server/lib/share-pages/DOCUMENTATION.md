@@ -94,7 +94,9 @@ Every change to a group is broadcast on the OpenChamber control stream as
   between the admission and that call loses only the notification.
 - Only after delivery is the share closed on the relay (ack), which deletes the
   page and the answer there. An answer that cannot be decrypted marks the
-  recipient `failed` and is closed too.
+  recipient `failed` and is closed too. At expiry the relay deletes the page
+  itself; an answer not collected yet stays there a week longer, for a laptop
+  that slept through it.
 - At most 100 groups stay on disk. Past that, the oldest finished groups go,
   json and local page copy together: finished means every recipient is
   answered (and delivered), expired, cancelled or failed. A group with a
@@ -125,8 +127,8 @@ Every change to a group is broadcast on the OpenChamber control stream as
 
 ## Receiving side
 
-A person who got a link and PIN and has OpenChamber opens the page in the app
-(decision 0013): the composer turns a pasted link into a chip with a PIN
+A person who got a link and PIN and has OpenChamber opens the page in the app,
+so their own agent can explain it before they answer: the composer turns a pasted link into a chip with a PIN
 field, the agent reads the page with the message, and the page opens as a tab
 of the context panel, where its Send answers it. The UI is in
 `packages/ui/src/components/chat/sharePages/received/`.
@@ -141,7 +143,7 @@ Routes under UI auth, `/api/openchamber/received-pages`:
   composer. 400 `invalid_link` or `link_not_allowed`.
 - `GET /` -> `{ pages }`: every received page, newest first, as a page
   without its `source` and with the answer's summary only, for the `pages`
-  surface's list (decision 0018). Pages belong to this server, not a
+  surface's list. Pages belong to this server, not a
   project; in enterprise mode only those on the pinned relay.
 - `GET /:id`, `POST /:id/status` (asks the relay; 502 when it cannot be read,
   and the state already kept stays), `GET /:id/document` (`{ html }`, 404
@@ -206,7 +208,36 @@ does (`../dispatch-results/`, `../workflows/`), so the agent's turn is never hel
 The label is the name the user gave the agent; whoever holds the link and PIN
 can answer. The message tells the agent to treat the content as that person's
 answer and as data, not instructions, and keeps `verified="false"` for the day
-accounts can verify it.
+accounts can verify it. The label is a typed field so that day changes what
+fills it, not the flow. A code sent by email was rejected as the way to verify
+the person: it needs a mail provider and its bill, and the author still
+forwards the link by hand; accounts with known teammates remove both. Until
+then the page names no author either (no name from git or a setting): with no
+accounts there is nothing to vouch for it.
+
+### Why one link and PIN per recipient
+
+One shared link for several people would make their answers impossible to
+tell apart. "Ask Yulia and Denis" gives two links, each answer arriving under
+its own label.
+
+### Why a share cannot be extended and an answer cannot be edited
+
+The lifetime is short (two working days) and the author can only shorten it.
+A longer default with an extend button was rejected: extending needs a view of
+pending answers that nobody would dig through sessions for, and the author
+knows when the recipient is away. An answer is final because the agent
+already acted on the first one. The relay deletes the page and the answer as
+soon as they are collected: the frozen copy lives in the session card, so
+nothing needs to stay on the relay until expiry.
+
+### Why there is no switch for sharing outside enterprise mode
+
+Nothing reaches a person until the user copies a link and sends it, and the
+relay stores only ciphertext, so asking the agent to share is the opt-in. A
+Settings switch before the first share would be a step that protects nothing.
+Enterprise mode is the exception, where the policy decides
+(`../enterprise-mode.js`).
 
 ### Why the group keeps the relay it was made on
 

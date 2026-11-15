@@ -176,8 +176,8 @@ type SessionMessageContext = {
 };
 
 /**
- * A page another person shared by link and PIN, attached from the composer
- * (decision 0013). The part's text is the page wrapped as that person's
+ * A page another person shared by link and PIN, attached from the composer.
+ * The part's text is the page wrapped as that person's
  * content; the link, its key and the PIN are never in it. `receivedId` names
  * the page in the server's store, null when the link had not been read yet.
  */

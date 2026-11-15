@@ -321,6 +321,13 @@ omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
 only when all steps have a valid sample.
 
+"Average first output" is a separate row from OpenCode's `time.firstToken`
+on each step: when the provider streamed its first output of any kind, a tool
+call included. It is hidden when any step of the turn lacks the field (steps
+written before OpenCode 2.3.0). It does not replace TTFT: a step that opens
+with a tool call would change what TTFT means, so the number would no longer
+be the time to the first visible text.
+
 Either rate above 5,000 tok/s is reported as unknown. No provider streams that
 fast, so such a value means the measured window is broken: a tool that runs
 for nearly the whole step leaves a residual of a millisecond, and a text

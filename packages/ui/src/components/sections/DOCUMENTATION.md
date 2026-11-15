@@ -148,6 +148,16 @@ rows or blocks saving.
 
 The custom-provider form recognizes the bundled OpenCode adapters for its three protocols, including `anthropic-compatible`. An edit keeps the stored bundled provider package while its protocol stays the same. Changing the protocol selects that protocol's default AI SDK package. The live catalog fills missing display fields but never supplies a package to persist; retained model packages belong to the server's merge.
 
+The custom-provider form has a "Client certificate" section (certificate,
+private key, passphrase) for gateways that require mutual TLS; "Find models"
+presents the same certificate. It is on the custom form only: public APIs
+never ask for a client certificate, so on built-in providers the fields would
+be noise. Paths are saved as `{file:path}` references and only full paths are
+accepted, because OpenCode resolves a relative path beside its config file
+while discovery runs elsewhere, so the same path would read two different
+files. The server keeps a certificate the form never read
+(`packages/web/server/lib/opencode/DOCUMENTATION.md`, `providers.js`).
+
 Model rows render collapsed (name, id, limits, non-text inputs) so a provider
 with dozens of models stays scannable; a row added by hand opens, and a row
 with a validation error opens on submit. Capabilities are written to the
@@ -766,3 +776,21 @@ the theme's canvas and accent.
 
 Imported themes add up quickly (the catalog, a themes folder). Without a cap
 the page below the list moves further down with every import.
+
+## About: the Android app's own update
+
+On the Android app, About shows the app's version with a "Download app
+{version}" button while the app's update check offers a newer APK, the same
+link as the update toast (`openchamber/AboutSettings.tsx`,
+`MobileAppUpdateToast.tsx`). The check button there checks the app build too.
+Closing the toast skips that version for the toast only; the button stays
+until the version is installed. iOS updates through the App Store and gets no
+button. The server's update buttons on the same page name the server or the
+desktop app they replace, never the phone app.
+
+### Why the button lives in About and the toast is not shown again
+
+A user who closed the toast already said no to it, so About is a quiet place
+to find the update instead of a toast that comes back. A second update item
+in the sessions footer was rejected: that item belongs to server updates in
+the browser, and a second meaning there confuses both.

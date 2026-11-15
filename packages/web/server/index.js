@@ -1514,7 +1514,7 @@ const sharePagesRuntime = createSharePagesRuntime({
 void sharePagesRuntime.start().catch((error) => {
   console.warn('[share-pages] failed to start:', error?.message ?? error);
 });
-// Pages other people shared, opened here with their link and PIN (decision 0013).
+// Pages other people shared, opened here with their link and PIN.
 const receivedPagesRuntime = createReceivedPagesRuntime({
   crypto,
   store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),

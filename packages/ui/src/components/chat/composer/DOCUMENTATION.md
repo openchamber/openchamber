@@ -524,7 +524,7 @@ is suppressed so only the citation lands in the draft.
 
 ### Attachments are chips in the text
 
-Every file the composer holds is a chip in the text (ADR 0021, 0022), however
+Every file the composer holds is a chip in the text, however
 it came: paste, drop, the attach menu and VS Code's picker
 (`attachFilesWithCitation`), VS Code's open-file suggestion and its editor and
 explorer commands (an effect writes the chip of each new VS Code file at the
@@ -548,7 +548,10 @@ caret). There are no thumbnails above the input.
   turning into bracketed text.
 - A click on a chip opens what it stands for (`onChipOpen` in the language
   context): an image, a text file or a PDF in its dialog, as in a sent message,
-  a file by path in the file viewer, an item in the Tracker. The caret goes
+  a file by path in the file viewer, an item in the Tracker. Where the Tracker
+  cannot show the item (VS Code, a repository no open project reads, a tracker
+  nobody signed in to) the chip opens its link in the browser
+  (`useOpenTrackerItem`). The caret goes
   beside a chip by a click next to it or the arrow keys. A chip is at most 18rem wide and leaves room for a
   space and the caret beside it, so a long name truncates instead of filling
   the line.
@@ -1302,8 +1305,42 @@ picker uses, and then draws as a chip where it stands: its number and title.
 Picker chips used to sit above the text, apart from the sentence, while a
 pasted link drew in place: two looks and two ways to remove the same item. A
 pasted link is part of the sentence ("compare this with that"), and the
-maintainer chose that one form for everything attached from outside (ADR 0021):
-an item is its link's chip where the caret was, and the text decides what goes.
+maintainer chose that one form for everything attached from outside: an item
+is its link's chip where the caret was, and the text decides what goes. A
+shared page is a chip like the rest; its PIN and status live in the card the
+chip opens, so it needs no row of its own above the input.
+
+### Why the files are a pool the text cites
+
+Detaching a file the moment its chip leaves the text was the alternative.
+Undo, a draft restore, history recall and the clear after a send all rewrite
+the text, and each would read as "every chip deleted". Keeping the pool and
+sending only what the text cites makes undo bring the chip and its file back
+with no extra state. Keeping the file after its chip is gone was rejected
+too: it would ride along with nothing on screen showing it.
+
+### Why a plain click opens a chip
+
+Cmd or Ctrl and a click would hide the preview behind a modifier the phone
+does not have. The chip is atomic, so a click beside it or the arrow keys put
+the caret next to it, and Backspace deletes it.
+
+### Why a chip whose file is gone stays a chip
+
+After a reload a file that lived only in memory is gone. Drawing its citation
+as plain `[name]` text would make the chip vanish with no explanation; the
+dashed chip says why it will not be sent and can be deleted.
+
+### Why a browser annotation's screenshot is not a chip in the text
+
+The screenshot belongs to its annotation: a chip in the prompt would separate
+the two, and removing it left the prompt claiming the screenshot was
+attached. It is a chip in the annotation's own row and leaves with it.
+
+### Why a sent message keeps its image and file previews
+
+Every other attachment shows in a sent message only as its chip, but images
+and files keep their strip: people rely on the quick look at what they sent.
 
 ## Paste routing
 

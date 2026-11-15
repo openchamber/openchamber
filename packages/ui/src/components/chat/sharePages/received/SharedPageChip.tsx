@@ -18,8 +18,8 @@ import { useReceivedPageText } from './useReceivedPageText';
 type SharedPageReference = Extract<ComposerReference, { kind: 'shared-page' }>;
 
 /**
- * A share link pasted or typed into the composer, standing in for the link
- * (decision 0013). Before the PIN it says whether the page can still be
+ * A share link pasted or typed into the composer, standing in for the link.
+ * Before the PIN it says whether the page can still be
  * opened; the right PIN opens it here and the chip shows its title and
  * outline, and the agent then gets the page's content with the message.
  * Sent without the PIN, the agent learns only that a link was shared.

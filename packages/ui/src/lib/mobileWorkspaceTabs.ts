@@ -27,7 +27,7 @@ const builtInMobileWorkspaceTabs = (): readonly BuiltInMobileWorkspaceTab[] => (
   isCapacitorApp() ? ALL_BUILT_IN_MOBILE_WORKSPACE_TABS : ALL_BUILT_IN_MOBILE_WORKSPACE_TABS.filter((id) => id !== 'preview')
 );
 /**
- * `pages`: the pages other people shared (decision 0018), a tab only while the
+ * `pages`: the pages other people shared, a tab only while the
  * server holds any. Not one the user orders or hides: it is never stored.
  */
 export type MobileWorkspaceTab = OrderedMobileWorkspaceTab | 'pages';

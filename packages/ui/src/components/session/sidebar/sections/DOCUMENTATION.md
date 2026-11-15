@@ -23,6 +23,10 @@ with its named pin lists. How the rows are drawn stays with the row model
   drag anywhere but their controls, as the sidebar's do (`../rowDrag.ts`); in
   the sidebar a section drags by its caption
   (`projects/SortableSidebarSection.tsx`), and both write the same order.
+  It also holds the sidebar's batch size (`sidebarSessionBatchSize`), one
+  number for every limited list: the manager is where sections are arranged,
+  and a number field reads badly in a menu or far away in Settings. A limit
+  per section was rejected as more controls for a need one number covers.
 - `PinToMenu.tsx`, `NewPinListDialog.tsx`, `apps/mobileSidebar/MobilePinToSheet.tsx`:
   Pin to on the row menus, the swipe on the phone, and naming a new list.
 
