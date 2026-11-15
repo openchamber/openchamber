@@ -11,6 +11,7 @@ A page an agent shares with other people (`openchamber_render` with `share`) lea
 - The page wears OpenChamber's default light and dark themes, picked by the reader's system, never the author's own theme.
 - Text comes in the reader's language: the browser's first, then the one the viewer's `init` names. The page carries only the strings its components name (`messages.generated.ts`); after changing strings the bundled components show, run `bun run --cwd packages/ui share-document:generate` (`messages.test.ts` fails while the copy is stale).
 - The bundle is built from the app's own source with the modules in `shims.ts` replaced. A new import in the UI block renderer's subtree lands in every shared page: an app store, the runtime or a large table needs a shim, or the bundle grows and may touch storage the opaque origin forbids at load.
+- Only the root scrolls: `html` is the scroll container and `body` stays `overflow: visible`. The bundled app stylesheet sets `overscroll-behavior: none` on body, so a body that scrolls itself takes every wheel inside the viewer's frame and hands none of it to the document; the page then never moves past its first screen.
 - Every config that builds the app for web, desktop and mobile emits the script: the web build (`packages/web/vite-share-document.ts`), which the desktop app serves and the Capacitor app copies. The dev server builds it on the first request and after a source change.
 
 ## Decisions
