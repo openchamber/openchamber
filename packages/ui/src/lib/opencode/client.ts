@@ -2354,6 +2354,11 @@ class OpencodeService {
     this.listAgentsInFlight.clear()
   }
 
+  /** Retire provider catalogs read before a configuration reload. */
+  clearProviderCatalogRequests(): void {
+    this.providerCatalogInFlight.clear()
+  }
+
   async listCommands(directory?: string | null, signal?: AbortSignal): Promise<Command[]> {
     return call("command.list", () => this.clientFor(directory).command.list(undefined, { signal }).then((r) => r.data))
   }
