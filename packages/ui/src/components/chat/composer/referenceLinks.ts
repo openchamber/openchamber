@@ -74,11 +74,56 @@ export const withReferencesFromText = (
 
 /** How a read link draws in the text (`lib/messages/referenceLinkChip.ts`), with its mark from the editor's sprite. */
 export const referenceLinkChip = (reference: ComposerReference, urls: RepositoryUrlMatcher) => {
-    // A shared page's link leaves the text as it lands (its chip sits above it), so no link reads as one.
+    // A shared page's link stands in the text without its key; the chip names the page.
     if (reference.kind === 'shared-page') {
         const title = reference.title ?? reference.host;
         return { label: title, title, iconHref: '#oc-pages' };
     }
     const { label, title, icon } = presentReferenceLinkChip(reference, urls.descriptorOf);
     return { label, title, iconHref: `#oc-${icon}` };
+};
+
+/**
+ * The link that stands for an item in the composer text: its page, or for a
+ * page someone shared, its link without the key. The text decides what goes:
+ * an item whose link is not in it is not sent.
+ */
+export const referenceTextLink = (reference: ComposerReference): string => {
+    if (reference.kind !== 'shared-page') return reference.url;
+    return reference.link ?? `https://${reference.host}/p/${reference.receivedId ?? reference.shareKey.slice(reference.shareKey.lastIndexOf('/') + 1)}`;
+};
+
+/** The items whose link the text holds. */
+export const referencesLinkedIn = (text: string, references: readonly ComposerReference[]): ComposerReference[] => {
+    if (references.length === 0) return [];
+    const links = new Set(findWebLinks(text).map(({ link }) => link));
+    return references.filter((reference) => links.has(referenceTextLink(reference)));
+};
+
+/** The text with the link of every item it does not hold yet appended, for items put back into the composer. */
+export const withMissingReferenceLinks = (text: string, references: readonly ComposerReference[]): string => {
+    const links = new Set(findWebLinks(text).map(({ link }) => link));
+    const missing = Array.from(new Set(references.map(referenceTextLink).filter((link) => !links.has(link))));
+    if (missing.length === 0) return text;
+    const head = text.replace(/\s+$/, '');
+    return head ? `${head} ${missing.join(' ')}` : missing.join(' ');
+};
+
+/**
+ * The text without the links of shared pages: in the composer each stands for
+ * its page as a chip, and the message carries the page itself (its card under
+ * the message, its content for the agent). The link without its key opens
+ * nothing, so it leaves the sent text.
+ */
+export const withoutSharedPageLinks = (text: string, references: readonly ComposerReference[]): string => {
+    const links = new Set(references.filter((reference) => reference.kind === 'shared-page').map(referenceTextLink));
+    if (links.size === 0) return text;
+    const ranges = findWebLinks(text).filter((range) => links.has(range.link));
+    let result = text;
+    for (const range of ranges.reverse()) {
+        const before = result.slice(0, range.start).replace(/[ \t]+$/, '');
+        const after = result.slice(range.end).replace(/^[ \t]+/, '');
+        result = before && after && !/\n$/.test(before) && !/^\n/.test(after) ? `${before} ${after}` : `${before}${after}`;
+    }
+    return result.trim() ? result : '';
 };

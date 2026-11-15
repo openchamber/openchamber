@@ -16,6 +16,7 @@
 
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
+import { attachmentBasename, withMissingCitations } from '@/lib/attachmentIdentity';
 import { isBtwPendingComposerKey } from '@/lib/btw';
 import { isMentionEntryInText } from '../language/mentions';
 import { useLinkedReferenceDrafts } from '../linkedReferenceDrafts';
@@ -258,9 +259,11 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         clearPending();
         skipNextPersistRef.current = true;
         confirmedMentionsRef.current = new Set();
-        setMessage(pending.text);
+        // A send includes only the files the text cites, so each one gets a chip.
+        const text = withMissingCitations(pending.text, pending.files.map((file) => ({ filename: attachmentBasename(file.filename) })));
+        setMessage(text);
         // Equal source/replay text need not trigger another render to persist.
-        persistNow(pending.target, pending.text);
+        persistNow(pending.target, text);
         input.clearAttachedFiles();
         for (const file of pending.files) input.addRestoredAttachment(file);
         requestAnimationFrame(() => {

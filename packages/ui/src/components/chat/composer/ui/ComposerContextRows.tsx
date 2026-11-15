@@ -32,6 +32,8 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { cn } from '@/lib/utils';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { INLINE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS } from '@/lib/messages/inlineMessageLinks';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
 import {
     EMPTY_INLINE_COMMENT_DRAFTS,
@@ -49,6 +51,8 @@ interface ComposerContextRowsProps {
     draftTarget: InlineCommentDraftTarget | null;
     /** Mobile edits a comment in the composer's comment shell, not in the row. */
     isMobile: boolean;
+    /** Opens one of the composer's files by name: a browser annotation's screenshot. */
+    onOpenAttachment: (filename: string) => void;
 }
 
 /** Rows shown before the rest folds behind "+N more", so the input keeps its place. */
@@ -116,7 +120,9 @@ const DraftRow: React.FC<{
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
     attachmentFilenames: readonly string[];
-}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames }) => {
+    /** Opens the annotation's screenshot; absent when the row has none. */
+    onOpenScreenshot: (() => void) | null;
+}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames, onOpenScreenshot }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(view.comment);
     // Images pasted while editing join the composer's attachments on save.
@@ -268,6 +274,9 @@ const DraftRow: React.FC<{
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">{t('chat.textSelection.comment.placeholder')}</span>
                     )
                 ) : null}
+                {onOpenScreenshot && draft.screenshot ? (
+                    <Icon name="image" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={draft.screenshot} />
+                ) : null}
                 {actions}
             </div>
         );
@@ -317,6 +326,19 @@ const DraftRow: React.FC<{
                     {view.quote}
                 </div>
             ) : null}
+            {onOpenScreenshot && draft.screenshot ? (
+                <button
+                    type="button"
+                    className={cn(INLINE_REFERENCE_CHIP_CLASS, 'mx-1.5 mt-1.5 cursor-pointer transition-colors hover:border-foreground/40')}
+                    style={{ minHeight: 0, minWidth: 0 }}
+                    onPointerDown={keepEditorFocus}
+                    onClick={onOpenScreenshot}
+                    title={draft.screenshot}
+                >
+                    <FileTypeIcon filePath={draft.screenshot} className="h-[1.1em] w-[1.1em] shrink-0" />
+                    <span className={REFERENCE_CHIP_LABEL_CLASS}>{draft.screenshot}</span>
+                </button>
+            ) : null}
             {editing ? (
                 <CommentTextEditor
                     value={editText}
@@ -339,7 +361,7 @@ const DraftRow: React.FC<{
     );
 };
 
-function ComposerContextRowsView({ draftTarget, isMobile }: ComposerContextRowsProps) {
+function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment }: ComposerContextRowsProps) {
     const { t } = useI18n();
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
@@ -355,6 +377,7 @@ function ComposerContextRowsView({ draftTarget, isMobile }: ComposerContextRowsP
     const quoteHighlights = useChatQuoteHighlightApi();
     const quotePublisher = React.useId();
     const attachedFiles = useInputStore((state) => state.attachedFiles);
+    const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
     const mobileComment = useMobileCommentComposerController();
     const [openId, setOpenId] = React.useState<string | null>(null);
@@ -543,6 +566,9 @@ function ComposerContextRowsView({ draftTarget, isMobile }: ComposerContextRowsP
                 onRemove={() => {
                     quoteHighlights?.focusMark(null);
                     removeDraft(draftTarget, draft.id);
+                    // The annotation's screenshot leaves with it.
+                    const screenshot = draft.screenshot ? attachedFiles.find((file) => file.filename === draft.screenshot) : undefined;
+                    if (screenshot) removeAttachedFile(screenshot.id);
                 }}
                 onSaveComment={(text) => saveComment(draft, text)}
                 onFocusQuote={quoteHighlights && draft.source === 'chat-quote'
@@ -552,6 +578,7 @@ function ComposerContextRowsView({ draftTarget, isMobile }: ComposerContextRowsP
                     ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
                     : null}
                 attachmentFilenames={attachmentFilenames}
+                onOpenScreenshot={draft.screenshot && attachmentFilenames.includes(draft.screenshot) ? () => onOpenAttachment(draft.screenshot ?? '') : null}
             />
         );
     });

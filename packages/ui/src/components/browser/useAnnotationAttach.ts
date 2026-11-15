@@ -29,14 +29,18 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
       return;
     }
 
-    let screenshotAttached = false;
+    // The screenshot joins the composer's files under the annotation's name
+    // for it: the annotation's row shows it, and it goes and leaves with the
+    // annotation, never as a chip in the prompt.
+    let screenshot: string | undefined;
     if (result.screenshot) {
       try {
-        screenshotAttached = await addAttachedFile(result.screenshot, attachments);
+        await addAttachedFile(result.screenshot, attachments, ([landed]) => { screenshot = landed?.filename; });
       } catch {
-        screenshotAttached = false;
+        screenshot = undefined;
       }
     }
+    const screenshotAttached = screenshot !== undefined;
 
     // The overlay is gone by now, so a refusal would lose the comment and marks.
     // The comment is the draft's own text, as for every other comment, so the
@@ -54,6 +58,7 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
       }),
       language: 'markdown',
       text: result.payload.comment.trim(),
+      screenshot,
     }, { written: true });
 
     toast.success(t('contextPanel.browser.annotate.attached'));

@@ -6,6 +6,7 @@ import {
     buildImagePathCitationText,
     findAttachmentCitationRanges,
     findImagePathCitationNames,
+    findLocalFileLinks,
     imageSaveModeForModel,
     isGenericImageFilename,
     nextPastedContextFilename,
@@ -127,5 +128,19 @@ describe('image save mode', () => {
         } finally {
             decodeHeic = original;
         }
+    });
+});
+
+describe('links to files on disk', () => {
+    test('finds the saved-image links the composer writes, plain and in angle brackets', () => {
+        const text = `see ${buildImagePathCitationText([{ filename: 'a.png', path: '/tmp/oc/a.png' }, { filename: 'b.png', path: 'C:\\Temp dir\\b.png' }])}`;
+        expect(findLocalFileLinks(text).map(({ name, path }) => ({ name, path }))).toEqual([
+            { name: 'a.png', path: '/tmp/oc/a.png' },
+            { name: 'b.png', path: 'C:/Temp dir/b.png' },
+        ]);
+    });
+
+    test('leaves links to the web alone', () => {
+        expect(findLocalFileLinks('[docs](https://example.com/a.png)')).toEqual([]);
     });
 });

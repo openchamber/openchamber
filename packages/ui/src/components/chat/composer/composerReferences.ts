@@ -35,6 +35,11 @@ export type ComposerReference =
         title: string | null;
         opened: boolean;
         contextText: string;
+        /**
+         * The link without its key, which stands for the page in the composer
+         * text. Absent on chips from before pages were chips in the text.
+         */
+        link?: string;
     }
     | {
         kind: 'repository-issue';

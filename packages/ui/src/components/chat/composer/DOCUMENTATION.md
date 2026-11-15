@@ -475,8 +475,8 @@ mobile pill and the dictation overlay are opaque and keep their shadow on a
 wrapper all the same.
 
 Context waiting for the next message (review comments, quotes, annotations,
-terminal selections, PR context) lists as rows inside the box, between the
-attachment row and the input (`ComposerContextRows`), one row per item in the
+terminal selections, PR context) lists as rows inside the box, right above
+the input (`ComposerContextRows`), one row per item in the
 order it was added. A row reads like the sent message will: the quote's first
 line, or where it came from, behind the accent bar, then the comment. A click
 opens the row in place with the whole quote and, on desktop, the comment field;
@@ -521,6 +521,42 @@ share `attachFilesWithCitation`: every file attaches and is cited in the draft
 as `[name]`; images get a generated unique name first, other files keep their
 own name and are cited only after they attached. A copied file's filename text
 is suppressed so only the citation lands in the draft.
+
+### Attachments are chips in the text
+
+Every file the composer holds is a chip in the text (ADR 0021, 0022), however
+it came: paste, drop, the attach menu and VS Code's picker
+(`attachFilesWithCitation`), VS Code's open-file suggestion and its editor and
+explorer commands (an effect writes the chip of each new VS Code file at the
+caret). There are no thumbnails above the input.
+
+- The draft's files are a pool; a send, a queued message and a parallel
+  launch take the ones their text cites (`attachmentsCitedIn`, `[name]` or the
+  `[name](path)` link of an image saved as a file), plus the screenshots of
+  the browser annotations going with it. Deleting a chip drops its file, and
+  undo, which only rewrites the text, brings it back. A send waits for files
+  still being read.
+- Each chip names one file: a name another file holds gets `-2`
+  (`assignFileAttachmentFilenames`), and square brackets become parentheses.
+- A draft put back into the composer (a revert, a queued message taken out to
+  edit, a recalled prompt, a fork or a sidebar draft) gets a chip for each of
+  its files the text does not cite (`withMissingCitations`): messages sent
+  before every file had a chip never named theirs.
+- Files live in memory, the text survives a reload. The names a draft had
+  attached are kept apart (`lib/draftAttachmentNames.ts`), so after a reload a
+  chip whose file is gone draws dashed with a tooltip saying so, instead of
+  turning into bracketed text.
+- A click on a chip opens what it stands for (`onChipOpen` in the language
+  context): an image or a text file in the viewer, a file by path in the file
+  viewer, an item in the Tracker. The caret goes beside a chip by a click next
+  to it or the arrow keys. A chip is at most 18rem wide and leaves room for a
+  space and the caret beside it, so a long name truncates instead of filling
+  the line.
+- The collapsed mobile pill draws the chips in its one line.
+- The sent message keeps a quick look at its images and files: one strip
+  (`MessageFilesDisplay`, compact) of tiles of one height, images as
+  thumbnails and files with their name and size, scrolled sideways when they
+  do not fit. Everything else the message carries is its chip in the text.
 An Android image paste arrives from the input method rather than from a paste event, because
 a WebView declares no content types on its `EditorInfo` and the IME refuses the paste before
 the page can hear about it. The Capacitor Android shell declares image content on the editor
@@ -1226,10 +1262,9 @@ is read the way the picker reads a chosen item (`resolveReferenceLink` in
 picker uses, and then draws as a chip where it stands: its number and title.
 
 - The text decides what is sent, as with session links: each linked item once,
-  after the chips above the composer, as the same context part the picker
-  sends, and the session records it as a linked issue. An item a picker chip
-  already carries keeps the chip's version, so its diff choice stands. A link
-  deleted from the text is not sent. The model reads the link where the user
+  as the same context part the picker sends, and the session records it as a
+  linked issue. An item the picker chose keeps the picker's version, so its
+  diff choice stands. A link deleted from the text is not sent. The model reads the link where the user
   put it. A send waits for a paste still being read, so a quick Enter never
   sends the link bare; a second Enter meanwhile does nothing.
 - Only a paste that lands in the text reads a link, afresh each time, as the
@@ -1238,28 +1273,36 @@ picker uses, and then draws as a chip where it stands: its number and title.
   `/issues/12`, and a read per keystroke would attach the wrong item. A link
   this composer has read before draws as its chip again wherever it reappears
   (typed or restored), with that read.
-- Editing a queued message puts each item its text links back as that link's
-  chip, the rest above the text.
+- An item attached any other way (the issue, PR and tracker pickers, an
+  extension's `attach`, a handed-over or restored item, a shared page) is its
+  link in the text too: the draft keeps the item (`linkedReferenceDrafts.ts`),
+  and its link goes in at the caret when it arrives, or into the saved text of
+  a draft no longer on screen (a picker that finished reading after a session
+  switch). Picking an item again with its link already there writes nothing.
+  A click on the chip opens the item in the Tracker; an extension's item goes
+  back to its extension, a shared page opens its card.
 - The sent message draws the same chips where the links stand
   (`message/parts/referenceLinkChips.tsx`, from the message's context parts;
   in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
   an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
   identifier), so a picker item whose link the user also typed draws there too.
-  An item drawn inline leaves the attachment row; one the text does not link,
-  or links only inside code, stays there. Both chips open the item in the
-  Tracker (`useOpenTrackerItem`), Cmd or Ctrl its page.
+  An item drawn inline leaves the message's preview strip; one the text does
+  not link (messages sent before items were links in the text), or links only
+  inside code, stays there. Both chips open the item in the Tracker
+  (`useOpenTrackerItem`), Cmd or Ctrl its page.
 - A link on another host than the project's, or one no account can read, stays
   text with the picker's attach-failed toast. A link past the project's fork
   network is read again as a linked item, as the Tracker does. Discussions stay
   text. A change request goes without its diff, the picker's default.
 - `/btw` and VS Code read no links, as they take no picker chips.
 
-### Why inline chips and not picker chips
+### Why every item is a chip in the text
 
-The picker's chips sit above the text, apart from the sentence. A pasted link
-is part of the sentence ("compare this with that"); turning it into a chip
-above the composer would cut the sentence apart. The maintainer chose the chip
-in place.
+Picker chips used to sit above the text, apart from the sentence, while a
+pasted link drew in place: two looks and two ways to remove the same item. A
+pasted link is part of the sentence ("compare this with that"), and the
+maintainer chose that one form for everything attached from outside (ADR 0021):
+an item is its link's chip where the caret was, and the text decides what goes.
 
 ## Paste routing
 

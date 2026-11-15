@@ -148,12 +148,11 @@ describe('MessageFilesDisplay pasted text files', () => {
     expect(popups[0].image?.filename).toBe('doc.pdf');
   });
 
-  test('a compact pdf chip stays a non-clickable chip', async () => {
+  test('a compact pdf tile has nothing to open, so it is disabled', async () => {
     await renderFiles([file({ mime: 'application/pdf', filename: 'doc.pdf', url: 'data:application/pdf;base64,aGVsbG8=' })], true);
 
-    const buttons = [...container.querySelectorAll('button')];
-    expect(buttons.find((entry) => entry.textContent?.includes('doc.pdf'))).toBeUndefined();
-    expect(container.textContent).toContain('doc.pdf');
+    const tile = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('doc.pdf'));
+    expect(tile?.hasAttribute('disabled')).toBe(true);
   });
 
   test('a compact chip of a file attached by path opens that file instead of an image preview', async () => {

@@ -314,7 +314,8 @@ for (const queue of [false, true]) {
     // Capture the queue payload without writing to the running server.
     const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockResolvedValue(undefined);
     try {
-      await submitInComposer('Read @src/a.ts', { attachment: selection, queue }, undefined, () => {
+      // The selection's chip is in the text: a message takes only the files it cites.
+      await submitInComposer('Read @src/a.ts [a.ts:2-2]', { attachment: selection, queue }, undefined, () => {
         if (queue) useSelectionStore.getState().pickSessionModel('ses_feature', 'provider', 'model');
       });
       const attachments = queue ? add.mock.calls[0]?.[1].attachments : sent[0]?.attachments;

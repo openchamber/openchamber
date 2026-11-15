@@ -11,7 +11,7 @@ import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftSto
 import { HeicConversionError, prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
-import { attachmentBasename } from "@/lib/attachmentIdentity"
+import { assignFileAttachmentFilenames, attachmentBasename } from "@/lib/attachmentIdentity"
 import { formatFileSize } from "@/lib/fileSize"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -304,7 +304,11 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  addAttachedFile: (file: File, target?: ChatDraftIdentity | null) => Promise<boolean>
+  /**
+   * `onAttached` gets the entries this call added, the original first: intake
+   * can rename a file (a HEIC becomes a JPEG), and other attaches may land meanwhile.
+   */
+  addAttachedFile: (file: File, target?: ChatDraftIdentity | null, onAttached?: (files: readonly AttachedFile[]) => void) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   /** Files filed under `target`, or the current slot when none is named. */
   getAttachedFiles: (target?: ChatDraftIdentity | null) => AttachedFile[]
@@ -458,13 +462,14 @@ export const useInputStore = create<InputState>()((set, get) => ({
     target === null ? get().pendingSyntheticParts : get().pinnedSyntheticParts.get(target) ?? null
   ),
 
-  addAttachedFile: async (file: File, target?: ChatDraftIdentity | null) => {
+  addAttachedFile: async (file: File, target?: ChatDraftIdentity | null, onAttached?: (files: readonly AttachedFile[]) => void) => {
     const generation = attachmentReadGeneration
     const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
     const attachReference = async (path: string): Promise<boolean> => {
       const reference = await prepareFileReference(file, path)
       if (generation !== attachmentReadGeneration) return false
       set((state) => appendAttachedFiles(state, [reference], target))
+      onAttached?.([reference])
       return true
     }
 
@@ -506,6 +511,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       if (hasGeneratedFilenameCollision(generatedFilenames, attachedFilesFor(get(), target))) continue
 
       set((state) => appendAttachedFiles(state, attachedFiles, target))
+      onAttached?.(attachedFiles)
       return true
     }
     return false
@@ -546,20 +552,28 @@ export const useInputStore = create<InputState>()((set, get) => ({
       }))
     }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const isDuplicate = get().attachedFiles.some(
+    // Added again (its chip deleted, then "Add to chat" once more): the same
+    // file comes back under a new id, which the composer reads as new and
+    // writes its chip for.
+    const existing = get().attachedFiles.find(
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
     )
-    if (isDuplicate) return
+    if (existing) {
+      set((s) => ({ attachedFiles: [...s.attachedFiles.filter((f) => f.id !== existing.id), { ...existing, id }] }))
+      return
+    }
     const dataUrl = toFileUrl(path)
+    // Each chip names one attachment, so a name another file holds gets `-2`.
+    const filename = assignFileAttachmentFilenames([{ name }], get().attachedFiles.map((file) => file.filename))[0]
     // `file://` URLs are the same contract used by server-source attachments.
     // The submission path passes `dataUrl` as `url` directly to the OpenCode
     // server, which resolves `file://` paths natively. No base64 encoding needed.
     const attached: AttachedFile = {
       id,
-      file: new File([], name, { type: 'text/plain' }),
+      file: new File([], filename, { type: 'text/plain' }),
       dataUrl,
       mimeType: 'text/plain',
-      filename: name,
+      filename,
       size: fileSize || 0,
       source: 'vscode',
       vscodePath: path,
@@ -572,10 +586,16 @@ export const useInputStore = create<InputState>()((set, get) => ({
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
     const selectionKey = `${generation}\u0000${getVSCodeSelectionKey(path, file.name)}`
-    const isDuplicate = get().attachedFiles.some(
-      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
+    // A selection added again comes back under a new id, as a file does.
+    // By the selection itself: its chip name can differ (brackets become parentheses, `-2`).
+    const existing = get().attachedFiles.find(
+      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.file.name === file.name && f.vscodePath === path
     )
-    if (isDuplicate || pendingVSCodeSelectionKeys.has(selectionKey)) return
+    if (existing) {
+      set((s) => ({ attachedFiles: [...s.attachedFiles.filter((f) => f.id !== existing.id), { ...existing, id }] }))
+      return
+    }
+    if (pendingVSCodeSelectionKeys.has(selectionKey)) return
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
@@ -591,7 +611,8 @@ export const useInputStore = create<InputState>()((set, get) => ({
       file,
       dataUrl,
       mimeType: file.type,
-      filename: file.name,
+      // Each chip names one attachment, so a name another file holds gets `-2`.
+      filename: assignFileAttachmentFilenames([{ name: file.name }], get().attachedFiles.map((existing) => existing.filename))[0],
       size: file.size,
       source: 'vscode',
       vscodePath: path,

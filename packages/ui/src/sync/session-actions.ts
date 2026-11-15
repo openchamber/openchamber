@@ -6,6 +6,7 @@
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
+import { attachmentBasename, withMissingCitations } from "@/lib/attachmentIdentity"
 import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
@@ -3358,9 +3359,15 @@ async function stageRevertToMessage(sessionId: string, messageId: string): Promi
   const prevTargetAttachments = useInputStore.getState().getAttachedFiles(restoreIdentity)
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
-  // Restore reverted message text and file attachments to input
-  if (messageText) {
-    useInputStore.getState().setPendingSessionRestore(sessionId, messageText)
+  // Restore reverted message text and file attachments to input. The text
+  // gets a chip for each file it does not cite: a send includes only the
+  // files its text cites, and messages sent before every attachment had a
+  // chip never named theirs.
+  const restoredText = targetMsg?.role === "user"
+    ? withMissingCitations(messageText ?? "", submittedFileParts.filter((part) => part.url).map((part) => ({ filename: attachmentBasename(part.filename ?? "attachment") })))
+    : messageText
+  if (restoredText) {
+    useInputStore.getState().setPendingSessionRestore(sessionId, restoredText)
   }
 
   // Restore file/image attachments from the target message.

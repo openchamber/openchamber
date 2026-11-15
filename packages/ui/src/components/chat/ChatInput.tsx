@@ -1,7 +1,6 @@
 import React from 'react';
 import { DraftProjectName } from '@/components/chat/DraftProjectName';
-import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
-import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
@@ -46,6 +45,7 @@ import {
     workDraftComposerKey,
     getChatDraftIdentityKey,
     clearChatDraft,
+    writeChatDraft,
     type ChatDraftIdentity,
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
@@ -57,7 +57,8 @@ import { BtwPanel } from './btw/BtwPanel';
 import { btwHoldsDock, useBtwPanelState } from './btw/useBtwPanelState';
 import { btwModelAvailability, resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
 import { buildBtwSyntheticTexts, btwPendingComposerKey, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
-import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
+import { ActiveEditorFileSuggestion } from './FileAttachment';
+import { withAttachmentChips } from './message/parts/attachmentCitationChips';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessagesStrip } from './QueuedMessagesStrip';
@@ -117,10 +118,9 @@ import {
     toContextReference,
     toLinkedIssue,
     withComposerReferences,
-    withoutComposerReference,
     type ComposerReference,
 } from './composer/composerReferences';
-import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, withReferencesFromText } from './composer/referenceLinks';
+import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, referencesLinkedIn, referenceTextLink, withMissingReferenceLinks, withoutSharedPageLinks, withReferencesFromText } from './composer/referenceLinks';
 import {
     loadSessionLinkReference,
     sessionLinkText,
@@ -138,7 +138,6 @@ import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, ty
 import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
 import { trackerPresentation } from '@/lib/trackers/presentation';
-import { useTrackerDescriptors } from '@/lib/trackers/registry';
 import { useTrackerSources } from '@/lib/trackers/sources';
 import { trackerReferenceSource, type TrackerReferenceSource } from '@/components/references/referencePickerItems';
 import type { ComposerTrackerPicker } from './composer/ui/ComposerAttachmentControls';
@@ -189,6 +188,8 @@ import {
     prepareImageToSave,
     renameFileForAttachmentCitation,
 } from './attachmentCitations';
+import { assignFileAttachmentFilenames, attachmentsCitedIn, withMissingCitations } from '@/lib/attachmentIdentity';
+import { readDraftAttachmentNames, rememberDraftAttachmentNames } from '@/lib/draftAttachmentNames';
 import {
     createPastedContextFile,
     isLargePlainTextPaste,
@@ -212,7 +213,9 @@ import { collectKnownTokenNames, lastPrefixSigilIndex } from './composer/languag
 import { resolveAutocompleteTrigger, type AutocompleteKind } from './composer/language/triggers';
 import { hasSessionMention } from './sessionMentionResults';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { type ComposerLanguageContext } from './composer/language/tokenize';
+import { type ComposerChipTarget, type ComposerLanguageContext } from './composer/language/tokenize';
+import { useOpenAttachment } from './message/useOpenAttachment';
+import { findAttachmentPart, resolveAttachmentOpenTarget } from '@/lib/messages/attachmentPreview';
 import {
     ComposerEditor,
     type ComposerChange,
@@ -291,8 +294,8 @@ import { MobilePillComposer } from './composer/ui/MobilePillComposer';
 import { PromptHistorySearchPanel } from './composer/ui/PromptHistorySearchPanel';
 import { ComposerContextRows } from './composer/ui/ComposerContextRows';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
-import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { findShareLink, withoutShareLinkKeys } from '@/lib/received-pages/link';
+import { SharedPageCardDialog } from './sharePages/received/SharedPageCardDialog';
 import { SharedPageChip } from './sharePages/received/SharedPageChip';
 import { takeShareLink, withRegisteredSharedPages } from './sharePages/received/takeShareLink';
 import { useReceivedPageBases } from './sharePages/received/useReceivedPage';
@@ -326,7 +329,6 @@ import {
     mergeSessionInputHistory,
 } from './inputHistory';
 import { useScopedBlockingForms, useScopedBlockingPermissions, useUserMessageHistory } from '@/sync/sync-context';
-import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -594,6 +596,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const dictationSendInFlightRef = React.useRef(false);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
+    const pendingAttachWorkRef = React.useRef<Set<Promise<void>>>(new Set());
+
+    /** Settles once the files being attached now are in; then the next render's handlers see them. */
+    const waitForPendingAttachments = React.useCallback(async (): Promise<boolean> => {
+        if (pendingAttachWorkRef.current.size === 0) return false;
+        await Promise.allSettled([...pendingAttachWorkRef.current]);
+        await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+        return true;
+    }, []);
     // The unanswered large-paste choice; `resolve` applies the answer once.
     const [largeTextPasteOffer, setLargeTextPasteOffer] = React.useState<{
         id: number;
@@ -1094,6 +1105,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         () => attachedFiles.map((file) => file.filename),
         [attachedFiles],
     );
+    // The names this draft has had attached, kept across a reload while its
+    // files are not: a chip whose file is gone draws as unavailable.
+    const chatDraftIdentityKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+    const chatDraftIdentityKeyRef = React.useRef(chatDraftIdentityKey);
+    chatDraftIdentityKeyRef.current = chatDraftIdentityKey;
+    React.useEffect(() => {
+        if (chatDraftIdentity) rememberDraftAttachmentNames(chatDraftIdentity, attachmentFilenames);
+        // The key stands for the identity, which is a new object every render.
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+    }, [attachmentFilenames, chatDraftIdentityKey]);
+    const missingAttachmentNames = React.useMemo(() => {
+        if (!chatDraftIdentity) return [];
+        const present = new Set(attachmentFilenames.map((name) => name.toLowerCase()));
+        return readDraftAttachmentNames(chatDraftIdentity).filter((name) => !present.has(name.toLowerCase()));
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+    }, [attachmentFilenames, chatDraftIdentityKey]);
 
     // Sessions and messages mentioned in the text, by `sessionLinkKey`. The
     // text decides what goes out: a mention deleted from it is not sent.
@@ -1225,9 +1252,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const referenceLinksIn = React.useCallback((text: string): ComposerReference[] => (
         isVSCodeRuntime() ? [] : referenceLinksInText(text, referenceLinksRef.current)
     ), []);
-    const referenceLinkChips = React.useMemo(() => new Map([...referenceLinks].map(([link, reference]) => (
-        [link, referenceLinkChip(reference, repositoryUrls)] as const
-    ))), [referenceLinks, repositoryUrls]);
+    // The draft's items (picked, handed over, put back) draw as their links' chips too.
+    const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+    // The shared page whose card is open: its PIN, its state, removing it.
+    const [openSharedPageKey, setOpenSharedPageKey] = React.useState<string | null>(null);
+    const referenceLinkChips = React.useMemo(() => new Map([
+        ...[...referenceLinks].map(([link, reference]) => [link, referenceLinkChip(reference, repositoryUrls)] as const),
+        ...linkedReferences.map((reference) => [referenceTextLink(reference), referenceLinkChip(reference, repositoryUrls)] as const),
+    ]), [linkedReferences, referenceLinks, repositoryUrls]);
 
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
@@ -1238,8 +1270,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         dismiss: (name: string) => dismissMention(name, confirmedMentionsRef.current),
         hint: t('chat.chatInput.mentionChip.editHint'),
     }), [t]);
+    // The chip opener is set further down, once what it needs exists.
+    const chipOpenRef = React.useRef<(target: ComposerChipTarget) => void>(() => {});
+    const openChip = React.useCallback((target: ComposerChipTarget) => chipOpenRef.current(target), []);
     const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
         inputMode,
+        onChipOpen: openChip,
         knownAgentNames,
         // A getter: a draft switch puts a new set in the ref without a new context.
         get confirmedMentions() { return confirmedMentionsRef.current; },
@@ -1249,12 +1285,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         knownSnippetTriggers,
         attachmentFilenames,
         pendingAttachmentFilenames: pendingPastedAttachmentFilenamesRef.current,
+        missingAttachments: missingAttachmentNames.length > 0
+            ? { names: missingAttachmentNames, title: t('chat.chatInput.attachment.unavailable') }
+            : undefined,
         knownSkillNames,
         fileIconVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
         sessionLinkChips,
         sessionLinkOrigins,
         referenceLinkChips,
-    }), [attachmentFilenames, confirmedMentionsRevision, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, mentionDismissal, referenceLinkChips, sessionLinkChips, sessionLinkOrigins]);
+    }), [attachmentFilenames, confirmedMentionsRevision, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, mentionDismissal, missingAttachmentNames, openChip, referenceLinkChips, sessionLinkChips, sessionLinkOrigins, t]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1266,6 +1305,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             })),
         [],
     );
+
 
     const resolveInlineFileMention = React.useCallback((mentionPath: string): { serverPath: string; filename: string; root: string } | null => {
         const isCandidate = isFileMentionCandidate(mentionPath, {
@@ -1438,7 +1478,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     });
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
-    const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+
     // Relays whose share links turn into a page chip (none where the server opens none).
     const receivedPageBases = useReceivedPageBases();
     const setLinkedReferencesFor = React.useCallback((
@@ -1492,6 +1532,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : null,
         [inlineDraftDirectory, inlineDraftSessionKey],
     );
+    /**
+     * The composer's files a message with `text` takes: those it or the
+     * comments going with it cite (an image pasted into a comment), and the
+     * annotations' screenshots.
+     */
+    const attachmentsToSend = React.useCallback((text: string): AttachedFile[] => {
+        const drafts = inlineDraftTarget ? useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget) : [];
+        const screenshots = new Set(drafts.flatMap((draft) => (draft.screenshot ? [draft.screenshot.toLowerCase()] : [])));
+        const cited = new Set(attachmentsCitedIn([text, ...drafts.map((draft) => draft.text)].join('\n'), attachedFiles));
+        return attachedFiles.filter((file) => cited.has(file) || screenshots.has(file.filename.toLowerCase()));
+    }, [attachedFiles, inlineDraftTarget]);
     const inlineDraftKey = inlineDraftTarget
         ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
         : null;
@@ -1585,7 +1636,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const applyHistoryValue = React.useCallback((value: MessageHistoryValue<AttachedFile>, selection: 'start' | 'end') => {
         const identity = promptHistorySearchIdentityRef.current;
-        setMessage(value.text);
+        // A prompt sent before every attachment had a chip gets one for each.
+        setMessage(withMissingCitations(value.text, value.attachments));
         useInputStore.getState().setAttachedFiles([...value.attachments], chatDraftIdentity);
         scheduleHistoryFocusFrame(() => {
             if (promptHistorySearchIdentityRef.current !== identity) return;
@@ -1784,8 +1836,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // builder serializes it into the outgoing message, so a composer holding
     // only one of those chips is not empty and has to be sendable on its own.
     // BTW sends strip every reference, so the gate stays out of BTW.
-    const hasLinkedReferences = linkedReferences.length > 0;
-    const hasContent = hasText || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences);
+    const hasContent = hasText || attachedFiles.length > 0 || hasDrafts;
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
@@ -1808,9 +1859,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const currentMessage = composerRef.current?.getValue() ?? composerText.get();
         return {
             message: currentMessage,
-            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
+            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
         };
-    }, [attachedFiles.length, composerText, hasDrafts, hasLinkedReferences, isBtwActive]);
+    }, [attachedFiles.length, composerText, hasDrafts]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -1823,12 +1874,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         presetText?: string;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
+    const handleQueueMessageRef = React.useRef<() => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(async () => {
         // The comment's exit paths are attach/cancel; queueing a real prompt
         // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
+        // Files still being attached: queue once they are in.
+        if (await waitForPendingAttachments()) {
+            void handleQueueMessageRef.current();
+            return;
+        }
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
@@ -1852,7 +1909,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // A share link's key is never queued, even one the composer did not turn into a chip.
         const messageToQueue = withoutShareLinkKeys(inputSnapshot.message.replace(/^\n+|\n+$/g, ''));
         if (!(await readSessionMentionsBeforeSend(messageToQueue))) return;
-        const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
+        // Only the files the text still cites go, and the screenshots of the
+        // annotations going with it: a deleted chip drops its file.
+        const composerAttachments = sanitizeAttachmentsForSend(attachmentsToSend(messageToQueue));
 
         // A queued message is resolved now, not at delivery: the server that
         // sends it has no agent list, no confirmed mentions, and no way to read
@@ -1869,7 +1928,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        const { sanitizedText, mention } = parseAgentMentions(messageToQueue, mentionableAgents());
+        // A shared page goes as its card and content; its keyless link leaves the delivered text.
+        const { sanitizedText, mention } = parseAgentMentions(withoutSharedPageLinks(messageToQueue, linkedReferences), mentionableAgents());
         const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared, composerAttachments);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
@@ -1894,8 +1954,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const syntheticParts = consumePendingSyntheticParts(mailboxTarget) ?? [];
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
-        const linked = linkedReferences;
-        // The chips and the items the text links; only the chips come back on a failure, the text brings its links.
+        // The items the text links: an item's chip is its link, so one deleted from the text stays behind.
+        const linked = referencesLinkedIn(messageToQueue, linkedReferences);
         const linkedToQueue = await withRegisteredSharedPages(withReferencesFromText(linked, referenceLinksIn(messageToQueue)));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
@@ -1986,10 +2046,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
         if (currentSessionId) actionsNote?.commit(currentSessionId);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachmentsToSend, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage, waitForPendingAttachments]);
+    handleQueueMessageRef.current = handleQueueMessage;
 
     /** Put the context a queued message was captured with back on the composer chips. */
-    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[], content: string) => {
+    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
         const synthetic: SyntheticContextPart[] = [];
         const restored: Exclude<ComposerReference, { kind: 'shared-page' }>[] = [];
         const sharedPages: ComposerReference[] = [];
@@ -2079,19 +2140,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             }
         }
-        // An item the text links goes back as that link's chip, the rest above the text.
-        const textLinks = new Set(findWebLinks(content).map(({ link }) => link));
-        const chips: ComposerReference[] = [...restored.filter((reference) => !textLinks.has(reference.url)), ...sharedPages];
+        // Every item goes back on the draft; one the text does not link yet gets its link written in.
+        const chips: ComposerReference[] = [...restored, ...sharedPages];
         if (chips.length > 0) {
             updateLinkedReferences((current) => withComposerReferences(current, chips));
         }
-        rememberReferenceLinks(restored.flatMap((reference) => (textLinks.has(reference.url) ? [[reference.url, reference] as const] : [])));
         rememberSessionMentions(mentions);
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
             useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
         }
-    }, [inlineDraftTarget, mailboxTarget, rememberReferenceLinks, rememberSessionMentions, updateLinkedReferences]);
+    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
 
     // Editing takes the message out of the queue, so sending it again queues
     // one message, not a copy.
@@ -2105,10 +2164,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const currentAttachments = useInputStore.getState().attachedFiles;
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...queued.attachments]);
             }
-            setMessage(queued.content);
+            setMessage(withMissingCitations(queued.content, queued.attachments ?? []));
             // Back in the composer, the message is armed again as it was queued.
             if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
-            restoreQueuedContext(queued.context ?? [], queued.content);
+            restoreQueuedContext(queued.context ?? []);
             setTimeout(() => {
                 composerRef.current?.focus();
             }, 0);
@@ -2132,15 +2191,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
     const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
-    const descriptorOf = useSourceControlDescriptorOf();
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
         if (isBtwActive) return;
         // The picker keeps this callback while context loads, including across a session switch.
         updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(current, references));
+        // A draft no longer on screen gets the links in its saved text; the one
+        // on screen gets them at the caret (the effect on the draft's items).
+        const onScreen = chatDraftIdentityKeyRef.current;
+        if (chatDraftIdentity && getChatDraftIdentityKey(chatDraftIdentity) !== onScreen) {
+            const saved = readChatDraft(chatDraftIdentity);
+            writeChatDraft(chatDraftIdentity, withMissingReferenceLinks(saved.text, references), saved.confirmedMentions);
+        }
     }, [chatDraftIdentity, isBtwActive, updateLinkedReferencesFor]);
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
-    const trackerDescriptors = useTrackerDescriptors();
     const trackerSources = useTrackerSources();
 
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
@@ -2154,6 +2218,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Comment mode's only submit is attach; every other send path must be
         // inert while it is open.
         if (isMobileCommentOpen()) return;
+        // Files still being attached: send once they are in, with the handler
+        // of the render that has them.
+        if (await waitForPendingAttachments()) {
+            void handleSubmitRef.current(options);
+            return;
+        }
         if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         if (pendingFirstSend) return;
         // "Run in parallel" launches the run instead of sending a message.
@@ -2195,7 +2265,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
-                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
+                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
             }
             : getCurrentInputSnapshot();
         if (queuedOnly && autoReviewRunning) {
@@ -2532,13 +2602,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
+        // Only the files the text still cites go, and the screenshots of the
+        // annotations going with it: a deleted chip drops its file, and undo,
+        // which only rewrites the text, brings it back.
+        const sentAttachedFiles = attachmentsToSend(inputSnapshot.message);
         const historySubmissions = buildChatInputHistorySubmissions({
             inputMode,
             // Server-owned items were recorded on acceptance. VS Code records
             // the full items actually taken, never the metadata projection.
             queuedMessages: isServerOwnedMessageQueue() ? [] : queuedMessagesToSend,
             composerText: inputSnapshot.message,
-            composerAttachments: attachedFiles,
+            composerAttachments: sentAttachedFiles,
             includeComposer: !queuedOnly && inputSnapshot.hasContent,
         });
         if (historySubmissions?.length) {
@@ -2583,12 +2657,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // The chips, then the items the text links that are not chips already.
         const sentComposerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : '';
         // A page chip whose link the server is still taking goes out with its id.
-        const linkedReferencesToSend = await withRegisteredSharedPages(withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText)));
+        // An item goes when the text links it: its chip is its link.
+        const linkedReferencesToSend = await withRegisteredSharedPages(withReferencesFromText(referencesLinkedIn(sentComposerText, linkedReferences), referenceLinksIn(sentComposerText)));
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
-            composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
-            composerAttachments: attachedFiles,
+            // A shared page goes as its card and content; its keyless link leaves the text.
+            composerText: !queuedOnly && inputSnapshot.hasContent ? withoutSharedPageLinks(inputSnapshot.message, linkedReferencesToSend) : null,
+            composerAttachments: sentAttachedFiles,
             inlineComments: expandedDrafts,
             syntheticTexts: [
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
@@ -3505,11 +3581,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         // A share link someone sent becomes a page chip: the link, with its
-        // key, goes to the server and never stays in the text or the draft.
+        // key, goes to the server and only the link without its key stays in
+        // the text, where it draws as the chip. Its card opens at once, since
+        // the page needs its PIN.
         const shareLink = !fromValueProp && !isBtwActive && inputMode === 'normal' ? findShareLink(value, receivedPageBases) : null;
         if (shareLink && composerRef.current) {
-            updateLinkedReferences((current) => withComposerReferences(current, [takeShareLink(shareLink)]));
-            composerRef.current.replaceRange(shareLink.start, shareLink.end, '', shareLink.start);
+            const link = withoutShareLinkKeys(shareLink.url);
+            const reference = { ...takeShareLink(shareLink), link };
+            updateLinkedReferences((current) => withComposerReferences(current, [reference]));
+            setOpenSharedPageKey(composerReferenceKey(reference));
+            composerRef.current.replaceRange(shareLink.start, shareLink.end, link, shareLink.start + link.length);
             return;
         }
 
@@ -3636,7 +3717,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
      * cited only once they attached, so a rejected file leaves no dangling
      * citation.
      */
-    const attachFilesWithCitation = React.useCallback(async (
+    /** Points a chip at its file's new name, where intake renamed the file. */
+    const renameCitation = React.useCallback((from: string, to: string) => {
+        const editor = composerRef.current;
+        if (!editor) return;
+        const citation = `[${from}]`;
+        const text = editor.getValue();
+        const start = text.lastIndexOf(citation);
+        if (start >= 0) editor.replaceRange(start, start + citation.length, `[${to}]`);
+    }, []);
+    const attachFilesWithCitationNow = React.useCallback(async (
         files: File[],
         leadingText: string = '',
     ): Promise<void> => {
@@ -3690,7 +3780,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const filename = assignedImageNames[index];
             const file = renameFileForAttachmentCitation(imageFiles[index], filename);
             try {
-                attached = (await addAttachedFile(file)) || attached;
+                // Intake can rename the file (a HEIC becomes a JPEG): its chip follows.
+                attached = (await addAttachedFile(file, undefined, ([landed]) => {
+                    if (landed && landed.filename.toLowerCase() !== filename.toLowerCase()) renameCitation(filename, landed.filename);
+                })) || attached;
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
                 toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
@@ -3706,11 +3799,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         const attachedOtherNames: string[] = [];
         let reported = false;
-        for (const file of otherFiles) {
+        // Each chip names one attachment, so a name already taken gets `-2`.
+        const otherNames = assignFileAttachmentFilenames(otherFiles, usedNames());
+        for (let index = 0; index < otherFiles.length; index += 1) {
+            const file = otherNames[index] === otherFiles[index].name
+                ? otherFiles[index]
+                : renameFileForAttachmentCitation(otherFiles[index], otherNames[index]);
             try {
-                if (await addAttachedFile(file)) {
+                // The chip names the file as intake kept it, which can differ from the picked name.
+                let landedName = file.name;
+                if (await addAttachedFile(file, undefined, ([landed]) => { if (landed) landedName = landed.filename; })) {
                     attached = true;
-                    attachedOtherNames.push(file.name);
+                    attachedOtherNames.push(landedName);
                 }
             } catch (error) {
                 console.error('File attach failed', error);
@@ -3727,7 +3827,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (files.length > 0 && !attached && !savedAny && !reported) {
             toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
-    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, savePastedImagesAsFiles, saveImagesWithPathCitation, t, composerText]);
+    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, renameCitation, savePastedImagesAsFiles, saveImagesWithPathCitation, t, composerText]);
+    // VS Code adds files from outside the composer (the open-file suggestion,
+    // the editor's and the explorer's "add to chat"); each new one gets its
+    // chip at the caret. The files a draft already had when it came on screen
+    // are its own and keep the chips its text has.
+    const seenVSCodeAttachmentsRef = React.useRef<{ draftKey: string; ids: Set<string> } | null>(null);
+    React.useEffect(() => {
+        const draftKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : '';
+        const vscodeFiles = attachedFiles.filter((file) => file.source === 'vscode');
+        const seen = seenVSCodeAttachmentsRef.current;
+        seenVSCodeAttachmentsRef.current = { draftKey, ids: new Set(vscodeFiles.map((file) => file.id)) };
+        if (!seen || seen.draftKey !== draftKey) return;
+        const fresh = vscodeFiles.filter((file) => !seen.ids.has(file.id));
+        if (fresh.length === 0) return;
+        const text = composerRef.current?.getValue() ?? composerText.get();
+        const uncited = fresh.filter((file) => attachmentsCitedIn(text, [file]).length === 0);
+        if (uncited.length > 0) insertCitationAtSelection(buildAttachmentCitationText(uncited.map((file) => file.filename)), '');
+    }, [attachedFiles, chatDraftIdentity, composerText, insertCitationAtSelection]);
+    // A send waits for files still being read: their chips are in the text,
+    // and a send includes only attached files the text cites.
+    const attachFilesWithCitation = React.useCallback((files: File[], leadingText: string = ''): Promise<void> => {
+        const work = attachFilesWithCitationNow(files, leadingText);
+        pendingAttachWorkRef.current.add(work);
+        const settle = () => { pendingAttachWorkRef.current.delete(work); };
+        work.then(settle, settle);
+        return work;
+    }, [attachFilesWithCitationNow]);
 
     const handlePaste = React.useCallback(async (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
@@ -4355,49 +4481,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+    // Files picked from the attach menu (or VS Code's picker) land as chips at
+    // the caret, as pasted and dropped ones do.
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
-        const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
-        let list = Array.isArray(files) ? files : Array.from(files);
-        let attached = false;
-
-        const images = list.filter((file) => file.type.startsWith('image/'));
-        if (imageSaveMode !== 'attach' && images.length > 0) {
-            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(
-                images,
-                '',
-                useInputStore.getState().attachedFiles.map((file) => file.filename),
-                imageSaveMode,
-            );
-            if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
-            const others = list.filter((file) => !file.type.startsWith('image/'));
-            if (imageSaveMode === 'alongside') {
-                // A HEIC saved unconverted gets only its link, which counts as attached.
-                attached = saved.length > attachable.length;
-                list = [...others, ...attachable, ...unsaved];
-            } else {
-                attached = saved.length > 0;
-                list = [...others, ...unsaved];
-            }
-        }
-
-        let reported = false;
-        for (const file of list) {
-            try {
-                attached = (await addAttachedFile(file)) || attached;
-            } catch (error) {
-                console.error('File attach failed', error);
-                // The store names the cause (a file too large to attach).
-                if (error instanceof Error) {
-                    toast.error(error.message);
-                    reported = true;
-                }
-            }
-            if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
-        }
-        if (list.length > 0 && !attached && !reported) {
-            toast.error(t('chat.chatInput.toast.attachFileFailed'));
-        }
-    }, [addAttachedFile, imageSaveMode, saveImagesWithPathCitation, t]);
+        await attachFilesWithCitation(Array.isArray(files) ? files : Array.from(files));
+    }, [attachFilesWithCitation]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
@@ -4529,6 +4617,65 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setAttachDialogItem(issue);
         setAttachDialogGuestId(issue.providerId);
     }, [currentDirectory, guestAttachItems, t]);
+
+    const openSharedPage = React.useMemo(() => {
+        const reference = openSharedPageKey ? linkedReferences.find((entry) => composerReferenceKey(entry) === openSharedPageKey) : undefined;
+        return reference?.kind === 'shared-page' ? reference : null;
+    }, [linkedReferences, openSharedPageKey]);
+
+    // A click on a chip opens what it stands for, as the same chip in a sent
+    // message does: an image or a text file in the viewer, a file attached by
+    // path in the file viewer, an issue, change request or tracker item in the
+    // Tracker. An extension's item goes back to its extension, a shared page
+    // opens its card.
+    const openAttachmentTarget = useOpenAttachment(handleShowAttachmentPreview);
+    chipOpenRef.current = (target: ComposerChipTarget) => {
+        if (target.kind === 'link') {
+            const reference = linkedReferences.find((entry) => referenceTextLink(entry) === target.url);
+            if (reference?.kind === 'shared-page') {
+                setOpenSharedPageKey(composerReferenceKey(reference));
+                return;
+            }
+            if (reference?.kind === 'guest') {
+                reopenGuestItem(reference);
+                return;
+            }
+            openAttachmentTarget({ kind: 'external', url: target.url });
+            return;
+        }
+        if (target.kind === 'path') {
+            openAttachmentTarget({ kind: 'file', path: target.path });
+            return;
+        }
+        const files = sanitizeAttachmentsForSend(attachedFiles).map((file) => ({ filename: file.filename, mime: file.mimeType, url: file.dataUrl }));
+        const opened = resolveAttachmentOpenTarget(findAttachmentPart(target.filename, files), files);
+        if (opened) openAttachmentTarget(opened);
+    };
+
+    const openAttachmentByName = React.useCallback((filename: string) => chipOpenRef.current({ kind: 'attachment', filename }), []);
+
+    // Items attached outside a paste (the pickers, an extension, a handed-over
+    // or restored item, a shared page) stand in the text as their link's chip:
+    // a new item whose link the text does not hold yet gets it at the caret.
+    // An item the text no longer links stays behind and is not sent. The items
+    // a draft already had when it came on screen are its own.
+    const seenReferencesRef = React.useRef<{ draftKey: string; items: Map<string, ComposerReference> } | null>(null);
+    React.useEffect(() => {
+        const draftKey = chatDraftIdentityKey ?? '';
+        const items = new Map(linkedReferences.map((reference) => [composerReferenceKey(reference), reference]));
+        const seen = seenReferencesRef.current;
+        seenReferencesRef.current = { draftKey, items };
+        if (!seen || seen.draftKey !== draftKey) return;
+        // A new item, or one picked again (a new object under the same key).
+        const fresh = linkedReferences.filter((reference) => {
+            const before = seen.items.get(composerReferenceKey(reference));
+            return !before || (before !== reference && before.kind !== 'shared-page');
+        });
+        if (fresh.length === 0) return;
+        const text = composerRef.current?.getValue() ?? composerText.get();
+        const missing = fresh.filter((reference) => referencesLinkedIn(text, [reference]).length === 0);
+        if (missing.length > 0) insertCitationAtSelection(missing.map(referenceTextLink).join(' '), '');
+    }, [chatDraftIdentityKey, composerText, insertCitationAtSelection, linkedReferences]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         if (isBtwActive) return;
         const contextText = guestAttachContextText(issue);
@@ -4803,109 +4950,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [isMobile, mobileComposerExpanded, mobileShell, setMessage]);
 
-    // Linked references render as chips beside the attached files, inside the
-    // composer box and inside the mobile pill.
-    const linkedReferenceChips = !isVSCode && hasLinkedReferences ? (
-        <div className="flex flex-wrap items-center gap-2 pt-2">
-            {linkedReferences.map((reference) => {
-                const key = composerReferenceKey(reference);
-                const remove = () => updateLinkedReferences((current) => withoutComposerReference(current, key));
-                switch (reference.kind) {
-                    case 'repository-issue':
-                        return (
-                            <LinkedReferenceRow
-                                key={key}
-                                numberLabel={`#${reference.number}`}
-                                title={reference.title}
-                                url={reference.url}
-                                author={reference.author}
-                                openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
-                                removeLabel={t('chat.chatInput.linked.issue.removeAria')}
-                                onReopenPicker={() => setReferencePicker({ source: 'repository', kind: 'issue' })}
-                                onRemove={remove}
-                            />
-                        );
-                    case 'repository-discussion':
-                        return (
-                            <LinkedReferenceRow
-                                key={key}
-                                numberLabel={`#${reference.number}`}
-                                title={reference.title}
-                                url={reference.url}
-                                author={reference.author}
-                                openInBrowserLabel={t('chat.chatInput.linked.discussion.openInBrowserAria')}
-                                removeLabel={t('chat.chatInput.linked.discussion.removeAria')}
-                                onReopenPicker={() => setReferencePicker({ source: 'repository', kind: 'discussion' })}
-                                onRemove={remove}
-                            />
-                        );
-                    case 'change-request':
-                        return (
-                            <LinkedReferenceRow
-                                key={key}
-                                numberLabel={formatChangeRequestLabel(descriptorOf(reference.provider), reference.number)}
-                                title={reference.title}
-                                url={reference.url}
-                                author={reference.author}
-                                branches={reference.head && reference.base ? { head: reference.head, base: reference.base } : undefined}
-                                openInBrowserLabel={t(changeRequestCopy('chat.chatInput.linked.pr.openInBrowserAria', descriptorOf(reference.provider).terminology.changeRequest))}
-                                removeLabel={t(changeRequestCopy('chat.chatInput.linked.pr.removeAria', descriptorOf(reference.provider).terminology.changeRequest))}
-                                onReopenPicker={() => setReferencePicker({ source: 'repository', kind: 'pull' })}
-                                onRemove={remove}
-                            />
-                        );
-                    case 'tracker-item': {
-                        const trackerName = trackerDescriptors.find((descriptor) => descriptor.id === reference.provider)?.name ?? reference.provider;
-                        return (
-                            <LinkedReferenceRow
-                                key={key}
-                                numberLabel={reference.identifier}
-                                title={reference.title}
-                                url={reference.url}
-                                author={reference.author}
-                                openInBrowserLabel={t('chat.chatInput.linked.trackerItem.openInBrowserAria', { provider: trackerName })}
-                                removeLabel={t('chat.chatInput.linked.trackerItem.removeAria', { provider: trackerName })}
-                                onReopenPicker={() => setReferencePicker({ source: trackerReferenceSource(reference.provider) })}
-                                onRemove={remove}
-                            />
-                        );
-                    }
-                    case 'shared-page':
-                        return (
-                            <SharedPageChip
-                                key={key}
-                                reference={reference}
-                                onChange={(next) => updateLinkedReferences((current) => withComposerReferences(current, [next]))}
-                                onRemove={remove}
-                            />
-                        );
-                    case 'guest':
-                        return (
-                            <LinkedReferenceRow
-                                key={key}
-                                numberLabel={reference.thread === 'pull'
-                                    ? t('chat.chatInput.linked.guest.pr.number', { id: reference.id })
-                                    : reference.id}
-                                title={reference.title}
-                                url={reference.url}
-                                author={reference.author ? { login: reference.author } : undefined}
-                                branches={reference.thread === 'pull' && reference.head && reference.base
-                                    ? { head: reference.head, base: reference.base }
-                                    : undefined}
-                                openInBrowserLabel={t('chat.chatInput.linked.guest.openInBrowserAria', { id: reference.id })}
-                                removeLabel={t('chat.chatInput.linked.guest.removeAria', { id: reference.id })}
-                                onReopenPicker={() => reopenGuestItem(reference)}
-                                onRemove={remove}
-                            />
-                        );
-                }
-            })}
-        </div>
-    ) : null;
     // Pending context (review comments, quotes, annotations, terminal
     // selections) lists as rows right above the input, one per item.
     const contextRows = hasDrafts ? (
-        <ComposerContextRows draftTarget={inlineDraftTarget} isMobile={isMobile} />
+        <ComposerContextRows draftTarget={inlineDraftTarget} isMobile={isMobile} onOpenAttachment={openAttachmentByName} />
     ) : null;
     // The suggested follow-up is the composer's own top row on every surface
     // (inside the mobile pill and the box alike); on mobile the model and
@@ -5291,6 +5339,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ) : isMobile && !mobileComposerExpanded && !isBtwActive ? (
                     <MobilePillComposer
                         message={pillText}
+                        messageContent={withAttachmentChips(pillText, attachmentFilenames, 'pill')}
                         sessionId={currentSessionId}
                         newSessionDraftOpen={newSessionDraftOpen}
                         hasContent={Boolean(hasContent) && !pendingFirstSend}
@@ -5302,11 +5351,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         stopIconSizeClass={stopIconSizeClass}
                         topRow={composerTopRows}
                         attachments={(
-                            <div className="px-3 pt-1">
-                                <AttachedFilesList draftIdentity={chatDraftIdentity} onShowPopup={handleShowAttachmentPreview} className="pt-2" />
-                                {linkedReferenceChips}
-                                {contextRows}
-                            </div>
+                            contextRows ? <div className="px-3 pt-1">{contextRows}</div> : null
                         )}
                         bottomRow={mobileModelAgentRow}
                         onExpand={mobileShell.expand}
@@ -5435,12 +5480,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         {parallel.isActive ? <ParallelComposerStrip parallel={parallel} project={parallelProjectRef} /> : null}
                         {composerTopRows}
-                        <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
-                            <AttachedFilesList draftIdentity={chatDraftIdentity} onShowPopup={handleShowAttachmentPreview} className="pt-2" />
-                            {!isBtwActive ? linkedReferenceChips : null}
-                            <AttachedVSCodeFileChips draftIdentity={chatDraftIdentity} onShowPopup={handleShowAttachmentPreview} />
-                            {!isBtwActive ? <ActiveEditorFileSuggestion /> : null}
-                        </div>
+                        {isVSCode && !isBtwActive ? (
+                            <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
+                                <ActiveEditorFileSuggestion />
+                            </div>
+                        ) : null}
                         {contextRows ? <div className="relative z-10 px-1.5">{contextRows}</div> : null}
                         <div
                             ref={dictationHeightHostRef}
@@ -5661,6 +5705,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         /> : null}
+        {/* A shared page reads the server whether or not its card is open: the
+            id its link got, its state, and once opened, the page the agent gets
+            (a page added from Pages may already be open). The card shows the
+            same chip; this copy stays out of sight. */}
+        <div hidden>
+            {linkedReferences.flatMap((reference) => (
+                reference.kind === 'shared-page' && composerReferenceKey(reference) !== openSharedPageKey
+                    ? [<SharedPageChip
+                        key={composerReferenceKey(reference)}
+                        reference={reference}
+                        onChange={(next) => updateLinkedReferences((current) => withComposerReferences(current, [next]))}
+                    />]
+                    : []
+            ))}
+        </div>
+        <SharedPageCardDialog
+            reference={openSharedPage}
+            onChange={(next) => updateLinkedReferences((current) => withComposerReferences(current, [next]))}
+            onClose={() => setOpenSharedPageKey(null)}
+        />
+
         {attachmentPreviewMounted ? (
             <React.Suspense fallback={null}>
                 <ToolOutputDialog

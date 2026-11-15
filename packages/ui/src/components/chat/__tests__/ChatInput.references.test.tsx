@@ -94,7 +94,7 @@ const { EditorView } = await import('@codemirror/view');
 const { openSessionDraft } = await import('@/components/session/sidebar/works/openSessionDraft');
 const { useInputStore } = await import('@/sync/input-store');
 const { useBtwStore } = await import('@/stores/useBtwStore');
-const { createChatDraftIdentity } = await import('@/lib/chatDraftPersistence');
+const { createChatDraftIdentity, readChatDraft } = await import('@/lib/chatDraftPersistence');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
 const { readLinkedReferences, useLinkedReferenceDrafts } = await import('../composer/linkedReferenceDrafts');
 const { usePendingComposerReferences } = await import('../composer/pendingComposerReferences');
@@ -180,9 +180,9 @@ test('picker confirmation keeps its source draft when context resolves after A t
     await act(async () => { resolveIssue(issue); expect(await pending).toBeNull(); });
     expect(readLinkedReferences(identity('session-a'))).toMatchObject([{ kind: 'repository-issue', number: 7 }]);
     expect(readLinkedReferences(identity('session-b'))).toEqual([]);
-    expect(container.textContent).not.toContain(issue.title);
-    await act(async () => selectSession('session-a'));
-    expect(container.textContent).toContain(issue.title);
+    // The item stands in its own draft's text as its link's chip, wherever the composer is now.
+    expect(readChatDraft(identity('session-a')).text).toContain(issue.url);
+    expect(readChatDraft(identity('session-b')).text).not.toContain(issue.url);
   });
 });
 

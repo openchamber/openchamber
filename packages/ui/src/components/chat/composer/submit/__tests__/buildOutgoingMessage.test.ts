@@ -516,37 +516,12 @@ describe('capturing composer context for the queue', () => {
 
 const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
 
-const LINKED_REFERENCE_KINDS = ['linkedReferences'];
-
 /** Lift one predicate out of the composer source: the code under test is the parameter source. */
 const gateExpression = (pattern: RegExp, what: string): string => {
     const match = pattern.exec(chatInputSource);
     if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
     return match[1];
 };
-
-/** Every value in the file that is derived from the linked references. */
-const linkedReferenceValues = (): string[] => {
-    const names: string[] = [];
-    for (const match of chatInputSource.matchAll(/const (\w+) = ([^;\n]*);/g)) {
-        const [, name, expression] = match;
-        if (LINKED_REFERENCE_KINDS.every((kind) => expression.includes(kind))) names.push(name);
-    }
-    return names;
-};
-
-/**
- * True when a predicate counts a linked reference: it names the reference list
- * directly, or it reads a value derived from it. The assertion follows that
- * intent rather than one variable name, so inlining the value back into the
- * predicates stays green while a predicate that stops counting stays red.
- */
-const countsLinkedReference = (predicate: string): boolean =>
-    LINKED_REFERENCE_KINDS.some((kind) => predicate.includes(kind))
-    || linkedReferenceValues().some((name) => predicate.includes(name));
-
-/** The condition the builder strips linked references with, read from the builder call itself. */
-const builderStripGuard = gateExpression(/references: (\w+) \? \[\] : linkedReferences/, 'the builder strip on linked references');
 
 describe('the composer send gate counts what the submission builder counts', () => {
     // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
@@ -564,29 +539,17 @@ describe('the composer send gate counts what the submission builder counts', () 
             .toContain('queuedProjection[0]?.sendConfig');
     });
 
-    test('every predicate the composer sends with counts a linked reference', () => {
-        const gates = [
+    test('a linked item is its link in the text: the gates count the text, and only linked items go', () => {
+        // The send-button gate and the submit guard need no list of their own:
+        // an item without its link in the text stays behind.
+        for (const gate of [
             gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
             gateExpression(/hasContent: (currentMessage\.trim\(\)[^,\n]*),/, 'the submit guard predicate'),
-            gateExpression(/hasContent: (options\.presetText\.trim\(\)[^,\n]*),/, 'the preset snapshot predicate'),
-        ];
-
-        for (const gate of gates) {
-            expect(countsLinkedReference(gate)).toBe(true);
-            // The builder drops the linked context in that mode, so the gate must too.
-            expect(gate).toContain(builderStripGuard);
+        ]) {
+            expect(gate).not.toContain('linkedReferences');
         }
-    });
-
-    test('the submit guard recomputes when a linked reference changes', () => {
-        expect(countsLinkedReference(gateExpression(
-            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{([\s\S]*?)\n {4}\}, \[/,
-            'the submit guard body',
-        ))).toBe(true);
-        expect(countsLinkedReference(gateExpression(
-            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{[\s\S]*?\n {4}\}, ([^)]*)\);/,
-            'the submit guard dependencies',
-        ))).toBe(true);
+        expect(chatInputSource).toContain('referencesLinkedIn(sentComposerText, linkedReferences)');
+        expect(chatInputSource).toContain('referencesLinkedIn(messageToQueue, linkedReferences)');
     });
 
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {

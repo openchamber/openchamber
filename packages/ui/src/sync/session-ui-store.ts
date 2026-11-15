@@ -121,8 +121,6 @@ import {
   type InputHistorySubmission,
 } from '@/stores/useInputHistoryStore'
 
-export type { AttachedFile }
-
 type GoalCommand = { name: string; template?: string }
 
 export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
