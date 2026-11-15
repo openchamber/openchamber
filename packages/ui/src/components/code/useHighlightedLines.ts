@@ -1,15 +1,13 @@
 import React from 'react';
-import {
-  getCachedHighlightedLines,
-  highlightLinesInWorker,
-} from '@/components/chat/markdown/markdown-worker';
+import { getHighlightedLines, highlightLines } from '@/components/chat/markdown/highlightedCode';
 import { carryUnchangedLines, type ReadyHighlight } from './carryHighlightedLines';
 
-// Tokenize a whole block ONCE in the Shiki worker and expose per-line inner
-// HTML. For per-line layouts (diffs, gutters, virtualization) that would
-// otherwise spawn one highlighter per row. Cached results are available on the
-// first render; cold requests distinguish loading from permanent failure so
-// callers can choose whether to reveal their plain-text fallback.
+// Tokenize a whole block ONCE and expose per-line inner HTML. For per-line
+// layouts (diffs, gutters, virtualization) that would otherwise highlight row
+// by row. Results are available on the first render once Highlights has
+// loaded; until then the hook distinguishes loading from permanent failure
+// (a runtime where Highlights cannot run) so callers can choose whether to
+// reveal their plain-text fallback.
 //
 // Whole-block tokenization also restores cross-line syntax context (multi-line
 // strings / comments) that independent per-line highlighting loses.
@@ -18,12 +16,12 @@ import { carryUnchangedLines, type ReadyHighlight } from './carryHighlightedLine
 // every line whose text did not change, so a block that grows or is edited in
 // place (a streaming write, an agent editing a file) keeps its colours instead
 // of flashing to plain text. Lines that changed stay undefined.
-export type WorkerHighlightedLinesResult =
+export type HighlightedLinesResult =
   | { status: 'loading'; lines: null; carriedLines: readonly (string | undefined)[] }
   | { status: 'ready'; lines: string[] }
   | { status: 'failed'; lines: null };
 
-type HighlightState = WorkerHighlightedLinesResult & {
+type HighlightState = HighlightedLinesResult & {
   code: string;
   language: string;
   /** The latest ready result, kept across loading states to carry lines from. */
@@ -31,22 +29,22 @@ type HighlightState = WorkerHighlightedLinesResult & {
 };
 
 const getHighlightState = (code: string, language: string, lastReady: ReadyHighlight | null): HighlightState => {
-  const lines = getCachedHighlightedLines(code, language);
+  const lines = getHighlightedLines(code, language);
   return lines
     ? { status: 'ready', lines, code, language, lastReady: { code, language, lines } }
     : { status: 'loading', lines: null, carriedLines: carryUnchangedLines(lastReady, code, language), code, language, lastReady };
 };
 
-export const useWorkerHighlightedLines = (code: string, language: string): WorkerHighlightedLinesResult => {
+export const useHighlightedLines = (code: string, language: string): HighlightedLinesResult => {
   const normalizedLanguage = (language || 'text').toLowerCase();
   const [state, setState] = React.useState<HighlightState>(() => getHighlightState(code, normalizedLanguage, null));
 
   React.useEffect(() => {
     setState((previous) => getHighlightState(code, normalizedLanguage, previous.lastReady));
-    if (getCachedHighlightedLines(code, normalizedLanguage)) return;
+    if (getHighlightedLines(code, normalizedLanguage)) return;
 
     let active = true;
-    void highlightLinesInWorker(code, normalizedLanguage).then((lines) => {
+    void highlightLines(code, normalizedLanguage).then((lines) => {
       if (!active) return;
       setState((previous) => (lines
         ? { status: 'ready', lines, code, language: normalizedLanguage, lastReady: { code, language: normalizedLanguage, lines } }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -91,7 +91,7 @@ function ReplyCommandOutput({ run }: { run: ReplyCommandRun }) {
           {/* Like a shell tool row: plain while it streams, highlighted once it settles. */}
           {running
             ? <pre className="m-0 whitespace-pre-wrap break-words">{output}</pre>
-            : <WorkerHighlightedCode language="bash" code={output} style={TRANSPARENT} wrap />}
+            : <HighlightedCode language="bash" code={output} style={TRANSPARENT} wrap />}
         </div>
       ) : null}
     </div>

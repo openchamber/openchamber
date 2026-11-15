@@ -29,10 +29,6 @@ const { useSkillsStore } = await import('@/stores/useSkillsStore');
 const { ThemeSystemContext } = await import('@/contexts/theme-system-context');
 const { getDefaultTheme } = await import('@/lib/theme/themes');
 const { EditorView } = await import('@codemirror/view');
-const { plugin } = await import('bun');
-plugin({ name: 'skill-editor-worker-url', setup(build) {
-  build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
-} });
 const { SkillsPage } = await import('./SkillsPage');
 const theme = getDefaultTheme(false);
 const noThemeChange = (): never => { throw new Error('Unexpected theme change'); };

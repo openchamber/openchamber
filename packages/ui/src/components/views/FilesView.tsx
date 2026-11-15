@@ -49,7 +49,7 @@ import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/l
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
-import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { ensurePierreThemeRegistered, getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
 import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
@@ -3732,17 +3732,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     // Same language resolver as the view, so both agree on the language. When
     // it is the color source, drop the lezer token colors to avoid a
     // competing highlighter (Keep the lezer language for indentation/folding).
-    const shikiLanguage = getLanguageFromExtension(selectedFile.path);
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
+    const highlightLanguage = getLanguageFromExtension(selectedFile.path);
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, highlightLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
     }
-    if (shikiLanguage) {
+    if (highlightLanguage) {
       extensions.push(codeHighlightExtension({
-        language: shikiLanguage,
-        themeName: getThemeRenderName(currentTheme),
-        theme: getCodeTokenTheme(currentTheme),
+        language: highlightLanguage,
+        theme: getCodeTokenTheme(currentTheme).zed,
       }));
     }
     if (wrapLines) {

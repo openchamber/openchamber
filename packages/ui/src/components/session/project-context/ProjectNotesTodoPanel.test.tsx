@@ -98,11 +98,6 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
   return Response.json({ error: 'Unavailable in this fixture' }, { status: 503 });
 }, originalFetch);
 
-// An open note renders Markdown, whose highlighter is a Vite worker URL.
-const { plugin } = await import('bun');
-plugin({ name: 'knowledge-note-worker-url', setup(build) {
-  build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
-} });
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');

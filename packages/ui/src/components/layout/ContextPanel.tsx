@@ -1295,6 +1295,11 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       data-context-zone={zone}
       data-right-slot={zone === 'right' ? '' : undefined}
       data-context-panel-open={isOpen ? 'true' : 'false'}
+      // The size the zone is at or animating to, for a surface that must know
+      // it before the animation gets there (the browser page, `useSteadyStage`).
+      // An attribute and not a custom property: nothing selects on it, so
+      // changing it restyles nothing.
+      data-zone-size={size}
       tabIndex={-1}
       className={cn(
         // `overflow-clip` on both axes, never `hidden`: a `hidden` axis makes

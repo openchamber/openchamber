@@ -721,5 +721,8 @@ side column animates or is dragged and lets the stage clip it: unchanged while
 the stage shrinks, one step (`GROW_STEP`) wider when the stage outgrows it,
 and the stage's width again once the layout settles. Following the stage on
 every frame, an expand with a site open drew 3 to 5 of the animation's 15
-frames in the desktop app. The page is therefore laid out wider than what
-shows until the animation ends, and snaps to the final width then.
+frames in the desktop app. A zone that grows to a size it already knows (an
+expand) publishes it as `data-zone-size`, and the page takes its final width
+before the animation starts, so nothing snaps at the end. A drag has no final
+size: there the page is laid out up to a step wider than what shows and takes
+the exact width on release.

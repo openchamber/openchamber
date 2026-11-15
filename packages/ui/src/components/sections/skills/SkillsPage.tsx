@@ -53,7 +53,7 @@ import { useI18n } from '@/lib/i18n';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
-import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
@@ -305,18 +305,17 @@ const SkillsInstalledPage: React.FC = () => {
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
     // File-view token colors for code supporting files; markdown stays on lezer.
-    const shikiLanguage = getLanguageFromExtension(filePath);
-    const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
+    const highlightLanguage = getLanguageFromExtension(filePath);
+    const useHighlight = Boolean(highlightLanguage) && highlightLanguage !== 'markdown';
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useHighlight ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const languageExtension = languageByExtension(filePath);
     if (languageExtension) {
       extensions.push(languageExtension);
     }
-    if (useShiki && shikiLanguage) {
+    if (useHighlight && highlightLanguage) {
       extensions.push(codeHighlightExtension({
-        language: shikiLanguage,
-        themeName: getThemeRenderName(currentTheme),
-        theme: getCodeTokenTheme(currentTheme),
+        language: highlightLanguage,
+        theme: getCodeTokenTheme(currentTheme).zed,
       }));
     }
     extensions.push(EditorView.lineWrapping);

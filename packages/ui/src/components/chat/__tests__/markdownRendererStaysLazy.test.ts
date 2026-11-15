@@ -1,7 +1,7 @@
 /**
  * Regression guard: the Markdown renderer stays out of the startup bundle.
  *
- * `MarkdownRendererImpl` brings Streamdown, KaTeX and Shiki; beautiful-mermaid
+ * `MarkdownRendererImpl` brings Streamdown and KaTeX; beautiful-mermaid
  * with ELK loads separately, with the first diagram. `markdownRendererLoader` imports it
  * dynamically so the first screen does not wait for it, but one static value
  * import from a module of the startup graph puts all of it back into that

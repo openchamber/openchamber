@@ -246,7 +246,7 @@ use native `data-streamdown` markers.
 #### Why Markdown consumers use the lazy wrapper
 
 `markdownRendererLoader.ts` dynamically imports the renderer and its imports,
-including Streamdown, KaTeX, Shiki and beautiful-mermaid with ELK.
+including Streamdown, KaTeX and beautiful-mermaid with ELK.
 The web and mobile entry points start that import at boot without making the
 first render wait for it.
 Components take `MarkdownRenderer`, `SimpleMarkdownRenderer` or
@@ -363,61 +363,48 @@ rendering keeps its direct-child rules. This CSS alternative still needs its
 own browser performance comparison; the explicit-metadata experiment does not
 establish its invalidation cost.
 
-Markdown code in languages with a `@pierre/highlights` lexer (about 170, every
-common one) is tokenized on the main thread, synchronously, in one pass over
-the whole block with `MARKDOWN_HIGHLIGHTS_THEME`, so the block paints
-highlighted on its first commit. The rest run in `streamdown-code.worker.ts`
-on Shiki/Oniguruma with the same grammar sanitization as the shared code
-worker and `MARKDOWN_SHIKI_THEME`. Until the Highlights import settles, the
-first blocks wait for it and then take the same split. Both themes resolve to the same `--md-*` variables.
-ANSI is the exception: Highlights has a lexer for it, but its tokens drop the
-escape sequences and merge the text around them, so token text no longer
-matches the source. Everything here places tokens by source offset (the packed
-transfer ranges, CodeMirror decorations), so `isHighlightsLanguage` in
-`highlightsEngine.ts` keeps ANSI on Shiki.
-For Shiki languages, complete-line grammar state stays in eight bounded worker
-lineages; edits restart from a matching prefix or a full pass. The client preserves the pre-migration cache
-policy: four recent streaming results, four complete-line snapshots, and a
-2000-entry, 24 MiB estimated completed-result LRU. Language and the existing
-dual-hash content fingerprint key pure highlighting. A single oversized entry
-is retained; no filesystem or runtime-dependent annotations enter this cache.
-Only completed requests coalesce. Streaming results promote to the completed
-cache when the same source settles. Snapshot sequence numbers keep an older
-response from replacing a newer base in the same lineage.
-Streaming requests reuse complete prefix rows and transfer only suffix token
-ranges and palette indexes in two ArrayBuffers. Text is reconstructed from the
-caller's source using UTF-16 offsets, without JSON encode/decode. Whitespace
-tokens may absorb foreground differences but preserve font/background and
-decoration boundaries. `MarkdownCode` owns the React token rows and line numbers,
-using Streamdown's public container and header. A warm lookup renders tokens on
-the first commit; unchanged row arrays skip row rendering. Async results carry
-their input and append lineage, so abandoned contexts and shorter late results
-cannot replace newer displays. Shiki never runs on the main thread:
-unsupported workers, oversized input and failed requests leave readable code.
-Main-thread Highlights results go through the same caches; streaming rows that
-match the previous result of the same block keep their identity. Each dispatched request has a five-second
-deadline. A timeout terminates the worker, caches only the offending failure in
-the same LRU, and replays other pending requests with fresh deadlines. A crash
-or message error ends all pending requests without caching their failure;
-subsequent requests may retry. Work serializes inside the worker, with no new
-main-thread queue admission limit. The existing `openchamber_stream_highlight`
-full-pass flag bypasses incremental reuse. Language-load failure falls back to
-text. Line budgets remain 1200 settled, 300 open-fence, and 200 in VS Code.
+Markdown code is tokenized by `@pierre/highlights` on the main thread,
+synchronously, in one pass over the whole block with
+`MARKDOWN_HIGHLIGHTS_THEME`, so the block paints highlighted on its first
+commit. Colors are the `--md-*` variables, so a theme switch repaints through
+CSS without tokenizing again. `highlightsLanguage` in `highlightsEngine.ts`
+picks the lexer for every consumer: the language's own, a close relative's from
+`LANGUAGE_RELATIVES` (`lib/shiki/languageRelatives.ts`, shared with files and
+diffs), or plain text. Until the Highlights import settles, the first blocks
+show plain text and wait for it. A runtime whose WebAssembly lacks SIMD fails
+the import, and code there stays plain text.
+A fence tagged `ansi` shows its text with the escape sequences removed and no
+colors (`stripAnsi`); the copy button and selection still give the fence's own
+source. Highlights has an ANSI lexer, but its tokens drop the escapes and merge
+the text around them, so they stop matching the source, and file-path marking
+and CodeMirror decorations place tokens by source offset.
+`MarkdownCodeHighlighter` keeps four recent streaming results and a 2000-entry,
+24 MiB estimated completed-result LRU. Language and the dual-hash content
+fingerprint key pure highlighting. A single oversized entry is retained; no
+filesystem or runtime-dependent annotations enter this cache. Streaming results
+promote to the completed cache when the same source settles. Streaming rows
+that match the previous result of the same block keep their identity, so React
+skips them. Whitespace tokens may absorb foreground differences but preserve
+font/background and decoration boundaries. `MarkdownCode` owns the React token
+rows and line numbers, using Streamdown's public container and header. Async
+results carry their input and append lineage, so abandoned contexts and shorter
+late results cannot replace newer displays. Line budgets remain 1200 settled,
+300 open-fence, and 200 in VS Code; a block over its budget renders as plain
+rows.
 Lexical file-path matches have a separate bounded source cache; confirmation
 stays directory/runtime-bound. Empty path results do not trigger another token
 callback, and annotations reuse results only within their resolver instance.
-VS Code loads the bundled worker through its existing webview blob-worker
-boundary. Image export awaits the same token path with a bounded fallback to
-readable source. The code body reads prepared tokens during render, so the final
-flush commits them without DOM readiness markers or an observer.
+Image export awaits the same token path with a bounded fallback to readable
+source. The code body reads prepared tokens during render, so the final flush
+commits them without DOM readiness markers or an observer.
 
 #### Why pending code retains its last result
 
 Like Streamdown's highlighted body, the code body uses plain text on first mount
-and retains the last display while an appended input waits for highlighting.
-It does not splice tokens itself: the worker owns complete-line grammar and token
-reuse. Replacing the entire block with plain rows between worker results discarded
-prefix identity and repeatedly deleted and recreated highlighted tokens.
+and retains the last display while an appended input waits for highlighting,
+which happens only until the Highlights import settles.
+Replacing the entire block with plain rows between results discarded prefix
+identity and repeatedly deleted and recreated highlighted tokens.
 
 A mounted body records the displayed result's actual input after commit. Results
 for intermediate append inputs may advance that display even when newer input is
@@ -425,44 +412,50 @@ pending, so continuous output does not starve updates. Shorter late results cann
 roll it back. Edits, deletions, language changes and plugin/context changes start
 a new lineage; callbacks from abandoned lineages are ignored even if the text
 later returns to an old prefix. Exact cached and policy-driven plain results take
-precedence. Worker failure publishes the requested plain text through the existing
-plugin fallback. This is one mounted component's display state, not a shared cache.
+precedence. Where Highlights cannot run, the plugin publishes the requested
+plain text. This is one mounted component's display state, not a shared cache.
 
-The separate code worker (`markdown-shiki.worker.ts`) remains shared by
-non-Markdown code views for Shiki languages. Their client renders Highlights
-languages on the main thread, and `getCachedHighlightedCode` /
-`getCachedHighlightedLines` answer them synchronously for a highlighted first
-paint.
-CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights' `LiveTokenizer`
-on the main thread, so an edit re-tokenizes only the lines it changed and
-colors land with the keystroke; it uses this worker only for languages without
-a Highlights lexer. Its whole-block HTML, per-line HTML and themed token APIs,
-cache and timeout/replay rules are unchanged. Markdown does not call that
-worker's HTML interfaces. Its `init` message warms Highlights only; Shiki and
-its WebAssembly start on the first language Highlights has no lexer for.
+Code views outside Markdown (`HighlightedCode`,
+`useHighlightedLines`) take whole-block and per-line HTML from
+`highlightedCode.ts`, which renders with Highlights on the main thread and
+memoizes by content fingerprint in a 2000-entry, 24 MiB LRU.
+`getHighlightedCode` / `getHighlightedLines` answer synchronously for a
+highlighted first paint; `highlightCode` / `highlightLines` wait for the import
+first. CodeMirror (`lib/codemirror/codeHighlight.ts`) runs Highlights'
+`LiveTokenizer` on the main thread, so an edit re-tokenizes only the lines it
+changed and colors land with the keystroke. Both follow the same language,
+ANSI and no-SIMD rules as Markdown code.
 
-#### Why Highlights languages run on the main thread without lineages
+#### Why Highlights runs on the main thread without lineages
 
 Highlights tokenizes without regular expressions, about a millisecond per
 100 KB, which is less than a worker round trip; the line budgets cap a block
 well below that. Running it on the main thread removes the plain first frame,
 and re-tokenizing a streamed fence from its first line costs less than keeping
-and matching lineage state. Its lexers are written per
-language and cannot backtrack, so the `template-call` hang behind the
-sanitization does not apply to them. A runtime whose WebAssembly lacks SIMD
-fails the Highlights import, and every language falls back to Shiki.
+and matching lineage state. Its lexers are written per language and cannot
+backtrack, so no request needs a deadline.
 
-#### Why the code plugin uses the application's WASM worker
+#### Why Highlights is the only highlighter and not Highlights with a Shiki fallback
 
-The official code plugin tokenizes both configured themes even when they are
-identical. This application uses one CSS-variable theme, so its worker runs one
-pass and, for Shiki languages, reuses the existing grammar sanitization and
-complete-line state rules. Transferring suffix ranges keeps repeated token strings and
-unchanged rows out of worker replies while preserving native Streamdown tokens.
-Cache eviction, request coalescing, timeout replay and grammar-lineage retention
-follow the pre-migration worker. The payload and its byte estimate change from
-HTML to tokens so React can own the code body; streaming-only prefixes stay in
-the bounded recent results.
+A Shiki/Oniguruma worker used to highlight what Highlights did not: languages
+without a lexer, `ansi` fences, and every language on a runtime without
+WebAssembly SIMD (Safari before 16.4). It was rejected for its cost against
+what it served. The fallback needed two workers, grammar-state resume for
+streamed fences, a five-second deadline with worker restart against grammar
+backtracking, grammar sanitization and a second theme format, and the language
+list alone put Shiki core and the 614 KB Oniguruma engine on the main thread at
+startup. Rare languages now take a relative's lexer or plain text, ANSI output
+is plain text, and a runtime without SIMD shows uncolored code. `@pierre/diffs`
+keeps its own `shiki-js` fallback for files and diffs.
+
+#### Why the code plugin is the application's and not `@streamdown/code`
+
+The official code plugin runs Shiki and tokenizes both configured themes even
+when they are identical. This application colors through one set of CSS
+variables, so its plugin runs one Highlights pass and returns native Streamdown
+tokens that React renders as rows. Streamdown reads only `getThemes` and
+`highlight` from it; its language questions belong to its own code block, which
+`MarkdownCode` replaces.
 
 ### Optional history disclosure
 

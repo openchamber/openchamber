@@ -1,7 +1,5 @@
 import React, { act } from 'react';
 import { describe, expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -16,18 +14,6 @@ import { I18nProvider } from '@/lib/i18n';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
-
-// Bun does not implement Vite's asset-query imports. Preserve the real asset
-// URL while keeping the renderer and worker client modules unchanged.
-plugin({
-  name: 'reasoning-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { TimelineNotice } = await import('../TimelineNotice');
 

@@ -18,6 +18,17 @@ export const pinnedPageWidth = (pinned: number | null, settled: number, stage: n
   return stage <= held ? held : Math.ceil(stage) + GROW_STEP;
 };
 
+/**
+ * The width the page takes as an animation starts: the one the stage will
+ * have at its end when the zone is growing and says how far (`zoneFrom` to
+ * `zoneTo`, its size before and its target), so the page is resized once,
+ * before anything moves. Otherwise the width it has.
+ */
+export const pageWidthAtStart = (settled: number, zoneFrom: number | null, zoneTo: number | null): number => {
+  const growth = zoneFrom !== null && zoneTo !== null ? zoneTo - zoneFrom : 0;
+  return growth > 0 ? settled + growth : settled;
+};
+
 type StageSize = { width: number; height: number };
 
 /**
@@ -32,7 +43,9 @@ type StageSize = { width: number; height: number };
  * holds a fixed width at the stage's start edge and the stage clips it:
  * unchanged while the stage shrinks, one step wider when the stage outgrows
  * it. It is pinned from the animation's start, before the first frame moves
- * the stage. It takes the stage's width again once the layout settles, which is
+ * the stage: at the stage's final width when the zone grows to a size it
+ * already knows (an expand), so the page is resized once and nothing snaps
+ * at the end. A drag has no final size, so there the step applies. It takes the stage's width again once the layout settles, which is
  * also when the size is published as state, so the pane does not re-render
  * per frame either.
  *
@@ -54,12 +67,23 @@ export const useSteadyStage = (
     let latest: StageSize | null = null;
     let settledWidth = 0;
     let pinned: number | null = null;
+    // The side zone the stage sits in publishes the size it is at or
+    // animating to (`data-zone-size`, ContextPanel). The bottom zone's size
+    // is a height, which the page's width does not follow.
+    const zoneSize = (): number | null => {
+      const zone = stage.closest<HTMLElement>('[data-context-panel]');
+      if (!zone || zone.dataset.contextZone === 'bottom') return null;
+      const size = Number(zone.dataset.zoneSize);
+      return size > 0 ? size : null;
+    };
+    let settledZoneSize = zoneSize();
 
     const settle = () => {
       if (pinned !== null) {
         pinned = null;
         if (pageRef.current && !sizedRef.current) pageRef.current.style.width = '100%';
       }
+      settledZoneSize = zoneSize();
       if (!latest) return;
       const next = latest;
       settledWidth = next.width;
@@ -88,8 +112,8 @@ export const useSteadyStage = (
     const stopListening = onLayoutAnimationStart(() => {
       const page = pageRef.current;
       if (!page || sizedRef.current || settledWidth === 0 || pinned !== null) return;
-      pinned = settledWidth;
-      page.style.width = `${settledWidth}px`;
+      pinned = pageWidthAtStart(settledWidth, settledZoneSize, zoneSize());
+      page.style.width = `${pinned}px`;
       runWhenLayoutSettled(settle);
     });
     return () => {

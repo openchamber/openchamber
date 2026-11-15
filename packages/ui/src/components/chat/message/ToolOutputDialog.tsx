@@ -2,7 +2,7 @@ import { isShellTool, isSubagentTool, isWriteTool } from '@/lib/opencode/tools';
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -1069,7 +1069,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     </div>
                                     {isShellTool(metaTool) && getInputValue('command') ? (
                                         <div className="tool-input-surface oc-tile rounded-xl mx-3">
-                                            <WorkerHighlightedCode
+                                            <HighlightedCode
                                                 language="bash"
                                                 code={getInputValue('command')!}
                                                 style={toolDisplayStyles.getPopupStyles()}
@@ -1158,7 +1158,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                                     return (
                                         renderWebSearchOutput(popup.content) || (
-                                            <WorkerHighlightedCode
+                                            <HighlightedCode
                                                 language="text"
                                                 code={popup.content}
                                                 style={toolDisplayStyles.getPopupContainerStyles()}
@@ -1186,7 +1186,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 return (
-                                    <WorkerHighlightedCode
+                                    <HighlightedCode
                                         language={popup.language || 'text'}
                                         code={popup.content}
                                         style={toolDisplayStyles.getPopupContainerStyles()}

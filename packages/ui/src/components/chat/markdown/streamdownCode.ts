@@ -1,11 +1,9 @@
-import { bundledLanguagesInfo } from 'shiki/langs';
 import type { CodeHighlighterPlugin, HighlightOptions, HighlightResult, HighlightToken } from 'streamdown';
-import { MARKDOWN_SHIKI_THEME_DEFINITION } from './markdownShikiThemeDefinition';
-import { streamdownCodeWorker } from './streamdownCodeWorker';
+import { markdownCodeHighlighter } from './markdownCodeHighlighter';
 
-const languages = bundledLanguagesInfo.map((info) => info.id);
-const supportedLanguages = new Set(bundledLanguagesInfo.flatMap((info) => [info.id, ...(info.aliases ?? [])]));
-const themes: ReturnType<CodeHighlighterPlugin['getThemes']> = [MARKDOWN_SHIKI_THEME_DEFINITION, MARKDOWN_SHIKI_THEME_DEFINITION];
+// Streamdown hands these back as the highlight input; colors come from the
+// `--md-*` variables, so both slots name the same theme.
+const themes: ReturnType<CodeHighlighterPlugin['getThemes']> = [{ name: 'openchamber-md' }, { name: 'openchamber-md' }];
 function nativeLanguage(language: string): string {
   return language.trim().toLowerCase() || 'text';
 }
@@ -77,7 +75,7 @@ function annotateCodePaths(result: HighlightResult, paths: readonly ConfirmedCod
 }
 
 export interface MarkdownCodePlugin extends CodeHighlighterPlugin {
-  /** Synchronous result lookup; never starts worker or filesystem work. */
+  /** Synchronous result lookup; never starts filesystem work. */
   cached: (input: HighlightOptions) => HighlightResult | null;
 }
 
@@ -95,15 +93,19 @@ export function createMarkdownCodePlugin(options: {
     if (prepared) return prepared;
     if (options.purpose === 'copy' || !canHighlight(input, options.isVSCode)) return plainCode(input.code);
     const language = nativeLanguage(input.language);
-    const result = streamdownCodeWorker.cached(input.code, language, input.isIncomplete ?? false);
+    const result = markdownCodeHighlighter.cached(input.code, language, input.isIncomplete ?? false);
     return result ? annotated.get(result) ?? result : null;
   };
   return {
+    // The only name Streamdown's plugin type accepts.
     name: 'shiki',
     type: 'code-highlighter',
-    getSupportedLanguages: () => languages,
+    // Streamdown asks about languages only in its own code block, which
+    // `MarkdownCode` replaces; every language renders, as itself, as a
+    // relative or as plain text.
+    getSupportedLanguages: () => [],
     getThemes: () => themes,
-    supportsLanguage: (language) => supportedLanguages.has(nativeLanguage(language)),
+    supportsLanguage: () => true,
     cached,
     highlight(input, callback) {
       const finish = (result: HighlightResult) => {
@@ -131,7 +133,7 @@ export function createMarkdownCodePlugin(options: {
       const ready = cached(input);
       if (ready) return options.prepared?.get(input.language)?.has(input.code) ? ready : finish(ready);
       const language = nativeLanguage(input.language);
-      void streamdownCodeWorker.highlight(input.code, language, input.isIncomplete ?? false)
+      void markdownCodeHighlighter.highlight(input.code, language, input.isIncomplete ?? false)
         .then((result) => callback?.(finish(result ?? plainCode(input.code))));
       return null;
     },

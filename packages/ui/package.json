@@ -87,7 +87,6 @@
     "react-dom": "^19.1.1",
     "react-drawio": "1.0.7",
     "rehype-sanitize": "6.0.0",
-    "shiki": "^3.23.0",
     "simple-git": "^4.0.2",
     "sonner": "^2.0.7",
     "sql.js": "1.15.2",

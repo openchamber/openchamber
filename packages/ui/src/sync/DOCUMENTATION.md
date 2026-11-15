@@ -1243,9 +1243,8 @@ Markdown renderer. The existing visibility/commit layer controls when source
 is shown; Streamdown owns parsing and React block updates after that boundary.
 The renderer adds no character-pacing timer or application HTML block cache.
 Native code components own their shell, line numbers and application-owned
-highlighting: Highlights on the main thread for the languages it has a lexer
-for, the Shiki worker for the rest. Non-Markdown code views and CodeMirror use
-the same split independently of Markdown rendering.
+highlighting: Highlights on the main thread. Non-Markdown code views and
+CodeMirror use it too, independently of Markdown rendering.
 
 The event pipeline delivers each ordered per-directory flush as one reducer batch. Events retain their individual notifications, cleanup, routing, materialization, and debug side effects, while directory mutations accumulate in order and publish one store transaction per touched directory. Global session mutations and live status, ordering, and timing transitions also accumulate in event order and each owner publishes at most once for the flush. Each top-level state slice is cloned lazily at most once in that batch; no-op events do not change references.
 

@@ -2,16 +2,14 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
-import { getCachedHighlightedCode, highlightCodeInWorker } from '@/components/chat/markdown/markdown-worker';
+import { getHighlightedCode, highlightCode } from '@/components/chat/markdown/highlightedCode';
 
-// Shared static code highlighter backed by the shared code worker client.
-//
-// Replaces `react-syntax-highlighter` for non-streaming code surfaces (tool
+// Shared static code highlighter for non-streaming code surfaces (tool
 // output, permission previews, diffs, sidebar file contents). Highlights
-// languages paint highlighted synchronously; for the rest the escaped code
-// paints first, the worker tokenizes off the main thread and swaps in the
-// highlighted markup. Colors resolve through the `--md-syntax-*` CSS
-// variables on the host, so theme changes never require re-highlighting.
+// renders on the main thread, so code paints highlighted synchronously; only
+// until its import finishes does the escaped code paint first. Colors resolve
+// through the `--md-syntax-*` CSS variables on the host, so theme changes
+// never require re-highlighting.
 
 const escapeHtml = (text: string): string =>
   text
@@ -32,8 +30,8 @@ const styleString = (style?: React.CSSProperties): string => {
     .join('');
 };
 
-// Normalize a worker/plain `<pre><code>` so it sits flush inside the host: drop
-// Shiki's own background/margin and apply wrap + caller code styles.
+// Normalize a highlighted or plain `<pre><code>` so it sits flush inside the
+// host: drop its own background/margin and apply wrap + caller code styles.
 const applyPreStyles = (host: HTMLElement, wrap: boolean, codeStyle?: React.CSSProperties): void => {
   const pre = host.querySelector('pre');
   if (pre) {
@@ -54,7 +52,7 @@ const applyPreStyles = (host: HTMLElement, wrap: boolean, codeStyle?: React.CSSP
 
 const plainHtml = (code: string): string => `<pre><code>${escapeHtml(code)}</code></pre>`;
 
-interface WorkerHighlightedCodeProps {
+interface HighlightedCodeProps {
   code: string;
   language: string;
   className?: string;
@@ -66,7 +64,7 @@ interface WorkerHighlightedCodeProps {
   wrap?: boolean;
 }
 
-export const WorkerHighlightedCode: React.FC<WorkerHighlightedCodeProps> = ({
+export const HighlightedCode: React.FC<HighlightedCodeProps> = ({
   code,
   language,
   className,
@@ -78,22 +76,22 @@ export const WorkerHighlightedCode: React.FC<WorkerHighlightedCodeProps> = ({
   const hostRef = React.useRef<HTMLDivElement>(null);
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
 
-  // Synchronous first paint: highlighted when the result is ready now (cached,
-  // or a Highlights language), escaped plain code otherwise.
+  // Synchronous first paint: highlighted once Highlights has loaded, escaped
+  // plain code otherwise.
   React.useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    host.innerHTML = getCachedHighlightedCode(code, (language || 'text').toLowerCase()) ?? plainHtml(code);
+    host.innerHTML = getHighlightedCode(code, (language || 'text').toLowerCase()) ?? plainHtml(code);
     applyPreStyles(host, wrap, codeStyle);
   }, [code, language, wrap, codeStyle]);
 
-  // Otherwise highlight in the worker, then swap in. Guarded against stale results.
+  // Otherwise wait for the Highlights import, then swap in. Guarded against stale results.
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (getCachedHighlightedCode(code, (language || 'text').toLowerCase())) return;
+    if (getHighlightedCode(code, (language || 'text').toLowerCase())) return;
     let active = true;
-    void highlightCodeInWorker(code, (language || 'text').toLowerCase()).then((html) => {
+    void highlightCode(code, (language || 'text').toLowerCase()).then((html) => {
       if (!active || !host || !html) return;
       host.innerHTML = html;
       applyPreStyles(host, wrap, codeStyle);
@@ -107,6 +105,7 @@ export const WorkerHighlightedCode: React.FC<WorkerHighlightedCodeProps> = ({
     <div
       ref={hostRef}
       className={cn('oc-surface-code bg-[var(--syntax-background)] typography-code', className)}
+      // SAFETY: the variables are CSS custom properties, which CSSProperties has no keys for.
       style={{ ...(syntaxVars as React.CSSProperties), ...style }}
     />
   );

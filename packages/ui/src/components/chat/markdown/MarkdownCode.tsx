@@ -17,6 +17,7 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { MarkdownSvgFailureContext, useMarkdownPresentation, type MarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
+import { stripAnsi } from './highlightsEngine';
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
 import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
@@ -25,7 +26,7 @@ import { isRunnableLanguage } from '@/lib/opencode/reply-command';
 import { onDemand } from '../uiBlocks/useUiBlockComponent';
 import type { RenderedCommand } from './ReplyCommand';
 
-// Complete prefix rows keep their identity in the worker client, so appending
+// Complete prefix rows keep their identity in the highlighter, so appending
 // code only renders changed rows. React owns every node; no HTML patching.
 const CodeLine = React.memo(function CodeLine({ tokens }: { tokens: HighlightToken[] }) {
   const empty = tokens.length === 0 || (tokens.length === 1 && tokens[0].content === '');
@@ -50,8 +51,7 @@ const MarkdownCodeBody = React.memo(function MarkdownCodeBody({ source, language
   plugin: MarkdownCodePlugin;
 }) {
   const input = React.useMemo(() => ({
-    code: source,
-    language,
+    ...shownCode(source, language),
     isIncomplete: incomplete,
     themes: plugin.getThemes(),
   }), [source, language, incomplete, plugin]);
@@ -115,6 +115,12 @@ const MarkdownCodeBody = React.memo(function MarkdownCodeBody({ source, language
   );
 });
 
+// What a fence shows: terminal output tagged `ansi` is plain text without its
+// escape sequences. Copy still takes the fence's own source.
+const shownCode = (source: string, language: string): { code: string; language: string } => (
+  language.toLowerCase() === 'ansi' ? { code: stripAnsi(source), language: 'text' } : { code: source, language }
+);
+
 // An svg fence with a script or an event handler stays an ordinary code block, so the reader sees what it carries.
 const activeSvg = /<script|\son[a-z]+\s*=/i;
 
@@ -171,7 +177,10 @@ function MarkdownCodeBlock({ children, className, node, command, ...props }: Cod
   const copySource = sourceOf(node);
   const { purpose, onExportCode } = presentation;
   React.useLayoutEffect(() => {
-    if (purpose && language !== 'mermaid') onExportCode?.(code, language);
+    if (purpose && language !== 'mermaid') {
+      const shown = shownCode(code, language);
+      onExportCode?.(shown.code, shown.language);
+    }
   }, [purpose, onExportCode, code, language]);
 
   if (language === 'svg' && presentation.svgFences && !activeSvg.test(code) && failedSvg !== code) {
