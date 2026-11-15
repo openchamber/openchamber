@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 import { Streamdown } from 'streamdown';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './streamdownPlugins';
+import { prepareUserMarkdownContent } from '../message/parts/userTextPartContent';
 
 const dom = new Window();
 function render(source: string, raw = false, vscode = false, singleTilde = false) {
@@ -293,5 +294,34 @@ describe('literal text a person typed', () => {
     const formula = renderTyped('so $x<y$ holds');
     expect(formula.querySelector('.katex-error')).toBeNull();
     expect(formula.querySelector('.katex')).not.toBeNull();
+  });
+
+  test('renders a typed Windows path literally while code, escapes and math keep working (#6990)', () => {
+    const path = renderTyped(prepareUserMarkdownContent({ textContent: 'C:\\Users\\myuser\\.unsloth', skillNames: new Set() }));
+    expect(path.textContent).toBe('C:\\Users\\myuser\\.unsloth');
+
+    const mixed = renderTyped(prepareUserMarkdownContent({ textContent: '`a\\.b` and \\*x\\* and \\(y\\)', skillNames: new Set() }));
+    expect(mixed.querySelector('code')?.textContent).toBe('a\\.b');
+    expect(mixed.textContent).toContain('*x*');
+    expect(mixed.querySelector('em')).toBeNull();
+    expect(mixed.querySelector('.katex')).not.toBeNull();
+  });
+
+  test('keeps the source of a typed formula next to a typed path, for every math delimiter (#6990)', () => {
+    const typed = (textContent: string) => renderTyped(prepareUserMarkdownContent({ textContent, skillNames: new Set() }));
+    const dotted = '\\text{\\.{z}}';
+    for (const formula of [`\\(${dotted}\\)`, `$x ${dotted}$`, `$$${dotted}$$`, `\\[\n${dotted}\n\\]`, `$$\n${dotted}\n$$`]) {
+      const expected = renderTyped(formula).querySelector('.katex-html')?.innerHTML;
+      expect(expected).toBeDefined();
+      const result = typed(`C:\\a\\.b\n\n${formula}`);
+      expect(result.querySelector('.katex-html')?.innerHTML).toBe(expected);
+      expect(result.textContent).toContain('C:\\a\\.b');
+    }
+  });
+
+  test('keeps one backslash in an indented code block (#6990)', () => {
+    const result = renderTyped(prepareUserMarkdownContent({ textContent: 'C:\\x\\.y\n\n    a\\.b', skillNames: new Set() }));
+    expect(result.querySelector('pre code, code')?.textContent?.trim()).toBe('a\\.b');
+    expect(result.textContent).toContain('C:\\x\\.y');
   });
 });

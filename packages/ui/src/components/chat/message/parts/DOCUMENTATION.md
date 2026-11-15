@@ -136,6 +136,23 @@ link. The text wins because it is what the user typed. Lines follow the chat's
 width, so `UserTextPart` measures them before paint, and clamping the block by
 height would cut a row in half.
 
+### Why backslash doubling stops at `.` and `?`
+
+A user message reads as typed, but CommonMark treats `\` + punctuation as
+an escape, so `prepareUserMarkdownContent` doubles backslash runs in prose
+before the renderer sees them — only before `.` and `?`, which start no
+Markdown or emoji construct. Code and formulas keep their source: the
+helper parses the message with the bubble's own math and literal-text
+plugins and skips fenced, indented and inline code and every math node,
+because a doubled backslash shows in code and changes a formula (`\.` is
+KaTeX's dot accent, `\text{\.{z}}`). Link targets keep their source too
+(`[f](./a\.txt)` points at `a.txt`): only a link's label is prose, and
+autolinks, bare URLs, images and reference definitions stay whole. A wider set was tried and reverted
+twice: the full punctuation set re-armed intentional escapes (`\*x\*`),
+live links, and math delimiters. `:` feeds emoji shortcodes for the same
+reason. The next reader tempted to widen the set is re-adding one of those
+regressions.
+
 ### Bidirectional prose
 
 Every paragraph, heading, list item and quote takes the direction most of its
@@ -817,7 +834,10 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `prepareUserMarkdownContent` used to escape them to entities in the source
   instead; entities are not decoded inside code spans and formulas, so
   `` `a<b` `` showed `a&lt;b`, and a quote escaped to `&quot;` let two shell
-  variables (`$USER ... "$HOME"`) read as one formula.
+  variables (`$USER ... "$HOME"`) read as one formula. Backslash runs
+  before `.` and `?` in prose are doubled there for the same reason
+  (CommonMark would strip them as escapes); code, math and every other
+  `\` + punctuation pair stay as typed — see "Why backslash doubling stops at `.` and `?`" above.
 - Attachment citations: the composer writes `[name.png]` into the text for each
   pasted or picked file. `UserTextPart` gets the message's file names and draws
   each citation of one of them as an inline chip with its file-type icon. The
