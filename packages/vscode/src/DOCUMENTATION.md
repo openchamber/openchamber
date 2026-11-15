@@ -232,6 +232,10 @@ The editor-panel host owns a singleton Settings tab separately from its session 
 
 A settings-save broadcast invalidates the recipient's cached server document before its existing settings synchronization runs. Reusing the short-lived GET cache hid a peer's save from an already-open tab. Synchronization keeps its normal mutation reconciliation and preserves the webview's editor-derived theme. Pending bridge replies post only while their original panel owner remains current; disposal cleanup uses the webview reference captured while the panel was alive, because VS Code's panel getter throws after disposal.
 
+### Why the Settings command accepts null without relaxing navigation validation
+
+VS Code can pass `null` as the view-title action context, so the command treats it like an omitted argument. Other supplied values still pass through the navigation schema: silently discarding malformed navigation would open the wrong settings page and hide a caller error.
+
 ### Why Settings uses a separate panel and not the sidebar view
 
 Settings needs the editor area's width while the sidebar keeps its current chat or session list. Sharing the existing panel host preserves its bridge and lifecycle behavior without copying another provider. The Settings root loads configuration pages on demand and does not mount the session layout, global session poller or background queue/cleanup effects.
