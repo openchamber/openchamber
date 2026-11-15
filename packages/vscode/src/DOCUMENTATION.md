@@ -70,6 +70,7 @@ unchanged; raw global session records remain available for cleanup.
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
+  - Reads `worktree.directory` through the web server's `shared.js` reader on the canonical checkout. Both runtimes merge ancestor files and checkout-local configs in OpenCode order, with project files overriding `OPENCODE_CONFIG`; malformed or unreadable configs fail creation before choosing a folder.
   - Preview and creation follow the [worktree path identity rule](../../web/server/lib/git/DOCUMENTATION.md#why-preview-and-creation-resolve-the-parent-after-creating-it), returning canonical paths. Workspace admission stays unchanged.
   - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository', message }`. Their bridge handlers were dead surface (DiffView is not mounted in VS Code) and are gone; `getGitDiff` remains on the host only for the SCM commit-message generator, and the gitPathDiff contract is covered by `gitPathDiff.test.ts`.
   - `api:git/status` rows carry a rename's or copy's source as `previousPath`, as the web server's status does: from the Git API change's `originalUri`, or from the source entry `git status -z` lists after the destination in the raw fallback. The Changes view that reads it is not mounted here; the field keeps the status contract the same on every runtime.
