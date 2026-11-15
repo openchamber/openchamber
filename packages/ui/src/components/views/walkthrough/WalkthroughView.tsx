@@ -486,6 +486,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             <BranchComparisonSelector
               key={JSON.stringify([directory, currentBranch])}
               branches={branches?.all ?? []}
+              defaultBranches={branches?.defaultBranches}
+              primaryRemote={binding.contexts[0]?.primaryRemote}
               currentBranch={currentBranch}
               base={comparisonBase}
               automatic={comparisonBaseSource !== 'chosen'}
