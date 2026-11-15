@@ -246,6 +246,7 @@ describe('HeaderProjectAction lifecycle', () => {
     toastCalls.success.length = 0;
     openContextPreviewCalls.length = 0;
     openContextPanelTabCalls.length = 0;
+    uiState.terminalOpenOnProjectAction = true;
     openExternalCalls.length = 0;
     detectedDevServer.command = null;
     detectedDevServer.previewUrlHint = null;
@@ -559,6 +560,26 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(useTerminalStore.getState().getDirectoryState('/repo-worktree')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
     expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action') ?? false).toBe(false);
     expect(openContextPanelTabCalls).toEqual([{ directory: '/repo-worktree', mode: 'terminal', targetDirectory: null }]);
+  });
+
+  test('with the terminal setting off, an action runs without switching the panel', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    effectiveDirectory = '/repo-worktree';
+    await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo-worktree')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
   });
 
   test('parent action runs in the parent checkout, stores its tab there, and reveals it from the live worktree host', async () => {
