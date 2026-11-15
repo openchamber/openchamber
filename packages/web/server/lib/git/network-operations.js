@@ -16,6 +16,7 @@ import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-
 import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
+import { birthtimeHoldsStill } from './directory-birthtime.js';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const CLEANUP_TIMEOUT_MS = 5_000;
@@ -65,28 +66,6 @@ const singleRefFetchRefspec = (sourceRef, destinationRef) => (
   `${destinationRef.startsWith('refs/remotes/') ? '+' : ''}${sourceRef}:${destinationRef}`
 );
 const fileIdentity = (stats) => `${stats.dev}:${stats.ino}`;
-// Linux reuses an inode number when a directory is removed and recreated in the
-// same parent, so device and inode alone cannot tell a replaced directory from
-// the one we made. Creation time can, but only where the filesystem keeps one:
-// without it Node fills the field from the change time, which moves whenever
-// entries are written into the directory, and every clone would then look
-// replaced the moment it filled its own checkout. So change the directory once
-// on purpose and see whether the reported creation time sits still. A
-// filesystem that fails this, or answers too coarsely to tell, falls back to
-// device and inode rather than to a false conflict.
-const birthtimeHoldsStill = async (fsImpl, pathImpl, directory) => {
-  const probe = pathImpl.join(directory, '.openchamber-clone-probe');
-  try {
-    const before = await fsImpl.stat(directory);
-    await fsImpl.mkdir(probe);
-    await fsImpl.rm(probe, { recursive: true });
-    const after = await fsImpl.stat(directory);
-    return after.ctimeMs !== before.ctimeMs && after.birthtimeMs === before.birthtimeMs;
-  } catch {
-    await fsImpl.rm(probe, { recursive: true, force: true }).catch(() => {});
-    return false;
-  }
-};
 const directoryIdentity = (stats, birthtimeHolds) => (birthtimeHolds
   ? `${fileIdentity(stats)}:${stats.birthtimeMs}` : fileIdentity(stats));
 const lstatSnapshot = (stats) => ({

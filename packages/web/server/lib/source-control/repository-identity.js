@@ -3,14 +3,7 @@ import fs from 'node:fs/promises';
 import { getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/service.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl } from './url-redaction.js';
-
-const repositoryIdFor = (commonDirectory, commonStat) => `repo_${crypto.createHash('sha256')
-  .update(commonDirectory)
-  .update('\0')
-  .update(String(commonStat.dev))
-  .update('\0')
-  .update(String(commonStat.ino))
-  .digest('base64url')}`;
+import { resolveRepositoryFilesystemId } from './repository-id-storage.js';
 
 /**
  * The ID a record is keyed by, plus the Git directory the worktree ID also
@@ -28,7 +21,7 @@ const readRepositoryId = async (directory, { fsImpl, resolveGitPaths }) => {
   return {
     supported: true,
     bare: gitPaths.bare,
-    repositoryId: repositoryIdFor(commonDirectory, await fsImpl.stat(commonDirectory)),
+    repositoryId: await resolveRepositoryFilesystemId(commonDirectory, { fsImpl }),
     gitDirectory: await fsImpl.realpath(gitPaths.gitDirectory),
   };
 };
@@ -44,7 +37,7 @@ const resolveIdentity = async (directory, {
   if (!gitPaths.supported) return gitPaths;
 
   const commonDirectory = await fsImpl.realpath(gitPaths.commonDirectory);
-  const commonStat = await fsImpl.stat(commonDirectory);
+  const repositoryId = await resolveRepositoryFilesystemId(commonDirectory, { fsImpl });
   const remotes = (await getRepositoryRemotes(directory))
     .map((remote) => ({
       name: remote.name,
@@ -54,7 +47,6 @@ const resolveIdentity = async (directory, {
     .filter((remote) => !isDiskPathRemoteUrl(remote.fetchUrl) && !isDiskPathRemoteUrl(remote.pushUrl))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
   const transportRevision = includeRawEndpoints ? await getTransportRevision(directory) : undefined;
-  const repositoryId = repositoryIdFor(commonDirectory, commonStat);
   // Version the binding authority so old config-byte revisions require an explicit resave.
   const configRevision = crypto.createHash('sha256')
     .update('repository-config-v2\0')
