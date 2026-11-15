@@ -35,9 +35,17 @@ export const normalizePath = (value?: string | null): string | null => {
   return stripped || null;
 };
 
+/**
+ * Whether an already-normalized directory is a filesystem root: `/`, a drive
+ * (`D:/`, `//?/D:/`) or a UNC share (`//server/share`, `//?/UNC/server/share`).
+ */
+export const isFilesystemRoot = (directory: string): boolean => (
+  directory === '/' || WINDOWS_DRIVE_ROOT.test(directory) || WINDOWS_DRIVE_PREFIX.test(directory) || UNC_SHARE_ROOT.test(directory)
+);
+
 /** Lexical parent of an already-normalized directory; filesystem roots have none. */
 export const getNormalizedParentDirectory = (directory: string): string | null => {
-  if (directory === '/' || WINDOWS_DRIVE_ROOT.test(directory) || WINDOWS_DRIVE_PREFIX.test(directory) || UNC_SHARE_ROOT.test(directory)) return null;
+  if (isFilesystemRoot(directory)) return null;
   const separator = directory.lastIndexOf('/');
   if (separator < 0) return null;
   if (separator === 0) return '/';
