@@ -16,7 +16,7 @@ import { createSessionGoalRuntime, normalizeMaxAutoTurns } from './runtime.js';
  *
  * The previous suite drove the whole audit loop against a fake v1 OpenCode; it
  * is gone rather than rewritten because every route and shape it asserted on
- * belongs to v1. Subagents come from `GET /api/session?parentID=` now.
+ * belongs to v1. Active subagents are identified by their session parentID.
  */
 
 const SESSION_ID = 'ses_parent';
@@ -87,7 +87,7 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
     const url = new URL(String(input));
     calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
     // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
-    if (url.pathname === '/api/session/active') return Response.json({ data: active });
+    if (url.pathname === '/api/session/active') return Response.json({ data: typeof active === 'function' ? await active() : active });
     if (url.pathname === '/api/session') {
       // Children of the parent, cursor paged: the first page is selected by
       // `parentID`, later ones by the cursor alone.
@@ -106,6 +106,11 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
       return json({ id: SESSION_ID, location: { directory: '/repo' } });
+    }
+    if (url.pathname.startsWith('/api/session/')) {
+      const id = decodeURIComponent(url.pathname.slice('/api/session/'.length));
+      const record = childPages.flat().find((item) => item.id === id);
+      return json(record ?? {}, record ? childrenStatus : 404);
     }
     return json({});
   });
@@ -223,13 +228,79 @@ describe('session goal session-read recovery', () => {
     expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['statuses', { active: null }],
+    ['active session', { active: { ses_missing: { status: 'running' } } }],
+    ['background jobs', { jobs: null }],
+    ['shells', { shellStatus: 503 }],
+  ])('blocks after repeated unknown %s without auditing or continuing', async (_name, options) => {
+    const test = setup(vi.fn(async () => {}), options);
+    await test.start();
+    await vi.advanceTimersByTimeAsync(105_000);
+    expect(test.metadata.openchamber.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'Session activity could not be read after repeated attempts. Resume to try again.',
+      turnsUsed: 0,
+    });
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(4);
+  });
+
+  it('recovers after an unknown active session disappears', async () => {
+    const active = { ses_missing: { status: 'running' } };
+    const test = setup(vi.fn(async () => {}), { active });
+    await test.start();
+    expect(test.generate).not.toHaveBeenCalled();
+    delete active.ses_missing;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+  });
+
+  it('resets activity failures when a working child is confirmed', async () => {
+    let active = null;
+    const test = setup(vi.fn(async () => {}), {
+      active: () => active,
+      childPages: [[{ id: 'ses_child', parentID: SESSION_ID }]],
+    });
+    await test.start();
+    active = { ses_child: { status: 'running' } };
+    await vi.advanceTimersByTimeAsync(15_000);
+    active = null;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(test.metadata.openchamber.goal.status).toBe('active');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(test.metadata.openchamber.goal.status).toBe('blocked');
+    expect(test.generate).not.toHaveBeenCalled();
+  });
+
+  it('preserves a paused goal while the final activity read is pending', async () => {
+    const gate = Promise.withResolvers();
+    const active = vi.fn().mockResolvedValue(null);
+    const test = setup(vi.fn(async () => {}), { active });
+    await test.start();
+    await vi.advanceTimersByTimeAsync(45_000);
+    active.mockImplementationOnce(() => gate.promise);
+    await vi.advanceTimersByTimeAsync(60_000);
+    test.metadata.openchamber.goal.status = 'paused';
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    gate.resolve(null);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.metadata.openchamber.goal.status).toBe('paused');
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+    expect(test.emitGoalNotification).not.toHaveBeenCalled();
+  });
+
   it('resets the failure count after a successful read', async () => {
     const sessionRead = vi.fn().mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue(undefined);
-    const test = setup(sessionRead, { childrenStatus: 500 });
+    const test = setup(sessionRead, { active: { ses_child: { status: 'running' } }, childPages: [[{ id: 'ses_child', parentID: SESSION_ID }]], childrenStatus: 500 });
     await test.start();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(sessionRead).toHaveBeenCalledTimes(2);
-    // The children read arms another quiet window without a new session event.
+    // The failed active-child read arms another quiet window without a new session event.
     sessionRead.mockRejectedValue(new Error('fetch failed'));
     await vi.advanceTimersByTimeAsync(15_000);
     await vi.advanceTimersByTimeAsync(14_999);
@@ -566,13 +637,34 @@ describe('session goal tick on v2 messages', () => {
 describe('session goal tick and subagents', () => {
   const child = (id) => ({ id, parentID: SESSION_ID, time: { updated: 1 } });
 
-  it('waits while a subagent listed on a later page is still working', async () => {
+  it('audits with 450 historical subagents and no active sessions', async () => {
+    vi.useFakeTimers();
+    quiet();
+    try {
+      const childPages = Array.from({ length: 9 }, (_, page) =>
+        Array.from({ length: 50 }, (_, index) => child(`ses_old_${page}_${index}`)));
+      const server = v2OpenCode({ messages: [assistantRecord()], childPages });
+      const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+      const seam = wired({ openchamber: { goal: activeGoal() } });
+      const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+      await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'complete' });
+      expect(server.calls.filter((call) => call.path === '/api/session')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits while a subagent among 450 historical children is still working', async () => {
     quiet();
     const generate = vi.fn();
     const server = v2OpenCode({
       messages: [assistantRecord()],
-      active: { ses_child_2: { status: 'running' } },
-      childPages: [[child('ses_child_1')], [child('ses_child_2')]],
+      active: { ses_old_8_49: { status: 'running' } },
+      childPages: Array.from({ length: 9 }, (_, page) =>
+        Array.from({ length: 50 }, (_, index) => child(`ses_old_${page}_${index}`))),
     });
     const { runtime } = makeRuntime({
       ...wired({ openchamber: { goal: activeGoal() } }),
@@ -580,8 +672,8 @@ describe('session goal tick and subagents', () => {
       recheckMs: 1_000,
     });
     await runTick(runtime);
-    const listCalls = server.calls.filter((call) => call.path === '/api/session');
-    expect(listCalls.map((call) => call.query.parentID ?? call.query.cursor)).toEqual([SESSION_ID, 'page-1']);
+    expect(server.calls.some((call) => call.path === '/api/session/ses_old_8_49')).toBe(true);
+    expect(server.calls.some((call) => call.path === '/api/session')).toBe(false);
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
   });
@@ -604,7 +696,7 @@ describe('session goal tick and subagents', () => {
 
     await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
     await vi.waitFor(() => {
-      expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
+      expect(server.calls.some((call) => call.path === '/api/session/ses_child_1')).toBe(true);
     });
     expect(generate).not.toHaveBeenCalled();
 
@@ -631,14 +723,14 @@ describe('session goal tick and subagents', () => {
       }),
     });
     await runTick(runtime);
-    expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
+    expect(server.calls.some((call) => call.path === '/api/session')).toBe(false);
     expect(seam.persistSessionGoal).toHaveBeenCalled();
   });
 
-  it('does not treat an unreadable children list as "no subagents"', async () => {
+  it('does not treat an unreadable active session as "no subagents"', async () => {
     quiet();
     const generate = vi.fn();
-    const server = v2OpenCode({ messages: [assistantRecord()], childrenStatus: 500 });
+    const server = v2OpenCode({ messages: [assistantRecord()], active: { ses_child: { status: 'running' } }, childPages: [[child('ses_child')]], childrenStatus: 500 });
     const seam = wired({ openchamber: { goal: activeGoal() } });
     const { runtime } = makeRuntime({
       ...seam,
@@ -646,7 +738,7 @@ describe('session goal tick and subagents', () => {
       recheckMs: 1_000,
     });
     await runTick(runtime);
-    expect(server.calls.some((call) => call.path === '/api/session')).toBe(true);
+    expect(server.calls.some((call) => call.path === '/api/session/ses_child')).toBe(true);
     expect(server.calls.some((call) => call.path.endsWith('/message'))).toBe(false);
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
