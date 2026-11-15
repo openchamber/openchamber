@@ -292,6 +292,7 @@ export function projectInboxMessage(
         sessionID: owner.sessionID,
         role: "user",
         time: { created: owner.created },
+        skills: projectUserSkills(item.payload),
         metadata: item.payload.metadata,
       }),
       parts: projectUserParts(item.payload, owner),
@@ -313,6 +314,12 @@ export function projectInboxMessage(
     }
   }
   return null
+}
+
+/** Id and name of each attached skill; the skill text stays on the server. */
+function projectUserSkills(payload: SessionInboxUserPayload): UserMessage["skills"] {
+  if (!payload.skills?.length) return undefined
+  return payload.skills.map((skill) => ({ id: skill.id, name: skill.name }))
 }
 
 /**
@@ -373,7 +380,7 @@ export function projectMessage(info: SessionMessageInfo, sessionID: string): Pro
   const metadata = info.metadata
   switch (info.type) {
     case "user": {
-      const message: UserMessage = compact({ id: info.id, sessionID, role: "user", time: { ...info.time }, metadata })
+      const message: UserMessage = compact({ id: info.id, sessionID, role: "user", time: { ...info.time }, skills: projectUserSkills(info), metadata })
       return {
         message,
         parts: projectUserParts(info, { sessionID, messageID: info.id, created: info.time.created }),
