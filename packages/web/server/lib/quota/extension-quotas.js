@@ -66,16 +66,18 @@ export function createExtensionQuotaProviders({
       if (registered.get(id)?.key === key) continue;
       // A replacement (new version, grant change) takes the slot; a read the old
       // adapter has in flight answers through the registry's coalescing as before.
-      registry.attachExtensionQuotaProvider(createExtensionQuotaProvider({
+      /** @type {Parameters<typeof createExtensionQuotaProvider>[0]} */
+      const dependencies = {
         guest: { id: guest.id, name: guest.name, icon: guest.icon, packageRoot: guest.packageRoot, service: guest.service, capabilityGrants: guest.capabilityGrants },
         contribution: guest.quota,
         currentGuest,
         reconcile,
         persistPath,
-        ...(proxyServiceRequest ? { proxy: proxyServiceRequest } : {}),
-        ...(readCredentials ? { readCredentials } : {}),
-        warn,
-      }));
+      };
+      if (proxyServiceRequest) dependencies.proxy = proxyServiceRequest;
+      if (readCredentials) dependencies.readCredentials = readCredentials;
+      dependencies.warn = warn;
+      registry.attachExtensionQuotaProvider(createExtensionQuotaProvider(dependencies));
       registered.set(id, { key });
       changed = true;
     }
