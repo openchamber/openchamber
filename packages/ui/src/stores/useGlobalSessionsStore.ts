@@ -62,6 +62,12 @@ type GlobalSessionsState = {
   rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionHead: () => Promise<boolean>;
+  /**
+   * Reads the newest page for a surface that lists only recent sessions and
+   * keeps no complete list (the desktop Mini Chat). The page is merged without
+   * authority; resolves false when it could not be read.
+   */
+  refreshRecentSessions: () => Promise<boolean>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applySessionMutations: (mutations: readonly GlobalSessionMutation[]) => void;
@@ -82,6 +88,9 @@ type GlobalSessionsState = {
 
 const PAGE_SIZE = 500;
 const HEAD_PAGE_SIZE = 20;
+// The Mini Chat switcher lists ten root sessions; their sub-agent sessions and
+// archived records share the newest-first page with them.
+const RECENT_PAGE_SIZE = 50;
 const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
 type DirectoryRefreshEpoch = {
   isCurrent: () => boolean;
@@ -123,6 +132,7 @@ const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promi
 
 let inflightLoad: Promise<LoadResult> | null = null;
 let inflightHead: Promise<boolean> | null = null;
+let inflightRecent: Promise<boolean> | null = null;
 // True while a page of an unfinished load is being merged. The managed-chats
 // snapshot is written from complete loads only, never from a partial list.
 let mergingSessionPage = false;
@@ -796,6 +806,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     loadGeneration += 1;
     inflightLoad = null;
     inflightHead = null;
+    inflightRecent = null;
     getDirectoryRefreshEpoch();
     set({
       ...buildManagedChatSessionsState(readPersistedSessionSeed()),
@@ -961,6 +972,52 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     inflightHead = headPromise;
     void headPromise.finally(() => { if (inflightHead === headPromise) inflightHead = null; });
     return headPromise;
+  },
+
+  refreshRecentSessions: async () => {
+    // A complete list is kept current from its head; a running complete load
+    // answers for this one.
+    if (get().hasLoaded || inflightLoad) return get().refreshSessionHead();
+    if (inflightRecent) return inflightRecent;
+    const generation = loadGeneration;
+    const baselineRevision = get().mutationRevision;
+    const recentPromise = (async () => {
+      try {
+        await ensureChatsRootDirectory();
+        if (generation !== loadGeneration) return false;
+        get().rehydrateManagedChatSessions();
+        let spaceMarks: SpaceMark[] = [];
+        const sessions = await listGlobalSessionPages(listSessionPage, {
+          pageSize: RECENT_PAGE_SIZE,
+          onSpaces: (spaces) => { spaceMarks = spaces ?? []; },
+          stopAfterPage: () => true,
+        });
+        if (generation !== loadGeneration) return false;
+        // A complete load that started meanwhile publishes its own snapshot.
+        if (get().hasLoaded || inflightLoad) return true;
+        useSpacesStore.getState().applyMarks(spaceMarks);
+        const page = splitGlobalSessionsByArchived(sessions);
+        mergingSessionPage = true;
+        try {
+          set((state) => mergeSessionPage(state, page.active, page.archived, baselineRevision));
+        } finally {
+          mergingSessionPage = false;
+        }
+        const committed = get().entityById;
+        raiseSessionOrderingBaselines(page.active.flatMap((session) => {
+          const record = committed.get(session.id);
+          return record && !record.time?.archived ? [record] : [];
+        }));
+        return true;
+      } catch (error) {
+        // The lists stay as they were: an unread page says nothing about them.
+        if (generation === loadGeneration) console.warn('[GlobalSessions] Failed to read recent sessions:', error);
+        return false;
+      }
+    })();
+    inflightRecent = recentPromise;
+    void recentPromise.finally(() => { if (inflightRecent === recentPromise) inflightRecent = null; });
+    return recentPromise;
   },
 
   refreshSessionsForDirectories: async (directories, fallbackActive) => {
@@ -1186,6 +1243,10 @@ export const refreshGlobalSessionsWhenShown = async (completeMaxAgeMs: number, f
   if (fresh) await state.refreshSessionHead();
   else await state.loadSessions(fallbackActive);
 };
+
+export const refreshRecentGlobalSessions = (): Promise<boolean> => (
+  useGlobalSessionsStore.getState().refreshRecentSessions()
+);
 
 export const refreshGlobalSessionsForDirectories = async (
   directories: Iterable<string>,

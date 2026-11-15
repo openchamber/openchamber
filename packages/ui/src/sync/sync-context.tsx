@@ -161,6 +161,7 @@ import {
   getImperativeSessionMessageLoader,
   setImperativeSessionMessageLoader,
   type SessionMessageLoadState,
+  type SessionMessageTarget,
 } from "./session-message-loader"
 import { openCodeStartupSignal } from "./opencode-startup-gate"
 import { claimFirstServerConnect, notifyFirstServerConnect } from "./first-server-connect"
@@ -2914,6 +2915,34 @@ const followCurrentChatToArchive = (goneIds: ReadonlySet<string>): boolean => {
   return true
 }
 
+type SyncStores = { childStores: ChildStoreManager; messageLoader: SessionMessageLoader }
+
+const createSyncStores = (): SyncStores => {
+  // The cached list of an isolated space's directory seeds a store only while this window knows
+  // the space: a deleted space's chats are on the Archive page, under the archive's own directory,
+  // and the space's prefix answers 404. Given here so a store a consumer makes during the first
+  // render, before `configure` runs, is gated too.
+  const childStores = new ChildStoreManager({ seedsSessions: isDirectoryOfKnownSpace })
+  return {
+    childStores,
+    messageLoader: new SessionMessageLoader(childStores, { sdk: opencodeClient, runtimeKey: getRuntimeKey() }, openCodeStartupSignal),
+  }
+}
+
+let syncStoresMadeBeforeMount: SyncStores | null = null
+
+/**
+ * Starts reading a session's transcript before `SyncProvider` mounts, for an
+ * entry that knows its session before React renders (the desktop Mini Chat,
+ * from its window URL). The provider adopts the stores made here, so the read
+ * is the loader's own prefetch: it lands in the directory store the timeline
+ * reads, the open that follows joins it, and a failed one is read again then.
+ */
+export function prefetchSessionBeforeMount(target: SessionMessageTarget): void {
+  syncStoresMadeBeforeMount ??= createSyncStores()
+  void syncStoresMadeBeforeMount.messageLoader.prefetch(target)
+}
+
 export function SyncProvider(props: {
   sdk: OpenCodeClient
   directory: string
@@ -2926,22 +2955,14 @@ export function SyncProvider(props: {
   // 403. With the origin allowlisted, mobile uses the same transport
   // selection as everywhere else ('auto' falls back to SSE on WS failure).
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  const childStoresRef = useRef<ChildStoreManager | null>(null)
-  // The cached list of an isolated space's directory seeds a store only while this window knows
-  // the space: a deleted space's chats are on the Archive page, under the archive's own directory,
-  // and the space's prefix answers 404. Given here so a store a consumer makes during the first
-  // render, before `configure` runs, is gated too.
-  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager({ seedsSessions: isDirectoryOfKnownSpace })
-  const childStores = childStoresRef.current
+  const syncStoresRef = useRef<SyncStores | null>(null)
+  if (!syncStoresRef.current) syncStoresRef.current = syncStoresMadeBeforeMount ?? createSyncStores()
+  const { childStores, messageLoader } = syncStoresRef.current
+  // Handed over once mounted, so a provider mounted later starts from its own.
+  useEffect(() => {
+    if (syncStoresMadeBeforeMount === syncStoresRef.current) syncStoresMadeBeforeMount = null
+  }, [])
   const runtimeKey = getRuntimeKey()
-  const messageLoaderRef = useRef<SessionMessageLoader | null>(null)
-  if (!messageLoaderRef.current) {
-    messageLoaderRef.current = new SessionMessageLoader(childStores, {
-      sdk: opencodeClient,
-      runtimeKey,
-    }, openCodeStartupSignal)
-  }
-  const messageLoader = messageLoaderRef.current
   const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: opencodeClient, runtimeKey })
   // Asked while the rest of the bootstrap loads, so the first session page

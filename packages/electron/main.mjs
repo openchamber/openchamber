@@ -3453,11 +3453,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     browserWindow.on('focus', refreshTrafficLights);
   }
 
-  browserWindow.once('ready-to-show', () => {
-    showWindow(browserWindow);
-    browserWindow.focus();
-  });
-
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
@@ -3478,6 +3473,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
+
+  // Shown at once in the theme colour, as the main window is, so the window is
+  // on screen while its document loads.
+  showWindow(browserWindow);
+  browserWindow.focus();
 
   await navigateWindow(browserWindow, buildMiniChatUrl({ mode, sessionId, directory, projectId }));
   return browserWindow;

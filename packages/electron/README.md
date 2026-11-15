@@ -478,6 +478,9 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 
 - Floating Mini Chat windows. Each new one opens pinned on top of other
   windows; its pin button unpins that window only, and nothing is persisted.
+  The window is shown the moment it is created, in the theme colour
+  (`resolveSplashBackgroundColor`, as the main window), and its document
+  paints into it; it does not wait for `ready-to-show`.
 - Quake Mode (Windows Terminal-style): one configurable global hotkey
   (``Ctrl+` `` by default, deliberately without the Win key) toggles the existing
   main window between hidden and a top-attached dropdown on the display holding

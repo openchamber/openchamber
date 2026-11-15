@@ -699,8 +699,9 @@ Cold navigation and prefetch request 100 records (50 on constrained surfaces) an
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
 
 Each full app root owns one global polling lifecycle through
-`useGlobalSessionsPolling`. The web/desktop root, the desktop Mini Chat window
-root, and the VS Code chat root load a complete snapshot when mounted. After
+`useGlobalSessionsPolling`. The web/desktop root and the VS Code chat root load
+a complete snapshot when mounted; the desktop Mini Chat window does not
+(see *Why Mini Chat reads the newest page and not the complete list*). After
 that the live event stream keeps the list current: it is one global stream,
 and `session.created` reaches the client for every directory, opened or not.
 The list is read again only where the stream cannot answer: a complete
@@ -721,7 +722,7 @@ visible takes one. On desktop the document stays `visible` while the window
 is hidden, minimized or closed to the tray, because windows run with
 background throttling off, so the hook reads the shell's
 `openchamber:window-visibility` instead. A window the shell sends no
-visibility to (Mini Chat) counts as visible.
+visibility to counts as visible.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. The tray renders only the sessions the sidebar can place — a
 configured project or worktree, a managed chat, or an isolated space — because
@@ -746,6 +747,25 @@ had left, so every check republished the store and rebuilt the sidebar
 projection over every session. A gap is the one time the stream may have
 missed a creation, so the head check runs once after it, and the complete
 snapshot every 10 minutes stays the baseline for deletions missed meanwhile.
+
+### Why Mini Chat reads the newest page and not the complete list
+
+The Mini Chat header switcher shows the ten most recent root sessions, and
+nothing else in that window needs every session: the open session is read by
+id, and its directory comes from the window URL. Polling the complete list
+there cost each new window nine requests and 3.3 MB at about 4,000 sessions. The
+window calls `refreshRecentGlobalSessions` when it mounts and each time the
+switcher opens (`SessionSwitcherDropdown` with `recentOnly`): one page of 50
+records, newest first, merged like the first page of a complete load, so
+`hasLoaded` stays false, `authoritativeSessions` stays null and nothing is
+persisted from it. Fifty and not ten because sub-agent sessions and archived
+records share the page with the roots. The rows below the page come from the
+persisted snapshot the main window wrote and from live events. A failed read
+leaves the lists untouched, and a change made while the page was in flight
+wins over it. When something in the window has loaded the complete list (the
+`@` session picker, a due retention run), the same call checks its head.
+Consumers that need a complete list already wait for `hasLoaded` and load it
+themselves.
 
 ### Why head checks and complete snapshots have separate authority
 
@@ -1194,6 +1214,23 @@ outside the displayed transcript is never requested.
 A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller requests on constrained VS Code/mobile surfaces and publish the cursor-extended ten-turn window described above. The mounted chat timeline requests one history batch when its pinned viewport is underfilled, when the user scrolls toward history, or when load older is pressed; mobile uses the explicit button. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
+
+### Why Mini Chat asks for its transcript before the provider mounts
+
+A Mini Chat window knows its session from its URL as soon as its script runs,
+before the first effects of the React tree, where the open used to start the
+read. Asking then puts the request 85 ms earlier and the transcript on screen
+about 70 ms sooner (a 492-message session, median of 8 interleaved opens; 426
+against 494 ms). `prefetchSessionBeforeMount` (`sync-context.tsx`) creates
+the child store manager and the message loader early and runs the loader's
+ordinary `prefetch`; `SyncProvider` adopts those same objects when it mounts,
+so the page lands in the directory store the timeline reads and the open that
+follows joins the request or finds it done. The alternative, a one-off fetch
+whose result is handed to the loader, would need its own rules for failure,
+staleness and the optimistic shadow; the prefetch already has them. A failed
+prefetch leaves the entry in `error`, and the open reads again. A window whose
+URL carries no directory, or whose session has moved to another directory,
+gets no benefit: the open resolves the real directory and reads there.
 
 ## Failed-turn diagnostics
 
@@ -1692,13 +1729,18 @@ and avoid moving unrelated rows. Layout parity and large-input costs require
 renderer/browser evidence; the shared worker's tests do not establish them.
 The timeline root stays at
 opacity 0 until every hold releases (capped at 250ms) and the content height
-has held still for two frames, then fades in once as a whole. The gate stops
+has held still for two frames, then appears as a whole. The gate stops
 accepting holds after the opening commit so rows mounting during scroll never
 hide the timeline. Once the lazy markdown
 module has loaded, `MarkdownRenderer` mounts it synchronously instead of
 through `Suspense`: a suspended boundary shows its fallback for a tick and
 React then throttles later-resolving boundaries by ~300ms, which staggered
-user and assistant text on a cold open.
+user and assistant text on a cold open. Since markdown does not hold the gate,
+an entry that can open on a transcript starts loading the module at boot
+(`preloadMarkdownRenderer` in `main.tsx`, `renderMobileApp.tsx` and
+`renderElectronMiniChatApp.tsx`). The mini chat window, opened on a session
+without it, revealed the timeline with empty message bodies and the text
+arrived about 250ms later, moving every row (layout shift 0.6).
 
 An opened session is shown already in place: at its end, or where the reader
 left it. Before KeepAlive hides a list on a session switch, and again on list
@@ -1813,7 +1855,10 @@ On launch the app reopens the session that was open when it closed
 (`sync/last-session-restore.ts`, used by `App` for web and desktop and by the
 Capacitor shell). `setCurrentSession` persists the pointer per runtime and a
 user-opened draft clears it, so the pointer names exactly what was on screen;
-without one the launch stays on the automatic draft. The shell shows before
+without one the launch stays on the automatic draft. The desktop Mini Chat
+shares that storage with the main window and neither writes nor clears the
+pointer (`leaveLastActiveSessionToMainWindow`): what a Mini Chat has open is
+not what the main window reopens. The shell shows before
 OpenCode is ready, so `App` selects the session in a layout effect
 (`beginLastSessionRestore`), before any passive effect of the tree runs;
 ChatContainer's passive effect would otherwise open the automatic draft first

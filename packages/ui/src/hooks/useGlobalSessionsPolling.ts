@@ -40,9 +40,9 @@ const NEVER_GAP: SubscribeStreamGap = () => () => undefined;
 /**
  * Desktop windows run with background throttling off, so the document stays
  * `visible` while the window is hidden or minimized. Its own visibility comes
- * from the shell's events instead. Only an event hides the window here: Mini
- * Chat starts hidden and the shell sends it none, so a queried starting state
- * would keep its refresh stopped for good.
+ * from the shell's events instead. Only an event hides the window here: a
+ * queried starting state would keep the refresh of a window that starts hidden
+ * and hears no event stopped for good.
  */
 const desktopWindowVisibility = (): PollingVisibility => {
   let hidden = false;
