@@ -50,6 +50,10 @@ The runtime also exposes `listTerminals({ directory })` and `readTerminal(sessio
 
 ## Decisions
 
+### Why PowerShell aliases need a launch probe
+
+Windows Store execution aliases can reject `stat` with `EACCES` while remaining launchable. Shell discovery probes those PowerShell candidates with a bounded, profile-free command in PATH order; other executables keep the normal file check. Auto resolves fallback shells as the PTY needs them, so a PowerShell probe cannot delay an earlier usable shell. Explicit selection only probes candidates for that shell.
+
 ### Why events and not polling
 
 The runtime broadcasts `openchamber:terminal-sessions-changed` after creation,

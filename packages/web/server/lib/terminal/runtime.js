@@ -231,7 +231,7 @@ export function createTerminalRuntime({
     // so it may run the project's environment command.
     const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv, { refresh: true }) : hostEnv;
     let lastError = null;
-    for (const executable of resolvedShell.executables) {
+    for await (const executable of resolvedShell.executables) {
       try {
         const env = { ...inheritedEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
