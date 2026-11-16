@@ -82,7 +82,6 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     const payload = nanoGptUsageSchema.parse(await response.json());
     const windows = {};
     const state = payload.state ?? 'active';
-    // A null current daily quota means no daily cap; only absent fields use legacy data.
     const daily = payload.dailyInputTokens !== undefined ? payload.dailyInputTokens : payload.daily;
     const quotas = [
       {

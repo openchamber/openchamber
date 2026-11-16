@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-// Installed-app clients already used by the Gemini and Antigravity providers.
-// Keeping these in git is fine: for an installed application Google expects
-// the client ID and secret to be embedded in the source, and "the client
-// secret is obviously not treated as a secret"
-// (https://developers.google.com/identity/protocols/oauth2#installed).
+// external: https://developers.google.com/identity/protocols/oauth2#installed Installed-app client IDs and secrets are embedded in source.
 const CLIENTS = {
   gemini: {
     clientId: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
@@ -59,8 +55,6 @@ const exchange = async (refreshToken, client) => {
 
 export const refreshGoogleAccessToken = async (refreshToken, client, { fallbackToAntigravity = false } = {}) => {
   const result = await exchange(refreshToken, client);
-  // Both plugins pack project context with pipes. The credential has no reliable
-  // client marker; probe the other known client only on this specific rejection.
   if (!result.ok && client === 'gemini' && fallbackToAntigravity
     && (result.status === 400 || result.status === 401) && result.error === 'unauthorized_client') {
     return exchange(refreshToken, 'antigravity');

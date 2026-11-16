@@ -1,12 +1,3 @@
-/**
- * Claude subscription quota.
- *
- * Reports the plan limits Claude Code itself is bound by (rolling session
- * window, weekly windows, model-scoped weekly windows, and paid extra usage)
- * using the OAuth credential Claude Code already holds.
- *
- * @module quota/providers/claude
- */
 
 import { createHash } from 'crypto';
 
@@ -23,8 +14,7 @@ const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
 const SESSION_EXPIRED_ERROR = 'Claude session expired. Open Claude Code to sign in again.';
-// Anthropic answers 403 for a valid token without the `user:profile` scope,
-// which a `claude setup-token` token never has; signing in again would not help.
+// external: https://api.anthropic.com/api/oauth/usage A valid setup-token lacks user:profile and receives 403; signing in again cannot add the scope.
 const USAGE_DENIED_ERROR = 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.';
 
 /**
@@ -44,8 +34,6 @@ const fingerprintOf = (credential) =>
 
 const cooldownFromHeader = (response) => {
   const raw = response.headers.get('retry-after');
-  // `Retry-After: 0` asks for an immediate retry, so it ends the cooldown.
-  // `Number(null)` is 0 as well, so a missing header must not reach this check.
   const retryAfter = raw ? Number(raw) : Number.NaN;
   if (Number.isFinite(retryAfter) && retryAfter >= 0) {
     return Math.min(retryAfter * 1000, MAX_COOLDOWN_MS);
@@ -160,7 +148,6 @@ export const fetchQuota = () => {
   return pendingFetch;
 };
 
-/** Test seam: clears the rate-limit cache between cases. */
 export const resetClaudeQuotaCache = () => {
   cachedUsage = null;
   cooldownUntil = 0;

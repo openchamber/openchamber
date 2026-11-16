@@ -1,9 +1,3 @@
-/**
- * Google Provider - Auth
- *
- * Authentication resolution logic for Google quota providers.
- * @module quota/providers/google/auth
- */
 
 import {
   getAuthEntry,
