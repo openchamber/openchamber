@@ -133,9 +133,7 @@ export function createManagedSshInventory({
       }
     } finally {
       try {
-        // The async iterator closes the directory when it finishes, so this is
-        // the second close; Node rejects with ERR_DIR_CLOSED and Bun returns
-        // undefined rather than a promise, and both mean the same thing.
+        // external: https://nodejs.org/api/fs.html#dirclose Async directory iteration closes the directory before final cleanup.
         await directory.close();
       } catch (error) {
         if (error?.code !== 'ERR_DIR_CLOSED') throw error;

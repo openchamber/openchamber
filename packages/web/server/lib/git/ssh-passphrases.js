@@ -1,6 +1,5 @@
 const INTEGRATION_ID = 'openchamber-git-ssh';
 
-/** Passphrases belong to exact credential IDs, independently of OpenCode's active account. */
 export function createSshPassphraseStore(source) {
   return {
     create: async (id, passphrase) => {

@@ -7,8 +7,6 @@ const requestSchema = z.object({
   mode: z.literal('light').optional(),
 });
 
-// Each completed directory is independently authoritative. Disconnecting stops
-// admission; already running reads remain owned by the shared Git service.
 export function registerGitStatusBatchRoute(app, readDirectory) {
   app.post('/api/git/status/batch', async (req, res) => {
     const parsed = requestSchema.safeParse(req.body);

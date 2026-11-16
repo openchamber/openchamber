@@ -8,15 +8,6 @@ const sameAccount = (left, right) => Boolean(left) && Boolean(right)
   && left.instance === right.instance
   && left.accountId === right.accountId;
 
-/**
- * The signature an identity for this account starts with.
- *
- * A provider that publishes an address gives it. GitHub often does not, and
- * answers that with its own no-reply address (the descriptor's
- * `identity.noReplyEmail`), which is the address its own web interface commits
- * as — so an identity is complete on the spot rather than asking for something
- * the person has to go and look up.
- */
 const accountSignature = (descriptor, user) => {
   const login = text(user?.login) || text(user?.username);
   const userName = text(user?.name) || login;
@@ -28,21 +19,12 @@ const accountSignature = (descriptor, user) => {
   return { userName, userEmail: noReply ?? '' };
 };
 
-/** The host of an instance, for telling two self-hosted GitLabs apart. */
 const instanceLabel = (instance) => {
   const value = text(instance);
   try { return new URL(value.includes('://') ? value : `https://${value}`).host; }
   catch { return value; }
 };
 
-/**
- * A name that says which account it is.
- *
- * The same login on two providers is ordinary — one person, one username, a
- * GitHub and a GitLab account — and calling the second one "ada 2" tells
- * nobody which is which. It is qualified by where it lives instead, and the
- * first one keeps the plain name it already had.
- */
 const uniqueName = (profiles, candidate, account, providerLabel) => {
   const taken = new Set(profiles.map((profile) => text(profile.name).toLowerCase()));
   const free = (name) => !taken.has(name.toLowerCase());
@@ -58,15 +40,6 @@ const uniqueName = (profiles, candidate, account, providerLabel) => {
   return `${candidate} ${Date.now()}`;
 };
 
-/**
- * Identities that follow the accounts people connect.
- *
- * Connecting an account is the moment every part of an identity is known — who
- * it is, what it may authenticate with, and how it signs — so the identity is
- * made there rather than asked for again later. Re-authenticating renews the
- * credential an identity names, and the identity follows it, because "my GitHub
- * account" is expected to keep working after signing in again.
- */
 export function createGitIdentityProvisioning({
   store,
   describeProvider = sourceControlProviderDescriptors.get,
@@ -79,26 +52,19 @@ export function createGitIdentityProvisioning({
   }
 
   const provisioned = Object.freeze({
-    /** Creates the identity for a newly connected account, if it has none. */
     ensureAccountIdentity: ({ account, user }) => {
       if (!account?.provider || !text(account.instance) || !text(account.accountId)) return null;
-      // An account of a provider this build does not know describes nothing to sign as.
       const descriptor = describeProvider(account.provider);
       if (!descriptor) return null;
       const profiles = store.getProfiles();
       const existing = profiles.find((profile) => sameAccount(profile.account, account));
       if (existing) return existing;
       const signature = accountSignature(descriptor, user);
-      // The same person connecting again after disconnecting is the same
-      // identity, not a second one: their signature on this instance already
-      // names them, so it follows the new credential instead of being cloned.
       const sameSignature = signature.userEmail ? profiles.find((profile) => profile.account
         && profile.account.provider === account.provider
         && profile.account.instance === account.instance
         && profile.userEmail === signature.userEmail) : null;
       if (sameSignature) return store.updateProfile(sameSignature.id, { ...sameSignature, account });
-      // A signature is required, and an account that publishes neither a name
-      // nor an address cannot supply one. The person makes that identity.
       if (!signature.userName || !signature.userEmail) return null;
       const login = text(user?.login) || text(user?.username) || signature.userName;
       return store.createProfile({
@@ -113,13 +79,6 @@ export function createGitIdentityProvisioning({
       });
     },
 
-    /**
-     * Identities for accounts connected before identities carried one.
-     *
-     * Runs once at startup rather than on demand, because the add and clone
-     * screens propose identities and an account with none would look like an
-     * account OpenChamber does not know about.
-     */
     backfillAccountIdentities: (accounts) => {
       const created = [];
       for (const entry of accounts ?? []) {
@@ -133,7 +92,6 @@ export function createGitIdentityProvisioning({
       return created;
     },
 
-    /** Follows a renewed credential, so identities keep naming a live account. */
     repointAccountIdentities: ({ from, to }) => {
       if (!sameAccount({ ...from, accountId: 'x' }, { ...to, accountId: 'x' }) || from.accountId === to.accountId) return [];
       return store.getProfiles()

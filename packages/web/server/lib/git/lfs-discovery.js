@@ -4,10 +4,6 @@ import { normalizeDiscoveryEndpoint, resolveGitRelativeEndpoint } from './discov
 export const LFS_DISCOVERY_LIMITS = Object.freeze({
   maxFilesBytes: 16 * 1024 * 1024,
   maxBatchBytes: 256 * 1024,
-  // As many files per Git call as one call's attribute output may report
-  // (`maxAttributeRecords`): each batch costs three Git processes, and a
-  // repository of thousands of files paid that cost hundreds of times on
-  // every pull and push. Byte limits still bound every call.
   fileBatchSize: 1_024,
   maxAttributesBytes: 256 * 1024,
   maxConfigBytes: 256 * 1024,
@@ -48,7 +44,6 @@ const parseConfig = (value, limits, label, { allowRepeatedCanonicalFilters = fal
     if (separator <= 0 || separator === record.length - 1) throw lfsError(`${label} record is malformed`);
     const key = record.slice(0, separator).toLowerCase();
     const configValue = record.slice(separator + 1);
-    // Effective Git config reports every layer, including identical LFS installs.
     const repeatedCanonicalFilter = allowRepeatedCanonicalFilters && result.get(key) === configValue
       && (SAFE_FILTERS[key] === configValue || (key === 'filter.lfs.required' && configValue === 'true'));
     if (result.has(key) && !repeatedCanonicalFilter) throw lfsError(`${label} contains duplicate ${key}`);
@@ -79,7 +74,6 @@ const parseAttributes = (value, limits) => {
   const seen = new Set();
   for (let index = 0; index < fields.length; index += 3) {
     const filePath = validateRepositoryPath(fields[index]);
-    // An empty value is valid: `filter=` in `.gitattributes` sets it to "".
     if (fields[index + 1] !== 'filter') throw lfsError('Effective attributes output is malformed');
     if (fields[index + 2] === 'lfs' && !seen.has(filePath)) {
       seen.add(filePath);
@@ -89,8 +83,6 @@ const parseAttributes = (value, limits) => {
   return paths;
 };
 
-// Pointer-sized blobs read with `cat-file --batch`, in as few calls as fit
-// `maxBatchBytes` each: a whole file batch of them may not fit in one.
 const readSmallBlobs = async (query, candidates, limits, label) => {
   const read = [];
   for (let start = 0; start < candidates.length;) {
@@ -121,14 +113,6 @@ const readSmallBlobs = async (query, candidates, limits, label) => {
   return read;
 };
 
-/**
- * Every tracked file is checked, and every pointer-sized blob that claims to be
- * an LFS pointer is validated. The result keeps only bounded evidence: up to
- * `maxPublicRecords` attribute records and `maxPointerSamples` pointer samples.
- * Hydration needs to know whether LFS is in use, not an inventory, so a
- * repository with thousands of LFS files is scanned in the same memory as one
- * with a handful.
- */
 export function createLfsFileScanner(query, gitlinkPaths = []) {
   const limits = LFS_DISCOVERY_LIMITS;
   const gitlinks = new Set(gitlinkPaths);
@@ -156,7 +140,6 @@ export function createLfsFileScanner(query, gitlinkPaths = []) {
       }
     }
     if (!batch.length) return;
-    // The index listing names each file's object, so sizes are asked by object id.
     const entries = batch.map((file) => {
       const entry = objects?.get(file);
       if (!entry) throw lfsError('Tracked file has no object id');
@@ -176,8 +159,6 @@ export function createLfsFileScanner(query, gitlinkPaths = []) {
       attributes.push(record);
     }
 
-    // Query sizes without reading blobs. Only pointer-sized blobs enter the
-    // bounded content query; Git LFS pointers fit within 1 KiB.
     const metadata = boundedText(await query(['cat-file', '--batch-check'],
       Buffer.from(`${entries.map((entry) => entry.oid).join('\n')}\n`)), limits.maxBatchBytes, 'Git object metadata');
     const records = metadata.split('\n');
@@ -193,7 +174,6 @@ export function createLfsFileScanner(query, gitlinkPaths = []) {
         candidates.push({ path: batch[index], oid: match[1], size: Number(match[3]) });
       }
     }
-    // Attributes are evidence, not an exhaustive list of pointer paths.
     const selectedPaths = new Set(selected);
     candidates.sort((left, right) => Number(selectedPaths.has(right.path)) - Number(selectedPaths.has(left.path)));
     if (!candidates.length) return;
@@ -303,10 +283,6 @@ const httpsCandidate = (value, gitRemoteUrl) => {
   return candidate;
 };
 
-// Git LFS falls back to the same host over HTTPS for an SSH checkout when the
-// server does not answer `git-lfs-authenticate`: it drops the SSH port and
-// adds `.git` to a repository path that lacks it. `gitRemote.path` is already
-// URL-decoded, so each segment is encoded again before the URL parser sees it.
 const sshRemoteHttpsEndpoint = (gitRemote) => {
   const decodedPath = gitRemote.path.startsWith('/') ? gitRemote.path : `/${gitRemote.path}`;
   const repositoryPath = decodedPath.split('/').map((part) => part ? encodeURIComponent(part) : part).join('/');
@@ -398,8 +374,6 @@ export function discoverLfs({
 
   const needed = attributePaths.length > 0 || pointers.length > 0 || lfsConfig.size > 0;
 
-  // Git LFS reads `.lfsconfig` only below Git's own configuration, and
-  // `lfs.url` wins over `remote.<name>.lfsurl` within either source.
   const remoteUrlKey = `remote.${gitRemoteName.toLowerCase()}.lfsurl`;
   const configured = [
     ['lfs.url', effectiveConfig.get('lfs.url'), 'git-config'],
@@ -427,7 +401,6 @@ export function discoverLfs({
       candidate: httpsCandidate(sshRemoteHttpsEndpoint(gitRemote), gitRemoteUrl),
     });
   } else {
-    // A checkout that needs no LFS transfer has no endpoint to derive.
     endpoint = Object.freeze({ status: 'unresolved', reason: 'ssh-git-remote' });
   }
   if (!needed && !pointerScanComplete) {
