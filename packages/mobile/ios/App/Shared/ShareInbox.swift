@@ -57,8 +57,26 @@ enum ShareInbox {
         let directory = inbox(in: container)
         let manager = FileManager.default
         try? manager.removeItem(at: directory)
+        removeStaleClaims(in: container)
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    /// A take that died between claiming the inbox and deleting its copy (the process was
+    /// killed mid-copy) leaves a `SharedInbox-<uuid>` behind, and nothing else removes them.
+    /// Only a claim older than an hour is swept: a younger one may still be read by a take.
+    private static func removeStaleClaims(in container: URL) {
+        let manager = FileManager.default
+        let cutoff = Date().addingTimeInterval(-3600)
+        let entries = (try? manager.contentsOfDirectory(
+            at: container,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix("\(directoryName)-") {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified >= cutoff { continue }
+            try? manager.removeItem(at: entry)
+        }
     }
 
     static func write(_ records: [Record], text: String? = nil, in directory: URL) throws {

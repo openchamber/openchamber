@@ -71,7 +71,7 @@ final class ShareInboxTests: XCTestCase {
         XCTAssertEqual(taken.rejected, [["name": "ninth.png", "reason": "too-many"]])
 
         XCTAssertEqual(ShareInbox.take(in: container).files.count, 0, "a share is delivered once")
-        XCTAssertFalse(ShareInbox.hasPending())
+        XCTAssertFalse(ShareInbox.hasPending(in: container))
     }
 
     func testTakeDeliversOnceWhenTwoCallersRace() throws {
