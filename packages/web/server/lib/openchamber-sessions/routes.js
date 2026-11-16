@@ -17,7 +17,6 @@ import {
   validateWorktreeDirectory as validateWorktreeDirectoryDefault,
   waitForActiveWorktreeBootstrap as waitForActiveWorktreeBootstrapDefault,
 } from '../git/index.js';
-import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
@@ -32,6 +31,7 @@ import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 import { createSession } from './create-session.js';
+import { fetchSelectionInputs, fetchWarmSelectionInputs } from './selection-inputs.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
@@ -213,38 +213,6 @@ const resolveProjectDefaults = (settings, directory, projectId) => {
     defaultModel: asNonEmptyString(matchedProject?.defaultModel),
     defaultVariant: asNonEmptyString(matchedProject?.defaultVariant),
   };
-};
-
-/**
- * One snapshot for this directory. Unknown catalogues can validate an explicit
- * choice permissively, but cannot establish the defaults for a new session.
- */
-const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) => {
-  const settings = await readSettingsFromDiskMigrated();
-  const options = { signal: AbortSignal.timeout(10_000) };
-  const [models, agents, configEntries] = await Promise.all([
-    client.model.list(undefined, options).then((response) => asList(response?.data)).catch(() => []),
-    // v2 agents carry `id` (`build`, what prompts and sessions refer to) and a
-    // display `name` (`Build`); every lookup here is by id.
-    client.agent.list(undefined, options).then((response) => asList(response?.data)).catch(() => null),
-    client.config.get(undefined, options).then((response) => asList(response)).catch(() => null),
-  ]);
-  if (configEntries === null) return { settings, models, agents, config: null };
-
-  // Config entries arrive lowest priority first, so the last definition wins.
-  const config = { defaultAgent: null, defaultModel: null };
-  for (const entry of configEntries) {
-    const info = entry?.info;
-    if (!info) continue;
-    const agent = asNonEmptyString(info.default_agent);
-    if (agent) config.defaultAgent = agent;
-    // Config `model` is the v2 selection spelling: "provider/model#variant" or
-    // the expanded object form. The canonical parser folds both.
-    const model = parseModelSelection(info.model);
-    if (model) config.defaultModel = model;
-  }
-
-  return { settings, models, agents, config };
 };
 
 const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, config, autoAvailable, requireDefaultAgent }) => {
@@ -568,6 +536,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     // Creates a worktree from a pull or merge request through the Git routes'
     // contributor pipeline. Absent where contributor worktrees are not served.
     createChangeRequestWorktree = null,
+    selectionWarmUp = undefined,
     dataDir = null,
     archiveStore: injectedArchiveStore = null,
     // Archive state on OpenCode; module tests pass a fake.
@@ -831,14 +800,16 @@ export const createOpenChamberSessionService = (dependencies) => {
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
+    warmUp = false,
   }) => {
     let model = requestedModel;
     let agent = requestedAgent;
     let variant = requestedVariant;
     let selectionInputs = null;
-    const readSelectionInputs = async () => {
+    const readSelectionInputs = async ({ waitForAgents = false } = {}) => {
       if (!selectionInputs) {
-        selectionInputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+        const read = () => fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+        selectionInputs = await (warmUp && waitForAgents ? fetchWarmSelectionInputs(read, selectionWarmUp) : read());
       }
       return selectionInputs;
     };
@@ -853,7 +824,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
     if (!model || !agent) {
-      const inputs = await readSelectionInputs();
+      const inputs = await readSelectionInputs({ waitForAgents: true });
       if (!inputs.agents?.length || inputs.config === null) {
         throw new OpenChamberControlError('Session selection is not ready: agent configuration is unavailable', 503);
       }
@@ -1275,6 +1246,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           requestedModel: model,
           requestedAgent: agent,
           requestedVariant: variant,
+          warmUp: Boolean(worktree),
         });
       }
     } catch (error) {

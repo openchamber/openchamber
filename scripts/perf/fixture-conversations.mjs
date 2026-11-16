@@ -483,18 +483,9 @@ const VERIFY_WORKFLOW_SCRIPT = [
 export const OPERATOR_PROMPT = "Start a worker session of your own for the parser fix."
 export const OPERATOR_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the lexer fix."
 export const OPERATOR_TAKEOVER_PROMPT = "Start a worker of your own in a new worktree that I may take over."
-// A new worktree's OpenCode location answers its first agent read empty, so
-// the first create answers `partialAction: worktree-created`; a real agent
-// retries in that folder, and so does this one.
+export const OPERATOR_PHONE_PROMPT = "Start a worker of your own in a new worktree that I may take over on my phone."
 const operatorWorktreeCode = (title, worktree) => [
-  "const parse = (value) => (typeof value === 'string' ? JSON.parse(value) : value);",
-  `const worker = { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true };`,
-  `let result = parse(await tools.openchamber({ action: 'session.create', parameters: { ...worker, worktree: '${worktree}' } }));`,
-  "const directory = result?.data?.directory ?? result?.directory;",
-  "for (let attempt = 0; attempt < 20 && directory && !(result?.data?.sessionId ?? result?.sessionId); attempt += 1) {",
-  "  result = parse(await tools.openchamber({ action: 'session.create', parameters: { ...worker, directory } }));",
-  "}",
-  "return result;",
+  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true, worktree: '${worktree}' } })`,
 ].join("\n")
 
 const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
@@ -526,6 +517,7 @@ const VERIFY_TURNS = [{
 },
   operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
   operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
+  operatorWorktreeTurn("operator_phone_1", OPERATOR_PHONE_PROMPT, "Phone worker", "phone-fix"),
 ]
 
 const TURNS = [

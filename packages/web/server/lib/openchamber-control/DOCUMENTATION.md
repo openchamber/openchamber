@@ -439,9 +439,17 @@ other.
   and effort preferences survive missing catalog entries rather than silently
   dispatching with a different model.
 - A create with a prompt resolves its selection in the target directory before
-  creating an OpenCode session. It reads discovery once with a 10-second request
-  deadline. Unavailable agent/config reads, an empty agent list, or a configured
-  agent absent from the list produce 503; no fallback model is dispatched from
+  creating an OpenCode session. It reads discovery with a 10-second request
+  deadline, once in an existing folder. In a worktree the same call just made,
+  it reads again every half second for up to 15 seconds while the agent list is
+  empty or the agent or config read fails, when the call has to pick an agent or
+  model (an explicit pair waits for nothing; its optional level is a single read)
+  (`../openchamber-sessions/selection-inputs.js`): that worktree's OpenCode
+  location answers its first agent read empty and fills the list about a second
+  later, so without the wait nearly every create in a new worktree came back
+  503 and the agent made a second, stray worktree before it retried in the
+  first. A list still missing after that, or after the one read elsewhere, an
+  empty agent list, or a configured agent absent from the list produce 503; no fallback model is dispatched from
   those snapshots. A missing saved default agent is named in the error with a
   hint to update the default or pass an explicit agent; it never silently picks
   another agent. An explicit agent that needs only a model does not require the
@@ -452,9 +460,11 @@ other.
   setup, with the deadlines above, then check the final status once. Git-ready
   alone is insufficient. Creating in an existing checkout subdirectory checks
   bootstrap at the checkout root while retaining the session's requested folder.
-  If a create prerequisite fails after making a worktree,
-  the error carries `partialAction: worktree-created` and `directory`, with no
-  session ID. The caller can retry that directory without a `worktree` parameter.
+  If a create prerequisite fails after making a worktree (agents that never
+  warmed up, a missing default agent, setup still running), the error carries
+  `partialAction: worktree-created` and `directory`, with no session ID. The
+  caller can retry that directory without a `worktree` parameter; after the
+  warm-up this is a real failure, no longer the normal first answer.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
   An empty-session create without a prompt keeps its existing selection behavior.
