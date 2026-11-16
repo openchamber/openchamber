@@ -6,6 +6,7 @@
     {
       "id": "history",
       "name": "An agent turn in the transcript",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx", "packages/ui/src/components/chat/message/parts/UserTextPart.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/useAssistantRenderedParts.tsx", "packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/ProgressiveGroup.tsx", "packages/ui/src/components/chat/message/parts/MinDurationShineText.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/toolDescriptions.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolChangeSummary.ts", "packages/ui/src/components/chat/message/parts/toolRow/DiffPreview.tsx", "packages/ui/src/components/chat/message/parts/ToolPartDiffPreview.tsx", "packages/ui/src/components/chat/message/parts/toolDiffUtils.ts", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx"],
       "what": "A finished turn shows the prompt, the agent's steps as tool rows and the final answer.",
       "reach": "Open a session where the agent read, searched, edited files and ran a command.",
       "proof": "The prompt bubble, one row per tool call with its target and edit counts, and the answer's Markdown.",
@@ -64,6 +65,7 @@
     {
       "id": "markdown",
       "name": "Markdown in answers",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx", "packages/ui/src/components/chat/MarkdownRenderer.tsx", "packages/ui/src/components/chat/markdownRendererLoader.ts", "packages/ui/src/components/chat/markdown/MarkdownTable.tsx", "packages/ui/src/components/chat/markdown/MarkdownCode.tsx", "packages/ui/src/components/chat/markdown/streamdownCode.ts", "packages/ui/src/components/chat/markdown/markdownCodeHighlighter.ts", "packages/ui/src/components/chat/markdown/streamdownPlugins.ts"],
       "what": "Answers render headings, numbered lists, tables and highlighted code in several languages.",
       "reach": "A session whose answer has headings, a list, a table and fenced code.",
       "proof": "Each construct is present as its own element with its text.",
@@ -89,6 +91,7 @@
     {
       "id": "live",
       "name": "A streaming answer",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/lib/turns/streamingTailEntry.ts", "packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx", "packages/ui/src/components/chat/components/ScrollToBottomButton.tsx", "packages/ui/src/components/chat/column/ComposerSlot.tsx", "packages/ui/src/hooks/useChatTimelineScroll.ts", "packages/ui/src/components/chat/lib/scroll/followScroll.ts", "packages/ui/src/components/chat/lib/scroll/followGlide.ts"],
       "what": "While the agent answers, the text grows in place and the composer shows Stop. A reply taller than the screen stops the follow at its start and offers Scroll to bottom. While the view follows it, the transcript fades out above the composer.",
       "reach": "Send a prompt to a model that streams for a few seconds, watch the open session.",
       "proof": "Stop shows during the stream; after it the reply's start is on screen, Scroll to bottom is offered and brings the reply's last sentence into view. The fade is on while the reply streams and the view follows, off as soon as the reader scrolls away, and off once the reply ends.",
@@ -135,6 +138,7 @@
     {
       "id": "scroll",
       "name": "Scrolling a long chat",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/column/useColumnTimelineScroll.ts", "packages/ui/src/components/chat/column/useColumnHistory.ts", "packages/ui/src/components/chat/column/ComposerSlot.tsx", "packages/ui/src/components/chat/components/ScrollToBottomButton.tsx", "packages/ui/src/hooks/useChatTimelineScroll.ts", "packages/ui/src/components/chat/lib/scroll/followScroll.ts", "packages/ui/src/components/chat/lib/scroll/followGlide.ts", "packages/ui/src/components/chat/lib/scroll/sessionScrollMemory.ts", "packages/ui/src/components/chat/lib/scroll/timelineScrollAnchoring.ts", "packages/ui/src/components/chat/lib/scroll/timelineScrollIntent.ts"],
       "what": "A long session opens at its end; scrolled up, an arrow brings the reader back to the end. Scrolled to the start, the older history that was not loaded on opening (past the first 100 messages) loads.",
       "reach": "Open a session with several turns, scroll up.",
       "proof": "The last answer is on screen after opening, Scroll to bottom appears after scrolling up and brings the end back. In a session longer than the first page, scrolling to the start brings its first prompt.",
@@ -230,6 +234,7 @@
     {
       "id": "actions",
       "name": "Message actions",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageActionButtons.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnActionButtons.tsx", "packages/ui/src/components/chat/message/body/AssistantCopyButton.tsx", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx"],
       "what": "Under each message: copy its text; under a prompt: revert the session to before it.",
       "reach": "Hover a message and use the buttons under it.",
       "proof": "Copy puts the message text on the clipboard; Revert removes the prompt and its answer from the transcript and puts the prompt back in the composer.",
@@ -272,6 +277,7 @@
     {
       "id": "tool-rows",
       "name": "Opening a tool row",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/MinDurationShineText.tsx", "packages/ui/src/components/chat/message/parts/toolRenderUtils.ts", "packages/ui/src/components/chat/message/toolRenderers.tsx", "packages/ui/src/components/chat/message/parts/BlockLine.tsx", "packages/ui/src/components/chat/message/parts/ToolResultParts.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolScrollableSection.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolScrollableTextOutput.tsx", "packages/ui/src/components/chat/message/parts/toolRow/CommandOutput.tsx", "packages/ui/src/components/chat/message/parts/toolRow/CopyToolOutputButton.tsx", "packages/ui/src/components/chat/message/parts/toolRow/JsonToolOutput.tsx", "packages/ui/src/components/chat/message/parts/JsonSummaryView.tsx", "packages/ui/src/components/chat/message/parts/TodoWriteList.tsx", "packages/ui/src/components/chat/message/parts/OpenChamberToolOutput.tsx", "packages/ui/src/components/chat/message/parts/openChamberToolEnvelope.ts", "packages/ui/src/components/chat/message/parts/OpencodeToolOutput.tsx", "packages/ui/src/components/chat/message/parts/opencodeToolResult.ts", "packages/ui/src/components/chat/message/parts/toolOutput.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolDescriptions.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolChangeSummary.ts", "packages/ui/src/components/chat/message/parts/toolRow/useToolRowOpenActions.ts", "packages/ui/src/components/chat/message/parts/toolRow/deferredExpandedContent.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolOutputText.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolPathRendering.tsx", "packages/ui/src/components/chat/message/parts/toolRow/toolPaths.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolDiagnostics.ts"],
       "what": "Each tool call the agent made is a row; opening it shows what the call did in that tool's own terms: a command's output, the file a write created, the task list, a search's matches, the error of a failed call, a script's JSON answer, calls and cut output, what an OpenCode or OpenChamber tool did.",
       "reach": "Open a session where the agent ran a command, wrote a file, set a task list, searched, made a failing edit or ran a script; click a row, or focus it and press Enter or Space.",
       "proof": "Collapsed, the row shows only its name and target; opened, the output, the written lines, every task, the error or the JSON shows under it, and a second click or key hides it again.",
@@ -478,6 +484,7 @@
     {
       "id": "tool-files",
       "name": "A file change from its tool row",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/useToolRowOpenActions.ts", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/DiffPreview.tsx", "packages/ui/src/components/chat/message/parts/ToolPartDiffPreview.tsx", "packages/ui/src/components/chat/message/DiffViewToggle.tsx", "packages/ui/src/components/chat/message/useDefaultDiffViewMode.ts", "packages/ui/src/components/chat/message/parts/toolDiffUtils.ts", "packages/ui/src/components/chat/message/parts/ApplyPatchFileButtons.tsx", "packages/ui/src/components/chat/message/parts/applyPatchEditorAction.ts"],
       "what": "A row that wrote or edited a file opens that file in Files, opens its diff in Changes, and shows the edit unified or side by side.",
       "reach": "In a session where the agent wrote or edited a file: the arrow after the row's name, or open the row and hover it for its file actions.",
       "proof": "Files shows the file's tab and its lines, Changes shows the file's diff, and the edit in the row switches between one column and two.",
@@ -570,6 +577,7 @@
     {
       "id": "tool-running",
       "name": "A command or subagent still at work",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ShellToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/BackgroundShellToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/SubagentToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/useShellOutput.ts", "packages/ui/src/components/chat/message/parts/foregroundShellStop.ts", "packages/ui/src/components/chat/message/parts/backgroundShellPart.ts", "packages/ui/src/components/chat/message/parts/backgroundSubagentPart.ts", "packages/ui/src/components/chat/message/parts/toolRow/useToolRowTiming.ts", "packages/ui/src/components/chat/message/parts/toolRow/LiveDuration.tsx"],
       "what": "While a command or subagent runs, its row shows it is working and offers Stop; opened, a command's row shows what it printed so far. A stopped one reads as stopped by the user, not failed.",
       "reach": "Let the agent start a long command, one in the background, or a slow subagent, and watch its row.",
       "proof": "Stop shows while it runs, the output so far shows in the opened row, and after Stop the row says stopped and Stop is gone.",
@@ -628,6 +636,7 @@
     {
       "id": "tool-conversation",
       "name": "Subagents, questions and !commands as rows",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/SubagentToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/subagentChildSession.ts", "packages/ui/src/components/chat/message/parts/toolRow/OpenSubtaskButton.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/questionOutput.ts", "packages/ui/src/components/chat/FormMarkdown.tsx", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/toolOutput.ts"],
       "what": "A subagent's row opens to its answer and to its own session; a question the agent asked shows what it asked and, once answered, what the user chose; a !command the user ran that failed says why on its row.",
       "reach": "Let the agent hand work to a subagent or ask a question; run !ls on a folder that is not there.",
       "proof": "The subagent's answer under its row and its session in a panel tab; the question's options, then only the chosen answer; the failure's last line on the closed row and the error in the opened one.",
@@ -705,6 +714,7 @@
     {
       "id": "prompt",
       "name": "Actions under a prompt",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx", "packages/ui/src/components/chat/messageSelection/useMessageSelectionEntry.ts", "packages/ui/src/components/chat/messageSelection/MessageSelectionBar.tsx"],
       "what": "Under a prompt, on hover: the time it was sent, Copy, and a menu with Save as snippet, Select messages, Pin into context and Fork from here.",
       "reach": "Hover a prompt in the transcript; the ... opens the menu.",
       "proof": "Copy puts the prompt on the clipboard; each menu item opens its dialog, bar or session, and Pin turns into Unpin.",
@@ -790,6 +800,7 @@
     {
       "id": "long-prompt",
       "name": "A long prompt",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx", "packages/ui/src/components/chat/message/parts/UserTextPart.tsx", "packages/ui/src/components/chat/lib/scroll/timelineScrollIntent.ts"],
       "what": "A long prompt shows its first lines with Show more; Show more opens it whole, Show less folds it again.",
       "reach": "Send a prompt of sixty lines and open the session; once it is open, scroll down to the link under it.",
       "proof": "The answer under the prompt is on screen while the prompt is folded, is pushed off it once the prompt opens, and is back after Show less.",
@@ -817,6 +828,7 @@
     {
       "id": "footer",
       "name": "The turn footer",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnFooter.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnActionButtons.tsx", "packages/ui/src/components/chat/message/body/AssistantCopyButton.tsx", "packages/ui/src/components/chat/message/body/useFooterSheetActions.tsx", "packages/ui/src/components/chat/message/body/useAssistantForkActions.ts", "packages/ui/src/components/chat/message/body/useAssistantPlanActions.ts", "packages/ui/src/components/chat/message/body/useAssistantImageShare.ts", "packages/ui/src/components/chat/message/imageExport.ts", "packages/ui/src/components/chat/message/useCopyMessageLink.ts", "packages/ui/src/components/chat/message/useFactsFit.ts", "packages/ui/src/components/chat/messageSelection/MessageSelectionBar.tsx", "packages/ui/src/components/session/ForkSessionDialog.tsx", "packages/ui/src/components/session/SaveProjectPlanDialog.tsx", "packages/ui/src/components/multirun/AskOtherModelsDialog.tsx"],
       "what": "Under a turn's final answer: the model and agent that answered, the time it took, and actions on hover: copy, continue from this answer, pin, and a menu with Copy link, Save as image, Select messages, Save as plan.",
       "reach": "Open a session with a finished turn, hover the answer.",
       "proof": "The footer names the model and agent; each action does what it says: a fork, a dialog, a draft, a toast, a pressed pin.",
@@ -971,6 +983,7 @@
     {
       "id": "navigate",
       "name": "Moving between prompts",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/components/PromptNavigatorRail.tsx", "packages/ui/src/components/chat/column/usePromptRail.ts", "packages/ui/src/components/chat/column/useColumnTurnNavigation.ts", "packages/ui/src/components/chat/column/chatKeyboardNavigation.ts", "packages/ui/src/components/chat/hooks/useChatTurnNavigation.ts", "packages/ui/src/components/chat/lib/promptPreviews.ts", "packages/ui/src/components/chat/TimelineDialog.tsx"],
       "what": "In a chat with several prompts the user jumps to any of them: from the prompt list in the top corner, with the arrow keys after clicking the transcript, or from the Conversation Timeline.",
       "reach": "Hover or click the ticks at the top start corner of the chat; click the transcript and press Arrow Up or Down; press Cmd/Ctrl+K then T for the timeline.",
       "proof": "The chosen prompt is on screen after each move.",
@@ -1055,6 +1068,7 @@
     {
       "id": "search",
       "name": "Searching the conversation",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/search/ChatSearchBar.tsx", "packages/ui/src/components/chat/search/chatSearchHighlight.ts", "packages/ui/src/components/chat/column/useChatSearch.ts"],
       "what": "Cmd/Ctrl+F in a chat opens a search bar over it that finds words in this conversation and counts the matches; Escape closes it, and it never follows the user into another session.",
       "reach": "Click the transcript or the composer, press Cmd/Ctrl+F, type a word.",
       "proof": "The bar opens, its count reads 2 of 2 for a word in two messages, Escape closes it, and switching to another session closes it too.",
@@ -1090,6 +1104,7 @@
     {
       "id": "expand",
       "name": "The expanded editor",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/column/ComposerSlot.tsx", "packages/ui/src/components/chat/column/useComposerPresentation.ts"],
       "what": "Cmd/Ctrl+Shift+E grows the composer over the whole chat for a long prompt and hides the transcript; the same keys bring the transcript back.",
       "reach": "In a session, press Cmd/Ctrl+Shift+E, then press it again.",
       "proof": "The transcript is hidden while the editor is expanded and shows again after.",
@@ -1117,6 +1132,7 @@
     {
       "id": "draft",
       "name": "A new session's first prompt",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/column/DraftWelcome.tsx", "packages/ui/src/components/chat/DraftPresetChips.tsx", "packages/ui/src/components/chat/useDraftHeading.ts", "packages/ui/src/components/chat/useDraftStarters.ts", "packages/ui/src/components/chat/column/ComposerSlot.tsx", "packages/ui/src/components/chat/column/useComposerPresentation.ts", "packages/ui/src/components/chat/column/sessionPlaceholder.tsx"],
       "what": "With no session open the chat is a draft: the composer stands alone, on the phone under a heading and starter chips. The first prompt turns it into a session whose transcript shows the prompt and answer, with the composer floating at its end.",
       "reach": "Open the app with no session selected, on the desktop or on /mobile.html; type a prompt or tap a starter.",
       "proof": "The draft's composer stands in the page; after sending, the prompt and answer show and the composer floats over the end of the transcript. On the phone the heading and starters show and go once a starter is tapped.",
@@ -1155,6 +1171,7 @@
     {
       "id": "subagent",
       "name": "A subagent's session",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/views/ChatView.tsx", "packages/ui/src/components/chat/message/parts/toolRow/OpenSubtaskButton.tsx", "packages/ui/src/components/chat/column/ComposerSlot.tsx", "packages/ui/src/components/chat/column/ReadOnlyPromptBanner.tsx", "packages/ui/src/components/chat/column/useColumnPromptReadOnly.ts", "packages/ui/src/components/chat/chatPromptReadOnly.ts", "packages/ui/src/components/chat/column/ReturnToParentButton.tsx", "packages/ui/src/components/chat/PermissionDock.tsx", "packages/ui/src/components/chat/PermissionCard.tsx", "packages/ui/src/components/chat/usePermissionResponse.ts"],
       "what": "A subagent the agent started has its own session. It takes no prompts: a banner stands in the composer's place, with Stop while the subagent works, and a permission the subagent asks for is answered there. Opened from its row it shows in the context panel; on the phone it replaces the chat and Parent leads back.",
       "reach": "Send a prompt the agent hands to a subagent, then click the arrow on the subagent's row in the chat.",
       "proof": "The banner says Subagent sessions cannot be prompted; Stop on it ends the subagent's turn; a permission it asks for takes Allow once in the panel; on the phone Parent returns to the parent's chat.",
@@ -1216,6 +1233,7 @@
     {
       "id": "side-panel",
       "name": "A session in the side panel",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/views/ChatView.tsx", "packages/ui/src/hooks/useKeyboardShortcuts.ts", "packages/ui/src/hooks/useComposerAbortEscape.ts"],
       "what": "Any session opens in the context panel beside the open one, with its own composer; Escape twice in that composer stops that session, not the main one.",
       "reach": "Right-click a session's row in the sidebar, Open in Side Panel.",
       "proof": "The panel shows the session with a composer; while both work, Escape twice in the panel's composer makes the panel's session idle and leaves the main one busy.",
@@ -1249,6 +1267,7 @@
     {
       "id": "questions",
       "name": "Questions in the chat",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/TranscriptForms.tsx", "packages/ui/src/components/chat/FormCard.tsx", "packages/ui/src/components/chat/FormFieldControl.tsx", "packages/ui/src/components/chat/formCardState.ts", "packages/ui/src/components/chat/formsInChat.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx", "packages/ui/src/lib/settings/search.ts"],
       "what": "With Settings > Chat > Questions set to In the chat, a question the agent asks shows as a card at the end of the transcript instead of over the composer, and the user answers it there.",
       "reach": "Settings > Chat, Questions: In the chat; then send a prompt the agent answers with a question.",
       "proof": "The question's answers show inside the transcript; picking one and Submit lets the agent answer.",
@@ -1285,6 +1304,7 @@
     {
       "id": "load",
       "name": "Opening a session that does not load",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/column/sessionPlaceholder.tsx", "packages/ui/src/components/chat/column/useColumnSessionLoad.ts"],
       "what": "A session whose messages cannot be fetched says so in place of the transcript and offers Try again; once the server is back the session loads.",
       "reach": "Open a session while the server is down, then start the server.",
       "proof": "Session could not be loaded shows with Try again while the server is down; once it is back the session's answer shows.",
@@ -1314,6 +1334,7 @@
     {
       "id": "work-status",
       "name": "The Work status card",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/work-status/", "packages/ui/src/components/chat/column/useWorkStatusPlacement.ts"],
       "what": "Beside a session's chat on a wide window, a card shows the session's context use, its project and branch.",
       "reach": "Open a session in a project on a desktop-sized window.",
       "proof": "The card shows the project's name and its branch.",
@@ -1335,6 +1356,7 @@
     {
       "id": "activity",
       "name": "Collapsed activity",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/components/LiveTurnActivity.tsx", "packages/ui/src/components/chat/components/LiveActivityCollapse.tsx", "packages/ui/src/components/chat/components/useTurnFold.ts", "packages/ui/src/components/chat/lib/turns/timelineRows.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx"],
       "what": "In Collapsed activity mode a finished turn hides its steps under an Activity header that opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it.",
       "reach": "Settings > Chat > Activity: Collapsed, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
       "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step.",
@@ -1428,6 +1450,7 @@
     {
       "id": "sticky",
       "name": "Sticky prompt",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/components/TurnItem.tsx", "packages/ui/src/components/chat/lib/turns/stickyPrompt.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx"],
       "what": "With Sticky user header on, a turn's prompt stays at the top while its long answer scrolls under it.",
       "reach": "Settings > Chat > Sticky user header, then open a session whose answer is taller than the screen.",
       "proof": "At the end of the answer the prompt is still on screen.",
@@ -1454,6 +1477,7 @@
     {
       "id": "return",
       "name": "Reading position on return",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/lib/scroll/sessionScrollMemory.ts", "packages/ui/src/hooks/useChatTimelineScroll.ts"],
       "what": "Coming back to a session shows the place the reader left, not its end.",
       "reach": "Scroll a long session up to its first prompt, open another session, come back.",
       "proof": "The first prompt is on screen again and the last answer is not.",
@@ -1485,6 +1509,7 @@
     {
       "id": "notices",
       "name": "Rows that are not a turn",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/TimelineNotice.tsx", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ShellToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/lib/messages/assistantError.ts", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx"],
       "what": "A !command the user runs shows as a Shell Command row with its output; a provider that keeps failing shows its retry error in the transcript.",
       "reach": "Type ! and a command in the composer and press Enter; send a prompt to a provider that is down.",
       "proof": "The Shell Command row opens to the command's output; the transcript shows ECONNREFUSED while the session retries.",
@@ -1525,6 +1550,7 @@
     {
       "id": "changed-files",
       "name": "Files a turn changed",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/TurnChangedFilePills.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnFooter.tsx", "packages/ui/src/components/chat/message/openTurnFileDiffInEditor.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx"],
       "what": "With Show changed files on, the turn footer lists the files the turn changed; a file opens its diff, and past four files a +N chip shows the rest.",
       "reach": "Settings > Chat > Show changed files, then a turn that edits files.",
       "proof": "No file pill before the setting and a pill for src/api/retry.ts after it; the pill opens Changes on that file's diff; +1 shows the fifth file and Show fewer hides it again.",
@@ -1585,6 +1611,7 @@
     {
       "id": "failure",
       "name": "A failed turn",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/lib/messages/assistantError.ts", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/LongErrorText.tsx", "packages/ui/src/components/chat/ErrorResponseDetails.tsx"],
       "what": "When the model cannot be reached, the turn shows the provider's error where the answer would be.",
       "reach": "Send a prompt to a provider that is down.",
       "proof": "The error text shows in the transcript under the prompt.",
@@ -1606,6 +1633,7 @@
     {
       "id": "selection",
       "name": "Selecting text in an answer",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/TextSelectionMenu.tsx", "packages/ui/src/components/chat/message/selectionMenuPosition.ts"],
       "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes.",
       "reach": "Drag across an answer's text.",
       "proof": "The menu shows over the selection.",
@@ -1628,6 +1656,7 @@
     {
       "id": "reasoning",
       "name": "The agent's thinking",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/parts/ReasoningPart.tsx", "packages/ui/src/components/chat/message/body/useAssistantRenderedParts.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx"],
       "what": "With Show reasoning traces on, each step's thinking shows before its text: as a folded Thinking block, or as plain text with collapsible thinking blocks off. With it off, no thinking shows.",
       "reach": "Settings, Chat: Show reasoning traces and Collapsible thinking blocks. A turn whose model thinks before its steps.",
       "proof": "Two Thinking blocks with the reasoning's first words; none after the setting goes off; the reasoning as text when blocks do not collapse.",
@@ -1672,6 +1701,7 @@
     {
       "id": "step-actions",
       "name": "Actions under every reply",
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/useAssistantRenderedParts.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageActionButtons.tsx", "packages/ui/src/components/chat/message/body/AssistantCopyButton.tsx"],
       "what": "With message actions on every reply, each text the agent wrote between its steps gets its own row: copy link and copy.",
       "reach": "Settings, Chat: show actions under every assistant reply. A turn with several steps.",
       "proof": "Copy under the first step's text puts that text, and only it, on the clipboard.",

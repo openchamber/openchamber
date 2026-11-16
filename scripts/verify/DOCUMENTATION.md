@@ -6,15 +6,17 @@ Sections: *Ownership*, *Running it*, *The feature map*, *Steps*, *Invariants*, *
 
 ## Ownership
 
-- `zones/*.json` is the feature map: per zone, its source files, its features (what, how to reach, what proves it) and their scenarios as steps.
+- `zones/*.json` is the feature map: per zone, its source files, its features (each with its own source files where they are narrower than the zone's) (what, how to reach, what proves it) and their scenarios as steps.
 - `vocabulary.json` names every part of the UI a step points at (`composer.send`, `sidebar.row`, `diff.added`) with its selector and one line saying what it is. It is the shared name for each thing, and the one place a selector changes when the markup does.
-- `stand.mjs` starts and resets the isolated instance, `browser.mjs` drives Chrome, `steps.mjs` runs steps, `run.mjs` is the command.
+- `stand.mjs` starts and resets the isolated instance, `browser.mjs` drives Chrome, `steps.mjs` runs steps, `changed.mjs` picks the scenarios a change touches, `run.mjs` is the command.
 
 The stand reuses `scripts/perf`: `cdp.mjs` for Chrome, `fixture-provider.mjs` for the model, `fixture-conversations.mjs` for the scratch project and the scripted agent turns.
 
 ## Running it
 
 ```bash
+bun run verify -- --changed                      # the scenarios the change touches (see below)
+bun run verify -- --changed --base A..B --list   # what the commits between A and B select, no run
 bun run verify                                   # every scenario
 bun run verify -- composer files.edit            # a zone, a feature, or one scenario id
 bun run verify -- --list composer                # the feature map, no run
@@ -29,7 +31,25 @@ FAIL composer.send.shift-enter (21.8s)
      step 7 editor: the editor is "line two", expected "line one\nline two"
 ```
 
-A fresh stand warms up for about 40 s (Vite's first compile of the chat, Changes and Files) before the first scenario; a full run takes 4 to 6 minutes. With `--keep` the stand runs until Ctrl-C, and `--attach` runs against it in seconds, which is the loop for writing scenarios. Vite serves the checkout's UI source, so a UI edit shows in the next scenario without restarting the stand. The server runs the code it started with: a change under `packages/web/server` needs a new stand.
+A fresh stand warms up for about 40 s (Vite's first compile of the chat, Changes and Files) before the first scenario; a full run of about 200 scenarios takes about 25 minutes. With `--keep` the stand runs until Ctrl-C, and `--attach` runs against it in seconds, which is the loop for writing scenarios. Vite serves the checkout's UI source, so a UI edit shows in the next scenario without restarting the stand. The server runs the code it started with: a change under `packages/web/server` needs a new stand.
+
+### Running only what a change touches
+
+`--changed` takes the files the change touches, counted as `bun run check:changed` counts them (from where the branch left `origin/main`, with uncommitted and new files; `--base <ref>` for another base, `--base A..B` for the commits between two refs only), and runs the scenarios of the features those files can break. Each changed file goes to one of these:
+
+| The file | Selects |
+|---|---|
+| A test, a document, or a file outside `packages/` and the net | Nothing; listed as not app code |
+| `zones/<zone>.json` | The features of that zone whose scenarios changed or are new |
+| `vocabulary.json` | The features whose steps use a name whose selector changed, is new or is gone |
+| Anything else under `scripts/verify/`, or a file the runner loads from `scripts/` (the fixtures, the isolated server) | Every scenario |
+| A file a feature's `sources` list, or under a listed directory | That feature |
+| A file the sources of some features import, through their components and hooks, or a store or library (`packages/ui/src/{stores,sync,lib}`) that code imports | Those features; every scenario when more than half the features import it |
+| App code nothing above reaches | Nothing; listed as covered by no scenario |
+
+The output names the feature each file led to, and lists the changed app files no scenario covers: for those the net has nothing to say, and a green run proves nothing about them. A change that selects nothing exits without starting a stand. `--list` with `--changed` prints the selection and the map without running.
+
+The selection code is `changed.mjs`, tested without a stand in `changed.test.mjs`.
 
 ## The feature map
 
@@ -43,6 +63,7 @@ A zone file:
   "features": [{
     "id": "edit",
     "name": "Editing a file",
+    "sources": ["packages/ui/src/components/views/files/FileEditor.tsx"],
     "what": "What the user gets, in their words.",
     "reach": "How to get there in the app.",
     "proof": "What shows that it works.",
@@ -60,6 +81,8 @@ A zone file:
   }]
 }
 ```
+
+`sources` are the files (or directories, ending in `/`) whose breakage the zone's scenarios catch, the ones `--changed` selects by. A feature may name its own; then it is selected by those alone, and a feature without them by its zone's. A feature's sources name the files its behavior lives in, including the container whose own code its scenarios play (the list that scrolls, the row that opens a menu), and leave out stores and libraries many features share: the import graph finds those. A source path that does not exist stops the run before it starts, so a split or a rename updates the map in the same change.
 
 A scenario id is `zone.feature.scenario`. `kind` is `path` for the plain user path and `break` for an ordinary failure (a provider that is down, a dropped connection, a file changed outside the app). The runner rejects a step whose `do` or `on` it does not know before anything starts.
 
@@ -151,3 +174,31 @@ A row drag (move a file, attach it to the chat) and a drop from the desktop are 
 ### Why the reset restores settings
 
 Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's settings files once it is up and the reset copies them back, so a scenario's choice ends with it.
+
+### Why a shared file is found through imports and not listed
+
+A store or a library sits under dozens of features, and listing it in each would go stale with every new import. `--changed` reads the imports of every feature's sources instead (static, re-exports, `import()`, through the `@/`, `@web/` and `@openchamber/*` aliases; type-only imports change no behavior and are skipped) and selects a feature when the changed file is reachable from its sources. A regular expression over import lines is enough for this repository's code and needs no compiler; a specifier it cannot resolve is a package and is left out.
+
+### Why the walk stops at the first store or library
+
+The stores, the sync layer and `lib/` import each other in cycles: following them, every feature reached every store, and a change to any store selected 64 features of 64. The walk follows a feature's components and hooks to any depth, takes the stores and libraries they import, and stops there. A store change then selects the features whose own code uses it: `useFileSearchStore` selects the file mention list and the file tree, 26 scenarios of 198. The price: a store that matters to a feature only through another store does not select it. Two levels deep already put most stores past half the features, so the walk takes one.
+
+### Why the import walk stops at a file another feature lists
+
+The transcript imports the composer, so without a stop every file the composer loads would select every chat feature. A file a feature lists is that feature's to catch: the walk does not enter it from another feature's sources, and the draft store behind the composer selects the composer's features only. The cost is that a feature which also depends on that file's imports through it must list them itself. For the same reason a feature never lists a file most of the app loads (`sync/sync-context.tsx`, a store): the walk would stop there for every other feature, and that file's imports would select only the one that listed it.
+
+### Why every chat feature lists the transcript's frame
+
+`ChatContainer`, `ChatViewport`, `MessageList`, `ChatMessage`, `MessageBody` and `timeline/` render every turn, so any chat scenario fails when they break, and every chat feature lists them. A change to the frame runs the whole chat zone; a change to what one feature draws (the turn footer, a tool row, the search bar) runs that feature.
+
+### Why more than half the features means every scenario
+
+Session state and the config store are imported by the code of 50 to 63 features of 64, and running those one by one is the full run under another name. Past half the features the selection is close to full anyway, and saying "this file is shared, everything runs" is more honest than a long list that reads as narrow. The threshold is per file, so one shared file in a change runs everything.
+
+### Why a map change runs what changed and not everything
+
+Writing scenarios edits a zone file and the vocabulary in nearly every commit. Running every scenario for that would make `--changed` a full run for all scenario work. A zone file selects its features whose scenarios differ from the base, the vocabulary the features whose steps use a changed name; the runner, the steps and the fixtures can break any scenario and select all of them.
+
+### Why uncovered files are printed and not ignored
+
+A change whose files no feature reaches selects nothing and exits green. Without naming those files, that green reads as "checked"; the list says where the net has no scenario, so the change gets a scenario or a check of another kind.

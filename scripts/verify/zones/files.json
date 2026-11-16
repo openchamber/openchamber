@@ -6,6 +6,7 @@
     {
       "id": "tree",
       "name": "The project's file tree",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeSearchField.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeToolbar.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeFallbackList.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeErrorRow.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeListing.ts", "packages/ui/src/components/layout/sidebarFilesTree/useVirtualFileTree.ts", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeToggle.ts", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeGitMarks.ts", "packages/ui/src/components/layout/sidebarFilesTree/useFileNameSearch.ts", "packages/web/server/lib/fs/routes.js", "packages/web/server/lib/fs/search.js", "packages/web/server/lib/fs/workspace-file-names.js"],
       "what": "The Files panel lists the project's folders and files; folders open and close in place, files and folders carry their git state, and the list follows the disk.",
       "reach": "Click Files on the right rail of a session.",
       "proof": "The top-level entries show, a folder opens to its files, a file the agent edited is marked modified.",
@@ -288,6 +289,7 @@
     {
       "id": "open",
       "name": "Opening a file",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx", "packages/web/server/lib/fs/routes.js"],
       "what": "A file opens in a tab of the editor beside the chat, from the tree or from a path in an answer.",
       "reach": "Click a file in the Files tree, or click a file path the agent wrote in the chat.",
       "proof": "A tab with the file's name, the editor shows its content, a Markdown file shows rendered.",
@@ -353,6 +355,7 @@
     {
       "id": "edit",
       "name": "Editing a file",
+      "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeListing.ts", "packages/web/server/lib/fs/routes.js"],
       "what": "The editor saves what the user types to disk and shows a change made to the open file outside the app; the tree shows files added or removed outside the app the next time it is shown.",
       "reach": "Open a file in Files, type, press Cmd/Ctrl+S; or change the file outside the app while it is open.",
       "proof": "The file on disk holds the typed text after saving; the editor shows text written outside the app; after closing and opening the panel the tree matches the disk.",
@@ -417,6 +420,7 @@
     {
       "id": "contents",
       "name": "Finding text in files",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeSearchField.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeFallbackList.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeOpening.ts", "packages/ui/src/components/views/files/useFileContentSearch.ts", "packages/ui/src/components/views/files/FileContentSearchResults.tsx", "packages/ui/src/components/views/FilesView.tsx", "packages/web/server/lib/fs/routes.js", "packages/web/server/lib/fs/content-search.js"],
       "what": "The search field switches to file contents: each line that matches is listed with its file, and opening one shows the file at that line; .* makes the query a regular expression.",
       "reach": "In Files, click the magnifier at the start of the search field and pick File contents.",
       "proof": "A query lists the files holding it, a click opens the file on the matching line, a pattern matches only with .* on.",
@@ -482,6 +486,7 @@
     {
       "id": "manage",
       "name": "Creating, renaming and deleting files",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeToolbar.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeCrudDialog.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeDialogs.ts", "packages/ui/src/components/views/files/moveWorkspacePath.ts", "packages/ui/src/components/layout/ContextPanel.tsx", "packages/web/server/lib/fs/routes.js"],
       "what": "The + menu and a row's right-click menu create files and folders, rename, delete, copy the path and download a file; the disk, the tree and the open tabs follow.",
       "reach": "In Files, the + next to the search field, or right-click a file or folder.",
       "proof": "The file on disk is created, renamed or gone; the tree shows it; an open tab follows a rename and closes on delete; the clipboard and the download hold the file's path and content.",
@@ -645,6 +650,7 @@
     {
       "id": "move",
       "name": "Moving by drag",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeDropIndicator.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeMoveDialog.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeDragDrop.ts", "packages/ui/src/components/layout/sidebarFilesTree/treePaths.ts", "packages/ui/src/components/views/files/moveWorkspacePath.ts", "packages/web/server/lib/fs/routes.js"],
       "what": "A file dragged onto a folder moves there after a confirmation the user can turn off; dropped on the empty part of the tree it moves to the project root; dragged into the chat it is attached instead.",
       "reach": "In Files, drag a row onto a folder row, onto the space below the rows, or onto the composer.",
       "proof": "The file is in the new folder on disk and in the tree, the confirmation names it and the folder, a taken name is refused with a toast.",
@@ -792,6 +798,7 @@
     {
       "id": "upload",
       "name": "Uploading files",
+      "sources": ["packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileRow.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeToolbar.tsx", "packages/ui/src/components/layout/sidebarFilesTree/FileTreeDropIndicator.tsx", "packages/ui/src/components/layout/sidebarFilesTree/useFileTreeDragDrop.ts", "packages/ui/src/components/views/files/useFileTreeUpload.tsx", "packages/web/server/lib/fs/routes.js"],
       "what": "Files from the computer land in the project: picked through Upload Files, or dropped on a folder or on the tree; a name that exists asks before replacing.",
       "reach": "In Files, + then Upload Files, a folder's right-click menu, or drag files from the desktop onto the tree.",
       "proof": "The uploaded file is on disk in the chosen folder with its content and shows in the tree; the drop names its target folder.",

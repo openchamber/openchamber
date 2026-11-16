@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
 import { startBrowser } from "./browser.mjs"
+import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
 
@@ -20,6 +21,12 @@ Selection: a zone (composer), a feature (composer.send) or one scenario
 (composer.send.enter). Nothing selected runs every scenario.
 
 Options:
+  --changed         Select the scenarios whose sources the change touches:
+                    files changed since the branch left origin/main, with
+                    uncommitted and new ones. Prints why each file selects
+                    what it does, and the changed files no scenario covers
+  --base <ref>      With --changed: compare with <ref> instead; A..B takes
+                    the files changed between two commits only
   --list            Print the feature map for the selection and exit
   --repeat <n>      Run the selection n times in the same stand
   --out <dir>       Artifacts directory (default: tmp/verify/<time>)
@@ -30,10 +37,12 @@ Options:
   --help            Show this help`
 
 const parseArgs = (argv) => {
-  const options = { selection: [], list: false, repeat: 1, out: null, keep: false, attach: null, headed: false, chrome: null }
+  const options = { selection: [], changed: false, base: null, list: false, repeat: 1, out: null, keep: false, attach: null, headed: false, chrome: null }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
+    else if (value === "--changed") options.changed = true
+    else if (value === "--base") options.base = argv[++index]
     else if (value === "--list") options.list = true
     else if (value === "--repeat") options.repeat = Math.max(1, Number(argv[++index]))
     else if (value === "--out") options.out = resolve(argv[++index])
@@ -44,6 +53,8 @@ const parseArgs = (argv) => {
     else if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`)
     else options.selection.push(value)
   }
+  if (options.changed && options.selection.length) throw new Error("--changed picks the scenarios itself; leave out the selection")
+  if (options.base && !options.changed) throw new Error("--base goes with --changed")
   return options
 }
 
@@ -54,7 +65,13 @@ const loadMap = () => {
   const scenarios = []
   const problems = []
   for (const zone of zones) {
+    for (const source of zone.sources) {
+      if (!existsSync(join(REPO_ROOT, source))) problems.push(`${zone.zone}: source ${source} does not exist`)
+    }
     for (const feature of zone.features) {
+      for (const source of feature.sources ?? []) {
+        if (!existsSync(join(REPO_ROOT, source))) problems.push(`${zone.zone}.${feature.id}: source ${source} does not exist`)
+      }
       for (const scenario of feature.scenarios) {
         const id = `${zone.zone}.${feature.id}.${scenario.id}`
         scenarios.push({ ...scenario, id, zone, feature })
@@ -78,6 +95,34 @@ const select = (scenarios, selection) => {
   return chosen
 }
 
+/** The scenarios the change touches, after printing which file led to which features and which no scenario covers. */
+const selectChanged = ({ zones, vocabulary }, scenarios, base) => {
+  const changed = listChangedFiles(REPO_ROOT, base)
+  const mapChanges = diffMap(readMapAt(REPO_ROOT, changed.from), changed.to ? readMapAt(REPO_ROOT, changed.to) : { zones, vocabulary })
+  const explained = createSelector(zones, keepingChangedFiles(workingTreeFiles(REPO_ROOT), changed.files)).explain(changed.files, mapChanges)
+  const ids = new Set(explained.flatMap((entry) => entry.features))
+  const chosen = scenarios.filter((scenario) => ids.has(`${scenario.zone.zone}.${scenario.feature.id}`))
+  const of = (reason) => explained.filter((entry) => entry.reason === reason)
+  console.log(`${changed.files.length} files changed against ${changed.label}`)
+  for (const entry of [...of("net"), ...of("shared"), ...of("scenarios"), ...of("vocabulary"), ...of("listed"), ...of("imported")]) {
+    const why = {
+      net: "the net's runner or fixtures: every scenario",
+      scenarios: entry.features.length ? `changed scenarios of ${entry.features.join(", ")}` : "no scenario changed",
+      vocabulary: entry.features.length ? `a changed selector used by ${entry.features.join(", ")}` : "no selector a scenario uses changed",
+      shared: `imported by the sources of ${entry.importers} of ${entry.total} features, more than half: every scenario`,
+      listed: `listed in the sources of ${entry.features.join(", ")}`,
+      imported: `imported by the sources of ${entry.features.join(", ")}`,
+    }[entry.reason]
+    console.log(`  ${entry.file}\n    ${why}`)
+  }
+  const uncovered = of("uncovered")
+  if (uncovered.length) console.log(`\nNo scenario covers ${uncovered.length} changed app files; the net does not check them:\n${uncovered.map((entry) => `  ${entry.file}`).join("\n")}`)
+  const notApp = of("not-app")
+  if (notApp.length) console.log(`\n${notApp.length} changed files are not app code (tests, docs, outside packages/): ${notApp.map((entry) => entry.file).join(", ")}`)
+  console.log(`\n${chosen.length} of ${scenarios.length} scenarios selected`)
+  return chosen
+}
+
 const printMap = (zones, chosen) => {
   const ids = new Set(chosen.map((scenario) => scenario.id))
   for (const zone of zones) {
@@ -85,7 +130,7 @@ const printMap = (zones, chosen) => {
     if (!features.length) continue
     console.log(`\n${zone.zone}: ${zone.name}\n  code: ${zone.sources.join(", ")}`)
     for (const feature of features) {
-      console.log(`\n  ${zone.zone}.${feature.id}: ${feature.name}\n    what:  ${feature.what}\n    reach: ${feature.reach}\n    proof: ${feature.proof}`)
+      console.log(`\n  ${zone.zone}.${feature.id}: ${feature.name}${feature.sources ? `\n    code:  ${feature.sources.join(", ")}` : ""}\n    what:  ${feature.what}\n    reach: ${feature.reach}\n    proof: ${feature.proof}`)
       for (const scenario of feature.scenarios) console.log(`    - ${scenario.id} [${scenario.kind}] ${scenario.title}`)
     }
   }
@@ -160,10 +205,14 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
-  const chosen = select(scenarios, options.selection)
+  const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)
   if (options.list) {
     printMap(zones, chosen)
     console.log(`\n${chosen.length} scenarios`)
+    return 0
+  }
+  if (chosen.length === 0) {
+    console.log("[verify] nothing to run")
     return 0
   }
   const outDir = options.out ?? join(REPO_ROOT, "tmp/verify", stamp())
