@@ -3,19 +3,11 @@ import { syntaxTree } from '@codemirror/language';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { symbolKindOf } from './documentSymbols';
 
-// While the body of a function or class fills the screen, its first line
-// stays pinned at the top of the editor, nested scopes under it, like VS
-// Code's sticky scroll. The scopes come from the syntax tree, the same
-// declarations the symbol list shows; a click scrolls to that line.
 
 const MAX_STICKY_LINES = 3;
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
-/**
- * Lines that open the declarations still running at `pos` and starting above
- * `coveredFrom`, outermost first, at most `MAX_STICKY_LINES` of the innermost.
- */
 export const enclosingScopeLines = (state: EditorState, pos: number, coveredFrom: number): Line[] => {
   const lines: Line[] = [];
   for (let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1); node; node = node.parent) {
@@ -31,7 +23,6 @@ export const enclosingScopeLines = (state: EditorState, pos: number, coveredFrom
 type StickyMeasure = {
   lines: Line[];
   lineHeight: number;
-  /** Where the code starts, and where the line-number column ends. */
   gutterWidth: number;
   numbersEnd: number;
   scrollLeft: number;
@@ -74,8 +65,6 @@ const stickyScopePlugin = ViewPlugin.fromClass(class {
       const block = view.lineBlockAtHeight(Math.max(0, height));
       return enclosingScopeLines(view.state, block.from, block.from);
     };
-    // The pinned lines cover the text under them, so ask again for the first
-    // line still visible below them.
     const first = top > 0 ? scopesAt(top) : [];
     const lines = first.length > 0 ? scopesAt(top + first.length * lineHeight) : [];
     const gutters = view.dom.querySelector<HTMLElement>('.cm-gutters');
@@ -107,8 +96,6 @@ const stickyScopePlugin = ViewPlugin.fromClass(class {
       row.className = 'cm-sticky-scope-line';
       row.style.height = `${lineHeight}px`;
       row.style.lineHeight = `${lineHeight}px`;
-      // The pinned line covers the gutter too, so it shows its own number
-      // and not the one of the line hidden under it.
       const number = document.createElement('span');
       number.className = 'cm-sticky-scope-number';
       number.textContent = String(line.number);
@@ -134,7 +121,6 @@ const stickyScopePlugin = ViewPlugin.fromClass(class {
 export const stickyScope = (): Extension => [
   stickyScopePlugin,
   EditorView.theme({
-    // Above the gutter too (z-index 2), from the editor's left edge.
     '.cm-sticky-scope': {
       position: 'absolute',
       top: '0',
@@ -154,7 +140,6 @@ export const stickyScope = (): Extension => [
     '.cm-sticky-scope-number': {
       flex: '0 0 var(--cm-sticky-gutter)',
       boxSizing: 'border-box',
-      // Right-aligned where the line-number column ends, like the numbers below.
       paddingRight: 'calc(var(--cm-sticky-gutter) - var(--cm-sticky-numbers-end) + 8px)',
       textAlign: 'right',
       color: 'var(--cm-sticky-number-color)',

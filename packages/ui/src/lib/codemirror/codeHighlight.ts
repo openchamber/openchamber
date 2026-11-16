@@ -5,31 +5,16 @@ import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate
 
 import { highlightsLanguage, loadHighlights } from '@/components/chat/markdown/highlightsEngine';
 
-// Syntax colors for CodeMirror that match the file view exactly. Inline mark
-// styles override the lezer HighlightStyle, so the lezer language extension
-// stays on for indentation, folding and brackets.
-//
-// Highlights tokenizes on the main thread with its LiveTokenizer: an edit
-// re-tokenizes only the lines it changed. Lines up to the end of the viewport
-// finish before each paint, so colors land in the same frame as the
-// keystroke; lines below continue in background batches and are finished when
-// they scroll into view. A language without a lexer takes a close relative's
-// or stays plain text, and so does every document where Highlights cannot
-// start.
 
 type CodeHighlightOptions = {
-  /** Language id from `getLanguageFromExtension` (e.g. 'typescript'). */
   language: string;
-  /** The app theme in Highlights' format. */
   theme: ZedTheme;
 };
 
-// Highlights' FontStyle bitmask.
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
 
-// Mark decorations are interned by color+style so repeated tokens reuse one spec.
 const markCache = new Map<string, Decoration>();
 
 const markFor = (color: string, fontStyle: number): Decoration => {
@@ -46,7 +31,6 @@ const markFor = (color: string, fontStyle: number): Decoration => {
   return decoration;
 };
 
-/** CodeMirror changes as LSP-style edits against the pre-edit document. */
 const toTextEdits = (tr: Transaction): LiveTextEdit[] => {
   const before = tr.startState.doc;
   const position = (offset: number) => {
@@ -82,8 +66,6 @@ const liveHighlightPlugin = (createTokenizer: (code: string) => LiveTokenizer) =
             if (!tr.docChanged) continue;
             this.tokenizer.applyEdits(toTextEdits(tr), { renderRange: visibleLines(update.view) });
           }
-          // Edits are validated against the tokenizer's copy; a mismatch would
-          // color the wrong text, so start over from the editor's document.
           if (this.tokenizer.lineCount !== update.state.doc.lines) {
             this.tokenizer.reset(update.state.doc.toString(), { renderRange: visibleLines(update.view) });
           }
@@ -95,7 +77,6 @@ const liveHighlightPlugin = (createTokenizer: (code: string) => LiveTokenizer) =
         const builder = new RangeSetBuilder<Decoration>();
         const { doc } = this.view.state;
         const [start, end] = visibleLines(this.view);
-        // Pending lines would show their previous colors until a background batch.
         this.tokenizer.flush(end);
         for (let index = start; index < Math.min(end, this.tokenizer.lineCount); index += 1) {
           const line = doc.line(index + 1);
@@ -117,13 +98,7 @@ const liveHighlightPlugin = (createTokenizer: (code: string) => LiveTokenizer) =
     { decorations: (plugin) => plugin.decorations },
   );
 
-/**
- * CodeMirror extension that colors the document like the file view. Recreate
- * it (new instance) when the language or theme changes.
- */
 export const codeHighlightExtension = (options: CodeHighlightOptions): Extension => {
-  // Highlights compiles its WebAssembly at import, so the tokenizer starts
-  // once the module resolves; until then the document shows plain text.
   const engine = new Compartment();
   const starter = ViewPlugin.fromClass(class {
     private active = true;
