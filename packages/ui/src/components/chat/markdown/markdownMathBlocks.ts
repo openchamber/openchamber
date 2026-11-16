@@ -12,6 +12,7 @@ import { remarkRepositoryReferences } from './remarkRepositoryReferences';
 
 const opening = /^\\\[[ \t]*\r?\n/;
 const entity = /&(?:#\d+|#x[\da-f]+|[a-z][\da-z]+);/i;
+const streamingRuleRisk = /[\\`[\]()<>*_~$!#]/;
 const punctuation = '\\[]()<>*_~$!#';
 const defaultRemend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 
@@ -20,6 +21,17 @@ type MathRules = { guestLinks?: readonly GuestLinkRule[] | null; repositoryLinks
 
 function containsRawHtml(node: Root | RootContent): boolean {
   return node.type === 'html' || ('children' in node && node.children.some(containsRawHtml));
+}
+
+function safeForStreamingRules(source: string, changes: number[]): boolean {
+  let offset = 0;
+  for (let index = 0; index < changes.length; index += 2) {
+    const start = changes[index];
+    const end = changes[index + 1];
+    if (streamingRuleRisk.test(source.slice(offset, start)) || streamingRuleRisk.test(source.slice(start + 2, end))) return false;
+    offset = end + 2;
+  }
+  return !streamingRuleRisk.test(source.slice(offset));
 }
 
 function hasUnescapedDelimiter(source: string): boolean {
@@ -133,6 +145,7 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
   const tree = parseMarkdownStructure(source, cjk.remarkPluginsBefore, cjk.remarkPluginsAfter, transforms.length ? transforms : undefined);
   findCandidates(tree);
   if (changes.length === 0) return unchanged;
+  if (streaming && transforms.length && !safeForStreamingRules(source, changes)) return unchanged;
   if (rules?.allowRawHtml && transforms.length && source.includes('<')) {
     const htmlTree = parseMarkdownStructure(source, cjk.remarkPluginsBefore, [...cjk.remarkPluginsAfter, markdownMath.remarkPlugin]);
     if (containsRawHtml(htmlTree)) return unchanged;
@@ -179,6 +192,7 @@ export function createMarkdownMathPreparer(rules: MathRules | null = null): (sou
       const unparsed = previous.prepared.parsed === null ? '' : source.slice(Math.max(0, previous.prepared.parsed.length - 1));
       if (!previous.source.endsWith('\\') && !previous.source.endsWith('\r')
         && !appended.includes('\\[') && !unparsed.includes(']:')
+        && (!(rules?.guestLinks?.length || rules?.repositoryLinks || rules?.emojiShortcodes) || !streamingRuleRisk.test(appended))
         && !previous.prepared.reserved.some((character) => appended.includes(character))) {
         const prepared = { ...previous.prepared, content: oldContent + appended };
         previous = { ...previous, source, prepared };

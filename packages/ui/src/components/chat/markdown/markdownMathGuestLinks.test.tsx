@@ -32,13 +32,32 @@ const draw = async (content: string, guestLinks: readonly GuestLinkRule[], strea
   <I18nProvider><MarkdownContent content={content} guestLinks={guestLinks} mode={mode} isStreaming={streaming} enableFileReferences={false} /></I18nProvider>,
 ));
 
-test('renders a formula after the reply streams and keeps the extension link', async () => {
+test('renders a formula during and after a reply with an extension link', async () => {
   await draw(`Task DEMO-2.\n\n${formula}`, rules, true);
-  expect(host.querySelector('.katex-display')).toBeNull();
+  expect(host.querySelector('.katex-display annotation')?.textContent).toContain('x+\n\ny');
   expect(host.querySelector('[data-oc-guest-link]')?.textContent).toBe('DEMO-2');
   await draw(`Task DEMO-2.\n\n${formula}\n\nDone.`, rules, false);
   expect(host.querySelector('.katex-display')).not.toBeNull();
   expect(host.querySelector('[data-oc-guest-link]')?.textContent).toBe('DEMO-2');
+});
+
+test('keeps the extension link when incomplete Markdown follows a formula', async () => {
+  const source = `Task DEMO-2.\n\n${formula}\n\n`;
+  await draw(source, rules, true);
+  expect(host.querySelector('.katex-display')).not.toBeNull();
+  await draw(`${source}**unfinished`, rules, true);
+  expect(host.querySelector('[data-oc-guest-link]')?.textContent).toBe('DEMO-2');
+  expect(host.textContent).toContain('unfinished');
+});
+
+test('rechecks unsafe punctuation that arrives across streaming updates', async () => {
+  const source = `Task DEMO-2.\n\n${formula}\n\n`;
+  await draw(source, rules, true);
+  expect(host.querySelector('.katex-display')).not.toBeNull();
+  await draw(`${source}<`, rules, true);
+  await draw(`${source}<another`, rules, true);
+  expect(host.querySelector('[data-oc-guest-link]')?.textContent).toBe('DEMO-2');
+  expect(host.textContent).toContain('x+');
 });
 
 test('keeps an extension identifier inside a candidate as a link', async () => {

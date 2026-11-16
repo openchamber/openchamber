@@ -39,6 +39,14 @@ test('renders formulas beside repository links and emoji', async () => {
   expect(host.textContent).toContain('🎉');
 });
 
+test('renders a simple streaming formula beside emoji', async () => {
+  const content = `Ready :tada:.\n\n${formula}`;
+  await act(() => root.render(<I18nProvider><MarkdownContent content={content} emojiShortcodes={emojiShortcodes}
+    mode="streaming" isStreaming enableFileReferences={false} /></I18nProvider>));
+  expect(host.textContent).toContain('🎉');
+  expect(host.querySelector('.katex-display annotation')?.textContent).toContain('x+\n\ny');
+});
+
 test('keeps a repository reference inside a candidate as a link', async () => {
   await draw('\\[\nx+\n\n#12\n\\]', true, false);
   expect(host.querySelector('.katex-display')).toBeNull();

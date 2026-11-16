@@ -110,7 +110,7 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 - Formulas inside a list nested in a quote remain unsupported.
 - Extension identifiers, repository references, and emoji shortcodes remain active outside formulas.
 - Candidates changed by those rules keep their Markdown behavior.
-- If those rules are active during streaming, the preparer leaves the source unchanged.
+- During streaming, rules permit formulas only when the formula body and surrounding source have no Markdown control characters.
 - If those rules and raw HTML are active, documents containing HTML keep their Markdown behavior.
 - Numeric single-dollar formulas follow the existing currency rule.
 
@@ -130,6 +130,12 @@ The final Remend handler restores the remaining punctuation before parsing.
 Text rules do not affect every formula.
 The parser applies those rules in the same order as the renderer.
 It leaves a candidate unchanged when a rule changes its text or turns the text into a link.
+
+### Why streaming text rules have a narrower scope
+
+Remend can join incomplete Markdown into an extension identifier.
+The preparer keeps the source when Markdown control characters make that result uncertain.
+The scope is checked again when streamed text is appended.
 
 ### Why raw HTML keeps the source with text rules
 

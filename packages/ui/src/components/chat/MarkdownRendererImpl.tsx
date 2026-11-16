@@ -455,7 +455,7 @@ export function MarkdownContent({
   const prepareMath = React.useMemo(() => createMarkdownMathPreparer({ guestLinks: activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml: allowRawHtml && !literalText }), [activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml, literalText]);
   const streamingMath = isStreaming && (windowed || mode === 'streaming');
   const preparedMath = React.useMemo(
-    () => prepareMath(content, streamingMath, !(isStreaming && (activeGuestLinks || repositoryLinks || emojiShortcodes))),
+    () => prepareMath(content, streamingMath, !(isStreaming && !streamingMath && (activeGuestLinks || repositoryLinks || emojiShortcodes))),
     [activeGuestLinks, content, emojiShortcodes, isStreaming, prepareMath, repositoryLinks, streamingMath],
   );
   const processing = React.useMemo(() => {
