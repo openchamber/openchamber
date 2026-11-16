@@ -1,14 +1,3 @@
-/**
- * Shapes Anthropic's OAuth usage payload into quota windows.
- *
- * The payload carries the same limit twice: a legacy set of named fields
- * (`five_hour`, `seven_day`, ...) and a newer `limits` array. Only the array
- * reports model-scoped limits, and Anthropic ships new limit kinds there under
- * rotating internal code names, so limits are read from the array by `kind` and
- * fall back to the legacy fields when the array is missing.
- *
- * @module quota/providers/claude/transforms
- */
 
 import { asObject, asNonEmptyString, toNumber, toTimestamp, toUsageWindow, formatMoney } from '../../utils/index.js';
 
@@ -16,14 +5,11 @@ const SESSION_WINDOW = '5h';
 const WEEKLY_WINDOW = '7d';
 const EXTRA_USAGE_WINDOW = 'extra_usage';
 
-// Consumers rank limits by how soon they run out, so each window carries its
-// duration. Extra usage is a monthly spend cap, not a rolling window.
 const SESSION_WINDOW_SECONDS = 5 * 60 * 60;
 const WEEKLY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
-/** Money in Anthropic's minor-unit form, e.g. `{ amount_minor: 10000, exponent: 2 }`. */
 const toAmount = (value) => {
   const money = asObject(value);
   const minor = toNumber(money?.amount_minor);
@@ -88,11 +74,6 @@ const applyLegacyFields = (payload, windows) => {
   }
 };
 
-/**
- * Extra usage is the paid overflow beyond plan limits. It is only meaningful
- * once the account has it enabled; a disabled block would render as a permanent
- * empty bar.
- */
 const applyExtraUsage = (payload, windows) => {
   const spend = asObject(payload.spend);
   if (!spend || spend.enabled !== true) return;

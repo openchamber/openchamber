@@ -14,10 +14,6 @@ import {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
-// A pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code
-// subscription) is refused by the Kimi Code usage address. Its balance is read
-// from the platform instead: USD, what remains, with no spent figure.
-// Resolves to the credits_balance windows, or null when they cannot be read.
 const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, refreshSignal) => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
@@ -43,23 +39,14 @@ const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, refreshSignal) => 
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
-// Preserve the existing preference order across regional and pre-split plans.
 const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
-// The ratio-based `usages` block, in the order Kimi's own CLI renders it.
-// `limit_month_code` is not read: it is the code-typed share of
-// `limit_month_total`, not a second allowance, and a value label carrying it
-// would replace the monthly percent and stay a used figure when the panel shows
-// what remains. `limit_7d` arrives only on plans that still have a weekly
-// quota, and Kimi documents the client as rendering whichever entries are served.
 const RATIO_WINDOWS = [
   { key: 'limit_5h', label: '5h', windowSeconds: 5 * 60 * 60 },
   { key: 'limit_7d', label: 'weekly', windowSeconds: 7 * 24 * 60 * 60 },
   { key: 'limit_month_total', label: 'monthly', windowSeconds: null }
 ];
 
-// `used_ratio` is a 0-1 fraction. An entry without a finite ratio carries no
-// information, so it is skipped rather than shown as an unknown percentage.
 const toRatioPercent = (entry) => {
   const ratio = toNumber(entry?.used_ratio);
   return ratio === null ? null : Math.max(0, Math.min(100, ratio * 100));
@@ -80,11 +67,6 @@ const ratioWindows = (usages) => {
   return windows;
 };
 
-// The pre-ratio payload: one counted weekly `usage` block plus `limits[]`
-// rate-limit entries. Plans that have not migrated still answer this way. Its
-// `usage` block reports `used`; the `limits[].detail` blocks report `remaining`
-// instead. Neither field is guaranteed present, so derive usedPercent from
-// whichever one the API actually returned.
 const computeUsedPercent = (total, used, remaining) => {
   if (!total) return null;
   if (used !== null) {
@@ -172,9 +154,6 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
 
       if (response.ok) {
         const payload = await response.json();
-        // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
-        // client reads only `usages`, so when that block is present the `limits[]`
-        // entry for the same 5-hour window is a coarser duplicate and is not read.
         const usages = asObject(asObject(payload)?.usages);
         const windows = usages ? ratioWindows(usages) : legacyWindows(payload);
 

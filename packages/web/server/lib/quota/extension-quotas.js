@@ -1,25 +1,6 @@
 import { createExtensionQuotaProvider, isQuotaGuest } from './extension-quota.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
 
-/**
- * Which installed extensions report usage right now, kept in step with the
- * extension catalog: the extension layer over the quota registry's built-ins.
- * The catalog is the authority, never an event's payload: every reconcile
- * reads it, attaches what is eligible and detaches what no longer is.
- *
- * A guest is eligible when it is enabled, fully approved with an effective
- * `service` grant (the catalog already drops a grant whose scope changed, so
- * a changed provider list leaves the card until the user approves again),
- * provides `quota` with a parsed `contributes.quota`, and has an id that can
- * name a provider (`ext-<guestId>`).
- *
- * Runs once at start, after approval, enable, install or replace and update
- * (`onGuestActivated`), and after pause, removal or withdrawn approval
- * (`onGuestDeactivated`). Runs are serialized, so two triggers never
- * interleave an attach with a detach. The role keeps nothing of its own on
- * the server, so a pause and a removal both only detach; the user's Usage
- * settings for the card are instance settings, kept like a built-in's.
- */
 
 /**
  * @param {{
@@ -48,7 +29,6 @@ export function createExtensionQuotaProviders({
     try {
       guests = await listGuests();
     } catch (error) {
-      // A catalog that cannot be read changes nothing: it is not an empty catalog.
       warn('[quota] the extension catalog could not be read:', error?.message ?? error);
       return;
     }
@@ -60,12 +40,8 @@ export function createExtensionQuotaProviders({
     const registry = await loadRegistry();
     let changed = false;
     for (const [id, guest] of eligible) {
-      // The card depends on the name, the icon and the version; the adapter also on
-      // the listed providers, where the package lives and what was granted.
       const key = JSON.stringify([guest.name, guest.icon, guest.version ?? '', guest.quota, guest.packageRoot, guest.service, guest.capabilityGrants]);
       if (registered.get(id)?.key === key) continue;
-      // A replacement (new version, grant change) takes the slot; a read the old
-      // adapter has in flight answers through the registry's coalescing as before.
       /** @type {Parameters<typeof createExtensionQuotaProvider>[0]} */
       const dependencies = {
         guest: { id: guest.id, name: guest.name, icon: guest.icon, packageRoot: guest.packageRoot, service: guest.service, capabilityGrants: guest.capabilityGrants },
@@ -97,7 +73,6 @@ export function createExtensionQuotaProviders({
 
   return Object.freeze({
     reconcile,
-    /** After a pause, a removal or withdrawn approval: the card leaves; nothing is stored for the role. */
     deactivated: () => reconcile(),
   });
 }

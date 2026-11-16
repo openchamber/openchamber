@@ -16,8 +16,6 @@ export const providerId = 'zai-coding-plan';
 export const providerName = 'z.ai';
 export const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
 
-// CREDIT_LIMIT entries carry `usage` (total credits), `currentValue` (consumed),
-// and `remaining`; TOKENS_LIMIT entries only carry a percentage.
 const formatCreditAmount = (value) => {
   if (value < 1000) return value.toLocaleString('en-US');
   return `${Math.round(value / 100) / 10}k`;
@@ -30,21 +28,14 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
-// Gift reset timestamps come as 'YYYY-MM-DD HH:mm:ss' in UTC+8.
 const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 const parseZaiResetExpire = (value) => {
-  // The pattern test coerces any non-string JSON value into a string that
-  // cannot match, so only a real 'YYYY-MM-DD HH:mm:ss' value gets through.
   if (!ZAI_RESET_TIME_PATTERN.test(value)) return null;
   const timestamp = Date.parse(`${value.replace(' ', 'T')}+08:00`);
   return Number.isNaN(timestamp) ? null : timestamp;
 };
 
-// Keep only claimable resets: available, with a parseable, not-yet-expired
-// time. The nearest expiry is the one worth activating first; expired records
-// are pointless to show. (z.ai also flips `available` to false on expiry, so
-// the check below stays a single condition.)
 const pickZaiGiftReset = (records) => {
   if (!Array.isArray(records)) return null;
   const now = Date.now();
@@ -69,7 +60,6 @@ const ZAI_GIFT_RESET_URL = 'https://api.z.ai/api/biz/customer-package-reset/list
 const ZAI_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const ZAI_WEEK_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
-// Supplementary call: gift reset info must never fail the quota result.
 const attachZaiGiftResets = async (windows, apiKey) => {
   try {
     const response = await fetch(ZAI_GIFT_RESET_URL, {
@@ -122,9 +112,6 @@ export const useZaiGiftReset = async ({ recordId, resetType, grantType }) => {
     throw new Error('Invalid gift reset request');
   }
 
-  // z.ai requires grantType (added to the contract in late Oct 2026). The value
-  // comes from the list record the user activates; GLOBAL is the only value
-  // observed so far, so it doubles as the fallback for records without one.
   const response = await fetch(ZAI_GIFT_RESET_USE_URL, {
     method: 'POST',
     headers: {
@@ -182,9 +169,6 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
-    // Like bigmodel.cn, z.ai reports an expired key or a missing plan as
-    // `{code, msg, success: false}` with HTTP 200; without this the card is
-    // just empty.
     const failure = envelopeError(payload);
     if (failure) {
       return buildResult({
@@ -198,8 +182,6 @@ export const fetchQuota = async () => {
 
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows = {};
-    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
-    // so both limit types map to the same windows.
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
       const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
