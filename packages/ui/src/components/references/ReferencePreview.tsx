@@ -51,16 +51,8 @@ import { forgetReferenceTextDraft, referenceTextDraft, referenceTextDraftKey, re
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
 const MARKDOWN_CLASS = '[&_img]:max-w-full [&_img]:h-auto';
-// The pictures `useReferenceImagePreview` opens; one inside a link keeps its link, a decorative one stays plain.
 const ZOOMABLE_IMAGE_CLASS = '[&_[data-markdown-content]_img:not(a_img):not([aria-hidden=true])]:cursor-zoom-in';
 
-/**
- * `pinned` (desktop pane): the item header and the send summary stay in view
- * while the meta grid, description and comments scroll between them, so a
- * long preview never hides the diff switch. Inline (mobile): one flow inside
- * the sheet's own scroll. Either way a divider sets the meta grid apart from
- * what follows it.
- */
 const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: React.ReactNode; footer: React.ReactNode; children: React.ReactNode }> = ({ pinned, header, meta, footer, children }) => {
     const imagePreview = useReferenceImagePreview();
     if (!pinned) {
@@ -98,7 +90,6 @@ const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label
     </>
 );
 
-/** An item's state as a tinted pill; `trailing` adds a chevron when the pill opens a menu. */
 export const StatePill: React.FC<{
     icon: React.ComponentProps<typeof Icon>['name'];
     color: string;
@@ -132,7 +123,6 @@ const ChecksSummaryText: React.FC<{ checks: CISummary }> = ({ checks }) => {
     return null;
 };
 
-/** A checks total as the preview and the board's checks dialog show it. */
 export const ChecksSummaryLine: React.FC<{ checks: CISummary }> = ({ checks }) => (
     <>
         <ChecksGlyph checks={checks} />
@@ -140,7 +130,6 @@ export const ChecksSummaryLine: React.FC<{ checks: CISummary }> = ({ checks }) =
     </>
 );
 
-/** What the agent gets from an attached item, and what a worktree started from one gets. */
 const SENDS_KEYS = {
     issue: 'references.picker.preview.sends.issue',
     pull: 'references.picker.preview.sends.pull',
@@ -168,17 +157,12 @@ const REVISION_KIND_KEYS = {
     'no-change': 'references.picker.preview.revision.kind.noChange',
 } as const satisfies Record<ChangeRequestRevisionKind, I18nKey>;
 
-/** A change's revisions to choose from, oldest first, and the one shown: null for the latest. */
 export type RevisionChoice = {
     revisions: ChangeRequestRevision[];
     selected: string | null;
     onSelect: (sha: string | null) => void;
 };
 
-/**
- * Which revision (patchset) of a change the Changes row shows, beside it.
- * Only where there is more than one to choose from.
- */
 const RevisionPicker: React.FC<{ choice: RevisionChoice }> = ({ choice }) => {
     const { t } = useI18n();
     const latest = choice.revisions.at(-1);
@@ -223,12 +207,10 @@ const RevisionPicker: React.FC<{ choice: RevisionChoice }> = ({ choice }) => {
     );
 };
 
-/** A review host's flags on a change: work in progress, private, its topic. Nothing for other hosts. */
 const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }) => {
     const { t } = useI18n();
     if (reference.kind !== 'pull') return null;
     const flags = [
-        // The state pill already says Draft for a draft; saying work in progress beside it repeats it.
         reference.workInProgress && !reference.draft ? t('references.picker.preview.wip') : null,
         reference.private ? t('references.picker.preview.private') : null,
     ].filter((flag): flag is string => flag !== null);
@@ -247,7 +229,6 @@ const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }
     );
 };
 
-/** Description with images and the HTML GitHub allows; the agent gets the source. */
 const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
     const links = React.useContext(ReferenceLinksContext);
@@ -267,12 +248,9 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     );
 };
 
-/** The thread section under the body: loading, failure, empty, or the comments. */
 const CommentsSection: React.FC<{
     state: CachedValue<ReferenceTimelineEntry[]>;
-    /** How many comments there are in all, to say when only the newest show. */
     total: number | null;
-    /** A PR's thread carries its commits too. */
     activity?: boolean;
     now: number;
     attachments?: CommentAttachments;
@@ -319,7 +297,6 @@ const CommentsSection: React.FC<{
     );
 };
 
-/** Pins a comment, or all of them, above the composer. */
 type CommentAttachments = {
     onAttach: (comment: ReferenceCommentItem) => void;
     onAttachAll: (comments: ReferenceCommentItem[]) => void;
@@ -340,15 +317,10 @@ const LoadError: React.FC<{ error: string }> = ({ error }) => {
     return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
 };
 
-/**
- * Size and review of the previewed PR from its detail, and its checks from
- * `checks`: the status that colours a GitHub PR, or a GitLab detail's pipeline.
- */
 const PullDetailRows: React.FC<{
     detail: CachedValue<RepositoryReferenceDetail>;
     checks: CachedValue<CISummary | null>;
     links?: React.ReactNode;
-    /** Opens the PR's check runs; the totals become a button. */
     onOpenChecks?: () => void;
     revisionChoice?: RevisionChoice;
 }> = ({ detail, checks, links, onOpenChecks, revisionChoice }) => {
@@ -408,7 +380,6 @@ const PullDetailRows: React.FC<{
     );
 };
 
-/** Copies the item's address, beside the link that opens it on its host. */
 const CopyReferenceLinkButton: React.FC<{ url: string; className?: string }> = ({ url, className }) => {
     const { t } = useI18n();
     const copyLink = useCopyReferenceLink();
@@ -431,13 +402,6 @@ const CopyReferenceLinkButton: React.FC<{ url: string; className?: string }> = (
 
 const NO_CHECKS: CachedValue<CISummary | null> = { status: 'ready', value: null };
 
-/**
- * The previewed PR's checks as its row has them, the status that stays
- * current while the preview is open. Until that arrives they come with the
- * PR's own detail (GitHub's head commit, GitLab's pipeline), so the preview
- * never waits for the statuses a whole list asks for. Closed and merged PRs
- * have none to show.
- */
 const previewChecks = (
     reference: RepositoryReference,
     pullStatus: CachedValue<ChangeRequestListStatus | null>,
@@ -469,9 +433,7 @@ const RepositoryPreview: React.FC<{
     threadActions?: ReferenceThreadActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
-    /** Saves an edited title and description; absent where the item is only read. */
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
-    /** Replaces or removes a conversation comment on its host; without it they are read only. */
     commentActions?: ScopedCommentActions;
 }> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
@@ -505,7 +467,6 @@ const RepositoryPreview: React.FC<{
                     resolved: comment.thread.resolved,
                     canResolve: comment.thread.canResolve,
                     canReply: comment.thread.canReply,
-                    // A reply sits on the opener's line; saying it again is noise.
                     replies: comment.thread.replies.map((reply, index) => ({ ...commentItem(reply, `${key}/${index}`), context: null })),
                 };
             }
@@ -528,14 +489,8 @@ const RepositoryPreview: React.FC<{
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
     const numberLabel = (number: number) => referenceNumberLabel({ ...reference, number }, descriptor);
-    // Counted from the bottom, as GitHub numbers layers.
     const stackPosition = stack ? stack.layers.findIndex((layer) => layer.number === reference.number) + 1 : 0;
 
-    // Editing the item's own title and description, where the host and this
-    // account allow it: the host replaces both together. The board shows the
-    // next item in this same preview, so the open editor and every save in
-    // flight belong to the item they started on: another item never shows,
-    // saves or closes them.
     const draftKey = referenceTextDraftKey(reference);
     const currentDraftKey = React.useRef(draftKey);
     currentDraftKey.current = draftKey;
@@ -545,7 +500,6 @@ const RepositoryPreview: React.FC<{
     const savingRef = React.useRef(new Set<string>());
     const saving = savingKeys.has(draftKey);
     const titleInput = React.useRef<HTMLInputElement>(null);
-    // Where the keyboard goes back to once the editor closes.
     const editButton = React.useRef<HTMLButtonElement>(null);
     const focusEditButton = () => { requestAnimationFrame(() => editButton.current?.focus()); };
     const isEditing = editing !== null;
@@ -560,8 +514,6 @@ const RepositoryPreview: React.FC<{
     };
     const detailBody = detail.status === 'ready' ? detail.value.body : undefined;
     const storedBody = detailBody ?? reference.body;
-    // The list body is cut at 20 000 characters: without the detail's own body,
-    // saving it would overwrite the rest of the description.
     const canEditText = onSaveText !== undefined
         && reference.linked !== true
         && !(reference.bodyTruncated && detailBody === undefined)
@@ -593,8 +545,6 @@ const RepositoryPreview: React.FC<{
     };
     const saveText = async () => {
         if (!editing || !canSave || !onSaveText || savingRef.current.has(draftKey)) return;
-        // The item, its save and its text as they are now: the preview may show
-        // another item by the time the host answers.
         const key = draftKey;
         const save = onSaveText;
         const input = { title: trimmedTitle, body: editing.body };
@@ -610,7 +560,6 @@ const RepositoryPreview: React.FC<{
         }
     };
     const onEditorKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        // The board's arrow-key navigation and a dialog's Escape stay away from the editor.
         event.stopPropagation();
         if (isIMECompositionEvent(event)) return;
         if (event.key === 'Escape') {
@@ -620,7 +569,6 @@ const RepositoryPreview: React.FC<{
             event.preventDefault();
             void saveText();
         } else if (event.key === 'Enter' && event.currentTarget instanceof HTMLInputElement) {
-            // The title is one line: Enter is the save it would be in any other field.
             event.preventDefault();
             void saveText();
         }
@@ -798,7 +746,6 @@ const RepositoryPreview: React.FC<{
                                         <span className="truncate">{reference.base}</span>
                                     </span>
                                 ) : (
-                                    // The head is a revision's ref, not a branch: only where it lands reads as one.
                                     <span className="block truncate font-mono">{reference.base}</span>
                                 )}
                             </MetaRow>
@@ -815,7 +762,6 @@ const RepositoryPreview: React.FC<{
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
                     ) : null}
                     {labelsControl ? (
-                        // Shown with no labels too, so some can be added.
                         <MetaRow label={t('references.picker.preview.labels')}>{labelsControl}</MetaRow>
                     ) : labels.length > 0 ? (
                         <MetaRow label={t('references.picker.preview.labels')}><ReferenceLabelChips labels={labels} /></MetaRow>
@@ -833,7 +779,6 @@ const RepositoryPreview: React.FC<{
                             </span>
                         ) : null}
                         {stack.number !== null && stack.layers.filter((layer) => layer.state === 'open').length > 1 ? (
-                            // GitHub rebases a stack only from its own page; its API has no such action.
                             <a
                                 href={reference.url}
                                 target="_blank"
@@ -865,7 +810,7 @@ const RepositoryPreview: React.FC<{
                             maxLines={8}
                             aria-label={t('sourceBoard.edit.body')}
                         />
-                        {/* A touch screen has no hover and no Cmd/Ctrl: the actions sit with the text. */}
+                        {}
                         <div className="mt-2 hidden items-center gap-2 pointer-coarse:flex">
                             <Button size="sm" onClick={() => void saveText()} disabled={!canSave}>
                                 {saving ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
@@ -892,14 +837,9 @@ const RepositoryPreview: React.FC<{
     );
 };
 
-/**
- * A parent or child item as one line: its state, identifier and title. A button
- * that previews it when the surface can, plain text otherwise.
- */
 const RelatedTrackerItem: React.FC<{
     issue: TrackerItemSummary;
     onOpen?: (issue: TrackerItemSummary) => void;
-    /** A child row also names its assignee. */
     showAssignee?: boolean;
 }> = ({ issue, onOpen, showAssignee = false }) => {
     const look = trackerStateGlyph(issue.state?.category);
@@ -928,7 +868,6 @@ const RelatedTrackerItem: React.FC<{
     );
 };
 
-/** A tracker item's children, finished of all, in the tracker's order. */
 const SubIssuesSection: React.FC<{
     issue: TrackerItem;
     onOpen?: (issue: TrackerItemSummary) => void;
@@ -965,7 +904,6 @@ const SubIssuesSection: React.FC<{
     );
 };
 
-/** A tracker's work item; parent, children, labels and priority show where its capabilities say so. */
 const TrackerPreview: React.FC<{
     issue: TrackerItemSummary;
     detail: CachedValue<TrackerItem>;
@@ -982,8 +920,6 @@ const TrackerPreview: React.FC<{
     const { capabilities } = descriptor;
     const look = trackerStateGlyph(issue.state?.category);
     const full = detail.status === 'ready' ? detail.value : null;
-    // A parent or child opened from another preview comes without its
-    // labels and parent; its own detail brings them.
     const labels = capabilities.labels
         ? (full?.labels ?? issue.labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
         : [];
@@ -1080,59 +1016,37 @@ const TrackerPreview: React.FC<{
 
 export const ReferencePreview: React.FC<{
     item: ReferencePickerItem | null;
-    /** The project the item was listed for; GitLab attachments are read through it. */
     directory: string | null;
-    /** The previewed PR's checks and mergeability, as its row has them. */
     pullStatus: CachedValue<ChangeRequestListStatus | null>;
     trackerDetail: CachedValue<TrackerItem>;
     repositoryDetail: CachedValue<RepositoryReferenceDetail>;
     purpose: ReferencePreviewPurpose;
-    /** Desktop pane: own scroll with the send summary pinned below. */
     pinned: boolean;
     includeDiff: boolean;
     onIncludeDiffChange: (include: boolean) => void;
     now: number;
-    /** Replaces what the agent gets with what the surface does with the item. */
     footer?: React.ReactNode;
-    /** Beside a PR's size: where to look at its changes. */
     pullLinks?: React.ReactNode;
-    /** Replaces a tracker item's state pill, such as with one that changes the state. */
     trackerStateControl?: React.ReactNode;
-    /** After an issue's or PR's activity: a way to answer it. */
     reply?: React.ReactNode;
-    /** Replace an issue's or PR's labels, and a PR's reviewers, with ones that change them. */
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
-    /** Opens the previewed PR's check runs from its checks totals. */
     onOpenChecks?: () => void;
-    /** An issue's or PR's comments, pinned above the composer one by one or together. */
     commentAttachments?: CommentAttachments;
-    /** Menu items on an issue's or PR's state pill, such as close or reopen. */
     stateMenu?: React.ReactNode;
-    /** Previews a tracker item's parent or child; without it they are plain text. */
     onOpenTrackerItem?: (item: TrackerItemSummary) => void;
-    /** Reads an issue or PR again from its host, past every cached answer; settles when the reads are asked. */
     onRefresh?: () => Promise<void>;
-    /** Answer and resolve a PR's review threads, or answer a discussion's comments and choose its answer; without it they are read only. */
     threadActions?: ReferenceThreadActions;
-    /** Replaces or removes a conversation comment on its host; without it they are read only. */
     commentActions?: ReferenceCommentActions;
-    /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
-    /** A change's revisions to pick the shown one from, where the host keeps revisions. */
     revisionChoice?: RevisionChoice;
-    /** Saves an edited title and description for the previewed repository item; absent where the item is only read. */
     onSaveText?: (input: { title: string; body: string }) => Promise<void>;
 }> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
     const reference = item?.source === 'repository' ? item.reference : null;
     const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
     const links = useReferenceLinks(directory, reference);
-    // A host that cannot change a comment publishes no route for it; the
-    // per-comment flags stay the second gate (whose comment it is).
     const commentWrites = useSourceControlProvider(reference?.provider ?? null).features.commentEdit;
-    // The account that writes the folder's comments, so another one never
-    // opens this one's unsaved rewrite.
     const readContext = useRepositoryReadContext(reference ? directory : null);
     const commentAccount = readContext && readContext !== 'missing'
         ? [readContext.provider, readContext.instance, readContext.accountId].join('\u0000')

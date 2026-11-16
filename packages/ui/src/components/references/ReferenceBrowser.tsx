@@ -1,4 +1,3 @@
-/** The parts of the reference list both the picker and the board lay out; state lives in `useReferenceBrowser`. */
 
 import * as React from 'react';
 
@@ -54,7 +53,6 @@ const NO_PULLS_KEYS = {
     change: 'references.picker.empty.changes',
 } as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
-/** Issues and change requests, named by the provider's term, and discussions where it keeps them; the repository source only. */
 export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
     if (browser.source !== 'repository') return null;
@@ -73,39 +71,26 @@ export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ 
     );
 };
 
-// The qualifiers the GitHub search text can carry; the list builder gives them
-// precedence over the controls, so the controls read as taken over.
 const QUALIFIER_STATE = /(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i;
 const QUALIFIER_PEOPLE = /(^|\s)(assignee|author|mentions|review-requested|reviewed-by):\S+/i;
 
 const NO_LABELS: Label[] = [];
 const NO_LABEL_NAMES: readonly string[] = [];
-// A value no label can hold, so "Clear" never collides with one.
 const CLEAR_LABELS_VALUE = '\u0000clear';
 
 type LabelChoices =
     | { status: 'loading' }
     | { status: 'error'; message: string }
-    /** The host serves no label list at all: the whole section is left out. */
     | { status: 'unsupported' }
     | { status: 'ready'; items: Label[] };
 
-/** The shell's answer when a provider has no such read, which is not a failure to report. */
 const UNSUPPORTED_READ = 'SOURCE_CONTROL_CAPABILITY_UNSUPPORTED';
 const isUnsupported = (error: Error): boolean => 'code' in error && error.code === UNSUPPORTED_READ;
 
-/**
- * The labels the host lists for the panel, read once per opening, and those
- * matching `query`. A label the host no longer lists stays chosen, so it can
- * be unpicked. `hidden` when the host has no label list at all.
- */
 function useLabelChoices(directory: string | null, applied: readonly string[], query: string) {
     const [choices, setChoices] = React.useState<LabelChoices>({ status: 'loading' });
-    // Read while the panel is open, never on mount: the section is only drawn then.
     const { ready, supported, read } = useRepositoryLabelReader(true, directory);
 
-    // The read is re-created whenever the binding settles; the section is read
-    // once per opening, not once per identity, so a moving identity cannot loop.
     const readRef = React.useRef(read);
     React.useEffect(() => { readRef.current = read; }, [read]);
     React.useEffect(() => {
@@ -116,8 +101,6 @@ function useLabelChoices(directory: string | null, applied: readonly string[], q
             (items) => { if (current) setChoices({ status: 'ready', items }); },
             (error: Error) => {
                 if (!current) return;
-                // A host with no label list says so once: showing a filter that can only
-                // fail would be worse than not offering it, and this is not an error.
                 setChoices(isUnsupported(error) ? { status: 'unsupported' } : { status: 'error', message: error.message });
             },
         );
@@ -146,7 +129,6 @@ type LabelSectionProps = {
     onChange: (labels: string[]) => void;
 };
 
-/** A check reads the list again at once and the panel stays open, as the filter it sets is live. */
 const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied, onChange }) => {
     const { t } = useI18n();
     const [query, setQuery] = React.useState('');
@@ -163,8 +145,6 @@ const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied
                 shouldFilter={false}
                 value={activeId ?? undefined}
                 onValueChange={setActiveId}
-                // The field types into itself: the menu's own typeahead would
-                // take every character, while Escape still closes the menu.
                 onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
                 className="min-h-0"
             >
@@ -178,7 +158,6 @@ const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied
                             event.stopPropagation();
                             return;
                         }
-                        // Ctrl+N/P reach the list, as they do in any other list here.
                         handleDropdownNavigationKey(event, (key) => {
                             event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
                         });
@@ -218,7 +197,6 @@ const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied
     );
 };
 
-/** The phone's labels section: its search raises the keyboard only when tapped. */
 const MobileReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied, onChange }) => {
     const { t } = useI18n();
     const [query, setQuery] = React.useState('');
@@ -244,7 +222,6 @@ const MobileReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, a
     );
 };
 
-/** Loading, failure, or nothing found, in place of the label rows. */
 const LabelChoicesState: React.FC<{ choices: LabelChoices; empty: boolean }> = ({ choices, empty }) => {
     const { t } = useI18n();
     if (choices.status === 'loading') {
@@ -270,11 +247,6 @@ const LabelChoicesState: React.FC<{ choices: LabelChoices; empty: boolean }> = (
     );
 };
 
-/**
- * Which items the list shows: one trigger, and one panel for status, people,
- * priority and the repository's labels. Picking stays in the panel, so a
- * tracker's parts combine, and a label check reads the list again at once.
- */
 const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
     const { source, trackerDescriptor } = browser;
@@ -282,25 +254,16 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const { filters } = trackerDescriptor.capabilities;
     const repository = browser.repositoryFilter;
     const applied = repository.labels;
-    // Labels narrow issues and change requests of the one repository the
-    // browser reads; a discussion has none, and a tracker keeps its own.
     const labelsAvailable = source === 'repository' && !browser.across && browser.repositoryKind !== 'discussion' && Boolean(browser.directory);
-    // Only this repository's own list is narrowed by them, so a tracker, a
-    // discussion or an across list names none even when one was picked here.
     const shownLabels = labelsAvailable ? applied : NO_LABEL_NAMES;
-    // An 18rem cap leaves room for one name; the rest count, and the tooltip names them all.
     const labelSummary = shownLabels.length === 0 ? null : shownLabels.length === 1 ? shownLabels[0] : `${shownLabels[0]} +${shownLabels.length - 1}`;
     const appliedNames = shownLabels.join(', ');
     const advancedSearch = source === 'repository' && browser.descriptor.features.advancedSearch;
-    // The qualifier itself, so the panel names what decides the list instead of
-    // leaving a checked value that no longer applies.
     const stateQualifier = advancedSearch ? browser.query.match(QUALIFIER_STATE)?.[0].trim() ?? null : null;
     const peopleQualifier = advancedSearch ? browser.query.match(QUALIFIER_PEOPLE)?.[0].trim() ?? null : null;
     const stateFromSearch = stateQualifier !== null;
     const peopleFromSearch = peopleQualifier !== null;
 
-    // A qualifier the user typed decides that field: the summary names it, not
-    // the control's value, which no longer applies.
     const statusText = stateFromSearch ? stateQualifier : source === 'repository'
         ? t(REPOSITORY_STATE_LABEL_KEYS[repository.state])
         : trackerStateFilterLabel(state, t);
@@ -313,9 +276,6 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const title = source === 'repository' ? [statusText, peopleText, appliedNames || null].filter(Boolean).join(' · ') : summary;
     const filterLabel = t('references.picker.filter.label');
 
-    // GitHub reads these qualifiers out of the search text itself; the host
-    // then ignores the control, so the control shows it has been taken over
-    // rather than offering a choice that changes nothing.
     const group = <T extends string>(
         label: string,
         value: T,
@@ -403,7 +363,6 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     );
 };
 
-/** One part of the filter panel: a choice of one value, or one a search qualifier took over. */
 type FilterGroup = {
     label: string;
     value: string;
@@ -412,10 +371,6 @@ type FilterGroup = {
     taken: boolean;
 };
 
-/**
- * The phone's filter: the same parts in one bottom sheet, the label search
- * among them. Picking keeps the sheet open, as the filter is live.
- */
 const MobileReferenceFilterSheet: React.FC<{
     title: string;
     trigger: (open: () => void) => React.ReactNode;
@@ -447,11 +402,9 @@ const MobileReferenceFilterSheet: React.FC<{
     );
 };
 
-/** The search field, taking the room it is given, and the filter beside it. */
 export const ReferenceBrowserSearch: React.FC<{
     browser: ReferenceBrowser;
     onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
-    /** After the filter, such as the board's list refresh. */
     trailing?: React.ReactNode;
 }> = ({ browser, onKeyDown, trailing }) => {
     const { t } = useI18n();
@@ -459,13 +412,9 @@ export const ReferenceBrowserSearch: React.FC<{
     const tracked = source !== 'repository';
     const discussions = !tracked && browser.repositoryKind === 'discussion';
     const placeholder = t(tracked ? 'references.picker.search.tracker' : discussions ? 'references.picker.search.discussions' : `references.picker.search.${term}`);
-    // The phone's field shares its row with the filter, so it gets the short wording;
-    // the label keeps the full one.
     const shortPlaceholder = t(tracked
         ? 'references.picker.search.mobile.tracker'
         : discussions ? 'references.picker.search.mobile.discussions' : `references.picker.search.mobile.${term}`);
-    // Only GitHub parses the search text; elsewhere the same words would be
-    // matched as plain text, so no hint is offered.
     const advancedHint = source === 'repository' && !discussions && browser.descriptor.features.advancedSearch
         ? ` · ${t('references.picker.search.advancedHint')}`
         : '';
@@ -512,15 +461,12 @@ export const ReferenceBrowserSearch: React.FC<{
     );
 };
 
-/** What a row adds on a surface that checks items; a board row has none of it. */
 type ReferenceBrowserRowSelection = {
-    /** Null where rows have no checkbox. */
     checked: boolean | null;
     diffIncluded: boolean;
     onToggle: () => void;
 };
 
-/** The list with its loading, failure, empty and not-connected states. */
 export const ReferenceBrowserList: React.FC<{
     browser: ReferenceBrowser;
     label: string;
@@ -528,19 +474,12 @@ export const ReferenceBrowserList: React.FC<{
     onOpenSettings: () => void;
     rowSelection?: (item: ReferencePickerItem, key: string) => ReferenceBrowserRowSelection;
     onActivate?: (item: ReferencePickerItem) => void;
-    /** After a row is clicked to show it, as when the list closes then. */
     onShow?: () => void;
-    /** A quiet line above the rows, such as the repositories a list across several left out. */
     notice?: React.ReactNode;
 }> = ({ browser, label, multiselectable, onOpenSettings, rowSelection, onActivate, onShow, notice }) => {
     const { t } = useI18n();
     const { source, sourceStatus, list, items, term, descriptor, isMobile, directory, debouncedQuery, repositoryKind, tracker } = browser;
 
-    // Load the next page when the end of the list scrolls into view. The
-    // observer is set up again after each page, so the end still in view asks
-    // for the next one even when a page added no row: a host that narrows
-    // labels on its own side answers a page, and then the client keeps only
-    // the matches, which can be none. A failed page waits for Retry instead.
     const sentinelRef = React.useRef<HTMLDivElement>(null);
     const { hasMore, loadMore, loadingMore, error } = list;
     React.useEffect(() => {

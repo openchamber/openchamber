@@ -23,57 +23,36 @@ import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
 
-/** Writes to a PR's review threads or a discussion's comments; each settles once the host answered. */
 export type ReferenceThreadActions = {
-    /** True when the reply was posted, so the box can empty. */
     reply: (threadId: string, body: string) => Promise<boolean>;
-    /** True when the host has the change; the thread is read again after it. */
     setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
-    /** A discussion's: choose the comment that opens the thread as its answer, or unchoose it. */
     setAnswer?: (threadId: string, answer: boolean) => Promise<boolean>;
 };
 
-/** Replaces or removes one conversation comment on its host; each settles once the host answered. */
 export type ReferenceCommentActions = {
-    /** Replaces one comment's text on its host; the comment carries the host id. */
     update: (comment: ReferenceCommentItem, body: string) => Promise<void>;
-    /** Removes one comment from its host. */
     remove: (comment: ReferenceCommentItem) => Promise<void>;
 };
 
-/** The actions as the preview hands them down, with the scope (`commentDraftScope`) an unsaved rewrite is kept under. */
 export type ScopedCommentActions = ReferenceCommentActions & { draftScope: string };
 
-// Text actions under a thread: a colour change on hover, no fill.
 const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
-// The button that opens a comment's own menu, shown with its row.
 const COMMENT_MENU_BUTTON_CLASS = 'inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 pointer-coarse:opacity-100';
 
-/** A comment on the conversation itself: the host's id, and neither a line nor a review verdict of its own. */
 const isConversationComment = (comment: ReferenceCommentItem): boolean => (
     comment.id !== undefined && !comment.location && !comment.context
 );
 
-/**
- * A conversation comment's own menu: edit its text in place, or remove it from
- * the host. Empty for a line comment, a review verdict, or where the surface
- * offers no writes.
- */
 const useCommentMenu = (comment: ReferenceCommentItem, actions: ScopedCommentActions | undefined, revealClass: string) => {
     const { t } = useI18n();
     const { confirm, dialog } = useConfirmDialog();
-    // The text being edited, under the draft key it was opened with; null while
-    // the comment reads as it was written. Another account or host closes it.
     const [editing, setEditing] = React.useState<{ key: string; text: string } | null>(null);
     const [busy, setBusy] = React.useState<'save' | 'delete' | null>(null);
-    // One write at a time per comment, however often a button is pressed.
     const writing = React.useRef(false);
     const trigger = React.useRef<HTMLButtonElement>(null);
     const draftKey = commentDraftKey(actions?.draftScope ?? '', comment.id);
     const draft = editing?.key === draftKey ? editing.text : null;
     const setDraft = (text: string | null) => setEditing(text === null ? null : { key: draftKey, text });
-    // Leaving the comment does not lose a half-typed rewrite, and the keyboard
-    // comes back to the menu it opened.
     const closeEditor = () => {
         forgetCommentDraft(draftKey);
         setDraft(null);
@@ -82,7 +61,6 @@ const useCommentMenu = (comment: ReferenceCommentItem, actions: ScopedCommentAct
     const conversation = actions !== undefined && isConversationComment(comment);
     const canUpdate = conversation && comment.canUpdate !== false;
     const canDelete = conversation && comment.canDelete !== false;
-    // Leading spaces are Markdown (an indented code block), so the text goes as typed.
     const changed = draft !== null && draft.trim().length > 0 && draft !== comment.body;
 
     const save = async () => {
@@ -200,7 +178,6 @@ const Avatar: React.FC<{ author: string | null; avatarUrl: string | null; classN
     );
 };
 
-/** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
 const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
     const { body, location, excerpt } = comment;
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
@@ -224,7 +201,6 @@ const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) =
     ) : null;
 };
 
-/** The ways under a comment's byline: pin it above the composer, and its own menu. */
 const CommentRowActions: React.FC<{
     comment: ReferenceCommentItem;
     onAttachComment?: (comment: ReferenceCommentItem) => void;
@@ -254,7 +230,6 @@ const CommentRowActions: React.FC<{
     );
 };
 
-/** One answer under a thread's opener, with its own menu. */
 const ReplyEntry: React.FC<{
     reply: ReferenceCommentItem;
     now: number;
@@ -277,17 +252,11 @@ const ReplyEntry: React.FC<{
     );
 };
 
-/**
- * What follows a thread's first comment: its answers, and a way to answer or
- * resolve it. A resolved thread folds to one line until opened.
- */
 const ThreadRest: React.FC<{
     comment: ReferenceCommentItem;
     thread: ReferenceCommentThread;
     now: number;
-    /** The opener's text, or its editor while it is being edited. */
     body: React.ReactNode;
-    /** The opener is being edited, so its editor has to be drawn even when the thread is folded. */
     editing: boolean;
     actions?: ReferenceThreadActions;
     onAttachComment?: (comment: ReferenceCommentItem) => void;
@@ -298,14 +267,11 @@ const ThreadRest: React.FC<{
     const [replying, setReplying] = React.useState(false);
     const [text, setText] = React.useState('');
     const [busy, setBusy] = React.useState<'reply' | 'resolve' | 'answer' | null>(null);
-    // Resolving folds the thread, reopening unfolds it, as the host shows it.
     const [shownResolved, setShownResolved] = React.useState(thread.resolved);
     if (shownResolved !== thread.resolved) {
         setShownResolved(thread.resolved);
         setOpen(!thread.resolved);
     }
-    // After a change is written, the thread as it was read stays until the
-    // preview reads it again; until then a second click would act on stale state.
     const [writtenOn, setWrittenOn] = React.useState<ReferenceCommentThread | null>(null);
     const settling = writtenOn === thread;
 
@@ -315,7 +281,6 @@ const ThreadRest: React.FC<{
         : count === 1 ? t('references.picker.thread.resolvedOneReply') : t('references.picker.thread.resolvedReplies', { count });
 
     if (!open) {
-        // A folded thread hides its opener's text, but not the editor the reader just opened.
         if (editing) return <>{body}</>;
         return (
             <HoverTooltip label={t('contextTooltips.tracker.showThread')}>
@@ -467,7 +432,6 @@ const ThreadRest: React.FC<{
     );
 };
 
-/** One comment at the top of the preview's thread: its byline, its menu, and its body or thread. */
 const CommentEntry: React.FC<{
     comment: ReferenceCommentItem;
     now: number;
@@ -527,7 +491,6 @@ const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, n
 const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ group, now }) => {
     const { t } = useI18n();
     const { directory } = React.useContext(ReferenceLinksContext);
-    // A commit the folder's repository has opens in the Diff view; any other on its host.
     const openLink = useOpenChatLink(directory ?? '');
     const count = group.commits.length;
     return (
@@ -579,19 +542,11 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
     );
 };
 
-/**
- * The thread under a preview, drawn like the PR view's comments: avatar on a
- * line, then the comment. Bodies render images and the HTML GitHub allows.
- * A PR's commits sit on the same line, grouped between the comments.
- */
 export const ReferenceComments: React.FC<{
     entries: ReferenceTimelineEntry[];
     now: number;
-    /** Pins one comment above the composer; shown on hover beside its author. */
     onAttachComment?: (comment: ReferenceCommentItem) => void;
-    /** Answer and resolve review threads; without it they are read only. */
     threadActions?: ReferenceThreadActions;
-    /** Replaces or removes a conversation comment on its host; without it they are read only. */
     commentActions?: ScopedCommentActions;
 }> = ({ entries, now, onAttachComment, threadActions, commentActions }) => {
     return (
