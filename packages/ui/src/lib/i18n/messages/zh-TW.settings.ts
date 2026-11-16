@@ -1421,7 +1421,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': '速度：{rate}',
   'settings.usage.pace.waitSeparator': ' · 等待 ',
   'settings.usage.pace.predictionLabel': '預測：',
-  'settings.usage.card.showInHeaderAria': '在頁首選單顯示',
   'settings.usage.card.resetsAt': '{time} 重設',
   'settings.usage.card.bar.used': '已用',
   'settings.usage.card.bar.remaining': '剩餘',

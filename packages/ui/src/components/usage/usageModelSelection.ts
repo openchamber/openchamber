@@ -1,5 +1,3 @@
-import type { QuotaProviderId } from '@/types';
-
 /**
  * The model rows a compact usage panel shows. A saved selection wins while it
  * still names a model the provider reports.
@@ -10,7 +8,7 @@ import type { QuotaProviderId } from '@/types';
  * saved selection, even when nothing matches.
  */
 export const selectVisibleModelEntries = <T>(
-  providerId: QuotaProviderId,
+  providerId: string,
   modelEntries: ReadonlyArray<readonly [string, T]>,
   selectedModels: readonly string[],
 ): ReadonlyArray<readonly [string, T]> => {
@@ -18,4 +16,22 @@ export const selectVisibleModelEntries = <T>(
   const matched = modelEntries.filter(([modelName]) => selectedModels.includes(modelName));
   if (matched.length === 0 && providerId === 'opencode') return modelEntries;
   return matched;
+};
+
+export const selectVisibleModelNames = (
+  providerId: string,
+  modelNames: readonly string[],
+  selectedModels: readonly string[],
+): string[] => selectVisibleModelEntries(providerId, modelNames.map((name) => [name, name] as const), selectedModels)
+  .map(([name]) => name);
+
+export const toggleVisibleModel = (
+  providerId: string,
+  modelNames: readonly string[],
+  selectedModels: readonly string[],
+  modelName: string,
+): string[] => {
+  const visible = selectVisibleModelNames(providerId, modelNames, selectedModels);
+  if (!visible.includes(modelName)) return [...visible, modelName];
+  return visible.length > 1 ? visible.filter((name) => name !== modelName) : visible;
 };

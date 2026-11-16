@@ -6,6 +6,7 @@ import {
   formatWindowLabel,
   resolveUsageTone,
 } from '@/lib/quota';
+import { selectVisibleModelEntries } from '@/components/usage/usageModelSelection';
 import type { ProviderResult, QuotaProviderId, UsageWindow } from '@/types';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 
@@ -73,9 +74,8 @@ export const createWidgetUsageSnapshot = (state: WidgetQuotaInput, format: Widge
     if (!result?.configured || !result.usage) return [];
     const windows = Object.entries(result.usage.windows ?? {})
       .map(([key, value]) => quota(key, value, mode, format));
-    const selected = state.selectedModels[id];
-    for (const [modelName, model] of Object.entries(result.usage.models ?? {})) {
-      if (selected?.length && !selected.includes(modelName)) continue;
+    const modelEntries = Object.entries(result.usage.models ?? {});
+    for (const [modelName, model] of selectVisibleModelEntries(id, modelEntries, state.selectedModels[id] ?? [])) {
       for (const [key, window] of Object.entries(model.windows ?? {})) {
         windows.push(quota(`${modelName} · ${key}`, window, mode, format));
       }

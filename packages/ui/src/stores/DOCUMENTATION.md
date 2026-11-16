@@ -164,6 +164,29 @@ OpenCode requests while retaining refresh for a Work status quota that stays on
 screen. Settings and first-load readiness share the same store loader so opening
 multiple readouts coalesces provider requests.
 
+#### Usage model selection
+
+`selectedModels[provider]` (persisted as `usageSelectedModels`) lists the model
+rows the compact readouts show: Work status, the mobile sidebar and the phone
+widget, all through `selectVisibleModelEntries`. An empty list shows every row.
+A saved list shows only the rows it names; for OpenCode Zen alone, a list that
+names no current model shows every row, because Zen once listed OpenCode Go
+models and selections saved then name none of today's.
+
+Each checkbox in Settings → Usage shows whether the readouts show that model,
+and a flip starts from the rows shown now (`toggleVisibleModel`): with nothing
+saved, hiding one model saves all the others. The last shown model's checkbox is
+disabled, since saving an empty list would show every row again; the provider's
+"Show in work status panel" switch hides it entirely.
+
+##### Why a checkbox follows visibility and not the saved names
+
+The checkboxes once showed whether a name was saved. With an empty or stale Zen
+selection every box looked off while every model showed, and clicking the one
+model a user wanted gone showed that model alone. Storing a hidden-model list
+instead was rejected: it changes the persisted format, and Settings already
+fills a new provider's selection with its default models.
+
 `useFileSearchStore` keeps OpenCode's indexed file results first. Non-default
 hidden/gitignore options also request `RuntimeAPIs.files.search` and append
 unique paths up to the caller's limit. Directory searches remain indexed.

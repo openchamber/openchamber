@@ -1573,7 +1573,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'קצב: {rate}',
   'settings.usage.pace.waitSeparator': ' · המתנה ',
   'settings.usage.pace.predictionLabel': 'תחזית: ',
-  'settings.usage.card.showInHeaderAria': 'הצג בתפריט הכותרת העליונה',
   'settings.usage.card.resetsAt': 'מתאפס {time}',
   'settings.usage.card.bar.used': 'בשימוש',
   'settings.usage.card.bar.remaining': 'נותר',

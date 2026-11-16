@@ -1543,7 +1543,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': '속도: {rate}',
   'settings.usage.pace.waitSeparator': ' · 대기 ',
   'settings.usage.pace.predictionLabel': '예측: ',
-  'settings.usage.card.showInHeaderAria': '헤더 메뉴에 표시',
   'settings.usage.card.resetsAt': '{time} 재설정',
   'settings.usage.card.bar.used': '사용됨',
   'settings.usage.card.bar.remaining': '남음',

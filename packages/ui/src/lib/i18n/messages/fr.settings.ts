@@ -1447,7 +1447,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Rythme : {rate}',
   'settings.usage.pace.waitSeparator': '· Attendez',
   'settings.usage.pace.predictionLabel': 'Préd :',
-  'settings.usage.card.showInHeaderAria': 'Afficher dans le menu d’en-tête',
   'settings.usage.card.resetsAt': 'Réinitialisation {time}',
   'settings.usage.card.bar.used': 'utilisé',
   'settings.usage.card.bar.remaining': 'restant',

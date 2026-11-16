@@ -1543,7 +1543,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': '速度：{rate}',
   'settings.usage.pace.waitSeparator': ' · 等待 ',
   'settings.usage.pace.predictionLabel': '预测：',
-  'settings.usage.card.showInHeaderAria': '在页眉菜单显示',
   'settings.usage.card.resetsAt': '{time} 重置',
   'settings.usage.card.bar.used': '已用',
   'settings.usage.card.bar.remaining': '剩余',

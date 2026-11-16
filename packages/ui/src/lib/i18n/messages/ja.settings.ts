@@ -1576,7 +1576,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'ペース: {rate}',
   'settings.usage.pace.waitSeparator': ' · 待機 ',
   'settings.usage.pace.predictionLabel': '予測: ',
-  'settings.usage.card.showInHeaderAria': 'ヘッダーメニューに表示',
   'settings.usage.card.resetsAt': '{time} にリセット',
   'settings.usage.card.bar.used': '使用済み',
   'settings.usage.card.bar.remaining': '残り',
