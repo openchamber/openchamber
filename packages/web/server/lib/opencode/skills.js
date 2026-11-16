@@ -155,11 +155,6 @@ async function getSkillWritePath(skillName, workingDirectory, requestedScope) {
 async function discoverSkills(workingDirectory, { parsedFiles = new Map() } = {}) {
   const skills = new Map();
 
-  // A root can come up twice in one discovery: a home directory opened as a
-  // project lists `~/.claude/skills` and `~/.agents/skills` once as user
-  // skills and again as project skills. Each root is walked and each SKILL.md
-  // read once; the second pass still re-adds them in the same order, so the
-  // project scope wins as before.
   const walkedRoots = new Map();
   const walkRoot = (root) => {
     const key = path.resolve(root);
@@ -212,9 +207,6 @@ async function discoverSkills(workingDirectory, { parsedFiles = new Map() } = {}
   let configuredPaths = [];
   try {
     const config = readConfig(workingDirectory);
-    // OpenCode 2 stores extra skill sources as one ordered `skills` array; v1
-    // split them into `skills.paths` and `skills.urls`. URLs are not scanned
-    // from disk either way.
     configuredPaths = Array.isArray(config?.skills)
       ? config.skills
       : (Array.isArray(config?.skills?.paths) ? config.skills.paths : []);
@@ -276,15 +268,9 @@ function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
   return merged;
 }
 
-// "Only when asked" is written as two frontmatter keys: the portable
-// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
-// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
-// which wins when both are present.
 const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
 const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
 
-// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
-// 1 and "yes" all reach it as the same text.
 const FRONTMATTER_BOOLEANS = new Map([
   ['true', true], ['yes', true], ['on', true], ['1', true],
   ['false', false], ['no', false], ['off', false], ['0', false],
@@ -320,9 +306,6 @@ function applyModelInvocation(frontmatter, disabled) {
   }
 }
 
-// `includeSupportingFiles: false` leaves `md.supportingFiles` out instead of
-// walking the skill folder: the skills list has no use for it, and a folder
-// with a bundled `.venv` or `node_modules` costs seconds to walk.
 async function getSkillSources(skillName, workingDirectory, discoveredSkill = null, { includeSupportingFiles = true, parsedFiles = new Map() } = {}) {
   const isReadableFile = async (filePath) => {
     if (!filePath) return false;
@@ -490,9 +473,6 @@ function assertValidSkillName(skillName) {
   }
 }
 
-// Create, edit and rename check the disk, wait on discovery, then write. Run
-// one at a time per process, the way they did while discovery was
-// synchronous, so a check cannot go stale before its own write.
 let skillWriteQueue = Promise.resolve();
 function serializeSkillWrite(write) {
   const run = skillWriteQueue.then(write, write);
@@ -564,8 +544,6 @@ async function createSkillNow(skillName, config, workingDirectory, scope) {
     applyModelInvocation(frontmatter, true);
   }
 
-  // `wx` fails if SKILL.md appeared since the check above, from another
-  // process or a client racing this one, instead of overwriting it.
   try {
     writeMdFile(targetPath, frontmatter, instructions || '', { flag: 'wx' });
   } catch (error) {
@@ -660,7 +638,6 @@ async function updateSkillNow(skillName, updates, workingDirectory, targetPath =
   console.log(`Updated skill: ${skillName} (path: ${mdPath})`);
 }
 
-/** The directory a skill of this name has in one scope and source, or null when that location needs a project. */
 function getSkillDirAt(location, skillName, workingDirectory) {
   if (location.scope === SKILL_SCOPE.USER) {
     if (location.source === 'agents') return getUserAgentsSkillDir(skillName);
@@ -673,12 +650,6 @@ function getSkillDirAt(location, skillName, workingDirectory) {
   return getProjectSkillDir(workingDirectory, skillName);
 }
 
-/**
- * Deletes a skill by name. Without `location` every copy goes, in the project
- * and the user's directories; with `location` ({ scope, source }) only the
- * copy there, so a caller that installed a skill to one place cannot remove
- * a same-named skill the user keeps elsewhere.
- */
 function deleteSkill(skillName, workingDirectory, location) {
   if (location) {
     const dir = getSkillDirAt(location, skillName, workingDirectory);
@@ -842,7 +813,6 @@ async function renameSkillNow(oldName, newName, workingDirectory) {
     throw new Error(`Skill directory already exists at ${newDir}`);
   }
 
-  // Rename the skill directory in place so supporting files and SKILL.md body are preserved.
   if (directoriesDiffer) {
     fs.renameSync(oldDir, newDir);
   }

@@ -5,15 +5,11 @@ export type LegacyAuthEntry =
   | { type: 'oauth'; access: string; refresh: string; expires: number; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
 export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 
-/** Where credentials come from: the running OpenCode in production, a fixture in tests. */
 export type CredentialSource = {
   list: () => Promise<CredentialEntry[]>;
-  /** Writes, present on the web server only: `renewStoredLogin` needs both. */
   create?: (input: CredentialCreateInput) => Promise<CredentialEntry>;
   remove?: (credentialID: string) => Promise<void>;
-  /** Variable keys by integration id; absent when the environment is unknown. */
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
-  /** The Console usage limits of the active `opencode` sign-in, null without one. */
   readUsageLimits?: () => Promise<UsageLimitsInfo | null>;
 };
 
@@ -30,7 +26,6 @@ export function readOpenCodeCredentials(): Promise<LegacyAuthFile>;
 export function getProviderAuth(providerId: string): Promise<LegacyAuthEntry | null>;
 export function readOpenCodeUsageLimits(): Promise<UsageLimitsInfo | null>;
 
-/** A browser login as OpenCode stores it, read for an isolated space's gatekeeper. */
 export type StoredLogin = {
   methodID: string;
   access: string;
@@ -39,7 +34,6 @@ export type StoredLogin = {
 };
 export function getStoredLogin(integrationID: string): Promise<StoredLogin | null>;
 
-/** What the issuer answers for a refresh token: the new tokens and the login's metadata as the method keeps it. */
 export type ExchangedLogin = {
   access: string;
   refresh: string;

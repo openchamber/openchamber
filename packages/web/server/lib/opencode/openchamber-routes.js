@@ -25,29 +25,15 @@ const LAUNCHD_SERVICE_ID = 'dev.openchamber.web';
 const resolveLaunchdPlistPath = (pathModule, osModule) =>
   pathModule.join(osModule.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_SERVICE_ID}.plist`);
 
-/**
- * `echo` in batch treats `& | < > ( ) ^` as syntax and `%var%` as expansion,
- * so a line of the log preamble is escaped before it becomes an `echo`.
- */
 const escapeBatchEchoLine = (line) => {
   if (!line) return 'echo.';
   return `echo ${line.replace(/%/g, '%%').replace(/[&|<>()^]/g, '^$&')}`;
 };
 
-/**
- * The Windows update runs as a batch file, one command per line, so the
- * `if ... else` block and the multi-line log preamble keep their structure.
- */
 const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
   '@echo off',
   ...logPreamble.split('\n').map(escapeBatchEchoLine),
-  // `timeout` refuses redirected stdin, which is what a detached child has;
-  // a ping to loopback waits about two seconds without a console.
   'ping -n 3 127.0.0.1 >nul',
-  // npm, pnpm and yarn are .cmd shims on Windows. Without `call`, a batch
-  // file hands control to them for good and the restart below never runs.
-  // Read from a file, cmd expands `%x%` and drops a lone `%`, so a `%` in a
-  // host would change the restart command. Doubling keeps it.
   `call ${updateCmd.replace(/%/g, '%%')}`,
   'if %ERRORLEVEL% EQU 0 (',
   '  echo Update successful, restarting OpenChamber...',
@@ -55,8 +41,6 @@ const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
   ') else (',
   '  echo Update failed',
   ')',
-  // The file has no use after the run. Deleting the running batch file on
-  // its last line is safe: cmd has already read it.
   'del "%~f0"',
   '',
 ].join('\r\n');
@@ -81,12 +65,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   let desktopRestartError = null;
 
-  /**
-   * The offered release needs a newer OpenCode than this server runs: after
-   * the install the new build would refuse to start against it, and an
-   * external OpenCode cannot be updated from the app. Null when the release
-   * does not say what it needs or the OpenCode version cannot be read.
-   */
   const readOpenCodeShortfall = async (version) => {
     const { fetchRequiredOpenCodeVersion } = await import('../package-manager.js');
     const requiredOpenCodeVersion = await fetchRequiredOpenCodeVersion(version);
@@ -97,11 +75,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       : null;
   };
 
-  /**
-   * How this server was launched, read from its instance file. A foreground
-   * server outside systemd has no process that can restart it after an
-   * install, so it cannot update itself.
-   */
   const readLaunchState = async () => {
     const currentPort = server.address()?.port || 3000;
     const instanceFilePath = path.join(openchamberDataDir, 'run', `openchamber-${currentPort}.json`);
@@ -117,9 +90,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     const systemdServiceUnit = isForegroundService && !isDarwin ? resolveSystemdServiceUnit(process.env) : null;
     const osModule = os || (await import('os'));
     const launchdPlistPath = isDarwin ? resolveLaunchdPlistPath(path, osModule) : null;
-    // launchd sets XPC_SERVICE_NAME to the job label, so a manual
-    // `serve --foreground` on a Mac that also has startup enabled is not
-    // mistaken for the LaunchAgent.
     const isLaunchdService = Boolean(
       isDarwin
       && isForegroundService
@@ -130,8 +100,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     return { storedOptions, launchMode, isForegroundService, systemdServiceUnit, isLaunchdService, launchdPlistPath };
   };
 
-  // Whether an administrator turned on enterprise mode, and by which source.
-  // Pinned endpoints and keys never leave the server.
   app.get('/api/openchamber/enterprise-policy', (_req, res) => {
     res.json(publicEnterprisePolicy());
   });
@@ -186,8 +154,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       } else {
         const { checkForUpdates, isUnmanagedInstall } = await import('../package-manager.js');
         updateInfo = await checkForUpdates(updateRequest);
-        // Tell clients up front that the install route will refuse, so they
-        // show manual steps instead of an Update button that fails.
         if (updateInfo?.available && updateRequest.appType === 'web') {
           const openCodeShortfall = await readOpenCodeShortfall(updateInfo.version);
           if (openCodeShortfall) {
@@ -212,12 +178,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
   });
 
-  // Release notes for Settings > About: `version` alone, or what an update
-  // from `since` to `version` brings. 502 when GitHub could not be read, so
-  // the page never mistakes an outage for a release without notes.
   app.get('/api/openchamber/release-notes', async (req, res) => {
     const { fetchReleaseNotes, VERSION_PATTERN, CANARY_VERSION_PATTERN } = await import('../changelog/update-notes.js');
-    // Query values can be arrays; only the string form is checked and used.
     const isVersion = (value) => VERSION_PATTERN.test(value) || CANARY_VERSION_PATTERN.test(value);
     const version = String(req.query.version ?? '');
     const since = req.query.since === undefined ? undefined : String(req.query.since);
@@ -297,7 +259,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         });
       }
 
-      // A global install would add a second copy and leave this one as it is.
       if (isUnmanagedInstall()) {
         return res.status(409).json({
           error: 'This copy can\'t update itself. Install the new version the way you installed it.',
@@ -423,9 +384,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             restartCmdFallback += ` --host '${escapedHost}'`;
           }
         }
-        // The UI password reaches the restarted server through the update
-        // child's environment (OPENCHAMBER_UI_PASSWORD), never as a flag: the
-        // command line shows in the process list and is written to the log.
         if (storedOptions.apiOnly === true) {
           restartCmdPrimary += ' --api-only';
           restartCmdFallback += ' --api-only';
@@ -452,11 +410,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
       const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
       const shellFlag = isWindows ? '/c' : '-c';
-      // cmd.exe /c takes one command line: a newline inside it ends the
-      // command, so a multi-line script passed as the argument ran nothing
-      // and exited 0, and the server shut itself down believing the update
-      // was under way (#3084). Batch runs from a file instead, written before
-      // the client is told to expect a restart.
       const windowsScriptPath = path.join(openchamberDataDir, 'update-install.cmd');
       if (isWindows) {
         try {
@@ -508,11 +461,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         }
 
         if (isWindows) {
-          // On Windows the detached child inherits this process's listening
-          // socket, and keeps the port for as long as the batch runs. The
-          // restart inside that batch then fails with "port already in use",
-          // and the update ends with no server. Closing the listener first
-          // leaves nothing to inherit; the process exits right after anyway.
           try {
             server.close();
           } catch (closeError) {
@@ -523,9 +471,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
-          // The restarted server's password is this one's on purpose: handed
-          // over as the user's own, since `serve` drops what the record marks
-          // as another instance's.
           env: storedOptions.uiPassword
             ? withUserEnv(process.env, { OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword })
             : process.env,

@@ -17,10 +17,6 @@ const packageDistSchema = z.object({
   }),
 });
 
-// OpenCode's installer is a bash script, so Windows installs the npm platform
-// package that script downloads, the same one the desktop bundle picks in
-// packages/electron/scripts/prepare-opencode-cli.mjs. x64 takes the baseline
-// build so hosts without AVX2 still run it.
 const windowsPackage = (arch) => (arch === 'arm64' ? '@opencode/cli-windows-arm64' : '@opencode/cli-windows-x64-baseline');
 
 export const supportsOpenCodeV2Install = (platform = process.platform) =>
@@ -42,7 +38,6 @@ const runInstaller = (script, version, env) => new Promise((resolve, reject) => 
   child.once('close', (code) => {
     clearTimeout(timer);
     terminate();
-    // Installer output may contain environment or registry secrets.
     if (code === 0) resolve();
     else reject(new Error('OpenCode installation failed. Try the official installation guide.'));
   });
@@ -59,7 +54,6 @@ const extractArchive = (tarCommand, archive, destination) => new Promise((resolv
   });
 });
 
-/** Downloads and runs the official installer script. Returns the step that replaces the binary. */
 const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }) => {
   const response = await fetchImpl('https://opencode.ai/v2/install', { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error('Could not download the OpenCode installer.');
@@ -68,10 +62,6 @@ const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }
   return () => runInstaller(script, version, env);
 };
 
-/**
- * Downloads the Windows platform package, checks it against the integrity npm
- * publishes for it, and unpacks it. Returns the step that replaces the binary.
- */
 const prepareWindowsBinary = async ({ version, arch, directory, workDirectory, fetchImpl, tarCommand }) => {
   const metadataResponse = await fetchImpl(`${NPM_REGISTRY}/${windowsPackage(arch).replace('/', '%2F')}/${version}`, { signal: AbortSignal.timeout(15_000) });
   if (!metadataResponse.ok) throw new Error('Could not resolve the OpenCode v2 package.');
@@ -93,15 +83,12 @@ const prepareWindowsBinary = async ({ version, arch, directory, workDirectory, f
   return () => fs.copyFile(extracted, path.join(directory, 'opencode.exe'));
 };
 
-// Only host-owned callers supply these options. No request body controls a
-// command, URL, version, destination, or environment.
 export const installOpenCodeV2 = async ({
   homeDirectory = os.homedir(),
   env = process.env,
   fetchImpl = fetch,
   platform = process.platform,
   arch = process.arch,
-  // Windows' own bsdtar. Git Bash's GNU tar on PATH reads `C:\...` as a remote host.
   tarCommand = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'),
 } = {}) => {
   if (!supportsOpenCodeV2Install(platform)) throw new Error('Automatic OpenCode v2 installation is unavailable on this platform.');
@@ -110,7 +97,6 @@ export const installOpenCodeV2 = async ({
   const directory = path.join(homeDirectory, '.opencode', 'bin');
   await fs.mkdir(directory, { recursive: true });
   const lock = path.join(directory, '.openchamber-install');
-  // Also serializes separate OpenChamber/VS Code processes sharing this home.
   await fs.mkdir(lock).catch(() => { throw new Error('Another OpenCode installation is already in progress.'); });
   const snapshots = [];
   let started = false;
@@ -146,8 +132,6 @@ export const installOpenCodeV2 = async ({
           if (exists) await fs.rename(backup, target);
         }
       } catch {
-        // Keep any remaining backups for manual recovery; never delete them
-        // after a failed rollback or allow another installer to overwrite them.
         cleanup = false;
         throw new Error('Could not restore the previous OpenCode installation. The backup remains in .opencode/bin/.openchamber-install.');
       }

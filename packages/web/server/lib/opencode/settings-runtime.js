@@ -15,10 +15,6 @@ import {
   serializePreferencesDocument,
 } from './settings-files.js';
 
-// An empty field means "no custom text": the notification uses the default for
-// the interface language (see notifications/template-locales.js), and the
-// settings page shows that default as the placeholder. Persisting English text
-// here is what made a Chinese interface send English notifications.
 const EMPTY_NOTIFICATION_TEMPLATES = {
   completion: { title: '', message: '' },
   error: { title: '', message: '' },
@@ -30,9 +26,6 @@ const emptyNotificationTemplates = () => Object.fromEntries(
   Object.entries(EMPTY_NOTIFICATION_TEMPLATES).map(([event, template]) => [event, { ...template }]),
 );
 
-// Builds before the language-aware defaults wrote this English set into every
-// install. It is cleared once so those installs follow their interface
-// language; anything the user typed stays untouched.
 const LEGACY_SEEDED_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
   error: { title: 'Tool error', message: '{last_message}' },
@@ -67,7 +60,6 @@ const ensureNotificationTemplateShape = (templates) => {
   return { templates: next, changed };
 };
 
-/** Settings that decide which OpenChamber plugins the managed OpenCode loads. */
 const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentControlToolEnabled',
   'agentScheduleToolEnabled',
@@ -81,7 +73,6 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentUsageToolEnabled',
   'agentTerminalToolEnabled',
   'agentWorkflowToolEnabled',
-  // The limit failover plugin loads only while one of these is set.
   'fallbackModel',
   'accountSwitchProviders',
 ]);
@@ -115,18 +106,9 @@ export const createSettingsRuntime = (deps) => {
   let persistSettingsLock = Promise.resolve();
 
   const PREFERENCES_FILE_PATH = preferencesFilePathFor(SETTINGS_FILE_PATH, path);
-  // True while preferences.json exists but cannot be read. Profile writes are
-  // refused meanwhile so a corrupt file is never overwritten with a seed or a
-  // partial document; clients keep the values they hold.
   let preferencesUnavailable = false;
   let preferencesFailureLogged = false;
 
-  // Orphan recovery is a one-shot best-effort scan: when orphans can't be
-  // matched on first pass they stay on disk and every subsequent settings
-  // read would re-scan them. In-process (Electron) this runs in the main
-  // event loop, so hitting it 3+ times/second from fs/list, path, etc.
-  // turns into perceptible UI jank for ~10-15 seconds after launch.
-  // Cache the outcome for this process lifetime.
   let orphanRecoveryDone = false;
 
   const PROJECTS_ROOT_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'projects');
@@ -285,19 +267,6 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  /**
-   * Merge the server-owned `context.json` (notes/todos/plans) across a project
-   * id change.
-   *
-   * `moveDirectoryContents` only renames a file when the destination is free,
-   * so without this step an existing `<newId>/context.json` would silently
-   * discard everything stored under `<oldId>`. Every list is merged by identity
-   * so neither side loses entries.
-   *
-   * A version 1 context stored notes as a single string. It is left untouched
-   * here: `project-context` converts it on read, and converting in two places
-   * would mean two definitions of the same migration.
-   */
   const mergeProjectContextFiles = async (oldStorageDir, newStorageDir) => {
     const oldContextPath = path.join(oldStorageDir, 'context.json');
     const newContextPath = path.join(newStorageDir, 'context.json');
@@ -308,13 +277,10 @@ export const createSettingsRuntime = (deps) => {
     ]);
 
     if (!oldContext || !newContext) {
-      // Nothing to reconcile: the plain directory move handles a single side.
       return;
     }
 
     const mergeNotes = () => {
-      // One side may still be a version 1 string; keep whichever is a list, and
-      // prefer the destination when both are strings.
       const oldIsList = Array.isArray(oldContext.notes);
       const newIsList = Array.isArray(newContext.notes);
       if (oldIsList && newIsList) {
@@ -360,13 +326,6 @@ export const createSettingsRuntime = (deps) => {
     await fsPromises.rm(oldConfigPath, { force: true });
   };
 
-  /**
-   * A build before the bounded folder name created `<projectId>/` for an id
-   * the filesystem still accepted (201 to 255 characters; longer ids never
-   * got a folder). Only the bounded folder is read now, so that folder's
-   * notes, plans, and memory are moved over once. A raw name the filesystem
-   * cannot hold (ENAMETOOLONG) means no such folder ever existed.
-   */
   const migrateRawIdStorageFolder = async (projectId) => {
     const stem = projectConfigFileStemOf(projectId);
     if (stem === projectId) return;
@@ -407,7 +366,7 @@ export const createSettingsRuntime = (deps) => {
     }
 
     if (!orphanRecoveryDone) {
-      orphanRecoveryDone = true; // set before await to close races under concurrent settings reads
+      orphanRecoveryDone = true;
       try {
         await recoverOrphanProjectFiles(nextProjects);
       } catch (error) {
@@ -432,11 +391,6 @@ export const createSettingsRuntime = (deps) => {
     };
   };
 
-  // Orphan files are project jsons left behind from earlier random-UUID project
-  // ids (they have no projectPath field and are not referenced by settings).
-  // For each canonical project whose current config is empty (lost during the
-  // earlier id churn), try to find a single orphan whose setup-worktree command
-  // patterns uniquely match the project's basename and merge it in.
   const recoverOrphanProjectFiles = async (canonicalProjects) => {
     let entries;
     try {
@@ -549,7 +503,6 @@ export const createSettingsRuntime = (deps) => {
 
       for (const orphan of orphansForProject) {
         const targetExisting = (await readJsonFile(targetPath)) || {};
-        // An orphan is named by the file found on disk, so its folder is the raw name.
         const orphanStorageDir = path.join(PROJECTS_ROOT_DIR, orphan.orphanId);
         const merged = mergeProjectConfigData({
           oldConfig: orphan.content,
@@ -589,11 +542,6 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  /**
-   * `{ status: 'missing' }` when the file does not exist, `{ status: 'ok',
-   * fields }` when it parsed, `{ status: 'failed' }` for anything else. Only
-   * "missing" may be seeded; "failed" must leave the file alone.
-   */
   const readPreferenceFields = async () => {
     let raw;
     try {
@@ -624,12 +572,6 @@ export const createSettingsRuntime = (deps) => {
     await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
   };
 
-  // The merged document every consumer sees: instance facts from settings.json
-  // plus the profile from preferences.json. On the first read of an install
-  // that predates the split, the profile keys still sitting in settings.json
-  // seed preferences.json. settings.json keeps a copy of the profile's base
-  // values on every write too, so an older build (which reads only that file)
-  // still finds everything where it used to be.
   const readSettingsFromDisk = async ({ surface = null } = {}) => {
     const instance = await readInstanceSettingsFromDisk();
     const preferences = await readPreferenceFields();
@@ -650,13 +592,6 @@ export const createSettingsRuntime = (deps) => {
     return { ...instance, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
   };
 
-  // Strict variant for callers that REGENERATE persisted identity when a key is
-  // absent (relay signing/encryption keys). The lenient reader above maps every
-  // failure — corrupt JSON, EACCES, transient I/O — to `{}`, which such callers
-  // cannot distinguish from "first run": they would mint a NEW identity, orphan
-  // every paired device and push binding, and overwrite the settings file with
-  // the empty spread. Here only a genuinely missing file means "no settings";
-  // any other failure (including a non-object payload) throws.
   const readSettingsFromDiskStrict = async () => {
     let raw;
     try {
@@ -704,10 +639,6 @@ export const createSettingsRuntime = (deps) => {
       throw lastError;
     }
 
-    // Windows can transiently reject atomic replacement when another process
-    // briefly opens the target file. Preserve atomic rename everywhere it works,
-    // but fall back to a direct replacement so settings persistence does not
-    // get permanently wedged on Windows desktop installs.
     try {
       await fsPromises.copyFile(tmp, target);
     } finally {
@@ -729,14 +660,8 @@ export const createSettingsRuntime = (deps) => {
 
   const writeJsonFileAtomic = async (filePath, text) => {
     const directory = path.dirname(filePath);
-    // Tighten only a directory this write created (mkdir's mode is umasked):
-    // an existing one keeps the permissions and ACLs an administrator gave it.
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
-    // Atomic write: Electron main and ssh-manager read these files via plain
-    // readFile + JSON.parse and silently coerce parse errors to {}. A
-    // partial read during a non-atomic writeFile would make their next
-    // read-modify-write wipe the file.
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
@@ -750,16 +675,9 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  /**
-   * Persist a merged document: profile keys go to preferences.json (stamped
-   * when their value changed), everything else to settings.json. While
-   * preferences.json is unreadable its part is skipped rather than replaced.
-   */
   const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
     if (current.status === 'failed') {
-      // The profile part is not saved; settings.json keeps whatever legacy
-      // profile copy it already holds rather than losing it too.
       preferencesUnavailable = true;
       const onDisk = await readInstanceSettingsFromDisk();
       await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({
@@ -799,8 +717,6 @@ export const createSettingsRuntime = (deps) => {
           console.warn(`[validateProjectEntries] Dropping project — directory no longer exists: ${project.path}`);
           return null;
         }
-        // Permission or transient fs error — keep the project rather than
-        // silently losing it from the user's list.
         return project;
       }
     });
@@ -813,8 +729,6 @@ export const createSettingsRuntime = (deps) => {
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   };
 
-  // A chat's folder belongs to no project. With no project open, the folder
-  // the UI last browsed is often a chat's, and it must not become one.
   const isChatDirectory = async (candidate) => {
     const roots = chatRoots.filter(Boolean).map((root) => path.resolve(root));
     if (roots.some((root) => isWithinRoot(candidate, root))) {
@@ -999,8 +913,6 @@ export const createSettingsRuntime = (deps) => {
     }
 
     const { templates, changed: templatesChanged } = ensureNotificationTemplateShape(settings.notificationTemplates);
-    // Clearing the old English seed is what lets an install that never edited
-    // the templates send notification text in its own language.
     const wasSeeded = isLegacySeededNotificationTemplates(templates);
     const nextTemplates = wasSeeded ? emptyNotificationTemplates() : templates;
     if (
@@ -1077,9 +989,6 @@ export const createSettingsRuntime = (deps) => {
     return { settings: changed ? next : settings, changed };
   };
 
-  // `approvedDirectories` was a write-only registry: every project path and
-  // visited directory was appended forever, but nothing ever read it. Strip
-  // the stale key from persisted settings on upgrade.
   const migrateSettingsRemoveApprovedDirectories = (current) => {
     const settings = current && typeof current === 'object' ? current : {};
     if (!Object.prototype.hasOwnProperty.call(settings, 'approvedDirectories')) {
@@ -1090,9 +999,6 @@ export const createSettingsRuntime = (deps) => {
     return { settings: next, changed: true };
   };
 
-  // Scheduled tasks used to be part of the agent control tool. Someone who had
-  // switched that tool off keeps them off after the split instead of getting a
-  // scheduling tool they never chose.
   const migrateSettingsScheduleToolFromControl = (settings) => {
     const chosen = settings.agentScheduleToolEnabled === true || settings.agentScheduleToolEnabled === false;
     if (settings.agentControlToolEnabled !== false || chosen) {
@@ -1121,24 +1027,16 @@ export const createSettingsRuntime = (deps) => {
     if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
       await writeSettingsToDisk(migration9.settings);
     }
-    // Migrations run on the base view; a surface asks for its own resolution
-    // of the per-surface keys on top of the migrated files.
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  // For a caller whose change depends on the settings on disk: `resolveChanges`
-  // runs inside the queue, so no other save lands between that read and this write.
   const persistResolvedSettings = async (resolveChanges, { surface = null } = {}) => {
     const result = persistSettingsLock.then(async () => {
       const current = await readSettingsFromDisk({ surface });
       const changes = resolveChanges(current);
-      // Log field names only — changes can carry credentials (UI password,
-      // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
       const sanitized = sanitizeSettingsUpdate(changes);
       for (const key of Object.keys(sanitized)) {
-        // Device state belongs to the install in front of the user, never to
-        // the instance; a client that still sends it is simply ignored.
         if (isDeviceSettingsKey(key)) {
           delete sanitized[key];
         } else if (preferencesUnavailable && isProfileSettingsKey(key)) {
@@ -1163,9 +1061,6 @@ export const createSettingsRuntime = (deps) => {
         next = approvedDirectoriesMigration.settings;
       }
 
-      // Validating project paths hits the filesystem for every entry, so only
-      // do it when the incoming update actually touches the projects list —
-      // not on every theme/window-state/etc. save.
       if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
         const validated = await validateProjectEntries(next.projects);
         next = { ...next, projects: validated };
@@ -1211,15 +1106,11 @@ export const createSettingsRuntime = (deps) => {
 
       const changedKeys = Object.keys(sanitized);
       await writeSettingsToDisk(next, { surface, changedKeys });
-      // OpenChamber's own OpenCode plugins live in a config file OpenCode
-      // watches, so flipping one of these switches takes effect in the running
-      // process instead of waiting for a restart.
       if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
         await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
           console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
         });
       }
-      // The search index starts or stops in the background; the save does not wait for it.
       if (changedKeys.includes('messageSearchEnabled')) {
         onMessageSearchEnabledChanged(isMessageSearchEnabled(next));
       }
@@ -1234,16 +1125,12 @@ export const createSettingsRuntime = (deps) => {
       }
       return formatSettingsResponse(next);
     });
-    // A failed write (a full disk) rejects only its own caller; the next
-    // save still runs instead of replaying that error until a restart.
     persistSettingsLock = result.catch(() => {});
     return result;
   };
 
   const persistSettings = (changes, options) => persistResolvedSettings(() => changes, options);
 
-  // A background session may discover a project while another window saves
-  // settings. Resolve the append inside the settings queue, without activation.
   const registerSessionProject = (resolveProject) => {
     const result = persistSettingsLock.then(async () => {
       const current = await readSettingsFromDiskStrict();

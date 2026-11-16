@@ -2,13 +2,8 @@ import { isIP } from 'node:net';
 
 const MAX_HOSTNAME_LENGTH = 253;
 const HOSTNAME_LABEL_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
-// All-numeric dotted values must be a real IPv4 address; otherwise typo'd IPs
-// like "0.0.0.0.0" would slip through as (technically valid) hostnames.
 const ALL_NUMERIC_DOTTED_RE = /^\d+(?:\.\d+)*$/;
 
-// Valid bind hostnames for the managed OpenCode server: IPv4, IPv6 (with or
-// without brackets), or a DNS-style hostname. Everything else (URLs, ports,
-// paths, whitespace, underscores) is rejected.
 export const isValidOpenCodeHostname = (value) => {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -21,8 +16,6 @@ export const isValidOpenCodeHostname = (value) => {
   return trimmed.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
 };
 
-// Node socket timers accept delays up to a signed 32-bit integer; larger
-// values overflow to 1 ms. Zero disables the proxy deadline.
 export const resolveProxyRequestTimeoutMs = (env = {}, logger = null) => {
   const raw = typeof env.OPENCHAMBER_PROXY_TIMEOUT_MS === 'string' ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
   if (!raw) return 4 * 60 * 1000;
@@ -73,8 +66,7 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
       warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
       return null;
     }
-    // URL drops a port equal to the scheme default (https://host:443 -> ''),
-    // so read an explicitly written port from the raw value.
+    // external: https://developer.mozilla.org/en-US/docs/Web/API/URL/port URL omits a port equal to the scheme default; explicit ports are read from the raw value.
     const writtenPort = raw.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:\[[^\]]*\]|[^/?#:]*):(\d+)(?:[/?#]|$)/i)?.[1];
     const port = parseInt(url.port || writtenPort || '', 10);
     if (!Number.isFinite(port) || port <= 0) {
@@ -88,7 +80,6 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
     return { origin: url.origin, port };
   })();
 
-  // OPENCODE_HOST takes precedence over OPENCODE_PORT when both are set
   const effectivePort = configuredOpenCodeHost?.port ?? configuredOpenCodePort;
 
   const configuredOpenCodeHostname = (() => {

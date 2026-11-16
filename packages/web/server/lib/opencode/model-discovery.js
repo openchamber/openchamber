@@ -43,7 +43,6 @@ const requestSchema = z.object({
 });
 const headersSchema = z.record(z.string(), z.unknown());
 
-/** One entry of an OpenAI-style `/models` list: a bare id or an object. */
 const providerModelSchema = z.union([
   trimmedString.transform((id) => ({ id })),
   z.object({
@@ -52,12 +51,10 @@ const providerModelSchema = z.union([
     limit: z.object({ context: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
     context_window: z.unknown().optional(),
     contextWindow: z.unknown().optional(),
-    // vLLM-style servers spell the context limit `max_input_tokens`.
     max_input_tokens: z.unknown().optional(),
     max_output_tokens: z.unknown().optional(),
     maxOutputTokens: z.unknown().optional(),
     modalities: z.object({ input: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
-    // The flat vLLM-style spellings of the modalities and tool-support fields.
     input_modalities: z.array(z.unknown()).optional().catch(undefined),
     supports_tool_call: z.unknown().optional(),
     capabilities: z.object({
@@ -104,7 +101,6 @@ const optionalBoolean = (value) => {
   return parsed.success ? parsed.data : undefined;
 };
 
-/** `{ context, output }` with only the limits that are known, or undefined. */
 const buildLimit = (context, output) => {
   if (!context && !output) return undefined;
   const limit = {};
@@ -113,7 +109,6 @@ const buildLimit = (context, output) => {
   return limit;
 };
 
-/** Capabilities when anything describes them; text in and out, with tools, fills the gaps. */
 const buildCapabilities = (input, output, tools) => {
   if (!input && !output && tools === undefined) return undefined;
   return { tools: tools ?? true, input: input ?? ['text'], output: output ?? ['text'] };
@@ -124,7 +119,6 @@ const withOptional = (target, key, value) => {
   return target;
 };
 
-/** `{env:NAME}` reads that variable; anything else is the literal value. */
 const resolveEnvReference = (value, env) => {
   const match = value.match(ENV_REFERENCE);
   if (!match) return value;
@@ -140,11 +134,6 @@ const resolveApiKey = (value, env) => {
 
 const FILE_REFERENCE = /^\{file:([^}]+)\}$/;
 
-/**
- * One `settings.tls` value as OpenCode reads it: `{file:path}` is the file's
- * text, trimmed, `{env:NAME}` the variable, anything else the value as
- * written (a literal passphrase keeps its spaces).
- */
 const resolveTlsValue = async (value, env, field) => {
   const text = optionalString(value);
   if (!text) return undefined;
@@ -160,7 +149,6 @@ const resolveTlsValue = async (value, env, field) => {
 
 const tlsSchema = z.object({ cert: z.unknown(), key: z.unknown(), passphrase: z.unknown().optional() });
 
-/** The client certificate the provider's gateway asks for (`settings.tls`), or null when none is set. */
 const resolveClientCertificate = async (value, env) => {
   if (value === undefined || value === null) return null;
   const parsed = tlsSchema.safeParse(value);
@@ -174,19 +162,9 @@ const resolveClientCertificate = async (value, env) => {
   return certificate;
 };
 
-/**
- * GET over HTTPS presenting a client certificate. The global fetch takes no
- * certificate in Node, so this goes through `node:https` and answers with a
- * standard Response, which the rest of discovery reads as usual. Redirects are
- * not followed, so the certificate goes to no other host. Each call opens its
- * own connection: the shared agent pools sockets without the passphrase in
- * its key, so a reused socket would skip the check of a changed passphrase.
- */
 const fetchWithClientCertificate = (url, init, certificate) => new Promise((resolve, reject) => {
   let request;
   try {
-    // The TLS context is built here, so an unreadable certificate or key, or
-    // a wrong passphrase, throws before any connection.
     request = https.request(url, { method: 'GET', headers: init.headers, signal: init.signal, agent: false, ...certificate }, onResponse);
   } catch (error) {
     reject(discoveryError(
@@ -397,13 +375,10 @@ export async function discoverProviderModels(input, options = {}) {
   const endpoint = buildModelsUrl(body.baseURL, body.modelsPath);
   const env = options.env ?? process.env;
   const requestedApiKey = resolveApiKey(body.apiKey, env);
-  // The saved key goes only to the saved endpoint: a form whose base URL was
-  // changed must not carry the stored credential to the new host.
   const storedApiKey = isSameEndpoint(options.storedBaseURL, body.baseURL)
     ? optionalString(options.storedApiKey)
     : null;
   const apiKey = requestedApiKey ?? resolveApiKey(storedApiKey, env);
-  // A certificate is presented only in a TLS handshake, as OpenCode does.
   const certificate = endpoint.protocol === 'https:' ? await resolveClientCertificate(body.tls, env) : null;
   const init = {
     method: 'GET',
@@ -414,8 +389,6 @@ export async function discoverProviderModels(input, options = {}) {
   const response = certificate
     ? await (options.fetchWithClientCertificate ?? fetchWithClientCertificate)(endpoint, init, certificate)
     : await (options.fetch ?? fetch)(endpoint, init).catch((error) => {
-      // fetch says only "fetch failed"; the reason (a refused connection, a
-      // TLS handshake the gateway ended) is its cause.
       const reason = error?.cause instanceof Error ? error.cause.message : error instanceof Error ? error.message : String(error);
       throw discoveryError(`Provider model endpoint failed: ${reason}`, 502, 'provider_error');
     });

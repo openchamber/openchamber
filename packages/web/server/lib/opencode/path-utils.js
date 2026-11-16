@@ -1,11 +1,3 @@
-/**
- * Shared PATH heuristics and merge utilities for server and Electron runtimes.
- *
- * The heuristic decides whether the current process.env.PATH looks like it was
- * configured by the user (or their session manager) vs. a minimal system default.
- * When the PATH looks user-configured we keep it; otherwise we prefer the login
- * shell PATH which typically has the full toolchain.
- */
 
 const TOOLCHAIN_SEGMENTS = [
   '/opt/homebrew/',
@@ -50,17 +42,14 @@ export function pathLooksUserConfigured(value, home, delim) {
     if (!segment) return false;
     const normalizedSegment = segment.replaceAll('\\', '/');
 
-    // Any path under the user's home directory.
     if (normalizedHome && (normalizedSegment === normalizedHome || normalizedSegment.startsWith(homeWithSep))) {
       return true;
     }
 
-    // Well-known package-manager / toolchain prefixes.
     if (TOOLCHAIN_SEGMENTS.some((prefix) => normalizedSegment.startsWith(prefix))) {
       return true;
     }
 
-    // Well-known dot-directories inside home (e.g. ~/.cargo/bin).
     const parts = normalizedSegment.split('/').filter(Boolean);
     if (parts.some((part) => TOOLCHAIN_BASENAMES.has(part))) {
       return true;

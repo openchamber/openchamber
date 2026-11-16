@@ -6,10 +6,6 @@ import { setSkillEnabled } from './skill-switch.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 
-/**
- * Matches how OpenCode reads its own boolean env flags: any value other than
- * unset, empty, "0" or "false" enables the flag.
- */
 const isEnvFlagEnabled = (value) => {
   if (typeof value !== 'string') return false;
   const normalized = value.trim().toLowerCase();
@@ -155,9 +151,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
   };
 
-  // `projectAncestors` is `getSkillProjectAncestors(workingDirectory)`, worked
-  // out once per list: it probes the disk up to the repository root, and a
-  // list has hundreds of skills.
   const inferSkillScopeAndSourceFromPath = (skillPath, projectAncestors) => {
     const resolvedPath = typeof skillPath === 'string' ? path.resolve(skillPath) : '';
     const home = os.homedir();
@@ -195,9 +188,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     return { scope: SKILL_SCOPE.USER, source };
   };
 
-  // Returns null when OpenCode's list could not be read (not running, error,
-  // timeout, malformed payload) so callers can tell a failed fetch from a
-  // genuinely empty list.
   const fetchOpenCodeDiscoveredSkills = async (workingDirectory) => {
     if (!getOpenCodePort()) {
       return null;
@@ -208,8 +198,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
         headers: {
           ...getOpenCodeAuthHeaders(),
-          // v2 scopes a request with a header, not a `directory` option, and
-          // rejects non-ASCII header values, so the path is percent-encoded.
           ...(workingDirectory ? { 'x-opencode-directory': encodeURIComponent(workingDirectory) } : {}),
         },
         fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
@@ -225,13 +213,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       return payload
         .map((item) => {
           const name = typeof item?.name === 'string' ? item.name.trim() : '';
-          // OpenCode v1's skill payload used `location`; v2 renamed the field
-          // to `path`. Accept both, or the whole authoritative list is dropped
-          // and the panel falls back to the (smaller) local disk scan.
           const rawLocation = typeof item?.path === 'string' ? item.path : (typeof item?.location === 'string' ? item.location : '');
-          // v1 marked built-in skills with `<built-in>`; v2 gives them a synthetic
-          // path, `/builtin/<id>.md` or, as 2.2.7 sends it, `skill://<id>/SKILL.md`.
-          // Normalize so they stay read-only in the panel and show their content.
           const location = rawLocation.startsWith('/builtin/') || rawLocation.startsWith('skill://') ? '<built-in>' : rawLocation;
           const description = typeof item?.description === 'string' ? item.description : '';
           const content = typeof item?.content === 'string' ? item.content : '';
@@ -240,8 +222,6 @@ export const registerSkillRoutes = (app, dependencies) => {
           }
           if (location === '<built-in>') {
             return {
-              // The path no longer carries the id, and a built-in's id can
-              // differ from its name (`opencode` / `OpenCode`); policies name the id.
               id: asNonEmptyString(item?.id) ?? name,
               name,
               path: location,
@@ -280,9 +260,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   };
 
-  // Prefer an explicit request directory, then soft-fallback to the active
-  // project / lastDirectory so repository-local skills stay visible when the
-  // client omits `directory` (create already used resolveProjectDirectory).
   const resolveSkillsDirectory = async (req) => {
     const optional = await resolveOptionalProjectDirectory(req);
     if (optional.error) {
@@ -315,12 +292,8 @@ export const registerSkillRoutes = (app, dependencies) => {
       const localSkills = await discoverSkills(directory, { parsedFiles });
       const skills = mergeDiscoveredSkills(openCodeSkills ?? [], localSkills);
 
-      // One skill at a time: each await hands the event loop back, so other
-      // requests are served while hundreds of skills are read.
       const enrichedSkills = [];
       for (const skill of skills) {
-        // The list carries no supporting files; the skill page reads them
-        // from GET /api/config/skills/:name.
         const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false, parsedFiles });
         const skillPath = typeof skill.path === 'string' ? skill.path : null;
         enrichedSkills.push({
@@ -334,27 +307,14 @@ export const registerSkillRoutes = (app, dependencies) => {
         });
       }
 
-      // OpenCode decides which external skill roots it loads from process
-      // env, and the browser cannot read that. Report the flags alongside the
-      // scan so the client can narrow its list to what the agent can actually
-      // invoke.
-      //
-      // OpenCode's own skill-list endpoint is not usable for this: on 1.18.14
-      // it returns only global and builtin skills, omitting the project
-      // `.agents`/`.claude` skills the agent demonstrably has.
       const body = {
         skills: enrichedSkills,
         externalSkills: {
-          // `OPENCODE_DISABLE_CLAUDE_CODE` is the broad switch; the specific
-          // one wins independently — OpenCode ORs them.
           claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
             || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
           allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
         },
       };
-      // The list is only the disk scan when OpenCode's own list failed:
-      // built-in skills and anything OpenCode finds only through its config
-      // are missing, so the client must not treat this as complete.
       if (openCodeSkills === null) {
         body.openCodeSkillsUnavailable = true;
       }
@@ -365,7 +325,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
   });
 
-  // Turns one skill off or back on for agents (`skill-switch.js`).
   app.put('/api/config/skill-switch', async (req, res) => {
     try {
       const parsed = skillSwitchRequestSchema.safeParse(req.body);
@@ -514,9 +473,6 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       const excludedSkills = new Set(src.excludedSkills || []);
-      // Provenance recorded at install time makes the badge source-aware; a
-      // name the registry has never heard of keeps the old name match, so
-      // skills installed before the registry existed look unchanged (#4756).
       const provenanceByName = readInstalledSources();
       const items = (scanResult.items || []).filter((item) => !excludedSkills.has(item.skillName)).map((item) => {
         const installed = installedByName.get(item.skillName);
@@ -663,8 +619,6 @@ export const registerSkillRoutes = (app, dependencies) => {
             sourceRef: source,
           })));
         } catch (error) {
-          // Provenance only refines the Installed badge; a failed write must
-          // not fail an install that already succeeded.
           console.error('Failed to record skill install provenance:', error);
         }
       }
@@ -782,8 +736,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
         await renameSkill(skillName, newName, directory);
-        // OpenCode 2 watches the skills directories: the renamed folder is
-        // picked up like any other write, no restart and no client reload.
         return res.json({
           ...buildAppliedResponse(`Skill renamed to ${newName} successfully.`),
           name: newName,
@@ -880,7 +832,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      // `scope` and `source` together narrow the delete to that one copy.
       const scope = asNonEmptyString(req.query.scope);
       const source = asNonEmptyString(req.query.source);
       let location;
@@ -895,7 +846,6 @@ export const registerSkillRoutes = (app, dependencies) => {
       try {
         removeInstalledSources(skillName);
       } catch (error) {
-        // Provenance only refines the Installed badge; the skill is gone either way.
         console.error('Failed to forget skill install provenance:', error);
       }
       res.json(buildAppliedResponse(

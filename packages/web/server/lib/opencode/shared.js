@@ -17,26 +17,19 @@ import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
 
-// ============== PATH CONSTANTS ==============
 
-// OpenCode 2 resolves its global config directory as `OPENCODE_CONFIG_DIR`
-// when set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`.
 const OPENCODE_CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR?.trim()
   ? path.resolve(process.env.OPENCODE_CONFIG_DIR.trim())
   : path.join(process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config'), 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
-// OpenCode 2 reads only `opencode.json(c)`; the v1-era `config.json` is not
-// discovered any more, so it is neither read nor written here.
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 
-/** OpenCode's data directory: `$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode`. */
 const getOpenCodeDataDir = (env = process.env) =>
   path.join(env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), '.local', 'share'), 'opencode');
 
-// ============== SCOPE TYPE CONSTANTS ==============
 
 const AGENT_SCOPE = {
   USER: 'user',
@@ -53,7 +46,6 @@ const SKILL_SCOPE = {
   PROJECT: 'project'
 };
 
-// ============== DIRECTORY OPERATIONS ==============
 
 function ensureDirs() {
   if (!fs.existsSync(OPENCODE_CONFIG_DIR)) {
@@ -70,13 +62,7 @@ function ensureDirs() {
   }
 }
 
-// ============== MARKDOWN FILE OPERATIONS ==============
 
-// Mirror of OpenCode's markdown frontmatter sanitizer (packages/opencode/src/
-// config/markdown.ts): other coding agents accept unquoted colons in YAML
-// values (e.g. `description: Build agent: creates builds`), which strict YAML
-// rejects. Rewrite those values as block scalars and retry the parse, so files
-// OpenCode accepts are parsed identically here.
 function sanitizeFrontmatter(frontmatter) {
   return frontmatter
     .split(/\r?\n/)
@@ -101,13 +87,7 @@ async function parseMdFileAsync(filePath) {
 }
 
 function parseMdContent(rawContent, filePath) {
-  // Strip a UTF-8 BOM so frontmatter is recognized regardless of the editor
-  // that saved the file.
   const content = rawContent.charCodeAt(0) === 0xfeff ? rawContent.slice(1) : rawContent;
-  // The closing `---` may sit at end-of-file without a trailing newline.
-  // gray-matter (used by OpenCode) accepts that, so we must too: otherwise the
-  // whole file is treated as the prompt body and a later save rewrites the
-  // existing YAML block into the body, duplicating the frontmatter.
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
 
   if (!match) {
@@ -118,8 +98,6 @@ function parseMdContent(rawContent, filePath) {
   try {
     frontmatter = yaml.parse(match[1]) || {};
   } catch (error) {
-    // Lenient fallback for frontmatter that strict YAML rejects but OpenCode
-    // still accepts (unquoted colons in scalar values).
     try {
       frontmatter = yaml.parse(sanitizeFrontmatter(match[1])) || {};
     } catch {
@@ -132,8 +110,6 @@ function parseMdContent(rawContent, filePath) {
   return { frontmatter, body };
 }
 
-// `flag: 'wx'` creates the file and fails with EEXIST when it is already
-// there; that error is passed on as is so a caller can tell it apart.
 function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
   try {
     const cleanedFrontmatter = Object.fromEntries(
@@ -144,8 +120,6 @@ function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
     if (flag === 'wx') {
       fs.writeFileSync(filePath, content, { encoding: 'utf8', flag });
     } else {
-      // OpenCode watches its agent and command folders, so a rewrite must not
-      // expose a half-written file.
       writeFileAtomic(filePath, content);
     }
     console.log(`Successfully wrote markdown file: ${filePath}`);
@@ -156,16 +130,7 @@ function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
   }
 }
 
-// ============== CONFIG FILE OPERATIONS ==============
 
-/**
- * Project config files in the order OpenCode 2 lets them win: a file under
- * `.opencode/` overrides the one beside it at the project root, and
- * `opencode.json` overrides `opencode.jsonc`. When several exist, the
- * highest-priority one is the file OpenChamber reads and writes for the
- * project scope (OpenCode merges them all; an entry that lives only in a
- * lower file is visible through the resolved catalog but not editable here).
- */
 function getProjectConfigCandidates(workingDirectory) {
   if (!workingDirectory) return [];
   return [
@@ -187,7 +152,6 @@ function getProjectConfigPath(workingDirectory) {
     }
   }
 
-  // A new project config goes beside the project's other `.opencode/` files.
   return candidates[0];
 }
 
@@ -198,7 +162,6 @@ function getConfigPaths(workingDirectory) {
       path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
     ],
     projectPath: getProjectConfigPath(workingDirectory),
-    // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
     customPath: process.env.OPENCODE_CONFIG
       ? path.resolve(process.env.OPENCODE_CONFIG)
       : null,
@@ -221,15 +184,6 @@ function isFile(filePath) {
   }
 }
 
-/**
- * Every config file OpenCode 2 finds by walking up from the project folder to
- * the filesystem root, lowest priority first, as `ConfigDiscovery.discover`
- * and `Config.load` order them: each folder's `opencode.json` then
- * `opencode.jsonc`, outermost folder first, followed by each folder's
- * `.opencode/opencode.json(c)` in the same order. The global config files are
- * left out, and there is no walk when the project folder is the global config
- * folder itself.
- */
 function getFolderConfigPaths(workingDirectory) {
   if (!workingDirectory) return [];
   const globalDirectory = realPathOrResolved(OPENCODE_CONFIG_DIR);
@@ -275,9 +229,6 @@ function formatJsoncParseError(filePath, errors) {
 }
 
 function isCommentOnlyParse(parsed, errors) {
-  // Comment-only / whitespace-only files parse to undefined with nothing but
-  // ValueExpected. Any other error means real content we failed to understand
-  // (YAML, plain text, a stray leading token), which must not read as empty.
   return parsed === undefined
     && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
 }
@@ -310,8 +261,6 @@ function readConfigFile(filePath) {
     if (!normalized) {
       return {};
     }
-    // Refuse partial jsonc-parser trees. Ignoring errors previously let mutations
-    // rewrite a truncated object (often only `$schema`) over the full config.
     return parseConfigObject(normalized, filePath);
   } catch (error) {
     if (isInvalidJsoncError(error)) {
@@ -361,9 +310,6 @@ function readConfigLayer(filePath) {
 function readConfigLayers(workingDirectory) {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
-  // OpenCode loads every global config file in order, so an `opencode.jsonc`
-  // next to `opencode.json` overrides it. New entries still go to the primary
-  // file; entries found in the override are edited where they live.
   const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
   const userLayer = readConfigLayer(userPath);
   const userOverrideLayer = readConfigLayer(userOverridePath);
@@ -403,17 +349,8 @@ function readConfig(workingDirectory) {
   return readConfigLayers(workingDirectory).mergedConfig;
 }
 
-/**
- * The parent directory OpenCode would create a worktree in for this project,
- * read from the merged OpenCode configuration on the canonical checkout. Keeps
- * the `worktree.directory` rule in one place (`worktree-directory.js`) and
- * returns null when the setting is unset, so the caller can fall back to
- * OpenChamber's data-dir location.
- */
 function readWorktreeDirectorySetting(workingDirectory, primaryWorktree = workingDirectory) {
   const { userPaths, customPath } = getConfigPaths(workingDirectory);
-  // Match OpenCode discovery without changing the edit targets used by Settings.
-  // Read strictly: a broken layer must not send creation to an unchosen folder.
   const sources = [...userPaths, customPath, ...getFolderConfigPaths(workingDirectory)];
   const mergedConfig = sources.reduce((config, filePath) => mergeConfigs(config, readConfigFile(filePath)), {});
   return resolveWorktreeDirectory(mergedConfig, primaryWorktree);
@@ -450,9 +387,6 @@ function deepEqualJsonValue(a, b) {
   return false;
 }
 
-// Element edits for an array that only grew at its end or only lost elements;
-// null for any other resize. Removals run from the highest index down, so each
-// one leaves the indices of the next in place.
 function arrayResizeEdits(current, next, basePath) {
   if (next.length > current.length) {
     if (!current.every((item, index) => deepEqualJsonValue(item, next[index]))) {
@@ -476,12 +410,6 @@ function arrayResizeEdits(current, next, basePath) {
   return removed.reverse().map((index) => ({ type: 'remove', path: [...basePath, index] }));
 }
 
-// Structural diff between the parsed on-disk config and the desired config.
-// Equal-length arrays keep their indices unless a retained value moves between
-// changed positions. An array that only grew at its end or only lost elements
-// gets one edit per element; other resized arrays and scalars are replaced
-// whole. The desired config must already be JSON-normalized, so absent keys
-// signal removals.
 function collectConfigEdits(current, next, basePath, edits) {
   if (Array.isArray(current) && Array.isArray(next) && current.length !== next.length) {
     const resizeEdits = arrayResizeEdits(current, next, basePath);
@@ -542,11 +470,6 @@ function findSeparatorComma(text, start, end) {
   return -1;
 }
 
-// Removes exactly the property node, or the array element, plus one adjacent
-// separator comma. The scanner-based comma lookup keeps comments in the
-// surrounding gaps (including commas inside comments), and avoids
-// jsonc-parser's own removal, which leaves a stray comma after the last
-// property of an object and deletes the comments next to an array element.
 function removeNodeEdits(text, nodePath) {
   const root = parseTree(text, [], { allowTrailingComma: true });
   const valueNode = findNodeAtLocation(root, nodePath);
@@ -581,7 +504,6 @@ function removeNodeEdits(text, nodePath) {
     commaOffset = findSeparatorComma(text, beforeGapStart, nodeStart);
   }
   const commaBefore = commaOffset !== -1 && commaOffset < nodeStart;
-  // A node alone on its lines leaves with them, so no blank line stays behind.
   const lineStart = text.lastIndexOf('\n', nodeStart - 1) + 1;
   const removedEnd = commaOffset >= nodeEnd ? commaOffset + 1 : nodeEnd;
   const lineEnd = text.indexOf('\n', removedEnd);
@@ -601,11 +523,6 @@ function removeNodeEdits(text, nodePath) {
   return edits;
 }
 
-// Adds an element on its own line after the last one, at that element's
-// indentation, so the text of the elements before it stays as written:
-// jsonc-parser's own insertion reformats the whole line it lands on. An empty
-// array, or one whose closing bracket shares a line with an element, goes
-// through jsonc-parser.
 function appendElementEdits(text, elementPath, value, formattingOptions) {
   const root = parseTree(text, [], { allowTrailingComma: true });
   const arrayNode = findNodeAtLocation(root, elementPath.slice(0, -1));
@@ -663,8 +580,6 @@ function buildConfigFileContent(desired, existingRaw, existingParse) {
     return JSON.stringify(desired, null, 2);
   }
   if (!existingParse || existingParse.commentOnly) {
-    // A comment-only file has no root object to merge into: keep the user's
-    // comments and append the serialized config below them.
     return `${existingRaw.trimEnd()}\n${JSON.stringify(desired, null, 2)}`;
   }
   if (!isPlainObject(desired)) {
@@ -689,7 +604,6 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     let existingRaw = '';
     let existingParse = null;
     if (fs.existsSync(filePath)) {
-      // Defense in depth: never overwrite a file we cannot fully parse.
       existingRaw = fs.readFileSync(filePath, 'utf8');
       if (existingRaw.trim()) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
@@ -701,8 +615,6 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    // A JSON round-trip normalizes the config at the write boundary: it drops
-    // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
     writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
     console.log(`Successfully wrote config file: ${filePath}`);
@@ -732,11 +644,6 @@ function throwIfLayerError(layers, filePath) {
   throw error;
 }
 
-/**
- * Look one entry up in a config layer, accepting both OpenCode 2 section keys
- * and the v1 keys v2 still decodes. `sectionKind` is `agents`, `commands`,
- * `providers`, or `mcp`.
- */
 function lookupSectionEntry(config, sectionKind, entryName) {
   if (sectionKind === 'mcp') {
     return readMcpEntry(config, entryName);
@@ -797,7 +704,6 @@ function getJsonWriteTarget(layers, preferredScope) {
   return { config: userConfig, path: paths.userPath };
 }
 
-// ============== GIT/WORKTREE HELPERS ==============
 
 function getAncestors(startDir, stopDir) {
   if (!startDir) return [];
@@ -836,7 +742,6 @@ function findWorktreeRoot(startDir) {
   }
 }
 
-// ============== PROMPT FILE HELPERS ==============
 
 function isPromptFileReference(value) {
   if (typeof value !== 'string') {
@@ -872,7 +777,6 @@ function writePromptFile(filePath, content) {
   console.log(`Updated prompt file: ${filePath}`);
 }
 
-// ============== SKILL FILE OPERATIONS ==============
 
 async function pathExists(target) {
   try {
@@ -883,14 +787,8 @@ async function pathExists(target) {
   }
 }
 
-// At most this many file-system calls of one walk are in flight at once.
 const SKILL_WALK_CONCURRENCY = 8;
 
-// Async so a skills tree with tens of thousands of entries (a bundled `.venv`
-// or `node_modules`) does not hold the server's event loop for seconds.
-// Sibling directories are read in parallel, a few calls at a time, and their
-// results are joined in readdir order, so the order matches the old
-// synchronous depth-first walk exactly.
 async function walkSkillMdFiles(rootDir) {
   if (!rootDir || !(await pathExists(rootDir))) return [];
 
@@ -907,11 +805,6 @@ async function walkSkillMdFiles(rootDir) {
     }
   };
 
-  // `ancestors` holds the real paths of the directories on the path to `dir`.
-  // Links (symlinks and Windows junctions) are followed at any depth; a link
-  // back to one of its own ancestors is skipped instead of recursing forever.
-  // Two links to the same target elsewhere in the tree are both walked, as the
-  // top level always did.
   const walk = async (dir, ancestors) => {
     let realDir;
     try {
@@ -929,11 +822,6 @@ async function walkSkillMdFiles(rootDir) {
     }
 
     const childAncestors = new Set(ancestors).add(realDir);
-    // A directory holding its own SKILL.md is one skill, and hidden directories
-    // and node_modules are skipped, as OpenCode discovers skills. Without this a
-    // dependency's bundled SKILL.md files listed as skills the user installed
-    // (#6708). A SKILL.md that is a link counts when it resolves to a file; a
-    // dangling one does not make the directory a skill.
     const skillEntry = entries.find((entry) => entry.name === 'SKILL.md');
     let holdsSkill = Boolean(skillEntry?.isFile());
     if (!holdsSkill && skillEntry?.isSymbolicLink()) {
@@ -946,9 +834,6 @@ async function walkSkillMdFiles(rootDir) {
     }
     const found = await Promise.all(entries.map(async (entry) => {
       const fullPath = path.join(dir, entry.name);
-      // Junctions report as links, not directories. A link whose target cannot be
-      // stat'ed is skipped, the way an unreadable directory is, instead of failing
-      // the whole scan.
       let isDirectoryEntry = entry.isDirectory();
       let isFileEntry = entry.isFile();
       if (entry.isSymbolicLink()) {
@@ -972,8 +857,6 @@ async function walkSkillMdFiles(rootDir) {
   return walk(rootDir, new Set());
 }
 
-// `parsed` is what `parseMdFileAsync(skillMdPath)` resolved to, or null when
-// the file could not be read; an unreadable file adds nothing.
 function addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source) {
   if (!parsed) {
     return;

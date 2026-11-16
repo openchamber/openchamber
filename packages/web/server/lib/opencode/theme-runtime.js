@@ -65,7 +65,6 @@ export const createThemeRuntime = (dependencies) => {
       return null;
     }
 
-    // Authored inputs only. The UI resolves optional roles before rendering.
     const required = [
       primary.base,
       surface.background,
@@ -110,12 +109,8 @@ export const createThemeRuntime = (dependencies) => {
     };
   };
 
-  // The last version of each file that loaded, by file name. A theme file
-  // saved half-written or with a typo keeps serving this version, so the
-  // theme on screen does not switch away while it is being edited.
   const lastValidThemes = new Map();
 
-  /** The file's theme, `null` when it is broken, or `undefined` when it is not a theme file. */
   const readThemeFile = async (name) => {
     const filePath = path.join(themesDir, name);
     try {
@@ -163,14 +158,12 @@ export const createThemeRuntime = (dependencies) => {
         themes.push(theme);
       }
 
-      // A removed file takes its theme with it.
       for (const name of lastValidThemes.keys()) {
         if (!listed.has(name)) lastValidThemes.delete(name);
       }
 
       return themes;
     } catch (error) {
-      // Missing dir is fine.
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         lastValidThemes.clear();
         return [];
@@ -185,8 +178,6 @@ export const createThemeRuntime = (dependencies) => {
     if (!parsed.success) throw new ThemeImportStorageError('invalid', 400);
     const normalized = normalizeThemeJson({ ...parsed.data, metadata: { ...parsed.data.metadata, id: 'import' } });
     if (!normalized) throw new ThemeImportStorageError('invalid', 400);
-    // The client supplies colors, never a filename or an overwrite target.
-    // Identical imports have the same ID, including retries after a lost reply.
     const digest = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex').slice(0, 24);
     const theme = { ...normalized, metadata: { ...normalized.metadata, id: `imported-vscode-${digest}` } };
     const contents = `${JSON.stringify(theme, null, 2)}\n`;
@@ -197,8 +188,6 @@ export const createThemeRuntime = (dependencies) => {
     try {
       await fsPromises.writeFile(temporary, contents, { flag: 'wx', mode: 0o600 });
       try {
-        // Link publishes the complete file atomically and cannot overwrite an
-        // existing theme, even if another import finishes at the same time.
         await fsPromises.link(temporary, target);
       } catch (error) {
         const parsedError = fileErrorSchema.safeParse(error);
@@ -243,12 +232,9 @@ export const createThemeRuntime = (dependencies) => {
         let theme;
         try { theme = normalizeThemeJson(JSON.parse(text)); }
         catch { theme = null; }
-        // A broken file the list still shows from its last valid version is deleted by that ID.
         theme ??= lastValidThemes.get(entry.name);
         if (theme?.metadata.id === id) matches.push(target);
       }
-      // IDs identify themes, not filenames. Refuse ambiguous matches rather
-      // than deleting an arbitrary sibling or constructing a path from the ID.
       if (matches.length > 1) throw new ThemeImportStorageError('conflict', 409);
       if (!matches.length) {
         if (readFailure) throw readFailure;

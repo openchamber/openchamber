@@ -202,7 +202,6 @@ export const createServerUtilsRuntime = (dependencies) => {
       getArchivedSessions,
       getUnreadBaseline,
       getStoredSessionMetadata,
-      // Read when the proxy is set up, after `main` decided whether the spaces host exists.
       mergeSpaceSessionList: typeof getMergeSpaceSessionList === 'function' ? getMergeSpaceSessionList() : null,
       spaceEventHub: typeof getSpaceEventHub === 'function' ? getSpaceEventHub() : null,
       hiddenSessions,
