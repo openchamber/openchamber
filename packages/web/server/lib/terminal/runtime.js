@@ -29,8 +29,6 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const TERMINATION_GRACE_MS = 1000;
 const INTERACTIVE_TERMINAL_MODE = 'interactive';
 const COMMAND_TERMINAL_MODE = 'command';
-// Error code the create/restart routes attach when the requested cwd no longer
-// exists. Mirrored by `TERMINAL_CWD_MISSING_CODE` in packages/ui/src/lib/terminalApi.ts.
 const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
 const TERMINAL_PURPOSE = Object.freeze({ type: 'terminal' });
 const MAX_PURPOSE_ID_CHARS = 128;
@@ -134,8 +132,6 @@ const appendOriginal = (history, text) => {
 };
 const appendHistory = (history, text) => {
   if (!text) return;
-  // Buffer.from encodes an unmatched high surrogate as U+FFFD. Until the first
-  // trim, the next chunk can still complete that UTF-16 pair.
   let encoded = text;
   if (history.original && /[\uD800-\uDBFF]/.test(history.originalLast) && /^[\uDC00-\uDFFF]/.test(text)) {
     removeHistoryTail(history, 3);
@@ -148,8 +144,6 @@ const appendHistory = (history, text) => {
     return;
   }
 
-  // A large PTY callback replaces the entire scrollback. Copy only its aligned
-  // suffix so a slice cannot keep the callback's much larger buffer alive.
   if (bytes.length >= MAX_HISTORY_BYTES) {
     let start = bytes.length - MAX_HISTORY_BYTES;
     while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
@@ -202,7 +196,6 @@ export function createTerminalRuntime({
   logger = console,
 }) {
   const sessions = new Map();
-  // Invalidation only: clients read the authoritative list without command text.
   const announceSessionsChanged = () => broadcastUiEvent({ type: 'openchamber:terminal-sessions-changed', properties: {} });
   const pendingSessionCreates = new Map();
   const pendingSessionRestarts = new Map();
@@ -224,31 +217,19 @@ export function createTerminalRuntime({
   const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell, mode, command }) => {
     const provider = await getPtyProvider();
     const resolvedShell = await shellResolver.resolve(shell);
-    // The user's and the project's variables go under the terminal's own TERM
-    // settings and the host-private removals below.
     const hostEnv = { ...process.env, PATH: buildAugmentedPath() };
-    // Opening a terminal or running a project action is the user's own act,
-    // so it may run the project's environment command.
     const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv, { refresh: true }) : hostEnv;
     let lastError = null;
     for (const executable of resolvedShell.executables) {
       try {
         const env = { ...inheritedEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
-        // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
-        // (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
         delete env.NODE_CHANNEL_FD;
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
-        // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
+        // external: #2588 AppImage exports ARGV0, which makes zsh rewrite argv[0] for every external command.
         stripAppImageArgv0Leak(env);
-        // The AppImage launcher also prepends its own directories to PATH, LD_LIBRARY_PATH,
-        // GSETTINGS_SCHEMA_DIR and XDG_DATA_DIRS (#4177). Only the desktop app runs from an
-        // AppImage, and it spawns through node-pty, which uses this env as given, so these
-        // need no `env -u` below.
+        // external: #4177 The AppImage launcher prepends its own PATH, LD_LIBRARY_PATH, GSETTINGS_SCHEMA_DIR and XDG_DATA_DIRS entries.
         stripAppImageLauncherEnv(env);
         const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
-        // bun-pty 0.5 gives the child exactly `env`; the POSIX launch is still
-        // wrapped with `env -u` for the variables deleted above, so a backend
-        // that merges the native OS environ cannot bring them back.
         const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env };
         if (process.platform === 'win32') options.useConpty = true;
@@ -312,9 +293,6 @@ export function createTerminalRuntime({
     publish(session, { t: 'output', d: raw, ...(raw !== replay ? { r: replay } : {}) });
   };
 
-  // Output after a quiet spell goes out at once, so a keystroke echo never
-  // waits for the timer. Output that follows within OUTPUT_BATCH_MS joins one
-  // frame, and the window stays open while the burst continues.
   const openOutputWindow = (session) => {
     session.outputTimer = setTimeout(() => {
       session.outputTimer = null;
@@ -339,9 +317,6 @@ export function createTerminalRuntime({
 
   const snapshot = (session) => ({
     t: 'snapshot', v: 3, s: session.id, q: session.sequence, history: historyText(session.history),
-    // The PTY size the history was drawn for: a client replays history at this
-    // size before fitting its own viewport, so shell output wrapped for one
-    // width never gets re-laid-out at another.
     cols: session.cols, rows: session.rows,
     status: session.status, exitCode: session.exitCode, signal: session.signal,
     mode: session.mode ?? INTERACTIVE_TERMINAL_MODE, purpose: getSessionPurpose(session),
@@ -404,9 +379,6 @@ export function createTerminalRuntime({
     ptyProcess.onExit(({ exitCode, signal }) => { session.eventQueue.push({ type: 'exit', process: ptyProcess, exitCode, signal }); drainEvents(session); });
   };
 
-  // A working directory that no longer exists (a deleted worktree) is the one
-  // rejection the client can recover from by moving the session to its
-  // project, so the response names it. Every other rejection stays generic.
   const invalidWorkingDirectory = (code) => Object.assign(new Error('Invalid working directory'), code ? { code } : {});
   const validateCwd = async (cwd) => {
     if (typeof cwd !== 'string' || !cwd.trim()) throw new Error('cwd is required');
@@ -543,8 +515,6 @@ export function createTerminalRuntime({
         connection.attachments.set(id, attachment);
         flushOutput(session);
         const initial = snapshot(session);
-        // `z: 1` is a client that can gunzip: history compresses five to ten
-        // times, and neither this socket nor the relay tunnel compresses frames.
         send(socket, initial, { gzip: message.z === 1 });
         for (const event of attachment.pending) if (event.q > initial.q) send(socket, event);
         attachment.pending.length = 0; attachment.initializing = false;
@@ -570,11 +540,6 @@ export function createTerminalRuntime({
       try {
         wsServer.handleUpgrade(req, socket, head, (ws) => wsServer.emit('connection', ws, req));
       } catch (error) {
-        // handleUpgrade only throws once it has taken the socket: either the
-        // handshake already wrote its 101 (a second upgrade of the same socket,
-        // or a throw from the connection callback), so the connection is no
-        // longer HTTP. Writing a status line here would append an HTTP response
-        // to a switched-protocol socket; drop it and log why instead.
         logUpgradeFailure(error);
         socket.destroy();
       }
@@ -643,10 +608,6 @@ export function createTerminalRuntime({
     return list;
   };
 
-  // In-process read of the replay text an attach snapshot sends, turned into
-  // plain text before the byte cap so the cap counts readable characters, not
-  // colour codes. It never touches the PTY, `lastActivity`, or any attached
-  // client stream; it only copies what the history ring already holds.
   const readTerminal = (sessionId, { maxBytes = DEFAULT_TERMINAL_READ_BYTES } = {}) => {
     const session = sessions.get(sessionId);
     if (!session) return null;
@@ -654,11 +615,6 @@ export function createTerminalRuntime({
     const limit = Math.min(requestedBytes, MAX_TERMINAL_READ_BYTES);
     const text = terminalPlainText(historyText(session.history));
     const bytes = Buffer.from(text);
-    // `appendHistory` clears `original` on the first trim or oversized
-    // replacement, which is the only path that drops retained output. Treating
-    // every such clear as truncation can over-report when the trim removed
-    // nothing (a callback of exactly 512 KiB), but it never under-reports a
-    // dropped byte, so it stays honest at the cost of a false positive.
     let truncated = session.history.original === null;
     let start = 0;
     if (bytes.length > limit) {
@@ -668,9 +624,6 @@ export function createTerminalRuntime({
     }
     let readText = bytes.subarray(start).toString('utf8');
     if (start > 0 && bytes[start - 1] !== 0x0a) {
-      // The tail starts mid-line. Resume at the next full line when the tail
-      // holds one; a single unterminated line is returned as it is rather
-      // than as an empty string.
       const newline = readText.indexOf('\n');
       if (newline >= 0 && newline + 1 < readText.length) readText = readText.slice(newline + 1);
     }

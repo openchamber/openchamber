@@ -2,7 +2,6 @@ const MODE_SET = '\u001b[?2031h';
 const MODE_RESET = '\u001b[?2031l';
 const CAPABILITY_QUERY = '\u001b[?2031$p';
 const MODE_QUERIES = ['\u001b[?996n', '\u001b[?997n'];
-// Fish asks this before an unattached browser terminal can reply.
 const PRIMARY_DEVICE_ATTRIBUTE_QUERIES = ['\u001b[c', '\u001b[0c'];
 const PRIMARY_DEVICE_ATTRIBUTE_RESPONSE = '\u001b[?1;2c';
 const OSC_QUERIES = [10, 11].flatMap((code) => [
@@ -57,8 +56,6 @@ export const consumeTerminalThemeQueries = (
   let modeEnabled = appearance.modeEnabled === true;
 
   for (let index = 0; index < input.length; index += 1) {
-    // Every recognized query begins with ESC, so ordinary text between
-    // escapes is skipped in one scan instead of tested per character.
     if (input.charCodeAt(index) !== 0x1b) {
       const nextEscape = findEscape(input, index);
       if (nextEscape === -1) break;
@@ -87,9 +84,6 @@ export const consumeTerminalThemeQueries = (
     }
     const primaryDeviceAttributeQuery = PRIMARY_DEVICE_ATTRIBUTE_QUERIES.find((query) => input.startsWith(query, index));
     if (primaryDeviceAttributeQuery && respondToPrimaryDeviceAttributes) {
-      // A shell can ask before any browser terminal is attached. Answer with a
-      // conservative VT100 DA1 response so Fish does not block startup for its
-      // ten-second query timeout while waiting for a renderer that cannot see it.
       responses.push(PRIMARY_DEVICE_ATTRIBUTE_RESPONSE);
       index += primaryDeviceAttributeQuery.length - 1;
       continue;
