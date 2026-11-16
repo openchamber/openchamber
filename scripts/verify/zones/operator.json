@@ -7,7 +7,6 @@
     "packages/ui/src/lib/sessionOperatorChild.ts",
     "packages/ui/src/sync/operator-children-done.ts",
     "packages/ui/src/sync/session-take-over.ts",
-    "packages/ui/src/components/session/sidebar/sessions/OperatorChildrenCount.tsx",
     "packages/ui/src/components/session/OperatorChildrenDoneDialog.tsx",
     "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx",
     "packages/ui/src/apps/mobileSidebar/MobileWorkRows.tsx",
