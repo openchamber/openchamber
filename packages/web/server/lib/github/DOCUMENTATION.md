@@ -274,7 +274,61 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Device flow handles GitHub `authorization_pending` at caller level.
 - Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.
 
+## Invariants
+
+- Mutation digest input keeps the same fields and insertion order, and stored operation kinds stay byte-identical. Changing either makes retained running records conflict on replay.
+- Host configuration validates each `hosts.yml` entry independently. A malformed entry cannot revoke another host's valid login.
+- A transient failure to identify the selected gh account preserves its activation. Only a missing, disabled or refused login clears the choice, so a network failure cannot silently select another account.
+- The gh token cache stamp includes the selected config directory. Switching `GH_CONFIG_DIR` cannot reuse another directory's answers, and file identity cannot rely on Windows inode values. Cache keys fold login case, while `--user` receives the stored spelling because gh owns token selection.
+- Enterprise auth storage resolves `OPENCHAMBER_DATA_DIR` at call time and shares `source-control-auth.json.lock` with the other server token-store users. The github.com file and Settings paths retain their module-load scope.
+- A detail-inclusive cached pull context can serve a detail-free request. Both use the same invalidation boundary.
+- Repository cache invalidation compares normalized, whole `::`-delimited repository segments across hosts within the requested credential scope. Mixed-case names must invalidate, and `foo/bar` must not match `xfoo/bar`.
+- Independent remote and metadata lookups may run concurrently, but deduplication and priority fold results in candidate order so completion timing cannot change PR selection. Already-fetched metadata serves default-branch checks to avoid another serial request per repository.
+- A shared repository pull list proves absence only when its first page contains fewer than 100 entries. Complete lists suppress per-head and search fallback calls; incomplete lists cannot prove a branch has no PR.
+- Partial GraphQL lookup data survives per-alias errors. One inaccessible item cannot discard resolved siblings, while an error without data remains a failed read.
+- Across-search with an explicit user `sort:` returns the items it reads even when they do not satisfy the newest-first merge frontier. Waiting for that frontier can otherwise stall such a query.
+- Review draft text belongs to the pending review, but its diff side comes from the containing thread. An outdated thread remains available on the board.
+- A new stack layer never treats the repository's default branch as another PR layer. A release PR out of the default branch must not capture unrelated PRs targeting that branch.
+- After an asynchronous merge is accepted, a failed follow-up read leaves the merge pending for live state to resolve. It cannot establish that the accepted write failed.
+- Cancellation re-reads waiting state after dequeue because dequeue can also clear auto-merge. The local cancel remains marked in flight until successful follow removal is queued, so an intervening live read cannot emit a removal notification for the user's own action.
+
 ## Decisions
+
+### Why Octokit bounds requests and rejects enterprise redirects
+
+An 8 s fetch deadline prevents one stalled request from consuming the status resolver's full budget and lets the caller use cached state. Named enterprise hosts reject redirects so their credentials stay scoped to that instance; github.com retains its default redirect behavior.
+
+### Why ETag responses are cached by credential digest and URL
+
+Conditional reads reduce REST quota use for unchanged data. The credential digest keeps raw tokens out of cache keys, and the URL separates hosts so a 304 response can only replay that credential's response from that instance.
+
+### Why branch discovery shares repository lists and remembers search misses
+
+Worktrees of one repository share an in-flight pull list and its 45 s answer, avoiding one list call per branch. The separate Search API quota is spent on live status; ten-minute per-branch misses and five-minute refusal backoff suppress repeated searches, while history uses per-head repository queries.
+
+### Why PR file context uses the merge base and provider objects
+
+The comparison view expands the same three-dot diff as the pull request, so its original side uses the merge base; using the base tip introduces unrelated base-branch work. Provider reads also cover unfetched commits and fork heads through the base repository, while the 5 MB full-text limit avoids an unreadable full-context view and its transfer cost.
+
+### Why patch reads resolve the checkout before choosing a client
+
+`sourceRepo` carries only owner and repository, so the local checkout supplies the host first. github.com uses the exact read-context account, while enterprise patch reads use that host's pinned credential; selectors stay inside the bound network unless an explicit linked read names the item.
+
+### Why static descriptors stay independent of Octokit
+
+Git transport, bindings and clients read the descriptor synchronously without loading the GitHub SDK. Hostname normalization checks URL form only; the separate trust gate decides whether a credential may be used.
+
+### Why authentication writes omit an unpinned login
+
+Older releases reject unknown storage keys. A write adds `cliLogin` only while a login is pinned and keeps the flat version 2 shape whenever the state fits it, preserving readability for those releases.
+
+### Why pending review submission reuses its original commit
+
+Approval and change requests must refer to the commit the user read, including the commit a pending review began on. A comment verdict can submit the existing draft on its original commit without asserting approval of a newer head.
+
+### Why reviewer pickers list people only
+
+The board's reviewer control selects individual users. Requested teams stay out of its list so submitting the control's set does not present teams as selectable people.
 
 ### Why a refused merge can enable auto-merge
 
