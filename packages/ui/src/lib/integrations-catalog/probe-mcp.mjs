@@ -1,16 +1,3 @@
-/**
- * Checks whether a remote MCP server can join the catalog as a one-click
- * OAuth entry, the way OpenCode 2.x signs in to it. See DOCUMENTATION.md
- * (Vetting a candidate) for how to read the result.
- *
- *   node packages/ui/src/lib/integrations-catalog/probe-mcp.mjs <mcp-url>... [--register]
- *
- * Without --register the probe only reads: the server's 401 challenge and its
- * OAuth metadata. With --register it also registers a throwaway client named
- * "opencode" with a loopback redirect, exactly as OpenCode does, and asks for
- * the authorization page without following it. That leaves an unused client
- * on the vendor's side and nothing else.
- */
 
 const INIT_BODY = JSON.stringify({
   jsonrpc: '2.0',
@@ -29,7 +16,7 @@ const readJson = async (url) => {
   }
 };
 
-/** Authorization server metadata, looked up the ways RFC 8414 and OIDC allow. */
+// external: https://www.rfc-editor.org/rfc/rfc8414#section-5 Try both OAuth and OIDC authorization-server metadata discovery paths.
 const readServerMetadata = async (issuer) => {
   const base = new URL(issuer);
   const path = base.pathname === '/' ? '' : base.pathname.replace(/\/$/, '');
@@ -126,8 +113,7 @@ const probe = async (mcpUrl, register) => {
   authorize.searchParams.set('redirect_uri', redirectUri);
   authorize.searchParams.set('code_challenge', 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
   authorize.searchParams.set('code_challenge_method', 'S256');
-  // OpenCode sends a random state and the RFC 8707 resource, as the MCP SDK
-  // does; some servers reject a short state or a missing resource.
+  // external: https://www.rfc-editor.org/rfc/rfc8707#section-2.1 Match OpenCode's random state and resource parameter; some servers reject a short state or missing resource.
   authorize.searchParams.set('state', crypto.randomUUID());
   authorize.searchParams.set('resource', mcpUrl);
   const page = await fetch(authorize, { redirect: 'manual' });

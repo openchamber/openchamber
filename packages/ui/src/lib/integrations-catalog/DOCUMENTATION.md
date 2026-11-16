@@ -2,6 +2,36 @@
 
 The Integrations page (sidebar header, next to Archive) offers a hand-picked list of outside services. Each entry installs at user scope through the same routes Settings uses: MCP config, npm plugins, the skills-catalog installer, extensions. The catalog only points at vendor material; every install downloads it from the vendor's own source onto the user's machine. The only vendor material in this repository is the logo each tile shows.
 
+## Ownership
+
+The catalog owns the bundled service definitions, vendor branding, and suitability probe. Settings routes and the skills-catalog installer own installation. Entry and URL changes require review and reach users with the next release. Recheck vendor URLs when changing an entry.
+
+## Invariants
+
+- Every entry has at least 1 installable component. Local MCP commands run on the machine running OpenCode.
+- Skill installed checks and uninstall lookups use the SKILL.md frontmatter name when it differs from the folder basename. Extension installed identities match their `panel.id`.
+- Missing picker values leave interpolation tokens unresolved, so validation can reject incomplete entries before installation.
+- Vendor logos are bundled 128px WebP assets; displaying a tile never fetches a vendor logo at runtime. A simple-icons glyph takes precedence over a vendor logo, then the tile falls back to its sprite icon.
+- Without `--register`, the suitability probe only reads the initialization response and OAuth metadata. Registration leaves an unused vendor-side client; the probe requests the authorization page without following redirects and does not complete sign-in.
+
+## Decisions
+
+### Why registry-compatible field names and not catalog-only names
+
+Fields shared with the official MCP Registry `server.json` use its names so importing registry entries stays possible.
+
+### Why a longer local startup timeout and not the default
+
+Local packages download on first run. OpenCode's default 5000ms startup timeout is too short for that download.
+
+### Why vendor colors and not theme tokens
+
+Brand glyphs use simple-icons' CC0 artwork and literal vendor colors so tiles retain the service's own appearance. Glyph colors contrast with the brand fill.
+
+### Why white-backed logos and not transparent logos
+
+Transparent vendor icons receive a white backing so dark marks remain visible on dark tiles.
+
 ## Files
 
 | File | Holds |
