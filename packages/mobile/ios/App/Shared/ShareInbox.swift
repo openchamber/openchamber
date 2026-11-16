@@ -32,8 +32,9 @@ enum ShareInbox {
     /// still has to take the files from the inbox, so a link cannot attach anything itself.
     static let openURL = URL(string: "openchamber://shared-file")!
     /// The most the bridge hands the page at once. A larger file is refused by name rather
-    /// than failing halfway through the copy.
-    static let maxFileBytes = 24 * 1024 * 1024
+    /// than failing halfway through the copy. The composer reads an attachment into the prompt
+    /// below 10 MB and refuses it above, so a larger share is rejected here, before it is copied.
+    static let maxFileBytes = 10 * 1024 * 1024
     /// The page holds every accepted file as base64 at the same time, so a batch is capped
     /// as well; the files past it are refused by name.
     static let maxBatchBytes = 32 * 1024 * 1024

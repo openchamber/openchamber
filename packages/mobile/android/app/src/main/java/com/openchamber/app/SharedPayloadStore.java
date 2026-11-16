@@ -14,7 +14,9 @@ public final class SharedPayloadStore {
 
     /** The most the bridge hands the page at once; matches the iOS share extension. */
     public static final int MAX_FILES = 8;
-    public static final long MAX_FILE_BYTES = 24L * 1024 * 1024;
+    // The composer reads an attachment into the prompt below 10 MB and refuses it above, so a
+    // larger share is rejected here, before it is copied, rather than after.
+    public static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
     public static final long MAX_BATCH_BYTES = 32L * 1024 * 1024;
 
     public static final String REASON_TOO_LARGE = "too-large";
