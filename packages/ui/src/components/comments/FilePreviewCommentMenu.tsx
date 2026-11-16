@@ -15,17 +15,9 @@ import { SelectionCommentPopup } from './SelectionCommentPopup';
 interface FilePreviewCommentMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
   filePath: string;
-  /** Raw file source, used to locate the selected fragment's line range. */
   fileContent: string;
 }
 
-/**
- * Comment-on-selection for read-only file previews (rendered markdown and the
- * like). Selecting text shows a small Comment pill above the selection;
- * choosing it opens the shared comment input, and attaching stores a
- * file-quote context draft carrying the selected fragment (with a best-effort
- * source line range) plus the user's comment.
- */
 export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: FilePreviewCommentMenuProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -40,8 +32,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   const commentModeRef = React.useRef(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const selectionRangeRef = React.useRef<Range | null>(null);
-  // The selected fragment stays visibly highlighted while the comment input
-  // owns focus, same as chat quote comments.
   const [highlightRects, setHighlightRects] = React.useState<DOMRect[] | null>(null);
 
   const hide = React.useCallback(() => {
@@ -93,16 +83,8 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     };
   }, [containerRef, hide]);
 
-  /**
-   * Best-effort mapping of the rendered-text selection back to source lines:
-   * an exact match of the fragment (or its first line) in the raw content
-   * yields a range; markdown syntax usually breaks the match, in which case
-   * the draft simply carries no line numbers.
-   */
   const resolveLineRange = React.useCallback((fragment: string): { start: number; end: number } | null => {
     const lineAt = (index: number): number => fileContent.slice(0, index).split('\n').length;
-    // Inline markdown syntax (emphasis markers and such) breaks long matches,
-    // so each anchor line is tried at decreasing lengths.
     const candidatesFor = (line: string): string[] => {
       const trimmed = line.trim();
       return [trimmed, trimmed.slice(0, 32), trimmed.split(' ').slice(0, 4).join(' ')]
@@ -129,8 +111,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     const start = lineAt(startIndex);
     if (fragmentLines.length === 1) return { start, end: start };
     const endIndex = locate(fragmentLines[fragmentLines.length - 1], startIndex);
-    // A partially located multi-line fragment gets no range rather than a
-    // misleading single-line one.
     if (endIndex < 0) return null;
     return { start, end: Math.max(start, lineAt(endIndex)) };
   }, [fileContent]);
@@ -172,8 +152,6 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     window.getSelection()?.removeAllRanges();
   }, [selectedText, updateHighlightRects]);
 
-  // Desktop: typing while the Comment pill is up starts the comment with
-  // that keystroke, same as the chat selection bubble.
   React.useEffect(() => {
     if (!anchor || commentMode || isMobile) return;
     const handleKeyDown = (event: KeyboardEvent) => {

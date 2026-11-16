@@ -9,17 +9,10 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { InlineCommentInput } from './InlineCommentInput';
 import { SelectionCommentPopup } from './SelectionCommentPopup';
 
-/**
- * Comment on a fragment the owner already worked out, for views where the
- * browser's own selection does not reach: table cells, a document in a frame.
- * Like every comment it only attaches to the composer and never sends.
- */
 export function QuoteCommentMenu({ anchor, quote, fileLabel, onOpen, onClose }: {
   anchor: { x: number; y: number };
-  /** What the agent gets: the place, then the content. */
   quote: string;
   fileLabel: string;
-  /** The field took over from the bubble, and now holds what the user types. */
   onOpen?: () => void;
   onClose: () => void;
 }) {

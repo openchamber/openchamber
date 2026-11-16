@@ -9,14 +9,6 @@ import { isWholeFileComment } from './wholeFileComment';
 
 const WHOLE_FILE_RANGE = { start: 0, end: 0 };
 
-/**
- * Comments on a file as a whole, written from its header. The header shows the
- * trigger. The saved comments render under the header, where the line
- * comments' editor would, so the file's own diff never moves. The editor goes
- * inside a sticky header: opened from a file scrolled far down, it shows under
- * the header on screen instead of at the file's top out of view.
- * Files view passes `source: 'file'`, so its comments sit with its line comments.
- */
 export function useWholeFileComment({
   fileLabel,
   origin,
@@ -41,12 +33,10 @@ export function useWholeFileComment({
   const reviewDrafts = (review?.state?.draft?.comments ?? []).filter((comment) => comment.path === fileLabel && comment.line === null);
   const reviewThreads = (review?.state?.threads ?? []).filter((thread) => thread.path === fileLabel && thread.line === null);
 
-  // Files view keeps one instance across files: an open editor belongs to the file it was opened on.
   React.useEffect(() => {
     cancel();
   }, [fileLabel, cancel]);
 
-  // The header button opens the editor and, pressed again, closes it unsaved.
   const toggle = React.useCallback(() => {
     if (selection) cancel();
     else setSelection(WHOLE_FILE_RANGE);

@@ -34,18 +34,9 @@ interface UseInlineCommentControllerOptions<TRange extends LineRangeBase> {
   getCodeForRange: (range: TRange) => string;
   toStoreRange: (range: TRange) => StoreRange;
   fromDraftRange: (draft: InlineCommentDraft) => TRange;
-  /** The diff these comments are written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
-  /**
-   * The lines a range is on, for comments that follow their code when the
-   * file changes. Null while they are not known: content still loading, or a
-   * range that has no single set of lines. The same object for the same
-   * content, since a new one reads as changed content.
-   */
   lineSource?: (range: TRange) => CommentLineSource | null;
-  /** Changes whenever the content behind `lineSource` does. */
   contentVersion?: unknown;
-  /** The open field's lines moved with their code. Defaults to this controller's own selection. */
   onSelectionMoved?: (range: TRange) => void;
 }
 
@@ -74,13 +65,10 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
 ) {
   const { t } = useI18n();
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange, origin, contentVersion } = options;
-  // Hosts pass fresh closures on every render; the effects below read the latest.
   const optionsRef = React.useRef(options);
   React.useEffect(() => {
     optionsRef.current = options;
   });
-  // The same path in a pull request and on disk are different lines, so a
-  // comment shows only on the diff it was written on.
   const originKey = diffCommentOriginKey(origin);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -118,9 +106,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     ));
   }, [fileLabel, originKey, sessionDrafts, source, target]);
 
-  // Saved comments follow their code: when the content changes, each one
-  // finds its lines again and the store takes the new numbers, so the card,
-  // the composer and the agent all see where the comment is now.
   React.useEffect(() => {
     if (!target) return;
     const { lineSource, fromDraftRange: rangeOf } = optionsRef.current;
@@ -134,11 +119,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
   }, [contentVersion, drafts, target, updateDraft]);
 
-  // The open field follows its code the same way. The code is the one its
-  // lines held when they were selected.
   const selectionAnchorRef = React.useRef<Omit<CommentAnchorInput, 'startLine' | 'endLine'> | null>(null);
-  // Where the field was last moved to. That selection keeps the anchor it
-  // had: after a rewrite the field still looks for the code it was opened on.
   const movedSelectionRef = React.useRef<{ start: number; end: number } | null>(null);
   React.useEffect(() => {
     const { lineSource, getCodeForRange: codeOf, toStoreRange: storeRangeOf } = optionsRef.current;
@@ -192,8 +173,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
   }, [editingDraftId, removeDraft, reset, target]);
 
-  // True when the editor is done with the text. False keeps it open: a refused
-  // comment exists nowhere but in the field.
   const saveComment = React.useCallback((textToSave: string, rangeOverride?: TRange): boolean => {
     const targetRange = rangeOverride ?? selection;
     const trimmedText = textToSave.trim();
@@ -204,7 +183,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
       return false;
     }
 
-    // The edited comment was sent or removed meanwhile: nothing left to save to.
     if (editingDraftId && !useInlineCommentDraftStore.getState().getDrafts(target).some((draft) => draft.id === editingDraftId)) {
       reset();
       return true;
@@ -214,8 +192,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     const normalizedStoreRange = normalizeStoreRange(toStoreRange(normalizedRange));
     const code = getCodeForRange(normalizedRange);
     const lines = optionsRef.current.lineSource?.(normalizedRange);
-    // Undefined fields overwrite an edited comment's old neighbours and its mark:
-    // the comment is on the code its lines hold now.
     const context = lines ? commentContext(lines, normalizedStoreRange.startLine, normalizedStoreRange.endLine) : null;
     const anchor = {
       contextBefore: context?.contextBefore,
