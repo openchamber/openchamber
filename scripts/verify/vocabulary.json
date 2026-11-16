@@ -87,5 +87,13 @@
   "sidebar.childCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]", "means": "The count of sessions an agent runs for its own work on its row: how many are running and how many finished."},
   "sidebar.expandChildren": {"selector": "[data-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]", "means": "The chevron that opens the sessions nested under a row."},
   "sidebar.anyChildCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running]", "means": "The worker count on an agent's row, whatever it says."},
-  "sidebar.workRow": {"selector": "[role=\"button\"][aria-label^=\"Open {label}\"]", "means": "A worktree's or space's own row in the sidebar, named by its task or branch; the label is the start of that name."}
+  "sidebar.workRow": {"selector": "[role=\"button\"][aria-label^=\"Open {label}\"]", "means": "A worktree's or space's own row in the sidebar, named by its task or branch; the label is the start of that name."},
+  "phone.sessions": {"selector": "button[aria-label=\"Open sessions and projects\"]", "means": "The list button at the top left of the phone layout; opens the drawer with sessions and projects."},
+  "phone.row": {"selector": "[data-mobile-session-row=\"{session}\"]", "means": "A session's row in the phone's session drawer; a long press opens its menu."},
+  "phone.anyRow": {"selector": "[data-mobile-session-row]", "means": "Any session row in the phone's drawer; pair it with text."},
+  "phone.childCount": {"selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]", "means": "The worker count on an agent's row in the phone's drawer."},
+  "phone.anyChildCount": {"selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running]", "means": "The worker count on an agent's phone row, whatever it says."},
+  "phone.expandChildren": {"selector": "[data-mobile-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]", "means": "The chevron that opens the sessions nested under a phone row."},
+  "phone.workRow": {"selector": "button[aria-label^=\"Open {label}\"]", "means": "A worktree's row in the phone's drawer, named by the start of its task or branch; a long press opens its menu."},
+  "operator.doneQuestion": {"selector": "[data-operator-children-done-dialog]", "means": "The question Done asks while sessions an agent runs for its own work still run: stop them or let them finish."}
 }

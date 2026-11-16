@@ -7,6 +7,7 @@ import { DEEP_QUERY } from "./browser.mjs"
 const DEFAULT_TIMEOUT_MS = 20_000
 const READY_TIMEOUT_MS = 120_000
 const READY = `!document.getElementById("initial-loading") && !!document.querySelector('[data-chat-input] .cm-content[contenteditable="true"]')`
+const PHONE_READY = `!document.getElementById("initial-loading") && !!document.querySelector('button[aria-label="Open sessions and projects"]')`
 const EDITOR_TEXT = `((element) => {
   if (!element) return null
   return [...element.querySelectorAll(".cm-line")].map((line) => {
@@ -58,7 +59,7 @@ const timeoutOf = (step) => step.timeout ? step.timeout * 1000 : DEFAULT_TIMEOUT
 const projectPath = (ctx, file) => join(ctx.stand.project, file)
 
 const waitForReady = async (ctx) => {
-  const ready = await ctx.page.poll(READY, READY_TIMEOUT_MS)
+  const ready = await ctx.page.poll(ctx.page.phone ? PHONE_READY : READY, READY_TIMEOUT_MS)
   if (!ready) fail("the app did not show its composer")
   await ctx.page.moveMouseAway()
 }
@@ -158,9 +159,10 @@ const ACTIONS = {
   },
   async open(step, ctx) {
     const query = step.session ? `?session=${encodeURIComponent(sessionId(step, ctx))}` : ""
-    await ctx.page.navigate(`${ctx.stand.uiUrl}/${query}`)
+    if (step.phone) await ctx.page.usePhone()
+    await ctx.page.navigate(`${ctx.stand.uiUrl}/${ctx.page.phone ? "mobile.html" : ""}${query}`)
     await waitForReady(ctx)
-    if (step.session) {
+    if (step.session && !ctx.page.phone) {
       const shown = await ctx.page.poll(`!!document.querySelector('[data-session-row="${sessionId(step, ctx)}"][aria-current="page"]')`, READY_TIMEOUT_MS)
       if (!shown) fail(`session ${step.session} did not open`)
     }
@@ -170,7 +172,7 @@ const ACTIONS = {
     if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
-    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), step.button === "right" ? "right" : "left")
+    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), ["right", "long"].includes(step.button) ? step.button : "left")
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
   },
   async hover(step, ctx) {
