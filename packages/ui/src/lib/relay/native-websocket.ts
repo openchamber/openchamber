@@ -38,8 +38,6 @@ export const nativeWebSocketHeaders = (
     ? { ...headers } : null;
 };
 
-// The native bridge carries binary frames as base64; consumers receive the same
-// ArrayBuffer shape as the private relay. Copy views using their exact byte range.
 const encodeBinary = (data: ArrayBuffer | ArrayBufferView): string => {
   const bytes = data instanceof ArrayBuffer
     ? new Uint8Array(data)
@@ -143,7 +141,6 @@ export const openNativeWebSocket = (
     if (state === 3) { await handle.remove(); return; }
     listener = handle;
     opening = true;
-    // Keep open ahead of close and sends even when the bridge resolves slowly.
     writes = plugin.open({ id, url, headers: { ...headers }, protocols });
     await writes;
   }).catch(fail);
