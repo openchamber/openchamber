@@ -30,7 +30,7 @@ const takePendingResultSchema = z.object({
 
 export type RejectedSharedFile = z.infer<typeof rejectedFileSchema>;
 
-export type SharedFilesPayload = {
+type SharedFilesPayload = {
   files: File[];
   /** A shared link or paragraph; null when the share carried files only. */
   text: string | null;
