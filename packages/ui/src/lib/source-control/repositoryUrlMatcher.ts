@@ -5,15 +5,8 @@ import { unknownProviderDescriptor, type ChangeRequestTerm, type SourceControlPr
 import { useSourceControlProviderRegistry } from './providers/registry';
 import { parseRepositoryItemUrl, type RepositoryItemUrlMatch } from './providers/urlMatchers';
 
-/**
- * Reads links as issues and change requests of the connected server's
- * providers, and names the descriptor of a provider id. Non-React code
- * (`lib/linkedIssues.ts`) takes one as a parameter instead of reading the
- * provider registry itself.
- */
 export interface RepositoryUrlMatcher {
   match: (url: string) => RepositoryItemUrlMatch | null;
-  /** The provider's descriptor; an id the registry does not hold reads as the generic fallback. */
   descriptorOf: (provider: string) => SourceControlProviderDescriptor;
 }
 
@@ -28,17 +21,11 @@ export const createRepositoryUrlMatcher = (
   };
 };
 
-/** What the provider of a change request link calls it; an address no provider claims reads as a pull request. */
 export const changeRequestTermOfUrl = (url: string, urls: RepositoryUrlMatcher): ChangeRequestTerm => {
   const item = urls.match(url);
   return item ? urls.descriptorOf(item.provider).terminology.changeRequest : 'pullRequest';
 };
 
-/**
- * The matcher for the current runtime's providers and connected instances.
- * One object while neither list changes, so it can sit in the dependencies of
- * the memos that read a session's links.
- */
 export const useRepositoryUrlMatcher = (): RepositoryUrlMatcher => {
   const descriptors = useSourceControlProviderRegistry((state) => state.ordered);
   const identities = useSourceControlAuthStore((state) => state.identities);

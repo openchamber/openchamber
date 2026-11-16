@@ -33,8 +33,6 @@ const repositoryLink = (
   const prefix = base.pathname.replace(/^\/+|\/+$/g, '');
   if (prefix && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length + 1);
   const segments = path.split('/');
-  // A provider that nests namespaces (GitLab subgroups) names a project by its whole path; others by owner/name.
-  // A path-style provider's project may also be top level, one segment.
   const descriptor = descriptors.find((entry) => entry.id === identity.provider) ?? unknownProviderDescriptor(identity.provider);
   const fewest = descriptor.repository.pathStyle === 'path' ? 1 : 2;
   if (segments.length < fewest || (!descriptor.repository.nestedNamespaces && segments.length !== 2)) return null;
@@ -46,11 +44,6 @@ const repositoryLink = (
   return { provider: identity.provider, url: base.toString() };
 };
 
-/**
- * Origin first, then the first recognized remote. Fetch identifies the
- * checkout before push. `identities` include each provider's default instance
- * (`defaultSourceControlIdentities`); `descriptors` are the registry's.
- */
 export const repositoryLinkFromRemotes = (
   remotes: readonly GitRemote[],
   identities: readonly SourceControlIdentity[],
