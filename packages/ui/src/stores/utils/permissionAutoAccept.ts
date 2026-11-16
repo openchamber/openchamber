@@ -1,28 +1,15 @@
 import { z } from "zod";
 import type { Session } from "@/lib/opencode/model";
 
-/**
- * How a session answers tool permissions. The server owns the policy
- * (`packages/web/server/lib/permission-auto-accept`):
- *
- * - `ask`: every request waits for the user.
- * - `safety`: accepted unless the safety net (Jev) says the user should decide.
- * - `auto`: every request is accepted.
- */
 const permissionModeSchema = z.enum(["ask", "safety", "auto"]);
 
 export type PermissionMode = z.infer<typeof permissionModeSchema>;
 
 export type PermissionModeMap = Record<string, PermissionMode>;
 
-/**
- * The mode the user sees. Without a classification provider there is no safety
- * net, and a `safety` session waits for the user exactly as an `ask` one does.
- */
 export const displayedPermissionMode = (mode: PermissionMode, safetyAvailable: boolean): PermissionMode =>
   mode === "safety" && !safetyAvailable ? "ask" : mode;
 
-/** The composer button's cycle: ask → safety → auto → ask, skipping safety while it is unavailable. */
 export const nextPermissionMode = (mode: PermissionMode, safetyAvailable: boolean): PermissionMode => {
   const shown = displayedPermissionMode(mode, safetyAvailable);
   if (shown === "ask") return safetyAvailable ? "safety" : "auto";
@@ -30,14 +17,6 @@ export const nextPermissionMode = (mode: PermissionMode, safetyAvailable: boolea
   return "ask";
 };
 
-/**
- * The mode the UI writes onto a session it has just created: the user's own
- * choice, else, in an isolated space, the Settings default the composer showed.
- * The host's server writes that default itself when the session is created,
- * and so does the server inside a space from the file the host keeps there;
- * this write covers a space still running a server from before that file.
- * `undefined` writes nothing.
- */
 export const permissionModeForNewSession = (
   choice: PermissionMode | undefined,
   inSpace: boolean,
@@ -49,11 +28,6 @@ export type PermissionPolicySnapshot = {
   revision?: number;
 };
 
-/**
- * A policy as the server or VS Code's bridge sends it, over HTTP or as a
- * broadcast. `modes` is the policy; servers from before the modes and VS Code
- * send only `sessions` as on/off, where on means `auto`.
- */
 export const permissionPolicyWireSchema = z.object({
   sessions: z.record(z.string().min(1), z.boolean()),
   modes: z.record(z.string().min(1), permissionModeSchema).optional(),
@@ -96,7 +70,6 @@ const resolveLineage = (
   return result;
 };
 
-/** The nearest explicit mode up the session's lineage, `ask` when there is none. */
 export const resolvePermissionMode = (input: {
   modes: PermissionModeMap;
   sessions: Session[];

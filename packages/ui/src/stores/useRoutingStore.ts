@@ -1,10 +1,3 @@
-/**
- * Projection of the server's routing state: whether Auto can be offered, the
- * config the settings page edits, the last routing decision per session, and
- * the permissions the safety net is holding. The server is authoritative; this
- * store is refreshed from `/api/routing` and kept current by control-stream
- * events. Nothing here is persisted.
- */
 import { create } from 'zustand';
 import {
   clearCustomEndpoint,
@@ -60,7 +53,6 @@ interface RoutingStoreState extends RoutingState {
   clearCustomEndpoint: () => Promise<void>;
 }
 
-/** Bumped on every load and every runtime switch; a response from an older generation is dropped. */
 let loadGeneration = 0;
 
 const heldRecord = (list: RoutingHeldPermission[] | undefined): Record<string, RoutingHeldPermission> =>
@@ -81,14 +73,11 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
       set({ ...state, held: heldRecord(state.heldPermissions), loaded: true, loadError: null });
     } catch (error) {
       if (generation !== loadGeneration) return;
-      // A failed read keeps whatever was known from this same server; it is not "routing is off".
       set({ loaded: true, loadError: error instanceof Error ? error.message : String(error) });
     }
   },
 
   resetForRuntime: () => {
-    // Another server means another config, key and set of held requests; nothing
-    // from the previous one may be offered while the new one loads.
     loadGeneration += 1;
     set({ ...ROUTING_UNAVAILABLE, loaded: false, loadError: null, decisions: {}, held: {} });
   },
@@ -99,7 +88,6 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
 
   applyAvailability: ({ available, autoReady, jevAvailable, tokenPresent, jevSource }) => {
     set({ available, autoReady, jevAvailable, tokenPresent, jevSource });
-    // The config behind the change lives on the server; re-read rather than guess.
     if (available) void get().load();
   },
 
@@ -169,8 +157,6 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
   },
 }));
 
-/** Whether the composer may offer the Auto row right now. */
 export const selectAutoReady = (state: RoutingStoreState): boolean => state.available && state.autoReady;
 
-/** Whether the safety net can be offered: this runtime has a server and a classification provider answers. */
 export const selectSafetyNetAvailable = (state: RoutingStoreState): boolean => state.available && state.jevAvailable;

@@ -50,8 +50,6 @@ const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
   }
 };
 
-// A running search behind the toggles stops once nobody waits for it. A caller
-// without a signal never stops waiting.
 interface SupplementalWalk {
   controller: AbortController;
   waiters: number;
@@ -107,8 +105,6 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         const runtimeFiles = type === 'file' && (includeHidden || !respectGitignore)
           ? getRegisteredRuntimeAPIs()?.files
           : undefined;
-        // Through the plain search's own entry, so a caller showing those hits
-        // before the supplement answers costs no second OpenCode request.
         const indexedSearch = runtimeFiles
           ? get().searchFiles(normalizedDirectory, normalizedQuery, limit, { type })
           : opencodeClient.searchFiles(normalizedQuery, {
@@ -209,8 +205,6 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           const walk: SupplementalWalk = {
             controller: walkController,
             waiters: 0,
-            // Out of the in-flight list at once: the same query asked again
-            // starts its own walk instead of joining the stopped one.
             abandon: () => {
               walkController.abort();
               dropInFlight();

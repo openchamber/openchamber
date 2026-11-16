@@ -51,45 +51,27 @@ type GlobalSessionsState = {
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
-  /** A complete global snapshot has arrived for this runtime. */
   hasLoaded: boolean;
-  /** Published only by complete loads. Partial head checks cannot prove absence. */
   authoritativeSessions: Session[] | null;
   managedChatsHydrated: boolean;
   status: GlobalSessionsStatus;
-  /** Re-read the persisted managed-chats snapshot after the chats root is
-      warm; retain newer mutations and stop after an authoritative load. */
   rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionHead: () => Promise<boolean>;
-  /**
-   * Reads the newest page for a surface that lists only recent sessions and
-   * keeps no complete list (the desktop Mini Chat). The page is merged without
-   * authority; resolves false when it could not be read.
-   */
   refreshRecentSessions: () => Promise<boolean>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applySessionMutations: (mutations: readonly GlobalSessionMutation[]) => void;
-  /**
-   * A change to the session that waits for its turn's end
-   * (`session-event-router.ts`) is still a mutation: a load that started
-   * before it must not overwrite the record it will apply to. Publishes no list.
-   */
   noteDeferredSessionUpdate: (sessionId: string) => void;
   upsertSession: (session: Session) => void;
   upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
-  /** Drop every session from the previous runtime instance and go back to the
-      unloaded state, so a fresh load runs against the new endpoint. */
   resetForRuntimeSwitch: () => void;
 };
 
 const PAGE_SIZE = 500;
 const HEAD_PAGE_SIZE = 20;
-// The Mini Chat switcher lists ten root sessions; their sub-agent sessions and
-// archived records share the newest-first page with them.
 const RECENT_PAGE_SIZE = 50;
 const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
 type DirectoryRefreshEpoch = {
@@ -133,11 +115,7 @@ const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promi
 let inflightLoad: Promise<LoadResult> | null = null;
 let inflightHead: Promise<boolean> | null = null;
 let inflightRecent: Promise<boolean> | null = null;
-// True while a page of an unfinished load is being merged. The managed-chats
-// snapshot is written from complete loads only, never from a partial list.
 let mergingSessionPage = false;
-// Bumped on runtime switch: an in-flight load from the previous instance must
-// not apply its (stale) snapshot after the reset.
 let loadGeneration = 0;
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
@@ -157,16 +135,11 @@ const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> =
   return next;
 };
 
-// A `session.patched` can change any of these without advancing `updated`, so
-// a signature without them reads a usage or selection patch as no change and
-// drops it.
 const sessionUsageSignature = (session: Session): string => [
   sessionSpendSignature(session),
   sessionSelectionSignature(session),
 ].join(':');
 
-// What every step of a running turn changes (OpenCode reports usage after each
-// step). The sidebar paints none of it.
 const sessionSpendSignature = (session: Session): string => `${session.cost ?? 0}:${JSON.stringify(session.tokens ?? null)}`;
 
 const sessionSelectionSignature = (session: Session): string => [
@@ -186,7 +159,6 @@ const getSessionSignature = (session: Session): string => {
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
-    // A view changes no `updated`; without these it would read as no change.
     session.time?.idle ?? 0,
     session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
@@ -203,10 +175,6 @@ const getSessionStructuralSignature = (session: Session): string => {
     session.parentID ?? '',
     session.time?.created ?? 0,
     session.time?.archived ?? 0,
-    // A finished turn and a view of it decide the unread mark, so they publish
-    // at once instead of waiting with the deferred updates. So does a
-    // selection change. Spend (cost, tokens) is left out: each step of a turn
-    // changes it, and publishing it rebuilt the whole sidebar once per step.
     session.time?.idle ?? 0,
     session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
@@ -215,12 +183,6 @@ const getSessionStructuralSignature = (session: Session): string => {
   ].join(':');
 };
 
-/**
- * Whether `incoming` differs from the published `existing` only in what a
- * running turn changes at every step: `time.updated` and spend. Such an update
- * waits for the turn's end (`session-event-router.ts`); anything else
- * publishes at once.
- */
 export const isGlobalSessionDeferrableUpdate = (existing: Session, incoming: Session): boolean => {
   const merged = mergeSessionDirectoryMetadata(incoming, existing);
   const changed = existing.time?.updated !== merged.time?.updated
@@ -228,11 +190,6 @@ export const isGlobalSessionDeferrableUpdate = (existing: Session, incoming: Ses
   return changed && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
 };
 
-/**
- * Records read from a persisted snapshot. They omit fields the sidebar does
- * not paint, so one never stands in for a complete record with the same
- * signature: the first live or authoritative copy replaces it.
- */
 const persistedSeedRecords = new WeakSet<Session>();
 
 const markPersistedSeed = (sessions: Session[]): Session[] => {
@@ -240,11 +197,6 @@ const markPersistedSeed = (sessions: Session[]): Session[] => {
   return sessions;
 };
 
-/**
- * The startup seed: managed chats and the global snapshot of every other
- * directory. Never authoritative; `hasLoaded` stays false until a complete
- * load replaces it.
- */
 const readPersistedSessionSeed = (): Session[] => {
   const chats = readManagedChatSessions();
   const chatIds = new Set(chats.map((session) => session.id));
@@ -252,7 +204,6 @@ const readPersistedSessionSeed = (): Session[] => {
   return markPersistedSeed(sortSessionsByUpdated([...chats, ...others]));
 };
 
-/** Whether `existing` can stay in place of `incoming`. */
 const isSameSessionRecord = (existing: Session, incoming: Session): boolean => (
   existing === incoming
   || ((!persistedSeedRecords.has(existing) || persistedSeedRecords.has(incoming))
@@ -332,7 +283,6 @@ type DirectoryPageResult = {
   errors: unknown[];
 };
 
-/** The session-list transport, bound once so paging code stays testable. */
 const listSessionPage: SessionPageLister = (options) => opencodeClient.listSessionsPage(options);
 
 const fetchDirectoryPages = async (
@@ -352,8 +302,6 @@ const fetchDirectoryPages = async (
         status: 'fulfilled' as const,
         value: {
           directory,
-          // One request per directory, split client-side: OpenCode's archived
-          // filter cannot see sessions the server's archive file marks.
           sessions: await withDirectorySessionRefreshSlot(() => {
             if (!isCurrent()) throw new Error('Runtime instance changed');
             return listGlobalSessionPages(listSessionPage, { directory, pageSize: PAGE_SIZE });
@@ -435,14 +383,6 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
   return ordered;
 };
 
-/**
- * Adds the live directory-store sessions this list does not hold yet.
- *
- * A record already held, active or archived, always stands: this list hears
- * every session event and action result itself, while a directory store can
- * keep an old copy of a session it does not own. Letting that copy win put
- * sessions the user had marked done back under "In work".
- */
 const addUnlistedLiveSessions = (active: Session[], archived: Session[], live?: Session[]): Session[] => {
   if (!live || live.length === 0) return active;
   const listed = new Set([...active, ...archived].map((session) => session.id));
@@ -459,8 +399,6 @@ const applySnapshot = (
   activeSessions: Session[],
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
-  /** False for a partial page merged mid-load: the lists are incomplete, so
-      they must not claim the authority `hasLoaded` grants. */
   markLoaded = status === 'ready',
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) {
@@ -513,14 +451,6 @@ const applySnapshot = (
   return snapshot;
 };
 
-/**
- * Merge one page of an in-flight global load into the visible lists. Never a
- * replacement: the store may already hold the persisted managed-chats seed and
- * earlier pages, and those must stay visible while pagination continues.
- * Sessions the page reclassifies move buckets; mutations newer than the load's
- * baseline win, so an archive or delete made while the page was in flight is
- * not undone.
- */
 const mergeSessionPage = (
   state: GlobalSessionsState,
   active: Session[],
@@ -772,9 +702,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
-    // An authoritative snapshot may carry newer `updated` stamps for sessions
-    // whose active→settled cycle this client slept through — raise their
-    // ordering baselines so recent lists re-sort (see session-ordering).
     raiseSessionOrderingBaselines(activeSessions);
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
   },
@@ -788,9 +715,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => mutationRevisionPatch(state, [sessionId]));
   },
 
-  // The module-init seed and runtime reset read the persisted snapshot before
-  // the server-resolved chats root is available, so relocated directories are
-  // filtered out of the stale sidebar paint until this runs after the warm-up.
   rehydrateManagedChatSessions: () => {
     const state = get();
     if (state.managedChatsHydrated || state.hasLoaded) return;
@@ -839,13 +763,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
         rootsReady = true;
         get().rehydrateManagedChatSessions();
-        // One fetch of every session, split client-side: archive state is
-        // OpenChamber's own, so the server list cannot filter on it.
-        // Thousands of sessions paginate for seconds. Show the newest page as
-        // soon as it lands and keep loading the rest silently; the complete
-        // snapshot below is still the only authoritative result.
         let firstPageMerged = false;
-        // The marks of the isolated spaces the host merged in, applied with the snapshot below.
         let spaceMarks: SpaceMark[] = [];
         const allSessions = await listGlobalSessionPages(listSessionPage, {
           pageSize: PAGE_SIZE,
@@ -864,13 +782,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         });
 
         if (generation !== loadGeneration) {
-          // Runtime switched mid-load: this snapshot belongs to the previous
-          // instance — drop it.
           return { activeSessions: [], archivedSessions: [] };
         }
         const { active, archived } = splitGlobalSessionsByArchived(allSessions);
-        // The marks first: a reader of the snapshot that asks which space a record belongs to
-        // must find the space that listed it.
         useSpacesStore.getState().applyMarks(spaceMarks);
         set((state) => {
           const reconciled = overlayMutationsSince(state, active, archived, baselineRevision);
@@ -884,8 +798,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           return { activeSessions: [], archivedSessions: [] };
         }
         if (!rootsReady) {
-          // No classification authority arrived. Preserve both memory and the
-          // persisted snapshot so a retry can hydrate it after root recovery.
           set({ status: 'error' });
           const state = get();
           return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
@@ -922,7 +834,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return get().status === 'ready';
     }
     if (inflightHead) return inflightHead;
-    // A seed cannot establish the unchanged-record boundary for a head check.
     if (!get().hasLoaded) {
       await get().loadSessions();
       return get().status === 'ready';
@@ -942,7 +853,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           }),
         });
         if (generation !== loadGeneration) return false;
-        // The first-page marks describe every space even when session coverage is partial.
         const spacesState = useSpacesStore.getState();
         if (spacesState.spaces.size !== spaceMarks.length || spaceMarks.some((mark) => {
           const existing = spacesState.spaces.get(mark.id);
@@ -975,8 +885,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   refreshRecentSessions: async () => {
-    // A complete list is kept current from its head; a running complete load
-    // answers for this one.
     if (get().hasLoaded || inflightLoad) return get().refreshSessionHead();
     if (inflightRecent) return inflightRecent;
     const generation = loadGeneration;
@@ -993,7 +901,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           stopAfterPage: () => true,
         });
         if (generation !== loadGeneration) return false;
-        // A complete load that started meanwhile publishes its own snapshot.
         if (get().hasLoaded || inflightLoad) return true;
         useSpacesStore.getState().applyMarks(spaceMarks);
         const page = splitGlobalSessionsByArchived(sessions);
@@ -1010,7 +917,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         }));
         return true;
       } catch (error) {
-        // The lists stay as they were: an unread page says nothing about them.
         if (generation === loadGeneration) console.warn('[GlobalSessions] Failed to read recent sessions:', error);
         return false;
       }
@@ -1050,7 +956,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     if (fetched.errors.length > 0) {
       console.warn('[GlobalSessions] Failed to refresh sessions for some directories:', fetched.errors[0]);
     }
-    // A space that answered a directory read is reachable again, whatever the last global list said.
     for (const directory of fetched.directories) {
       const spaceId = spaceIdOfDirectory(directory);
       if (spaceId !== null) useSpacesStore.getState().noteReachable(spaceId);
@@ -1168,12 +1073,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 }));
 
-/**
- * Before the first complete load the store holds the seed, maybe a first page,
- * and live upserts: a partial list. The global snapshot then keeps its saved
- * contents plus explicit local mutations; from the first complete load on it
- * follows the active list.
- */
 const persistGlobalSnapshotFrom = (state: GlobalSessionsState, previous: GlobalSessionsState): void => {
   if (state.hasLoaded) {
     if (state.activeSessions !== previous.activeSessions || !previous.hasLoaded) {
@@ -1188,15 +1087,12 @@ const persistGlobalSnapshotFrom = (state: GlobalSessionsState, previous: GlobalS
 
 useGlobalSessionsStore.subscribe((state, previous) => {
   countSyncPerformance('globalSessionPublications');
-  // Both snapshots split sessions by the chats root, so they wait for it.
   if (mergingSessionPage || getChatsRoot() === null) return;
   if (
     state.activeSessions !== previous.activeSessions
     || (!state.managedChatsHydrated && state.mutationRevision !== previous.mutationRevision)
     || (state.hasLoaded && !previous.hasLoaded)
   ) {
-    // A local mutation can precede the initial load. Preserve the saved seed
-    // and overlay its explicit mutations instead of persisting a partial list.
     const sessions = !state.hasLoaded && !state.managedChatsHydrated
       ? overlayMutationsSince(state, readManagedChatSessions(), [], 0).activeSessions
       : state.activeSessions;
@@ -1220,23 +1116,12 @@ export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
 };
 
-// When the last complete load committed on this runtime; 0 before one. A
-// complete load always publishes a new `authoritativeSessions`, and a runtime
-// switch clears it.
 let completeLoadAt = 0;
 useGlobalSessionsStore.subscribe((state, previous) => {
   if (state.authoritativeSessions === previous.authoritativeSessions) return;
   completeLoadAt = state.authoritativeSessions ? Date.now() : 0;
 });
 
-/**
- * The read for a list that has no poller and reads when it is shown (the
- * mobile sessions sheet). The event stream keeps the list current, so a
- * complete snapshot younger than `completeMaxAgeMs` is checked at its head
- * only; an older, missing or failed one is read again in full. With thousands
- * of sessions the complete read is many pages, which every opening of the
- * sheet paid for through the relay.
- */
 export const refreshGlobalSessionsWhenShown = async (completeMaxAgeMs: number, fallbackActive?: Session[]): Promise<void> => {
   const state = useGlobalSessionsStore.getState();
   const fresh = completeLoadAt > 0 && state.status === 'ready' && Date.now() - completeLoadAt < completeMaxAgeMs;

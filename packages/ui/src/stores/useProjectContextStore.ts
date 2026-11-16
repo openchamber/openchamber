@@ -1,13 +1,3 @@
-/**
- * Project context store: notes, todos, and plan links, keyed by project.
- *
- * Replaces the `openchamber:project-notes-updated` / `openchamber:project-plan-saved`
- * window events that previously forced every mounted panel to re-read the whole
- * config. Writers now mutate the store and every reader re-renders from it.
- *
- * Storage is server-owned; this store is a cache with optimistic mutations.
- * See `packages/web/server/lib/project-context/DOCUMENTATION.md`.
- */
 
 import { create } from 'zustand';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -40,23 +30,16 @@ interface ProjectContextEntry {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
-  /** The team's shared plans folder, when the project has one; sharing a plan needs it. */
   sharedPlansDir: string | null;
-  /** The store `todos` was read from; a whole-list save sends it so a switch since then refuses the write. */
   notesTodosStore: ProjectNotesTodosStore | null;
-  /** True once an authoritative load has succeeded at least once. */
   loaded: boolean;
   loading: boolean;
-  /** Last load or save failure. Never clears cached data on its own. */
   error: string | null;
 }
 
 interface MutationFlags {
-  /** A note write is in flight; a slower load must not overwrite the list. */
   notes: boolean;
-  /** A todo write is in flight; same rule. */
   todos: boolean;
-  /** A plan write is in flight; same rule. */
   plans: boolean;
   revisions: { notes: number; todos: number; plans: number };
 }
@@ -80,13 +63,7 @@ interface ProjectContextActions {
   savePlan: (project: ProjectRef, planId: string, raw: string) => Promise<boolean>;
   setPlanPinned: (project: ProjectRef, planId: string, pinned: boolean) => Promise<boolean>;
   deletePlan: (project: ProjectRef, planId: string) => Promise<boolean>;
-  /**
-   * Move a plan into the team's shared folder, or back. Resolves to the plan's
-   * id after the move, null on failure: a plan that only lived in the team's
-   * folder (`shared:<file>`) gets a new id when it is made personal.
-   */
   movePlan: (project: ProjectRef, planId: string, direction: 'share' | 'unshare') => Promise<string | null>;
-  /** Remember the session a plan was just sent to; its card then leads there. */
   linkPlanSession: (project: ProjectRef, planId: string, sessionId: string) => Promise<boolean>;
   reset: () => void;
 }
@@ -104,13 +81,6 @@ export const EMPTY_PROJECT_CONTEXT_ENTRY: ProjectContextEntry = {
   error: null,
 };
 
-/**
- * Per-project write chains and in-flight mutation flags.
- *
- * Kept outside the store because they are coordination state, not rendered
- * state: putting them in the store would re-render every consumer whenever a
- * write starts or finishes.
- */
 const writeChains = new Map<string, Promise<unknown>>();
 const mutationFlags = new Map<string, MutationFlags>();
 
@@ -122,10 +92,6 @@ const flagsFor = (projectId: string): MutationFlags => {
   return created;
 };
 
-/**
- * Serialize writes per project so two saves cannot interleave into a
- * last-writer-wins race against the server's own read-modify-write.
- */
 const enqueueWrite = <T>(projectId: string, field: 'notes' | 'todos' | 'plans', operation: () => Promise<T>): Promise<T> => {
   const flags = flagsFor(projectId);
   const previous = writeChains.get(projectId) ?? Promise.resolve();
@@ -166,13 +132,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       return get().entries[projectId] ?? EMPTY_PROJECT_CONTEXT_ENTRY;
     },
 
-    /**
-     * Load authoritative context.
-     *
-     * A failure sets `error` and leaves any previously loaded data in place:
-     * an unreachable server must not read as "this project has no notes",
-     * which is exactly how a user loses trust in a notes panel.
-     */
     load: (project, options = {}) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return Promise.resolve();
@@ -193,8 +152,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
         do {
           const forced = refreshAgain;
           refreshAgain = false;
-          // A peer notification can precede our own save response. Read after
-          // admitted local writes finish, without changing ordinary load dedupe.
           if (forced) {
             while (current()) {
               const writes = writeChains.get(projectId);
@@ -217,7 +174,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
             const committed = currentEntry(projectId);
             const keepTodos = flags.todos || flags.revisions.todos !== revisions.todos;
 
-            // Completed writes still outrank a snapshot requested before them.
             patchEntry(projectId, {
               notes: flags.notes || flags.revisions.notes !== revisions.notes ? committed.notes : data.notes,
               todos: keepTodos ? committed.todos : data.todos,
@@ -244,15 +200,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       return promise;
     },
 
-    /**
-     * Optimistically apply todos, then persist.
-     *
-     * With `change` only that one todo is sent, so a todo an agent added since
-     * the last read is not overwritten by this list; without it (reorder,
-     * clearing completed) the whole list is. On failure the previous list is
-     * restored, so the panel never shows a state that is not on disk without
-     * also showing the error.
-     */
     saveTodos: async (project, todos, change) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return false;
@@ -271,8 +218,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
         if (committed) {
           patchEntry(projectId, { todos: committed.todos, notesTodosStore: committed.notesTodosStore, loaded: true });
         } else {
-          // Someone, usually an agent, removed the todo first: nothing failed,
-          // the list on screen is just behind.
           refreshAfterWrite = true;
         }
         return true;
@@ -281,8 +226,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
           todos: previous,
           error: errorMessage(error, 'Failed to save project todos'),
         });
-        // A whole list is refused when the project switched stores since it
-        // was read; show the selected store instead of the stale list.
         if (!change) refreshAfterWrite = true;
         return false;
       } finally {
@@ -291,15 +234,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /**
-     * Create a note. Not optimistic: the id and timestamps come from the
-     * server, and a placeholder row that cannot be edited or pinned is worse
-     * than a brief wait.
-     *
-     * The caller may be a chat action running while the panel is not mounted,
-     * so the committed list is adopted wholesale rather than spliced into a
-     * possibly-empty local one.
-     */
     createNote: async (project, value) => {
       const projectId = resolveProjectContextId(project);
       const body = value.body.trim();
@@ -356,7 +290,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /** Sends `pinned` alone, so it cannot roll back a concurrent body edit. */
     setNotePinned: async (project, noteId, pinned) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return false;
@@ -410,11 +343,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /**
-     * Create a plan. Not optimistic: the id and file name are assigned by the
-     * server, and a placeholder row that cannot be opened is worse than a
-     * short wait.
-     */
     createPlan: async (project, value) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return null;
@@ -434,11 +362,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /**
-     * Persist an edited plan and fold the refreshed title back into the list,
-     * so renaming a plan's heading in the editor is reflected in the panel
-     * without a reload. Resolves false when the plan is gone.
-     */
     savePlan: async (project, planId, raw) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return false;
@@ -568,7 +491,6 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /** Drop every cached project. Used when the active runtime changes. */
     reset: () => {
       generation += 1;
       loads.clear();
