@@ -1,22 +1,7 @@
-/**
- * The terminal's retained output as plain text, for a reader that is not a
- * terminal emulator (the agent's `terminal.read`).
- *
- * The replay history keeps colours, titles, cursor moves and other display
- * controls on purpose, because the panel redraws from it (`history.js`). A
- * model reading that copy gets `\u001b[31m` noise instead of words, so this
- * drops every escape and control sequence and applies the two line edits that
- * decide what a line finally says: a carriage return or backspace moves the
- * cursor back so later text overwrites the line (progress bars, spinners), and
- * erase-in-line clears what follows or the whole line.
- */
-
 const ESC = 0x1b;
 const BEL = 0x07;
 const ST = 0x9c;
 
-// CSI, OSC and the string controls (DCS, SOS, PM, APC), as ESC + byte or as
-// their single C1 code point.
 const kindOfIntroducer = (code) => {
   if (code === 0x5b || code === 0x9b) return 'csi';
   if (code === 0x5d || code === 0x9d) return 'string';
@@ -25,7 +10,6 @@ const kindOfIntroducer = (code) => {
   return null;
 };
 
-/** Index just past a string control's terminator (BEL, ST or ESC \), or the end. */
 const endOfString = (input, start) => {
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
@@ -35,7 +19,6 @@ const endOfString = (input, start) => {
   return input.length;
 };
 
-/** Index just past a CSI final byte, with the parameters it carried. */
 const readCsi = (input, start) => {
   for (let index = start; index < input.length; index += 1) {
     const code = input.charCodeAt(index);
@@ -46,7 +29,6 @@ const readCsi = (input, start) => {
   return { end: input.length, final: null, params: '' };
 };
 
-/** Index just past a two-character escape (intermediates, then a final byte). */
 const endOfEscape = (input, start) => {
   let index = start;
   while (index < input.length && input.charCodeAt(index) >= 0x20 && input.charCodeAt(index) <= 0x2f) index += 1;
@@ -100,7 +82,6 @@ export const terminalPlainText = (input) => {
     } else if (code === 0x08) {
       cursor = Math.max(0, cursor - 1);
     } else if (code === 0x09 || (code >= 0x20 && code !== 0x7f)) {
-      // A surrogate pair stays one cell so overwriting cannot split it.
       const width = code >= 0xd800 && code <= 0xdbff && index + 1 < input.length ? 2 : 1;
       const char = input.slice(index, index + width);
       while (line.length < cursor) line.push(' ');
@@ -112,6 +93,5 @@ export const terminalPlainText = (input) => {
     index += 1;
   }
 
-  // Finished lines end in `\n`; the line still being written follows as it is.
   return lines.map((text) => `${text}\n`).join('') + line.join('');
 };

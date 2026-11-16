@@ -6,10 +6,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const SHUTDOWN_GRACE_MS = 20_000;
 
-// Job-control shells give foreground/background jobs their own process groups.
-// Killing only -pty.pid misses those jobs; closing the PTY first sends SIGHUP.
 const readProcesses = async () => {
-  // Minimal server/container installations need not ship procps.
   if (process.platform === 'linux') {
     const processes = new Map();
     for (const entry of await fs.readdir('/proc')) {
@@ -37,7 +34,6 @@ const signal = (pid, name) => {
 
 export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_GRACE_MS } = {}) {
   if (!terminals.length) return;
-  // ConPTY has no POSIX signal protocol. Its backend owns tree teardown.
   if (process.platform === 'win32') {
     for (const { process: pty } of terminals) {
       try { pty.kill(); } catch { /* already gone; other terminals still need cleanup */ }
@@ -54,8 +50,6 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
       const current = snapshot.get(terminal.process.pid);
       if (!current || current.zombie) continue;
       owned.set(current.pid, { ...current, terminal: current.pid });
-      // An exec'ed server occupies the shell PID, but must get the same grace
-      // as a child. Only an actual shell is held open until its jobs finish.
       if (path.basename(current.command) === path.basename(terminal.shellExecutable)) shells.set(current.pid, terminal.process);
     }
     const signalled = new Set();
@@ -65,8 +59,6 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
         if (!current || current.zombie || current.started !== previous.started) { owned.delete(pid); shells.delete(pid); }
         else if (current.command !== previous.command) shells.delete(pid);
       }
-      // Retain descendants before signalling anything, including separate job
-      // groups and children still cleaning up after their parent has exited.
       let added;
       do {
         added = false;
@@ -96,7 +88,6 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
       snapshot = await readProcesses();
     }
   } catch (error) {
-    // A failed process-table read is not evidence that the jobs exited.
     console.warn('Terminal graceful shutdown failed; forcing owned PTYs closed:', error.message);
     for (const pid of owned.keys()) { try { signal(pid, 'SIGKILL'); } catch { /* best effort */ } }
     for (const { process: pty } of terminals) {
