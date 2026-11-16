@@ -71,8 +71,6 @@ function buildIssueListFilter({ status, assignee, teamId, priority } = {}) {
   return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
-// A related issue (a parent, a sub-issue) carries what its row and its own
-// preview header need; labels stay out, they multiply the query's cost.
 const RELATED_ISSUE_FIELDS = `
   id
   identifier
@@ -84,9 +82,6 @@ const RELATED_ISSUE_FIELDS = `
   assignee { name displayName avatarUrl }
   team { id key name }
 `;
-// Linear has no sub-issue count, and every connection multiplies the query's
-// complexity by its page size (a query may not exceed 10,000 points). A list
-// page asks this many sub-issue states per issue; more reads as "N+".
 const SUB_ISSUE_COUNT_LIMIT = 20;
 const SUB_ISSUE_PAGE = 100;
 const ISSUE_SUMMARY_FIELDS = `
@@ -314,7 +309,6 @@ function readRelatedIssue(node) {
 
 const FINISHED_STATE_TYPES = new Set(['completed', 'canceled', 'duplicate']);
 
-/** How many sub-issues an issue has and how many are finished; null without any. */
 function readSubIssueProgress(connection) {
   const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
   if (nodes.length === 0) return null;
@@ -333,7 +327,6 @@ function readIssueSummary(node) {
   };
 }
 
-// Linear's own order: the one the sub-issues are dragged into in Linear.
 function readSubIssues(connection) {
   const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
   return nodes
@@ -482,14 +475,10 @@ export async function getLinearIssue(id) {
   });
 }
 
-/** Per request; a sidebar shows a handful, and Linear rates by query complexity. */
 const MAX_SUMMARY_IDENTIFIERS = 50;
 const MISSING_TTL_MS = 10 * 60_000;
 const SINGLE_LOOKUP_CONCURRENCY = 4;
 const SUMMARY_FIELDS = 'identifier title state { name type }';
-// Identifiers the current workspace did not have, so they stay out of the next
-// batches instead of failing them again. Keyed by workspace: switching it can
-// make them resolvable.
 const missingUntil = new Map();
 
 const missingKey = (identifier) => `${getLinearAuth()?.workspaceId ?? ''}:${identifier}`;
@@ -511,12 +500,6 @@ function readIssueLiveSummary(node) {
   return { identifier, title: readTrimmedString(node.title), state: { name: state.name, type: state.type } };
 }
 
-/**
- * Live state of linked issues, one aliased query per call. In Linear's schema
- * `issue(id:)` is non-null, so one identifier this workspace does not have
- * (a deleted issue, another workspace's) fails the whole query. That case is
- * asked one issue at a time instead, and the missing ones are remembered.
- */
 export async function getLinearIssueSummaries(identifiers, { now = Date.now } = {}) {
   const wanted = [...new Set((Array.isArray(identifiers) ? identifiers : [])
     .map((value) => readTrimmedString(value).toUpperCase())

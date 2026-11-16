@@ -1,16 +1,6 @@
 import { disconnectCurrentLinearWorkspace, readLinearAuthStatus } from './auth-status.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 
-/**
- * Linear as a work item tracker: its descriptor and the adapter that turns
- * Linear's shapes into the neutral tracker contract
- * (`../trackers/tracker-contract.d.ts`). The legacy `/api/linear/*` routes keep
- * answering in Linear's own shapes; this module does not change them.
- *
- * Only cheap modules are imported statically. The Linear libraries load the
- * first time the tracker registry asks for the implementation.
- */
-
 /** @typedef {import('../trackers/tracker-contract').TrackerDescriptor} TrackerDescriptor */
 /** @typedef {import('../trackers/tracker-contract').TrackerStateCategory} TrackerStateCategory */
 /** @typedef {import('../trackers/tracker-contract').TrackerPriority} TrackerPriority */
@@ -38,8 +28,6 @@ export const LINEAR_TRACKER_DESCRIPTOR = Object.freeze({
     sessionComments: true,
     hostAccess: true,
   }),
-  // The order is the filter menu's. `inReview` and `duplicate` are Linear's
-  // own name-based filters; Linear has no triage list filter.
   stateFilters: Object.freeze(['open', 'all', 'backlog', 'todo', 'in-progress', 'inReview', 'done', 'canceled', 'duplicate']),
   urlPatterns: Object.freeze([
     Object.freeze({ host: 'linear.app', path: '^/[^/]+/issue/([A-Za-z][A-Za-z0-9]*-\\d+)(?:/|$)' }),
@@ -54,12 +42,9 @@ const STATE_CATEGORY_BY_TYPE = {
   started: 'in-progress',
   completed: 'done',
   canceled: 'canceled',
-  // Linear reports a duplicate as its own type on some workspaces; it is a
-  // canceled item for everything category-based (look, cadence, progress).
   duplicate: 'canceled',
 };
 
-// What a live summary reports for a state type Linear added after this build.
 const UNMAPPED_STATE_CATEGORY = 'todo';
 
 /** @returns {TrackerStateCategory | null} */
@@ -74,7 +59,6 @@ export function linearPriority(value) {
   return Number.isInteger(value) && value >= 0 && value < PRIORITY_BY_VALUE.length ? PRIORITY_BY_VALUE[value] : null;
 }
 
-// Neutral filter ids to the `status` values `listLinearIssues` takes.
 const LINEAR_STATUS_BY_STATE_FILTER = {
   open: 'open',
   all: 'all',
@@ -87,7 +71,6 @@ const LINEAR_STATUS_BY_STATE_FILTER = {
   duplicate: 'duplicate',
 };
 
-/** The Linear list `status` for a neutral state filter id; null when Linear has no such filter. */
 export function linearStatusOfStateFilter(state) {
   return Object.hasOwn(LINEAR_STATUS_BY_STATE_FILTER, state) ? LINEAR_STATUS_BY_STATE_FILTER[state] : null;
 }
@@ -97,11 +80,6 @@ const URL_PATTERNS = LINEAR_TRACKER_DESCRIPTOR.urlPatterns.map((pattern) => ({
   path: new RegExp(pattern.path),
 }));
 
-/**
- * The identifier a Linear issue link names, upper-cased; null for anything
- * else. Same rule as the descriptor's `urlPatterns`: an http(s) URL whose host
- * (without `www.`) is the pattern's host and whose path matches.
- */
 export function matchLinearUrl(value) {
   const raw = readTrimmedString(value);
   if (!raw || !URL.canParse(raw)) return null;
@@ -302,11 +280,6 @@ export function createLinearTracker(libraries) {
       return { connected: true, item: result.issue ? toTrackerItem(result.issue) : null };
     },
 
-    // `state.type` rides along while bundled phone UIs that read it still
-    // talk to this server; newer schemas strip it. A state type this build
-    // does not map (one Linear adds later) reads as `todo`, an open category
-    // the live-summary schema accepts, so the item keeps its badge and the
-    // open cadence instead of dropping out as "no longer answered".
     liveSummaries: async (identifiers) => {
       const result = await getLinearIssueSummaries(identifiers);
       if (result.connected === false) return { connected: false };
@@ -358,8 +331,6 @@ export function createLinearTracker(libraries) {
       createRuntime: () => createLinearSessionStatusRuntime(),
     },
 
-    // What a host-Linear SDK guest borrows. The guest proxy keeps the token
-    // on `apiOrigin`; nothing here returns it to a client.
     hostAccess: {
       apiOrigin: HOST_LINEAR_API_ORIGIN,
       account: async () => {
@@ -387,7 +358,6 @@ export function createLinearTracker(libraries) {
   };
 }
 
-/** The tracker registry entry: the static descriptor and a lazy loader. */
 export const linearTracker = Object.freeze({
   descriptor: LINEAR_TRACKER_DESCRIPTOR,
   load: async () => {

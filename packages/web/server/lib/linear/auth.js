@@ -414,10 +414,6 @@ export function getLinearRedirectUri() {
   return `${getLinearBrokerUrl()}/callback`;
 }
 
-/**
- * Status comments are opt-in: they are written into a Linear workspace other
- * people read, so nothing is posted until the user turns them on.
- */
 export function getLinearSessionCommentsEnabled() {
   return readSettings()[SESSION_COMMENTS_SETTING_KEY] === true;
 }

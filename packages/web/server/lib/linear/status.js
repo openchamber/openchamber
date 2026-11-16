@@ -97,10 +97,6 @@ function readRecords() {
   return next;
 }
 
-/**
- * The file only exists to dedupe comments, so it does not need to remember
- * every session ever started. Keep the newest entries and drop the tail.
- */
 export function pruneSessionStatusRecords(records, limit = MAX_SESSION_STATUS_RECORDS) {
   const keys = Object.keys(records);
   if (keys.length <= limit) {
@@ -124,8 +120,6 @@ async function postOnce(input) {
     throw new LinearSessionStatusError('kind and sessionId are required', 'INVALID');
   }
 
-  // Disconnected answers first so the picker and panel keep showing their
-  // "connect Linear" state whatever the comment preference says.
   if (!getLinearAuth()) {
     return { connected: false };
   }
@@ -150,8 +144,6 @@ async function postOnce(input) {
 
   const sessionOrigin = readSessionOrigin(input?.sessionOrigin)
     || readTrimmedString(existing?.sessionOrigin);
-  // Without an origin other people can reach, the comment would carry a link
-  // only its author could open. Say nothing rather than publish a dead link.
   if (!isPublicSessionOrigin(sessionOrigin)) {
     return { connected: true, posted: false, skipped: 'origin-not-public' };
   }
