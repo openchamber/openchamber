@@ -1,6 +1,6 @@
 ---
 name: openchamber-ui-guidance
-description: Use when designing, building or reviewing how OpenChamber UI looks or behaves on screen: composing a panel, dialog, card, list row or control; choosing surfaces, depth and borders; spacing, sizing and text density; or what moves when the user interacts.
+description: "Use when designing, building or reviewing how OpenChamber UI looks or behaves on screen: composing a panel, dialog, card, list row or control; choosing surfaces, depth and borders; spacing, sizing and text density; or what moves when the user interacts."
 ---
 
 # OpenChamber UI Guidance
