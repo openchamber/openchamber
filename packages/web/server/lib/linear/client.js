@@ -10,8 +10,6 @@ import { isPlainObject, readTrimmedString } from './parse.js';
 
 const LINEAR_GRAPHQL_URL = 'https://api.linear.app/graphql';
 const VIEWER_QUERY = '{ viewer { id name displayName email avatarUrl } organization { id name urlKey } }';
-// Linear file URLs in GraphQL need this header or the browser cannot load
-// uploads.linear.app images (comment screenshots, description images).
 const LINEAR_PUBLIC_FILE_URL_TTL_SECONDS = '3600';
 
 class LinearApiError extends Error {

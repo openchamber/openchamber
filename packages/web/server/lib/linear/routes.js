@@ -54,14 +54,6 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/linear-auth">Retu
 </html>`;
 }
 
-/**
- * Legacy Linear routes, kept in their Linear-shaped answers. Newer clients use
- * the provider-neutral `/api/tracker/linear/*` routes (`../trackers/routes.js`).
- * These stay for phone apps that bundle an older UI and talk to a newer
- * server, and for the SDK's documented `GET /api/linear/issues/get` used by
- * host-Linear guests. `/linear/oauth/callback` is the redirect URI registered
- * with Linear for custom direct-redirect setups, so it stays here as well.
- */
 export function registerLinearRoutes(app) {
   let loadedLibraries = null;
   const getLinearLibraries = async () => {
