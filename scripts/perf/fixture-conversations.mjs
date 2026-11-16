@@ -495,7 +495,58 @@ const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
   answer: "The worker runs in its own worktree.\n",
 })
 
-const VERIFY_TURNS = [{
+/**
+ * `SUBAGENT_PROMPT` starts a subagent that thinks for thirty seconds, so its
+ * session is still running while a scenario looks at it.
+ * `SUBAGENT_PERMISSION_PROMPT` starts a subagent that reads `notes.secret`,
+ * which the verify stand asks permission for, so the subagent's read-only
+ * session asks for a permission.
+ * `QUESTION_PROMPT` asks the user a question and answers after it.
+ */
+export const SUBAGENT_PROMPT = "Hand the parser review to a subagent."
+export const SUBAGENT_PERMISSION_PROMPT = "Hand the secret notes to a subagent."
+const SECRET_NOTES_PROMPT = "Read the secret notes"
+export const QUESTION_PROMPT = "Ask me which retry policy to use."
+const subagentTurn = (id, prompt, task, model) => ({
+  id,
+  prompt,
+  steps: [{
+    text: "Handing it to a subagent.",
+    calls: [{ name: "subagent", arguments: { agent: "general", description: task, prompt: `${task}.`, model } }],
+  }],
+  answer: "The subagent is on it.\n",
+})
+
+const VERIFY_TURNS = [
+  subagentTurn("verify_subagent", SUBAGENT_PROMPT, "Review the parser", "perf/think-30s"),
+  subagentTurn("verify_subagent_permission", SUBAGENT_PERMISSION_PROMPT, SECRET_NOTES_PROMPT, "perf/stream-20000cps"),
+{
+  id: "verify_secret_notes",
+  prompt: SECRET_NOTES_PROMPT,
+  steps: [{ text: "Reading them.", calls: [{ name: "read", arguments: { path: "notes.secret" } }] }],
+  answer: "The secret notes hold one line.\n",
+},
+{
+  id: "verify_question",
+  prompt: QUESTION_PROMPT,
+  steps: [{
+    text: "One thing to settle first.",
+    calls: [{
+      name: "question",
+      arguments: {
+        questions: [{
+          question: "Which retry policy should withRetry use?",
+          header: "Retry policy",
+          options: [
+            { label: "Exponential backoff", description: "Double the wait after each failure." },
+            { label: "Fixed delay", description: "Wait the same time before every retry." },
+          ],
+        }],
+      },
+    }],
+  }],
+  answer: "Going with the policy you picked.\n",
+}, {
   id: "verify_workflow",
   prompt: "Run the workflow we agreed on over the API files.",
   steps: [{

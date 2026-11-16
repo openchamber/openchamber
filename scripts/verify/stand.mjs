@@ -107,6 +107,9 @@ const opencodeConfig = (fixturePort, deadPort) => {
     autoupdate: false,
     share: "disabled",
     compaction: { auto: false },
+    // Everything else runs without asking; a read of a `.secret` file asks,
+    // so a scenario can show a permission request.
+    permission: { read: { "*.secret": "ask" } },
   }
 }
 

@@ -102,6 +102,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
 - Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, a fresh browser context. A scenario's result does not depend on which ran before it.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
+- Tools run without asking, except a read of a `*.secret` file: that one asks, so a scenario can raise a permission request by having the agent read such a file.
 - A stopped run leaves nothing: the dev server's process group, the fixture, Chrome and its profile, the stand folder and the Vite cache of its port are removed on exit, on failure, and on Ctrl-C or SIGTERM, startup included.
 - A scenario during which the page reloaded or hot-updated on its own fails, whatever its steps saw: a source file changed under it (another session editing the checkout, or your own edit mid-run), so its result proves nothing. The failure says so; rerun with the source still.
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
