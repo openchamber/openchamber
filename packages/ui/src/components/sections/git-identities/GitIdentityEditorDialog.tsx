@@ -28,17 +28,11 @@ import type { GitIdentityTransport } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
-/** Select value for an identity that answers to no connected account. */
 const NO_ACCOUNT = '__none__';
 
-/** Same key `buildManagedAccountOptions` gives the account's option. */
 const accountOptionKey = (account: NonNullable<GitIdentityProfile['account']>): string =>
   JSON.stringify([account.provider, account.instance, account.accountId]);
 
-/**
- * How an identity pushes and pulls. Only "Account" needs a connected account;
- * the others may still name one so it answers for issues and change requests.
- */
 type AuthMethod = GitIdentityTransport;
 const AUTH_METHODS = [
   { method: 'system', icon: 'computer', labelKey: 'settings.gitIdentities.editor.auth.system', hintKey: 'settings.gitIdentities.editor.auth.systemHint' },
@@ -55,7 +49,6 @@ const PROFILE_COLORS = [
   { key: 'type', labelKey: 'settings.gitIdentities.editor.color.yellow', cssVar: 'var(--syntax-type)' },
 ] as const;
 
-/** The built-in marks; each source-control provider adds its own after them, named by its literal label. */
 const PROFILE_ICONS = [
   { key: 'branch', Icon: 'git-branch', labelKey: 'settings.gitIdentities.editor.icon.branch' },
   { key: 'briefcase', Icon: 'briefcase', labelKey: 'settings.gitIdentities.editor.icon.work' },
@@ -64,11 +57,6 @@ const PROFILE_ICONS = [
   { key: 'code', Icon: 'code', labelKey: 'settings.gitIdentities.editor.icon.code' },
 ] as const satisfies ReadonlyArray<{ key: string; Icon: IconName; labelKey: string }>;
 
-/**
- * One form row: the label, with its hint, beside the control on a wide
- * dialog and above it on a narrow one. The label keeps a control's height so
- * it lines up with the first line of a control that grows below.
- */
 const EditorRow: React.FC<{ label: React.ReactNode; info?: React.ReactNode; children: React.ReactNode }> = ({ label, info, children }) => (
   <div className="flex flex-col gap-1.5 @md:flex-row @md:items-start @md:gap-4">
     <div className="flex shrink-0 items-center gap-1.5 @md:h-8 @md:w-32">
@@ -82,7 +70,6 @@ const EditorRow: React.FC<{ label: React.ReactNode; info?: React.ReactNode; chil
 interface GitIdentityEditorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Profile ID to edit, 'new' for creation, or null */
   profileId: string | null;
 }
 
@@ -128,17 +115,12 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
     if (open && !isGlobalProfile) void refreshAccounts(sourceControl);
   }, [open, isGlobalProfile, refreshAccounts, sourceControl]);
 
-  // Every connected account, whichever provider or instance it belongs to: an
-  // identity picks one, and the transport picks up its credential from there.
   const accountOptions = React.useMemo(() => identities.flatMap((identity) => {
     const entry = authEntries[getSourceControlAuthKey(identity)];
     if (!entry?.hasChecked || entry.status?.status !== 'connected') return [];
     return buildManagedAccountOptions(identity, descriptorOf(identity.provider), entry.status.accounts, (account) => t(getManagedCredentialSourceLabelKey(account.source)));
   }), [authEntries, descriptorOf, identities, t]);
   const selectedAccount = accountOptions.find((option) => option.key === accountKey) ?? null;
-  // A stored account the account list cannot show right now (status read
-  // failed, provider offline) stays the identity's account: only choosing
-  // another entry or "None" changes it, never a failed read.
   const storedAccount = selectedProfile?.account && accountKey === accountOptionKey(selectedProfile.account)
     ? selectedProfile.account
     : null;
@@ -203,7 +185,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
 
     setIsSaving(true);
     try {
-      // The server owns any private migration fields; editors send only the public author DTO.
       const profileData: Omit<GitIdentityProfile, 'id'> & { id?: string } = {
         name: name.trim() || userName.trim(),
         userName: userName.trim(),
@@ -215,8 +196,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
         color,
         icon,
       };
-      // Only an SSH transport names a managed key, so the field is absent
-      // rather than empty when another transport is chosen.
       if (transport === 'ssh') profileData.sshCredentialId = sshCredentialId.trim();
 
       let success: boolean;
@@ -263,7 +242,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   };
 
   const currentColorValue = PROFILE_COLORS.find((c) => c.key === color)?.cssVar ?? 'var(--syntax-keyword)';
-  // An icon key that names a provider (an identity made from a connected account) draws its mark.
   const iconChoices = [
     ...PROFILE_ICONS.map((entry) => ({ key: entry.key, label: t(entry.labelKey), mark: (className: string) => <Icon name={entry.Icon} className={className} /> })),
     ...providers.map((descriptor) => ({ key: descriptor.id, label: descriptor.label, mark: (className: string) => <ProviderIcon descriptor={descriptor} className={className} /> })),
@@ -289,7 +267,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
           </DialogHeader>
 
           <div className="@container flex flex-col gap-6">
-            {/* The profile's own label: its icon, painted in its colour, and its name. */}
             {!isGlobalProfile && (
               <div className="flex items-center gap-2">
                 <DropdownMenu>
@@ -390,8 +367,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   className="min-w-0 flex-1"
                 />
               </EditorRow>
-              {/* Commit signing is independent of transport authentication. The key
-                  field stays laid out while signing is off, so the toggle moves nothing. */}
               {!isGlobalProfile && (
                 <EditorRow label={t('settings.gitIdentities.editor.section.commitSigning')}>
                   <Checkbox
@@ -411,8 +386,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
               )}
             </div>
 
-            {/* An identity is an account, a transport and a signature: the
-                three answers a repository needs, given once and named. */}
             {!isGlobalProfile && (
               <div className="flex flex-col gap-3">
                 <EditorRow label={t('settings.gitIdentities.editor.field.account')}>
@@ -445,9 +418,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   />
                 </EditorRow>
 
-                {/* Laid out for every method and live only for SSH, so switching
-                    methods keeps the dialog's height. The picker mounts with SSH
-                    because mounting reads the saved keys. */}
                 <EditorRow label={t('settings.gitIdentities.editor.field.sshKey')} info={t('settings.sourceControl.ssh.hostSetupHint')}>
                   {transport === 'ssh' ? (
                     <ManagedSshCredentials selection={{ value: sshCredentialId, onChange: setSshCredentialId }} />
@@ -495,7 +465,6 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
       <Dialog
         open={isDeleteDialogOpen}
         onOpenChange={(o) => { if (!isDeleting) setIsDeleteDialogOpen(o); }}

@@ -12,22 +12,15 @@ import { useI18n } from '@/lib/i18n';
 import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import type { DiscoveredModel } from './custom-provider-form';
 
-/** Below this many results the list is short enough to scan without a filter. */
 const SEARCH_THRESHOLD = 8;
 
 type Props = {
   models: readonly DiscoveredModel[];
-  /** Model ids already in the form; they show as added and cannot be picked again. */
   existingIds: ReadonlySet<string>;
   onAdd: (selected: DiscoveredModel[]) => void;
   onCancel: () => void;
 };
 
-/**
- * The one-time review step after asking a provider for its models: pick
- * which ones to add, then the panel closes. Nothing here stays in sync with
- * the provider afterwards.
- */
 export const CustomProviderModelDiscovery: React.FC<Props> = ({ models, existingIds, onAdd, onCancel }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');

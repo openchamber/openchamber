@@ -21,20 +21,13 @@ import { CustomEndpointFields } from './CustomEndpointFields';
 import { ClassifierTestButton } from './ClassifierTestButton';
 import { SettingsInlineLink } from './JevAccessNote';
 
-// The docs keep the list of features Jev answers for, so this page never goes stale.
 const CLASSIFICATION_DOCS_URL = 'https://docs.openchamber.dev/classification-providers/';
 
 interface ClassificationProvidersPageProps {
   titleLeading: React.ReactNode;
-  /** Opens the OpenCode provider whose API key a source reads. */
   onOpenProvider: (providerId: string) => void;
 }
 
-/**
- * The "missing key" line with a link to the provider that holds the key. The
- * option row selects on click and swallows Enter and Space, so the link keeps
- * its events to itself.
- */
 const MissingKeyDescription: React.FC<{ text: string; linkLabel: string; onOpen: () => void }> = ({ text, linkLabel, onOpen }) => (
   <>
     {text}{' '}
@@ -44,10 +37,6 @@ const MissingKeyDescription: React.FC<{ text: string; linkLabel: string; onOpen:
   </>
 );
 
-/**
- * The Gemini key kept for Jev alone, apart from OpenCode's Google key, which
- * would also open every Gemini chat model there. Saving it picks Gemini.
- */
 const GeminiKeyField: React.FC = () => {
   const { t } = useI18n();
   const keyPresent = useRoutingStore((state) => state.geminiKeyPresent);
@@ -108,12 +97,6 @@ const GeminiKeyField: React.FC = () => {
   );
 };
 
-/**
- * Settings → Providers → Classification providers: where Jev requests go, for
- * every feature that asks Jev. Not an OpenCode provider,
- * so it has its own page instead of the provider detail view. The server owns
- * the pick and the TypeSafe key (`packages/web/server/lib/routing`).
- */
 export const ClassificationProvidersPage: React.FC<ClassificationProvidersPageProps> = ({ titleLeading, onOpenProvider }) => {
   const { t } = useI18n();
   const available = useRoutingStore((state) => state.available);
@@ -122,7 +105,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const classifier = useRoutingStore((state) => state.classifier);
   const tokenPresent = useRoutingStore((state) => state.tokenPresent);
   const customEndpoint = useRoutingStore((state) => state.customEndpoint);
-  // The server refuses every other pick and any key; the controls only mirror that.
   const locked = useRoutingStore((state) => state.enterpriseMode);
   const load = useRoutingStore((state) => state.load);
   const setClassifierSource = useRoutingStore((state) => state.setClassifierSource);
@@ -156,7 +138,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
     setTokenBusy(true);
     setTokenError(null);
     try {
-      // The server also picks TypeSafe: pasting a key is choosing it.
       await setToken(token);
       setTokenInput('');
     } catch (error) {
@@ -228,10 +209,8 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                 label={t('settings.classification.source.off.name')}
                 description={t('settings.classification.source.off.description')}
               />
-              {/* Enterprise mode leaves Off as the only choice. */}
               {locked ? null : (
                 <>
-                  {/* The promotion is offered only while the server can use it; otherwise only an existing pick still shows it. */}
                   {promoUsable || classifier.selected === 'zen-promo' ? (
                     <SettingsRadioOption
                       selected={classifier.selected === 'zen-promo'}
@@ -293,7 +272,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                     onSelect={() => void pick('gemini')}
                     disabled={!geminiUsable}
                     label={t('settings.classification.source.gemini.name')}
-                    // The free-tier note shows before a key is saved too: saving one selects Gemini.
                     description={geminiUsable
                       ? t('settings.classification.source.gemini.description')
                       : `${t('settings.classification.source.gemini.description')} ${t('settings.classification.source.gemini.missing')}`}
@@ -309,7 +287,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                   />
                 </>
               )}
-              {/* An endpoint pinned by the server environment stays a choice in enterprise mode. */}
               {!locked || customEndpoint?.pinned ? (
                 <SettingsRadioOption
                   selected={classifier.selected === 'custom'}

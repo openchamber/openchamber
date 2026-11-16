@@ -1,13 +1,3 @@
-/**
- * Provider credential helpers.
- *
- * OpenCode v2 moved provider sign-in behind *integrations*: `GET /api/integration`
- * lists, per integration, the methods it accepts (`oauth`, `key`, `external`,
- * `command`, `env`) and the connections that are already live (a stored credential, or an
- * environment variable the server can see). There is no `auth.json` any more,
- * so "does this provider have credentials" is answered by its integration's
- * connections rather than by a local file.
- */
 
 import type {
   ConnectionInfo,
@@ -21,49 +11,25 @@ import type { Provider } from '@/lib/opencode/model';
 
 export type CredentialConnection = Extract<ConnectionInfo, { type: 'credential' }>;
 
-/**
- * An API key written straight into the provider entry. OpenCode 2 keeps request
- * settings under `settings`, an open record whose typed keys (timeout,
- * compaction, transport since 2.0.10) never include the key itself, so it is
- * read as a free-form entry and kept only when it is a string.
- */
 const providerApiKeySetting = z.string();
 export const readProviderApiKeySetting = (provider: Pick<Provider, 'settings'> | undefined): string | null =>
   providerApiKeySetting.safeParse(provider?.settings?.apiKey).data ?? null;
 
-/**
- * Vertex signs in through Google Application Default Credentials on the server
- * machine, which OpenCode neither stores nor reports as a connection. OpenCode's
- * Vertex plugin switches the provider on once it resolves a project (from config
- * or `GOOGLE_CLOUD_PROJECT` and its aliases) and writes that project into the
- * provider's settings, so a resolved project is what makes Vertex usable. The
- * plugin matches Vertex by package, so a config alias on that package counts too.
- */
+// external: https://cloud.google.com/docs/authentication/application-default-credentials Vertex uses server-machine credentials; OpenCode reports a resolved project instead of a stored connection.
 const vertexProjectSetting = z.string().min(1);
 export const usesMachineCredentials = (provider: Pick<Provider, 'id' | 'package' | 'settings'> | undefined): boolean =>
   provider !== undefined
   && (provider.id === 'google-vertex' || provider.package.startsWith('@opencode/ai/providers/google-vertex'))
   && vertexProjectSetting.safeParse(provider.settings?.project).success;
 
-/** Integrations are keyed by their own id; a provider matches on the same id. */
 export const findIntegrationForProvider = (
   integrations: readonly IntegrationInfo[],
   providerId: string,
 ): IntegrationInfo | undefined => integrations.find((integration) => integration.id === providerId);
 
-/**
- * OpenCode Go bills through the OpenCode Console, so it signs in through the
- * Console's `opencode` integration; its own integration only accepts a
- * service-account key. OpenCode's own connect dialog makes the same mapping.
- * Returns the integration whose OAuth methods sign a provider in.
- */
 export const getSignInIntegrationId = (providerId: string): string =>
   providerId === 'opencode-go' ? 'opencode' : providerId;
 
-/**
- * Connections that give a provider credentials: its own, plus the sign-in
- * integration's when the provider signs in elsewhere.
- */
 export const getProviderConnections = (
   integrations: readonly IntegrationInfo[],
   providerId: string,
@@ -76,11 +42,6 @@ export const getProviderConnections = (
   return [...(own ?? []), ...(signIn ?? [])];
 };
 
-/**
- * Methods that sign in with a button rather than a pasted key: OAuth, and
- * external credentials OpenCode references outside its store (2.0.25+: an
- * Azure CLI login, an AWS profile). Kept in the integration's declared order.
- */
 export type SignInMethod = IntegrationOAuthMethod | IntegrationExternalMethod;
 
 export const getSignInMethods = (
@@ -93,16 +54,9 @@ export const getKeyMethod = (
 ): IntegrationKeyMethod | undefined =>
   (integration?.methods ?? []).find((method): method is IntegrationKeyMethod => method.type === 'key');
 
-/**
- * Show the API key form when the integration accepts a key, or when the
- * integration is unknown — a provider OpenCode has no integration for (a custom
- * one from opencode.json) is still keyed by an API key. OAuth-only integrations
- * must not get an API key prompt.
- */
 export const shouldShowApiKeyAuth = (integration: IntegrationInfo | undefined): boolean =>
   integration === undefined || getKeyMethod(integration) !== undefined;
 
-/** Stored credentials, which are the only connections the user can remove. */
 export const getCredentialConnections = (
   integration: IntegrationInfo | undefined,
 ): CredentialConnection[] =>
@@ -110,12 +64,6 @@ export const getCredentialConnections = (
     (connection): connection is CredentialConnection => connection.type === 'credential',
   );
 
-/**
- * Whether a provider has a stored login that its own page lists and OpenCode
- * uses for it, which is what a provider with no model is still there to manage.
- * A Console workspace provider uses the Console's login but does not list it:
- * that login is managed on the Console's own page.
- */
 export const providerHoldsStoredLogin = (
   integrations: readonly IntegrationInfo[] | null,
   provider: Pick<Provider, 'id' | 'integrationID'>,
@@ -127,27 +75,11 @@ export const providerHoldsStoredLogin = (
 };
 
 interface ProviderCredentialInput {
-  /**
-   * Connections the provider's integration reports. A stored credential or a
-   * resolved environment variable both count as a usable login.
-   */
   connections?: readonly ConnectionInfo[];
-  /**
-   * Provider.options is shipped to the client for config-defined providers, so
-   * a custom provider whose key is written straight into opencode.json has no
-   * integration connection but is still logged in.
-   */
   optionsApiKey?: string | null;
-  /** Signs in through credentials on the server machine (`usesMachineCredentials`). */
   machineCredentials?: boolean;
 }
 
-/**
- * Prefer authoritative credential signals: the server either reports a
- * connection for the integration or it does not. An inline `options.apiKey` and
- * credentials on the server machine are the cases the server cannot see as a
- * connection.
- */
 export const providerHasCredentials = (input: ProviderCredentialInput): boolean => {
   if ((input.connections?.length ?? 0) > 0 || input.machineCredentials) {
     return true;
@@ -155,12 +87,6 @@ export const providerHasCredentials = (input: ProviderCredentialInput): boolean 
   return typeof input.optionsApiKey === 'string' && input.optionsApiKey.trim().length > 0;
 };
 
-/**
- * A problem OpenCode reported for a live connection (2.0.20+): `needs_auth`
- * asks the user to sign in again, at `url` when one is given, otherwise by
- * reconnecting the integration. Runtime-only on OpenCode's side; it clears
- * itself once the connection works again.
- */
 export const connectionNeedsAuth = (connection: ConnectionInfo): boolean =>
   connection.status?.status === 'needs_auth';
 
@@ -172,17 +98,11 @@ export type ProviderCardStatus =
   | { kind: 'environment' }
   | { kind: 'signInNeeded' };
 
-/**
- * The one-glance status a provider card shows. A provider with no integration
- * (a custom one from opencode.json) has nothing OpenCode can sign in to, so it
- * gets no status rather than a false "not signed in".
- */
 export const getProviderCardStatus = (input: {
   integrations: readonly IntegrationInfo[] | null;
   providerId: string;
   optionsApiKey?: string | null;
   machineCredentials?: boolean;
-  /** OpenCode lists the provider with no model the account can use. */
   noModels?: boolean;
 }): ProviderCardStatus | null => {
   if (input.integrations === null) return null;
@@ -196,12 +116,6 @@ export const getProviderCardStatus = (input: {
   return connections === undefined ? null : { kind: 'signInNeeded' };
 };
 
-/**
- * Judged over all of a provider's accounts, which the page splits across
- * cards. With a single usable account there is nothing to switch between, so
- * it carries no Use button; the Active mark still shows when idle ones sit next
- * to it.
- */
 export const getAccountSwitching = (connections: readonly ConnectionInfo[], unusedIds: ReadonlySet<string>) => {
   const credentials = connections.filter((connection) => connection.type === 'credential');
   return {
@@ -212,14 +126,8 @@ export const getAccountSwitching = (connections: readonly ConnectionInfo[], unus
 
 export const shouldShowModelsSection = (input: {
   modelCount: number;
-  /** False while the integration list is still loading. */
   integrationsLoaded: boolean;
   hasCredentials: boolean;
-  /**
-   * Config-defined custom providers (providerSources.custom present and parsed
-   * via `isConfigDefinedCustomProvider`) are user-editable in place, so a
-   * stale `Credentials missing` signal must not hide their models section.
-   */
   isEditableCustomProvider?: boolean;
 }): boolean =>
   input.modelCount > 0 &&

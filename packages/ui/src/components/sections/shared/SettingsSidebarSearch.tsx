@@ -3,10 +3,6 @@ import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 
-/**
- * Filter field for Settings list sidebars (agents, commands, skills). The list
- * keeps its own grouping and order; the query only hides rows that don't match.
- */
 export const SettingsSidebarSearch: React.FC<{
   value: string;
   onChange: (value: string) => void;
@@ -37,7 +33,6 @@ export const SettingsSidebarSearch: React.FC<{
   );
 };
 
-/** Shown in place of the list when a query hides every row. */
 export const SettingsSidebarNoMatches: React.FC<{ query: string }> = ({ query }) => {
   const { t } = useI18n();
   return (

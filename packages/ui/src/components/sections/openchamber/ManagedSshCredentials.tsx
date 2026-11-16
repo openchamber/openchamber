@@ -32,7 +32,6 @@ const initialState = (): InventoryState => ({
   status: 'idle', credentials: [], candidates: [], truncated: false, discoveryAttempted: false,
 });
 
-/** The managed SSH key picker inside the identity editor: inventory, discovery and import in one field. */
 export function ManagedSshCredentials({ selection, disabled = false }: {
   selection: { value: string; onChange: (value: string) => void };
   disabled?: boolean;
@@ -53,8 +52,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       setConfirmedCandidateId('');
       setPassphrase('');
     };
-    // Mounting keeps the identity's saved key; only a runtime switch makes it
-    // name a key on another machine, so only that clears it.
     reset();
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
       reset();
@@ -113,8 +110,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       }
     }
   };
-  // The saved key is an opaque reference the field can only name once the
-  // list is read, so it is read as the editor opens rather than on request.
   const sendRef = React.useRef(send);
   sendRef.current = send;
   React.useEffect(() => {
@@ -145,8 +140,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
   const selectedCredential = state.credentials.find((credential) => credential.credentialId === selection.value) ?? null;
   const rejection = rejectionMessage();
   const controlsDisabled = disabled || state.status === 'loading' || !git.managedSshCredentials;
-  // Most important first: what failed, what is in progress, what blocks the
-  // feature, then outcomes and empty states.
   const status = (text: string, tone: StatusTone) => ({ text, tone });
   const statusLine = rejection
     ? status(rejection, 'error')
@@ -159,7 +152,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
     : state.status === 'ready' && !state.credentials.length ? status(t('settings.sourceControl.ssh.empty'), 'neutral')
     : null;
 
-  // The editor draws the field's label; this is the control column of its row.
   return <div className="flex min-w-0 flex-1 flex-col gap-2">
     <SettingsStackedField label={t('settings.sourceControl.ssh.passphrase')}
       info={t('settings.sourceControl.ssh.passphraseHint')}>
@@ -171,13 +163,10 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
           setState((current) => ({ ...current, candidates: [], discoveryAttempted: false }));
         }} />
     </SettingsStackedField>
-    {/* Keep actions on the same line as the disabled stand-in. Long selected
-        fingerprints truncate within the remaining width instead of wrapping actions. */}
     <div className="flex min-w-0 items-center gap-2">
       <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
         <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.sourceControl.ssh.title')}>
           <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
-            {/* The value is an opaque reference; only the safe label may be shown. */}
             {selectedCredential ? describeCredential(selectedCredential) : undefined}
           </SelectValue>
         </SelectTrigger>
@@ -185,8 +174,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
           {describeCredential(credential)}
         </SelectItem>)}</SelectContent>
       </Select>
-      {/* The list loads as the editor opens; this only brings it back after
-          a failed read or a runtime switch. */}
       {state.status === 'idle' || state.status === 'error' ? (
         <Button size="sm" variant="outline" className="shrink-0" disabled={controlsDisabled} onClick={() => void send({ operation: 'inventory' })}>
           {t('settings.sourceControl.ssh.load')}
@@ -217,9 +204,6 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
         {[candidate.label, candidateReason(candidate)].filter(Boolean).join(' · ')}
       </p>)}
     </div> : null}
-    {/* One status line, always in place: switching auth method or loading
-        the list must not grow the dialog, so the slot keeps its line even
-        when empty and shows only the most important message. */}
     <p
       role={statusLine?.tone === 'error' ? 'alert' : 'status'}
       title={statusLine?.text}

@@ -6,7 +6,6 @@ import type { ProjectSetupSource } from '@/lib/openchamberConfig';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectSetupState } from './useProjectSetup';
 
-/** Where an action or a command lives: in the repo for the whole team, or only in the user's own settings. */
 export const ProjectScopeChip: React.FC<{ source: ProjectSetupSource }> = ({ source }) => {
   const { t } = useI18n();
   return source === 'shared'
@@ -14,7 +13,6 @@ export const ProjectScopeChip: React.FC<{ source: ProjectSetupSource }> = ({ sou
     : <SettingsCardChip>{t('settings.projects.scope.personal')}</SettingsCardChip>;
 };
 
-/** Stands in for a tab's content while the setup loads, or when it could not be read. */
 export const ProjectSetupUnavailable: React.FC<{ setupState: ProjectSetupState }> = ({ setupState }) => {
   const { t } = useI18n();
   if (setupState.load.state === 'failed') {

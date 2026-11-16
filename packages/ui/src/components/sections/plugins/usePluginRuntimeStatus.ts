@@ -16,9 +16,7 @@ import {
 } from './pluginLoadState';
 
 export type PluginRuntimeStatus =
-  /** No answer for this directory yet. */
   | { kind: 'loading' }
-  /** The read failed, or the row has no identity OpenCode could report. */
   | { kind: 'unknown' }
   | { kind: 'known'; load: PluginLoadState; update: PluginUpdateFlag; target: PluginRuntimeTarget };
 
@@ -33,7 +31,6 @@ export function usePluginRuntimeStatus(target: PluginRuntimeTarget | null): Plug
   }, [runtime, scope, target]);
 }
 
-/** The update this client started for a package target in the current directory, if any. */
 export function usePluginPackageUpdate(target: PluginRuntimeTarget | null): PluginPackageUpdate | null {
   const scope = getPluginsScopeKey(getPluginsConfigDirectory());
   const key = target?.kind === 'package' ? getPluginUpdateKey(scope, target.target) : null;

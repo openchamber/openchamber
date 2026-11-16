@@ -53,7 +53,6 @@ export const ProjectsPage: React.FC = () => {
   }, [selectedProject, updateProjectMeta]);
 
   const selectedProjectId = selectedProject?.id ?? null;
-  // The worktrees page is a main-window surface; the phone has its own project sheet for worktrees.
   const handleOpenWorktrees = React.useMemo(() => {
     if (isMobile || !selectedProjectId) return undefined;
     return () => {

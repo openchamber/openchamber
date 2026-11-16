@@ -63,10 +63,8 @@ const getVariantOptionsForModel = (
   const model = findCatalogModel(provider?.models, parsedModel.modelId);
   return modelVariantNames(model);
 };
-/** The colour the form shows for a stored value; empty reads as automatic, as in the colour resolver. */
 const storedAgentColor = (stored: string | null | undefined): string => configuredAgentColor(stored)?.toLowerCase() ?? '';
 
-/** Everything the page writes into the agent's config file. */
 interface FormState {
   draftName: string;
   draftScope: AgentScope;
@@ -78,7 +76,6 @@ interface FormState {
   temperature: number | undefined;
   topP: number | undefined;
   system: string;
-  /** Six-digit hex, or '' for the automatic theme colour. */
   color: string;
 }
 
@@ -105,8 +102,6 @@ export const AgentsPage: React.FC = () => {
     setSelectedAgent: s.setSelectedAgent,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsDirectory));
   // SAFETY: the agents store attaches scope, group, path and legacy to every
@@ -114,9 +109,6 @@ export const AgentsPage: React.FC = () => {
   // stored entry, not from the resolved `AgentInfo`.
   const selectedAgent = (selectedAgentName ? getAgentByName(selectedAgentName, settingsDirectory) : null) as AgentWithExtras | null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);
-  // The resolved runtime values (built-in defaults, plugin-injected agents) are
-  // shown only as placeholder hints; the form state stays the stored entry, so
-  // a save never writes them back.
   const runtimeDescription = isNewAgent ? '' : selectedAgent?.description?.trim() ?? '';
   const runtimeSystem = isNewAgent ? '' : selectedAgent?.system?.trim() ?? '';
 
@@ -134,18 +126,8 @@ export const AgentsPage: React.FC = () => {
   const [isCreating, setIsCreating] = React.useState(false);
   const [storedAt, setStoredAt] = React.useState<{ legacy: boolean; path: string | null; source: AgentEntityEnvelope['source'] } | null>(null);
 
-  /**
-   * The agent's stored entry. A save rewrites `request` wholesale, so the
-   * headers and body keys this form does not expose are carried over from here
-   * instead of being dropped.
-   */
   const entityRef = React.useRef<AgentEntity>({});
 
-  /**
-   * The permissions section's save routine. It writes its own request, but the
-   * page owns the indicator, so the page's save runs it too and reports one
-   * outcome for both.
-   */
   const permissionsSaveRef = React.useRef<(() => Promise<AutosaveResult>) | null>(null);
   const registerPermissionsSave = React.useCallback(
     (routine: (() => Promise<AutosaveResult>) | null) => {
@@ -154,9 +136,6 @@ export const AgentsPage: React.FC = () => {
     [],
   );
 
-  // What the agent's config file currently holds. A save writes only when the
-  // form differs from it, and an incoming refresh only repopulates the form
-  // when the stored value moved away from it.
   const savedRef = React.useRef<FormState | null>(null);
   const selectionKey = JSON.stringify([selectedAgentName, settingsDirectory, isNewAgent]);
   const selectionRef = React.useRef(selectionKey);
@@ -219,9 +198,6 @@ export const AgentsPage: React.FC = () => {
     };
   }, [agentDraft, isNewAgent]);
 
-  // An existing agent is edited from its OWN stored entry, not from the
-  // resolved `AgentInfo`: the resolved view already merges built-in defaults
-  // and global config, and writing that back would bake them into the file.
   React.useEffect(() => {
     if (isNewAgent || !selectedAgentName) return;
     let cancelled = false;
@@ -236,8 +212,6 @@ export const AgentsPage: React.FC = () => {
         draftName: '',
         draftScope: 'user',
         description: entity.description || '',
-        // A stored override often omits `mode` (built-in build/plan); fall back
-        // to the resolved mode so an unrelated edit never writes `subagent`.
         mode: entity.mode || selectedAgent?.mode || 'subagent',
         model: parsedModel ? `${parsedModel.providerID}/${parsedModel.modelID}` : '',
         variant: parsedModel?.variant || '',
@@ -258,7 +232,6 @@ export const AgentsPage: React.FC = () => {
         current.color !== saved.color
       );
       setStoredAt({ legacy: envelope.legacy === true, path: envelope.path, source: envelope.source });
-      // A refresh can publish an older write while the next draft is still being edited.
       if (hydratedSelectionRef.current === selectionKey && dirty) return;
       hydratedSelectionRef.current = selectionKey;
 
@@ -288,8 +261,6 @@ export const AgentsPage: React.FC = () => {
         })
       : null;
 
-    // `request` is replaced as a whole on write, so the headers and any body
-    // keys this form does not own are carried over from the stored entry.
     const storedRequest = entityRef.current.request;
     const body: AgentRequestBody = { ...storedRequest?.body };
     if (temperature === undefined) delete body.temperature;
@@ -313,29 +284,20 @@ export const AgentsPage: React.FC = () => {
       request: Object.keys(request).length > 0 ? request : null,
     };
     if (trimmedDescription) config.description = trimmedDescription;
-    // Written only when it changed, so an untouched agent keeps whatever its
-    // file holds; null removes the key and the theme colour returns.
     if (color !== (savedRef.current?.color ?? '')) config.color = color || null;
     if (isNewAgent && draftScope) config.scope = draftScope;
     if (isNewAgent && agentDraft?.hidden !== undefined) config.hidden = agentDraft.hidden;
-    // A duplicate carries the source agent's rules; the permissions editor only
-    // appears once the agent exists, so this is the one path that writes them
-    // at creation time.
     if (isNewAgent && agentDraft?.permissions?.length) {
       config.permissions = agentDraft.permissions;
     }
     return config;
   }, [agentDraft, color, description, draftScope, isNewAgent, mode, model, steps, system, temperature, topP, variant]);
 
-  // An existing agent writes itself; a new one is only created once the user
-  // confirms it, so an abandoned draft never reaches disk.
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const saved = savedRef.current;
     const agentName = selectedAgentName?.trim();
     if (isNewAgent || !saved || !agentName) return AUTOSAVE_UNCHANGED;
 
-    // The permissions section is part of this page, so its write goes out with
-    // the page's and both report through one indicator.
     const permissionsResult = permissionsSaveRef.current
       ? await permissionsSaveRef.current()
       : AUTOSAVE_UNCHANGED;

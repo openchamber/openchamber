@@ -87,18 +87,13 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   const [discovering, setDiscovering] = React.useState(false);
   const [discoveryError, setDiscoveryError] = React.useState<string | null>(null);
   const [discoveredModels, setDiscoveredModels] = React.useState<DiscoveredModel[] | null>(null);
-  // Rows open for editing. A provider can carry dozens of imported models, so
-  // saved and imported rows start collapsed; a row added by hand opens.
   const [expandedRows, setExpandedRows] = React.useState<Set<string>>(() => (
     new Set(initialValues ? [] : form.models.map((model) => model.row))
   ));
-  // Only gateways with mutual TLS need a certificate, so the section stays
-  // folded unless one is saved or a field has an error.
   const [certificateOpen, setCertificateOpen] = React.useState(() => hasClientCertificate(initialValues));
   const seededEditProviderIdRef = React.useRef<string | null>(null);
   const logoProviderId = form.providerID.trim() || 'custom';
   const { hasLogo: providerHasLogo } = useProviderLogo(logoProviderId);
-  // A logo stored under the typed ID: kept when the provider was removed and is added again.
   const storedLogo = useUIStore((state) => state.customProviderLogos[logoProviderId]);
   const pickedLogoFile = form.logo instanceof File ? form.logo : null;
   const [pickedLogoUrl, setPickedLogoUrl] = React.useState<string | null>(null);
@@ -116,8 +111,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     if (!initialValues) {
       return;
     }
-    // Edit mode: seed once per provider id so parent re-renders (new object
-    // identity for the same snapshot) do not wipe in-progress edits.
     if (isEdit && seededEditProviderIdRef.current === initialValues.providerID) {
       return;
     }
@@ -138,7 +131,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
 
   const setTls = (key: keyof ClientCertificateFields, value: string) => {
     setForm((prev) => ({ ...prev, tls: { ...(prev.tls ?? EMPTY_CLIENT_CERTIFICATE), [key]: value } }));
-    // Either half's error is about the pair, so a change clears both.
     setErr((prev) => ({ ...prev, tlsCert: undefined, tlsKey: undefined }));
   };
 
@@ -206,7 +198,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setForm((previous) => {
       const existing = new Set(previous.models.map((model) => model.id.trim()).filter(Boolean));
       const added = selected.filter((model) => !existing.has(model.id)).map(modelRowFromDiscovery);
-      // The blank starter row of a new form gives way to the imported models.
       const kept = previous.models.filter((model) => model.id.trim() || model.name.trim());
       return { ...previous, models: [...kept, ...added] };
     });
@@ -251,7 +242,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setModelErrors(output.models);
     setHeaderErrors(output.headers);
     if (output.err.tlsCert || output.err.tlsKey) setCertificateOpen(true);
-    // A collapsed row would hide its own error.
     const rowsWithErrors = form.models
       .filter((_, index) => Object.values(output.models[index] ?? {}).some(Boolean))
       .map((model) => model.row);
@@ -306,7 +296,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               if (!(protocol in CUSTOM_PROVIDER_PROTOCOLS)) {
                 return;
               }
-              // Saved levels were spelled for the old protocol; rebuild them for the new one.
               setForm((prev) => ({
                 ...prev,
                 protocol,
@@ -352,7 +341,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
           info={t('settings.providers.page.custom.field.icon.info')}
         >
           <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('settings.providers.page.custom.field.icon.label')}>
-            {/* Default keeps the provider's own logo when its id has one. */}
             <Button
               type="button"
               variant={form.icon === null ? 'chip' : 'ghost'}
@@ -488,8 +476,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
                 ...previous,
                 models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: true, metadataSource: 'manual' } : entry),
               }))}
-              // Unchecked writes `chat` explicitly: the save merges over the
-              // stored entry, so leaving `type` out would keep `image`.
               onImageGenerationChange={(imageGeneration) => setForm((previous) => ({
                 ...previous,
                 models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, type: imageGeneration ? 'image' : 'chat' } : entry),

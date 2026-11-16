@@ -4,11 +4,6 @@ import { SettingsGroupTitle } from '@/components/sections/shared/SettingsSection
 import { useI18n } from '@/lib/i18n';
 import { BusyDots } from '@/components/ui/busy-dots';
 
-/**
- * Device-authorization step shared by the GitHub and GitLab cards: the code
- * to type into the provider, a way back to the provider page, and the quiet
- * "waiting" line with cancel. Kept identical so both providers read the same.
- */
 export const DeviceFlowCode: React.FC<{
   code: string;
   description: string;
