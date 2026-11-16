@@ -118,7 +118,20 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     },
 };
 
-export const composerEditorTheme = EditorView.theme(COMPOSER_EDITOR_THEME_SPEC);
+// external: #7096 Chromium on Android reads text a `::before` paints inside an editable as the field's own text.
+// external: https://github.com/marijnh/style-mod/blob/main/src/style-mod.js style-mod expands `&` inside an @-block against the @-rule, so this selector gets the theme scope only without one.
+const PLACEHOLDER_ALT_TEXT_SPEC = {
+    '@supports (content: "" / "")': {
+        '.cm-content.cm-composer-empty .cm-line::before': {
+            content: 'var(--composer-placeholder) / ""',
+        },
+    },
+};
+
+export const composerEditorTheme = EditorView.theme({
+    ...COMPOSER_EDITOR_THEME_SPEC,
+    ...PLACEHOLDER_ALT_TEXT_SPEC,
+});
 
 /**
  * Outside CodeMirror's iOS branch, devices keep `drawSelection()` but show the

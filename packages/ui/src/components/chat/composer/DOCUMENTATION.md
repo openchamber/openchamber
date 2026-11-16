@@ -1039,6 +1039,37 @@ cap their width at the available line width minus the shared chip's 2px inline
 margins; the label's existing ellipsis then handles long summaries. This is local
 to the composer and leaves the source string and sent-message chips unchanged.
 
+### Why the hint is a `::before` and not `placeholder()`
+
+The empty composer's hint is a `::before` on its first line, drawn by
+`editor/theme.ts` from the `cm-composer-empty` class and the
+`--composer-placeholder` property that `ComposerEditor` puts on the content
+element. CodeMirror's `placeholder()` widget sat at the caret of an empty
+document and broke the text probe that iOS smart-spacing keyboards run before
+committing, so nothing typed arrived (#5093). A pseudo-element is not in the
+DOM, so that probe sees an empty line.
+
+### Why the hint's generated text has empty alternative text
+
+Chromium on Android counts text a pseudo-element paints inside an editable as
+the field's own text. Without alternative text, the empty composer reported
+"Plan, build, or ask" with the caret after it to accessibility services, and
+dictation apps that read the field inserted their text as a continuation of the
+hint (#7096). `content: var(--composer-placeholder) / ""` keeps the hint on
+screen and gives it empty accessible text. The DOM is unchanged, so the
+keyboard text probe from #5093 still sees an empty line.
+
+The rule sits behind `@supports (content: "" / "")` for browsers without
+alternative text in `content`, Safari before 17.4 among them. A value with
+`var()` always passes parsing, so such a browser keeps the declaration and only
+finds it invalid after substituting the variable. `content` then falls back to
+`normal`, the earlier rule does not step in, and the hint disappears.
+
+The guarded rule lives in its own spec merged after
+`COMPOSER_EDITOR_THEME_SPEC`, so it is emitted later than the rule it
+overrides. Its selector has no `&`, because inside an @-block style-mod expands
+`&` against the @-rule and the rule never reaches the page.
+
 ## Ordering rules worth knowing
 
 ### Why mention deduplication requires a full path
