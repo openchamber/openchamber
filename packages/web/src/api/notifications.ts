@@ -206,9 +206,9 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
     return false;
   }
 
-  // Background push is the delivery channel when the web/PWA client is not
-  // focused. Keep the main notification toggle and templates enabled, but avoid
-  // also showing the same foreground notification from a hidden page.
+
+
+
   if (!isClientFocused() && await hasActivePushSubscription()) {
     return true;
   }
@@ -218,8 +218,8 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
   }
 
   try {
-    // Some installed PWAs expose Notification.permission but only allow
-    // notifications through an active service worker registration.
+
+
     if (await notifyWithServiceWorker(payload)) {
       return true;
     }
