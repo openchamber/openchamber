@@ -1,16 +1,3 @@
-/**
- * Project setup routes: the client-owned part of a project's config file
- * (worktree setup commands, project actions, draft starters).
- *
- * These replace the shared UI's direct `/api/fs/*` access to
- * `~/.config/openchamber/projects/<projectId>.json`. The client no longer
- * resolves the home directory or composes the path, and every write goes
- * through the same lock the scheduled-task writers hold.
- *
- * `/api/projects` is on the JSON-body allowlist in `core-routes.js`, so
- * `req.body` is parsed here without a per-route parser.
- */
-
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import path from 'node:path';
 import { z } from 'zod';
@@ -98,7 +85,6 @@ export const registerProjectSetupRoutes = (app, dependencies) => {
     }
   });
 
-  // The team's shared file in the checkout; see `updateSharedProjectSetup`.
   app.put('/api/projects/:projectId/config/shared', async (req, res) => {
     if (!isObjectRecord(req.body)) {
       return res.status(400).json({ error: 'Body must be an object' });
