@@ -781,7 +781,7 @@ const SourceBoardBody: React.FC<{
                     onChanged={refreshRepositoryItem}
                 />
             ) : undefined}
-            assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} context={context} onChanged={refreshRepositoryItem} /> : undefined}
+            assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} writeAccess={browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.writeAccess : undefined} context={context} onChanged={refreshRepositoryItem} /> : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                     <SourceBoardReviewers

@@ -284,8 +284,8 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
-                assigneesControl={reference.kind === 'issue' && writeContext ? (
-                    <SourceBoardAssignees issue={reference} detail={detail} context={writeContext} onChanged={refreshItem} />
+                assigneesControl={reference.kind === 'issue' && reference.linked !== true && writeContext ? (
+                    <SourceBoardAssignees issue={reference} detail={detail} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />

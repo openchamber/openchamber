@@ -3,8 +3,9 @@ const DEVELOPER_ACCESS_LEVEL = 30;
 const gitlabWriteAccess = (raw, isPlainObject) => {
   const permissions = raw?.permissions;
   if (!isPlainObject(permissions)) return undefined;
-  return [permissions.project_access?.access_level, permissions.group_access?.access_level]
-    .some((level) => Number.isInteger(level) && level >= DEVELOPER_ACCESS_LEVEL);
+  const levels = [permissions.project_access?.access_level, permissions.group_access?.access_level].filter(Number.isInteger);
+  if (!levels.length) return undefined;
+  return levels.some((level) => level >= DEVELOPER_ACCESS_LEVEL);
 };
 
 export const gitlabWithWriteAccess = (value, raw, isPlainObject) => {

@@ -203,9 +203,10 @@ const assigneeChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
 export const SourceBoardAssignees: React.FC<{
     issue: RepositoryIssueReference;
     detail: CachedValue<RepositoryReferenceDetail>;
+    writeAccess?: boolean;
     context: SourceControlReadContext;
     onChanged: () => void | Promise<void>;
-}> = ({ issue, detail, context, onChanged }) => {
+}> = ({ issue, detail, writeAccess, context, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const [busy, setBusy] = React.useState(false);
@@ -235,7 +236,7 @@ export const SourceBoardAssignees: React.FC<{
 
     if (detail.status === 'error') return null;
     if (!assignees) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
-    const editable = candidates !== null;
+    const editable = candidates !== null && writeAccess !== false;
     return (
         <MetaValue
             empty={false}

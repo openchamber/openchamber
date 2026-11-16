@@ -69,9 +69,10 @@ const ada: RepositoryReferenceReviewer = { id: 'ada-id', login: 'ada' };
 const grace: RepositoryReferenceReviewer = { id: 'grace-id', login: 'grace' };
 const linus: RepositoryReferenceReviewer = { id: 'linus-id', login: 'linus' };
 
-const detailWith = (assignees?: RepositoryReferenceReviewer[]): RepositoryReferenceDetail => {
+const detailWith = (assignees?: RepositoryReferenceReviewer[], writeAccess?: boolean): RepositoryReferenceDetail => {
   const detail: RepositoryReferenceDetail = { number: 7, comments: [], commentTotal: 0, pull: null };
   if (assignees) detail.assignees = assignees;
+  if (writeAccess !== undefined) detail.writeAccess = writeAccess;
   return detail;
 };
 
@@ -87,6 +88,7 @@ const setProvider = async () => {
 type ShowOptions = {
   assignees?: RepositoryReferenceReviewer[];
   candidates?: RepositoryReferenceReviewer[] | Error;
+  writeAccess?: boolean;
   failSave?: boolean;
 };
 
@@ -132,7 +134,8 @@ const show = async (options: ShowOptions = {}) => {
         <RuntimeAPIContext.Provider value={apis}>
           <SourceBoardAssignees
             issue={issue}
-            detail={{ status: 'ready', value: detailWith(options.assignees) }}
+            detail={{ status: 'ready', value: detailWith(options.assignees, options.writeAccess) }}
+            writeAccess={options.writeAccess}
             context={context}
             onChanged={() => { changed += 1; }}
           />
@@ -160,6 +163,22 @@ describe('an issue\'s assignees row', () => {
     await show({ assignees: [ada, grace] });
     expect(host.textContent).toContain('ada');
     expect(host.textContent).toContain('grace');
+    expect(pencil()).not.toBeNull();
+  });
+
+  test('hides the pencil when the detail says the account cannot write', async () => {
+    await show({ assignees: [ada], writeAccess: false });
+    expect(host.textContent).toContain('ada');
+    expect(pencil()).toBeNull();
+  });
+
+  test('keeps the pencil when the detail does not say whether the account can write', async () => {
+    await show({ assignees: [ada] });
+    expect(pencil()).not.toBeNull();
+  });
+
+  test('keeps the pencil when the detail says the account can write', async () => {
+    await show({ assignees: [ada], writeAccess: true });
     expect(pencil()).not.toBeNull();
   });
 

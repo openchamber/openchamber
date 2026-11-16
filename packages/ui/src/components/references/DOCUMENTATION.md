@@ -537,7 +537,8 @@ preview's footer holds actions instead of what the agent gets.
   `features.authorCanReview` (GitLab).
 - Assignees (`SourceBoardAssignees`, the same picker): an issue's row names its
   current assignees and offers the pencil once the project answered who can be
-  assigned. That read uses `role: 'assignee'`, so an owner-only repository still
+  assigned and the detail does not say `writeAccess: false`. That read uses
+  `role: 'assignee'`, so an owner-only repository still
   offers its owner; reviewers keep the default role. An empty candidate list
   still opens the picker with its empty message, a failed
   candidate read keeps the pencil and shows the failure there, and a host that

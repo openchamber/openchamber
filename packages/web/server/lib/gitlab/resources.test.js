@@ -1308,3 +1308,31 @@ describe('GitLab label filtering', () => {
     expect(client.Issues.all).not.toHaveBeenCalled();
   });
 });
+
+describe('GitLab write access', () => {
+  const getIssueWith = async (permissions) => {
+    const project = { ...sourceProject };
+    if (permissions !== undefined) project.permissions = permissions;
+    return setup({
+      Projects: { show: vi.fn(async (id) => (Number(id) === 2 ? targetProject : project)) },
+    }).service.getIssue('/repo', 3, undefined, 'origin');
+  };
+
+  it('keeps write access unknown when neither membership level is an integer', async () => {
+    const issue = await getIssueWith({ project_access: { access_level: null }, group_access: { access_level: null } });
+    expect(issue).not.toHaveProperty('writeAccess');
+  });
+
+  it('keeps write access unknown when GitLab sends no permissions', async () => {
+    const issue = await getIssueWith(undefined);
+    expect(issue).not.toHaveProperty('writeAccess');
+  });
+
+  it('denies write access below Developer', async () => {
+    await expect(getIssueWith({ project_access: { access_level: 20 } })).resolves.toMatchObject({ writeAccess: false });
+  });
+
+  it.each([30, 40])('allows write access at or above Developer (%i)', async (level) => {
+    await expect(getIssueWith({ project_access: { access_level: level } })).resolves.toMatchObject({ writeAccess: true });
+  });
+});
