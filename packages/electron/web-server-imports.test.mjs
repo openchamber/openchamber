@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -14,11 +23,12 @@ import { fileURLToPath } from 'node:url';
 // unused and a cleanup PR (like #2296, which broke issue #2300) de-exports a
 // symbol the desktop app needs at module-link time.
 //
-// This test parses every static named import (plus `} = await import()`
-// destructures) of `@openchamber/web/server` modules in this package and
-// asserts each imported name is still exported by the corresponding source
-// file under packages/web. It fails on the pre-#2300-fix tree and passes
-// with the export restored, independently of knip.
+// This test parses every static named import, `} = await import()`
+// destructure, and `import(...).then(({ ... }) => ...)` destructure of
+// `@openchamber/web/server` modules in this package and asserts each
+// imported name is still exported by the corresponding source file under
+// packages/web. It fails on the pre-#2300-fix tree and passes with the
+// export restored, independently of knip.
 
 const ELECTRON_DIR = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(ELECTRON_DIR, '..', 'web');
@@ -84,10 +94,30 @@ const dynamicDestructures = (source) => {
   return out;
 };
 
-const resolveServerFile = (specifier) => {
+/**
+ * `import('spec').then(({ a, b }) => ...)` — the shape main.mjs uses to
+ * lazily load the dev-tunnel client (#2306). Returns [{ specifier, names }].
+ */
+const thenDestructures = (source) => {
+  const out = [];
+  const re =
+    /import\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*then\s*\(\s*\(\s*\{([^}]*)\}\s*\)/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const names = match[2]
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => part.split(/[:=]/)[0].trim());
+    out.push({ specifier: match[1], names });
+  }
+  return out;
+};
+
+const resolveServerFile = (specifier, webDir = WEB_DIR) => {
   const subpath = specifier.replace(
     '@openchamber/web/server',
-    `${WEB_DIR}/server`,
+    `${webDir}/server`,
   );
   const candidates = [subpath, `${subpath}.js`, `${subpath}/index.js`];
   for (const candidate of candidates) {
@@ -178,18 +208,21 @@ const sourceExports = (file, visited = new Set()) => {
   return names;
 };
 
-test('every name Electron statically imports from @openchamber/web/server is still exported', () => {
+/** Scan an Electron tree for web-server imports and compare each name against the web source tree. */
+const analyzeImports = (electronDir, webDir) => {
   const checked = [];
   const missing = [];
   const unresolvable = [];
 
-  for (const file of collectMjs(ELECTRON_DIR)) {
+  for (const file of collectMjs(electronDir)) {
     const source = stripComments(readFileSync(file, 'utf8'));
-    const imports = [...staticImports(source), ...dynamicDestructures(source)].filter(
-      ({ specifier }) => SERVER_SPECIFIER.test(specifier),
-    );
+    const imports = [
+      ...staticImports(source),
+      ...dynamicDestructures(source),
+      ...thenDestructures(source),
+    ].filter(({ specifier }) => SERVER_SPECIFIER.test(specifier));
     for (const { specifier, names } of imports) {
-      const target = resolveServerFile(specifier);
+      const target = resolveServerFile(specifier, webDir);
       if (!target) {
         unresolvable.push(`${path.basename(file)}: ${specifier}`);
         continue;
@@ -200,12 +233,18 @@ test('every name Electron statically imports from @openchamber/web/server is sti
         if (!exported.has(name)) {
           missing.push(
             `${path.basename(file)} imports { ${name} } from ${specifier}, ` +
-              `but ${path.relative(WEB_DIR, target)} does not export it`,
+              `but ${path.relative(webDir, target)} does not export it`,
           );
         }
       }
     }
   }
+
+  return { checked, missing, unresolvable };
+};
+
+test('every name Electron imports from @openchamber/web/server is still exported', () => {
+  const { checked, missing, unresolvable } = analyzeImports(ELECTRON_DIR, WEB_DIR);
 
   assert.deepEqual(
     unresolvable,
@@ -216,5 +255,55 @@ test('every name Electron statically imports from @openchamber/web/server is sti
     checked.length > 0,
     'expected to find at least one Electron import from @openchamber/web/server',
   );
+  // #2306: the `.then()` destructure in main.mjs must be checked, and adding
+  // it must not drop any name the older parsers already covered.
+  assert.ok(
+    checked.includes(
+      'main.mjs -> @openchamber/web/server/lib/dev-tunnel/client.js :: createDevTunnelClient',
+    ),
+    `expected the .then() destructure in main.mjs to be checked, got:\n${checked.join('\n')}`,
+  );
+  assert.ok(
+    checked.some((entry) => entry.endsWith(':: provideLoginShellEnvSnapshot')) &&
+      checked.some((entry) => entry.endsWith(':: startWebUiServer')),
+    'expected the static and await-destructure shapes to stay checked',
+  );
   assert.deepEqual(missing, [], `broken Electron web-server imports:\n${missing.join('\n')}`);
+});
+
+test('the guard catches a de-exported name reached through a .then() destructure (#2306 negative control)', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'web-server-imports-'));
+  const electronDir = path.join(root, 'electron');
+  const webDir = path.join(root, 'web');
+  const clientFile = path.join(webDir, 'server', 'lib', 'dev-tunnel', 'client.js');
+  mkdirSync(path.dirname(clientFile), { recursive: true });
+  mkdirSync(electronDir, { recursive: true });
+  writeFileSync(
+    path.join(electronDir, 'main.mjs'),
+    [
+      'const getDevTunnelClient = async () => {',
+      "  devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')",
+      '    .then(({ createDevTunnelClient }) => createDevTunnelClient({ logger: log }));',
+      '};',
+      '',
+    ].join('\n'),
+  );
+
+  try {
+    writeFileSync(clientFile, 'export const createDevTunnelClient = () => {};\n');
+    const healthy = analyzeImports(electronDir, webDir);
+    assert.deepEqual(healthy.missing, []);
+    assert.ok(
+      healthy.checked.includes(
+        'main.mjs -> @openchamber/web/server/lib/dev-tunnel/client.js :: createDevTunnelClient',
+      ),
+    );
+
+    writeFileSync(clientFile, 'export const somethingElse = () => {};\n');
+    const broken = analyzeImports(electronDir, webDir);
+    assert.equal(broken.missing.length, 1);
+    assert.match(broken.missing[0], /createDevTunnelClient/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
