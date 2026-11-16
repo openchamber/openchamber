@@ -30,6 +30,7 @@ import { AssistantTurnActionButtons } from './AssistantTurnActionButtons';
 import { AssistantTurnFooter } from './AssistantTurnFooter';
 import { useAssistantForkActions } from './useAssistantForkActions';
 import { useAssistantImageShare } from './useAssistantImageShare';
+import { useAssistantMarkdownSave } from './useAssistantMarkdownSave';
 import { useAssistantPlanActions } from './useAssistantPlanActions';
 import { useAssistantRenderedParts } from './useAssistantRenderedParts';
 import { useFooterSheetActions } from './useFooterSheetActions';
@@ -150,6 +151,11 @@ export const AssistantMessageBody = React.memo(({
         messageId,
         messageContentRef,
         messageTextContentRef,
+        assistantTextParts,
+        earlierAssistantText: turnGroupingContext?.earlierAssistantText,
+    });
+    const { saveTurnAsMarkdown } = useAssistantMarkdownSave({
+        messageId,
         assistantTextParts,
         earlierAssistantText: turnGroupingContext?.earlierAssistantText,
     });
@@ -275,6 +281,7 @@ export const AssistantMessageBody = React.memo(({
         onToggleContextPin,
         playFooterTTS,
         reviewTransferAction,
+        saveTurnAsMarkdown,
         shareTurnAsImage,
         showMessageTTSButtons,
         stopFooterTTS,

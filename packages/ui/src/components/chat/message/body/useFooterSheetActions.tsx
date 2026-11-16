@@ -26,6 +26,7 @@ type FooterSheetActionsParams = {
     onToggleContextPin: (() => void) | undefined;
     playFooterTTS: (text: string) => Promise<void> | void;
     reviewTransferAction: { tooltip: string; onClick: () => void | Promise<void> } | undefined;
+    saveTurnAsMarkdown: () => Promise<void>;
     shareTurnAsImage: () => Promise<void>;
     showMessageTTSButtons: boolean;
     stopFooterTTS: () => void;
@@ -51,6 +52,7 @@ export const useFooterSheetActions = ({
     onToggleContextPin,
     playFooterTTS,
     reviewTransferAction,
+    saveTurnAsMarkdown,
     shareTurnAsImage,
     showMessageTTSButtons,
     stopFooterTTS,
@@ -99,6 +101,13 @@ export const useFooterSheetActions = ({
                 icon: <Icon name="image-download" className="h-3.5 w-3.5" />,
                 disabled: !hasCopyableText,
                 onSelect: () => { void shareTurnAsImage(); },
+            });
+            actions.push({
+                id: 'save-markdown',
+                label: t('chat.messageBody.actions.saveAsMarkdown'),
+                icon: <Icon name="download" className="h-3.5 w-3.5" />,
+                disabled: !hasCopyableText,
+                onSelect: () => { void saveTurnAsMarkdown(); },
             });
         }
         if (onSelectMessages) {
@@ -165,5 +174,5 @@ export const useFooterSheetActions = ({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onSelectMessages, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onSelectMessages, onToggleContextPin, playFooterTTS, reviewTransferAction, saveTurnAsMarkdown, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 };
