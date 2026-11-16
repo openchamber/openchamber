@@ -13,24 +13,18 @@ import { resolveGerritProjectsFromDirectory } from './repo.js';
 const LIST_PAGE = 20;
 const STATUS_CANDIDATES = 10;
 const BRANCH_PAGE = 500;
-// Whole collections (branches) are read to the end within this bound; past
-// it the read fails instead of passing a capped list off as complete.
 const COLLECTION_MAX_ITEMS = 2000;
 const REVIEWER_SAMPLE = 25;
 const LIVE_SUMMARY_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-// `o=` options per read: each asks for what its answer maps, no more.
 const STATUS_OPTIONS = ['ALL_REVISIONS', 'LABELS', 'SUBMITTABLE', 'DETAILED_ACCOUNTS'];
 const LIST_OPTIONS = ['CURRENT_REVISION', 'LABELS', 'SUBMITTABLE', 'DETAILED_ACCOUNTS'];
-// `DETAILED_LABELS` alone leaves out each label's `approved` / `rejected` /
-// `recommended` / `disliked` summary on 3.8 (3.10 sends it), so `LABELS` is asked too.
+// external: https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#labels Gerrit 3.8 needs LABELS alongside DETAILED_LABELS for label summaries.
 const CONTEXT_OPTIONS = ['ALL_REVISIONS', 'CURRENT_COMMIT', 'LABELS', 'DETAILED_LABELS', 'DETAILED_ACCOUNTS', 'MESSAGES', 'SUBMITTABLE', 'SUBMIT_REQUIREMENTS'];
 const HEAD_OPTIONS = ['ALL_REVISIONS'];
-// `reviewers` comes with `LABELS`; nothing is answered without a label option.
 const MUTATION_OPTIONS = ['CURRENT_REVISION', 'LABELS', 'DETAILED_ACCOUNTS'];
-// Gerrit's review comments outside any file of the diff.
 const MAGIC_REVIEW_PATHS = new Set(['/COMMIT_MSG', '/MERGE_LIST', '/PATCHSET_LEVEL']);
 const CANDIDATE_OPTIONS = ['LABELS', 'DETAILED_ACCOUNTS'];
 const LIVE_OPTIONS = ['CURRENT_REVISION', 'SUBMITTABLE'];
@@ -52,7 +46,6 @@ function requireMapped(value, message) {
   return value;
 }
 
-/** Free text as one quoted search term; a bare number is the change itself. */
 const searchTerm = (query) => {
   const value = isString(query) ? query.trim() : '';
   if (!value) return '';
@@ -61,13 +54,6 @@ const searchTerm = (query) => {
   return words ? `message:"${words}"` : '';
 };
 
-/**
- * Among the changes that carry one Change-Id (cherry-picks to other
- * branches), the one a local branch is for: the open change on the branch
- * it tracks, else on the project's default branch, else the only open one,
- * else the most recently updated open one, else the newest closed one as
- * history.
- */
 export function selectChangeForBranch(candidates, { upstreamBranch, defaultBranch }) {
   const newest = (list) => list.reduce((best, raw) => (!best || String(raw.updated) > String(best.updated) ? raw : best), null);
   const open = candidates.filter((raw) => raw.status === 'NEW');
@@ -78,11 +64,6 @@ export function selectChangeForBranch(candidates, { upstreamBranch, defaultBranc
     ?? newest(candidates.filter((raw) => raw.status !== 'NEW'));
 }
 
-/**
- * Gerrit reads and writes for one session, as neutral DTOs. Every read is
- * bound to the project the directory's remote names on this instance;
- * Gerrit has no forks, so that project is the whole network.
- */
 export function createGerritResourceService({
   origin,
   client,
@@ -98,7 +79,6 @@ export function createGerritResourceService({
     return primary;
   };
 
-  /** The bound project, and the one a selector names, which must be it unless a link named it (`linked`). */
   const boundProject = async (directory, selector, remote, { linked = false } = {}) => {
     const primary = await primaryProject(directory, remote);
     if (linked && selector) return { ...primary, project: joinProjectPath(selector.owner, selector.name), owner: selector.owner, name: selector.name };
@@ -106,7 +86,6 @@ export function createGerritResourceService({
     return primary;
   };
 
-  /** The branch the project's HEAD names; unknown (null) when it cannot be read, except a refused account. */
   const readDefaultBranch = async (name) => {
     try {
       const head = await client.get(`/projects/${enc(name)}/HEAD`);
@@ -119,7 +98,6 @@ export function createGerritResourceService({
 
   const projectOf = (primary, options) => requireMapped(mapGerritProject(primary.project, identity, options), 'Gerrit returned an invalid project');
 
-  /** A change by number in the bound project, read with `options`. */
   const readChange = async (name, number, options) => {
     const raw = await client.get(changePath(name, number), { o: options });
     if (!isPlainObject(raw) || raw._number !== number) throw malformed('Gerrit returned another change');
@@ -136,7 +114,6 @@ export function createGerritResourceService({
     return { primary, project, raw, request: requireChange(raw, project) };
   };
 
-  /** The patchset a read asks for, by commit SHA; the current one when none is named. */
   const revisionOf = (raw, revision) => {
     if (revision === undefined || revision === null || revision === '') {
       if (!COMMIT_SHA.test(String(raw.current_revision))) throw malformed('Gerrit returned a change without a current patchset');
@@ -148,7 +125,6 @@ export function createGerritResourceService({
     return revision;
   };
 
-  /** The relation chain around a change; absent (undefined) when it cannot be read. */
   const readStack = async (name, number, base) => {
     try {
       return mapGerritRelatedStack(await client.get(`${changePath(name, number)}/revisions/current/related`), { origin, project: name, base });
@@ -186,7 +162,6 @@ export function createGerritResourceService({
     return drafts;
   };
   const hasDrafts = (drafts) => Object.values(drafts).some((comments) => Array.isArray(comments) && comments.length > 0);
-  /** Only the viewer's own draft can be changed: Gerrit shows no one else's. */
   const requireDraft = async (providerTarget, commentId) => {
     const draft = Object.values(await readDrafts(providerTarget)).flat().find((comment) => comment?.id === commentId);
     if (!draft) throw Object.assign(new Error('Review comment is not a draft of yours on this change'), { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
@@ -207,12 +182,6 @@ export function createGerritResourceService({
   };
 
   return {
-    /**
-     * A local branch's change, found by the Change-Id trailer of its tip
-     * commit, not by its name: a Gerrit change has no source branch.
-     * `localRevision.uploadedAs` is the patchset whose commit is the local
-     * tip, null when the local commit is not uploaded yet.
-     */
     async changeRequestStatus(directory, branch, remote) {
       const primary = await primaryProject(directory, remote);
       const defaultBranch = await readDefaultBranch(primary.project);
@@ -243,7 +212,6 @@ export function createGerritResourceService({
       return status;
     },
 
-    /** One page of the bound project's changes, newest update first. */
     async listChangeRequests(directory, options = {}) {
       const page = options.page ?? 1;
       const primary = await primaryProject(directory, options.remote);
@@ -254,11 +222,6 @@ export function createGerritResourceService({
       return { items: result.items.map((raw) => requireChange(raw, project)), page, hasMore: result.hasMore };
     },
 
-    /**
-     * A change with its votes, submit requirements, patchsets, messages and
-     * inline comments. Files and diff are those of `revision` (a patchset's
-     * commit SHA), the current patchset when none is named.
-     */
     async changeRequestContext(directory, number, options = {}) {
       const { primary, project, raw, request } = await findChange(directory, number, options.project, options.remote, CONTEXT_OPTIONS, { linked: options.linked });
       const sha = revisionOf(raw, options.revision);
@@ -299,7 +262,6 @@ export function createGerritResourceService({
       };
       if (stack !== undefined) context.stack = stack;
       if (!options.includeTimeline) return context;
-      // A change is one commit: its timeline is the current patchset's.
       const commit = raw.revisions?.[raw.current_revision]?.commit;
       return {
         ...context,
@@ -318,7 +280,6 @@ export function createGerritResourceService({
       };
     },
 
-    /** Gerrit has no forks. */
     async projectUpstream(directory, remote) {
       await primaryProject(directory, remote);
       return { identity, isFork: false, upstream: null };
@@ -338,11 +299,6 @@ export function createGerritResourceService({
       }
     },
 
-    /**
-     * Who can be asked to review. Gerrit has no project-member list a user
-     * can read, so candidates are the owners and reviewers of the project's
-     * recent changes. Ids are numeric account ids.
-     */
     async listReviewerCandidates(directory, selector, remote) {
       const primary = await boundProject(directory, selector, remote);
       const changes = await client.get('/changes/', { q: `project:${primary.project}`, o: CANDIDATE_OPTIONS, n: REVIEWER_SAMPLE });
@@ -358,7 +314,6 @@ export function createGerritResourceService({
       return [...candidates.values()];
     },
 
-    /** A patchset's changes as one unified diff (`/patch` is a base64 mail; its diff part is kept). */
     async changeRequestPatch(directory, number, { project, remote, revision, linked } = {}) {
       const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
@@ -366,11 +321,6 @@ export function createGerritResourceService({
       return { patch: diffOfPatch(patch.toString('utf8')), meta: { owner: primary.owner, repo: primary.name, number } };
     },
 
-    /**
-     * Both sides of one file: the patchset's first parent (`parent=1`) and
-     * the patchset. `/COMMIT_MSG` is the commit message, which has no
-     * earlier side.
-     */
     async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision, binary, linked }) {
       const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
@@ -389,11 +339,6 @@ export function createGerritResourceService({
       return { original, modified };
     },
 
-    /**
-     * Live state of known changes. A change Gerrit cannot answer is left
-     * out, unknown rather than closed; a refused account fails the whole
-     * read so it is reconciled. Gerrit has no issues.
-     */
     async liveSummaries({ refs = [] }) {
       const summaries = await mapLimited(refs, LIVE_SUMMARY_CONCURRENCY, async (ref) => {
         try {
@@ -406,13 +351,11 @@ export function createGerritResourceService({
       return { summaries: summaries.filter(Boolean), issueSummaries: [] };
     },
 
-    /** A change by number in the bound project, with every patchset. */
     async findChangeRequest(directory, number, selector, remote) {
       const { project, raw, request } = await findChange(directory, number, selector, remote, HEAD_OPTIONS);
       return { project, raw, request };
     },
 
-    // Mutations.
 
     async resolveChangeRequestMutation(context, expected) {
       const { primary, project, request } = await findChange(context.directory, expected.number, expected.project, context.primaryRemote, MUTATION_OPTIONS);
@@ -423,7 +366,6 @@ export function createGerritResourceService({
       };
     },
 
-    /** Submits only the patchset that was reviewed: a newer upload is a target mismatch. */
     async submit({ providerTarget, expectedTarget }) {
       requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);
       const raw = await client.post(`${targetPath(providerTarget)}/submit`, {});
@@ -444,7 +386,6 @@ export function createGerritResourceService({
       return { draft: true };
     },
 
-    /** Closed is abandoned; open is restored. */
     async setState({ providerTarget, state }) {
       const raw = await client.post(`${targetPath(providerTarget)}/${state === 'closed' ? 'abandon' : 'restore'}`, {});
       if (!isPlainObject(raw) || raw._number !== providerTarget.number || changeState(raw.status) !== state) {
@@ -467,11 +408,6 @@ export function createGerritResourceService({
       return current ? notApplied() : { state: 'outcome-unknown' };
     },
 
-    /**
-     * The whole reviewer set by account id: the difference is sent, one
-     * account per call (additions, then removals), so the calls are not
-     * atomic and reconciliation succeeds only when the set matches.
-     */
     async setReviewers({ providerTarget, reviewers }) {
       const current = reviewerIds(await readTarget(providerTarget));
       const path = targetPath(providerTarget);
@@ -485,18 +421,12 @@ export function createGerritResourceService({
       return {};
     },
 
-    /** Only a match is certain: another edit since may have moved the set either way. */
     async reconcileReviewers(providerTarget, names) {
       const current = reviewerIds(await readTarget(providerTarget));
       if (current.length !== names.length || !current.every((id) => names.includes(id))) return { state: 'outcome-unknown' };
       return { state: 'succeeded', result: {} };
     },
 
-    /**
-     * The viewer's draft comments and the comment threads on the current
-     * patchset, for the diff. An older patchset's lines are not in this diff;
-     * the board keeps those.
-     */
     async reviewState(directory, number, project, remote) {
       const { primary, raw } = await findChange(directory, number, project, remote, MUTATION_OPTIONS);
       const providerTarget = { project: primary.project, number };
@@ -528,7 +458,6 @@ export function createGerritResourceService({
         draft: draftComments.length > 0 ? {
           id: String(number),
           body: '',
-          // A draft on an older patchset has no line in this diff; it shows with the file's comments.
           comments: draftComments.map((comment) => ({
             ...(comment.patch_set === currentPatchSet ? reviewCommentAt(comment) : { ...reviewCommentAt(comment), line: null, startLine: null }),
             id: comment.id,
@@ -584,7 +513,6 @@ export function createGerritResourceService({
       return {};
     },
 
-    /** Gerrit has no call for the whole draft, so each comment goes on its own; a failure leaves the rest to discard again. */
     async discardReview({ providerTarget }) {
       for (const draft of Object.values(await readDrafts(providerTarget)).flat()) {
         await client.delete(`${targetPath(providerTarget)}/revisions/${draft.patch_set}/drafts/${encodeURIComponent(draft.id)}`);
@@ -592,25 +520,17 @@ export function createGerritResourceService({
       return {};
     },
 
-    /** A change message, without votes. */
     async comment({ providerTarget, body }) {
       const result = await client.post(`${targetPath(providerTarget)}/revisions/current/review`, { message: body });
       if (!isPlainObject(result)) throw malformed('Gerrit returned an invalid review result');
       return {};
     },
 
-    /**
-     * Votes with an optional message, on the patchset the user read: the
-     * current patchset is checked first and the review is posted to that
-     * commit, so a newer upload is a target mismatch, never a vote on code
-     * nobody looked at.
-     */
     async vote({ providerTarget, votes, body, expectedTarget }) {
       requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);
       if (Object.keys(votes).length === 0 && body === undefined && !hasDrafts(await readDrafts(providerTarget))) {
         throw Object.assign(new Error('A review with no comments needs text'), { status: 422 });
       }
-      // The viewer's draft comments go out with the votes.
       const payload = { labels: votes, drafts: 'PUBLISH_ALL_REVISIONS' };
       if (body !== undefined) payload.message = body;
       const result = await client.post(`${targetPath(providerTarget)}/revisions/${expectedTarget.headSha}/review`, payload);
