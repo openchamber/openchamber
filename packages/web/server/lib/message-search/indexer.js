@@ -1,18 +1,3 @@
-/**
- * Keeps the message search index in step with OpenCode.
- *
- * Live: a session's turn ending (or one of its steps settling) queues that
- * session; a sync reads only what came after the stored cursors. Background:
- * once OpenCode is reachable, the session list is walked and every session
- * changed since it was last read is queued behind the live ones, one at a
- * time. Nothing here blocks a request or a turn.
- *
- * What goes in: the text of user messages and of settled agent replies, and,
- * when asked for (`includeReasoning`), the agent's reasoning as rows of their
- * own. Tool calls, their output and attached context records stay out.
- * Subagent sessions stay out, as they do in the command palette.
- */
-
 import { z } from 'zod';
 import { sessionParentId } from '../session-lineage.js';
 
@@ -24,8 +9,6 @@ const ROLES = ['user', 'assistant'];
 
 const isTag = (error, tag) => error?._tag === tag;
 
-// OpenCode's records and events, read once here. Only the fields the index
-// uses are parsed; anything else on them is ignored.
 const sessionSchema = z.object({
   id: z.string().min(1),
   parentID: z.string().nullish(),
@@ -70,11 +53,8 @@ const archivedEventSchema = z.object({
   data: z.object({ sessionID: z.string().min(1) }),
 });
 
-// Terminal selections appended by older builds are source material, not what
-// the user wrote (session-assist/context.js strips them the same way).
 const stripTerminalContext = (text) => text.replace(/\n*<terminal_context>\n[\s\S]*?\n<\/terminal_context>\s*$/, '');
 
-/** An agent record's parts of one kind, joined; null when it has none. */
 const joinParts = (message, schema) => {
   const blocks = [];
   for (const part of message.content ?? []) {
@@ -84,7 +64,6 @@ const joinParts = (message, schema) => {
   return blocks.length > 0 ? blocks.join('\n\n') : null;
 };
 
-/** The searchable text of a parsed message record, or null when it has none. */
 const readSearchableText = (message) => {
   if (message.type === 'user') return stripTerminalContext(message.text ?? '').trim() || null;
   return joinParts(message, textPartSchema);
@@ -101,19 +80,14 @@ const messageExists = async (client, sessionId, messageId) => {
   }
 };
 
-// An assistant record is still being written until OpenCode stamps it
-// completed; its text is not final and it must not move the cursor past it.
 const isSettled = (message) => message.type !== 'assistant' || Number.isFinite(message.time.completed);
 
 export const createMessageSearchIndexer = ({
   store,
-  // (directory) => OpenCode client, built at call time so a restarted or
-  // re-pointed OpenCode is used as soon as it exists.
   createClient,
   pageSize = PAGE_SIZE,
   liveDebounceMs = LIVE_DEBOUNCE_MS,
   backfillPauseMs = BACKFILL_PAUSE_MS,
-  // Read per record, so switching it takes effect from the next one.
   includeReasoning = () => false,
   getArchivedSessions = async () => null,
   applyOwnedArchiveState = (session) => session,
@@ -238,21 +212,17 @@ export const createMessageSearchIndexer = ({
     const directory = session.location?.directory || directoryHint || '';
     store.upsertSession({ id: sessionId, directory, title: session.title ?? '', createdAt: session.time?.created, archivedAt: session.time?.archived, lifecycleKnown: true });
 
-    // A revert hides the tail of the conversation, and the next prompt
-    // deletes it: what was read past the boundary is no longer the session.
     const revertId = session.revert?.messageID ?? null;
     const known = store.readSession(sessionId);
     if ((known?.revert_id ?? null) !== revertId) store.resetSession(sessionId, revertId);
     let cutoff = Number.POSITIVE_INFINITY;
     if (revertId) {
-      // Unknown boundary: index nothing rather than text the user took back.
       const reverted = createdSchema.safeParse(
         await client.session.message.get({ sessionID: sessionId, messageID: revertId }).catch(() => null),
       );
       cutoff = reverted.success ? reverted.data.time.created : Number.NEGATIVE_INFINITY;
     }
 
-    // The history under the cursors changed: read the session again from the start, once.
     const startOver = () => {
       store.resetSession(sessionId, revertId);
       return syncSession(sessionId, directory, { retried: true });
@@ -260,8 +230,6 @@ export const createMessageSearchIndexer = ({
 
     const readingSession = store.readSession(sessionId);
     for (const role of ROLES) {
-      // While reverted, the tail beyond the boundary will change: read from
-      // the start each time and keep no cursor.
       let cursor = revertId ? null : (role === 'user' ? readingSession?.user_cursor : readingSession?.assistant_cursor) ?? null;
       let anchor = role === 'user' ? readingSession?.user_anchor : readingSession?.assistant_anchor;
       for (;;) {
@@ -278,17 +246,11 @@ export const createMessageSearchIndexer = ({
           throw error;
         }
         const records = page.data;
-        // OpenCode answers a cursor whose message is gone (a revert followed
-        // by a new prompt deletes the tail) with an empty page, the same as
-        // "nothing new". Taken at its word, the session would never be read
-        // past that point again.
         if (records.length === 0 && cursor && !retried && !(await messageExists(client, sessionId, anchor))) return startOver();
         const rows = [];
         let complete = true;
         for (const record of records) {
           const parsed = messageSchema.safeParse(record);
-          // A record this reader does not understand carries nothing it can
-          // index; passing over it keeps the rest of the session searchable.
           if (!parsed.success) continue;
           const message = parsed.data;
           if (message.time.created >= cutoff || !isSettled(message)) {
@@ -297,8 +259,6 @@ export const createMessageSearchIndexer = ({
           }
           const text = readSearchableText(message);
           if (text) rows.push({ id: message.id, sessionId, role, createdAt: message.time.created, text });
-          // A row of its own: the reply and the reasoning are found, filtered
-          // and dropped separately, and both lead to the same message.
           const reasoning = message.type === 'assistant' && includeReasoning() ? joinParts(message, reasoningPartSchema) : null;
           if (reasoning) {
             rows.push({ id: `${message.id}:reasoning`, messageId: message.id, sessionId, role: 'reasoning', createdAt: message.time.created, text: reasoning });
@@ -309,7 +269,6 @@ export const createMessageSearchIndexer = ({
         const next = page.cursor?.next ?? null;
         const last = recordIdSchema.safeParse(records.at(-1));
         if (next && !revertId && last.success) {
-          // The cursor points after the page's last record.
           anchor = last.data.id;
           store.setCursor(sessionId, role, next, anchor);
         }
@@ -369,12 +328,6 @@ export const createMessageSearchIndexer = ({
     }, liveDebounceMs));
   };
 
-  /**
-   * Walks every root session OpenCode lists and queues the ones changed since
-   * they were read. Sessions the index holds that OpenCode no longer lists are
-   * dropped, but only after the whole list arrived: a failed page is not an
-   * empty list.
-   */
   const runBackfill = async (startedAtRevision) => {
     const run = ++backfillRun;
     const client = createClient('');
@@ -428,7 +381,6 @@ export const createMessageSearchIndexer = ({
   const startBackfill = () => withLifecycleReader(runBackfill);
 
   return {
-    /** Translated OpenCode events (event-stream/translate-v2.js vocabulary). */
     processPayload(payload, directory = '') {
       if (stopped) return;
       const event = eventSchema.safeParse(payload);
@@ -460,7 +412,6 @@ export const createMessageSearchIndexer = ({
       }
     },
 
-    /** OpenCode (re)connected: catch up on whatever changed while it was not watched. */
     onConnected() {
       if (stopped) return;
       void startBackfill();
@@ -477,7 +428,6 @@ export const createMessageSearchIndexer = ({
       return { backfill: { ...backfill, queued: backfillQueue.size }, ...store.counts() };
     },
 
-    /** Test seam and shutdown barrier: wait for indexing and lifecycle overlays. */
     idle: async () => {
       await (draining ?? Promise.resolve());
       while (pendingLifecycleWork.size > 0) await Promise.all(pendingLifecycleWork);
