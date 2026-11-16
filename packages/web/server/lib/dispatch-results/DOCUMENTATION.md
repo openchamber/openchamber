@@ -25,7 +25,8 @@ terminal has no session to deliver into.
   `readDispatchOutcome(..., { withText: true })`, which takes the text from
   the newest reply of the turn that has any, and mints its ids with
   `createMessageId`.
-- `runtime.test.js` — delivery, waiting on running sessions and subagents,
+- `runtime.test.js` — delivery, waiting on running sessions, not waiting on
+  their children,
   archived and deleted parents, a deleted dispatched session, idempotent
   retries, one result for several sends into one run, unknown versus idle,
   restart, a corrupt file.
@@ -61,9 +62,7 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
 "over":
 
 1. `/api/session/active` lists it → running; its next idle event re-arms.
-2. A subagent of it runs → not over: the session runs again on the subagent's
-   result. Rechecked after 5 s (`../opencode/session-activity.js`).
-3. The newest page of its records (`order: desc`, 50): OpenCode appends an
+2. The newest page of its records (`order: desc`, 50): OpenCode appends an
    `idle` record with `outcome` (`succeeded`, `failed`, `interrupted`) when a
    run ends. The dispatch route reads the newest one before the prompt goes
    out (`afterIdleId`, null when the session has none); a newer idle record
@@ -75,9 +74,18 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
    its event, then events take over. A `session.send` into a session that is
    already running can end on that running turn when OpenCode steers the
    prompt into it; that turn's answer then includes the prompt's work.
-4. The session itself answers 404 → it was deleted; reported as stopped.
+3. The session itself answers 404 → it was deleted; reported as stopped.
 
 A failed read retries with backoff (2 s doubling to 60 s).
+
+### Why an idle session's answer goes out while its children still run
+
+Subagents in OpenCode 2 run in the background, as do workflow agents and
+sessions started with `ownWork`: the session answers and goes idle while they
+work, and their results arrive later as messages that start a new turn.
+Waiting on them, as `hasWorkingChildren` does for goals and notifications,
+kept a question to an orchestrating session from coming back for hours while
+its workflow ran, though the session had answered in 36 seconds.
 
 ## Delivery
 
