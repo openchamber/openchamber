@@ -200,5 +200,15 @@
   "sidebar.rowGoal": {"selector": "[data-session-row=\"{session}\"] [aria-label^=\"Goal \"]", "means": "The target mark of a row whose session works toward a goal."},
   "sidebar.rowTitle": {"selector": "[data-session-row=\"{session}\"] [data-session-row-main] .typography-ui-label[dir=\"auto\"]", "means": "The title text of a session row alone; pair it with text and exact to read the whole title."},
   "sidebar.page": {"selector": "a, button, [role=\"button\"]", "means": "A page link at the top of the left sidebar (Archive, Stats); pair it with its exact name."},
-  "archive.page": {"selector": "[data-archive-page=\"desktop\"]", "means": "The Archive page; pair it with a session title to find it among the archived ones."}
+  "archive.page": {"selector": "[data-archive-page=\"desktop\"]", "means": "The Archive page; pair it with a session title to find it among the archived ones."},
+  "composer.attach": {"selector": "[data-chat-input-footer] button[aria-label=\"Add attachment\"]", "means": "The paperclip at the start of the composer footer; opens Attach files and the link pickers."},
+  "composer.editorAs": {"selector": "[data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"][aria-placeholder=\"{placeholder}\"]", "means": "The composer's text field by the placeholder it shows: Enter shell command... in shell mode, Ask in this btw session… in a by-the-way chat."},
+  "composer.attachmentChip": {"selector": "[data-chat-input=\"true\"] [data-chip-open=\"attachment:{name}\"]", "means": "An attached file's chip in the composer's text, by the file's name."},
+  "composer.dropNote": {"selector": "div:has(> [data-dictation-chain]) > .z-50", "means": "The note over the composer while files are dragged onto it: Drop files here to attach, Drop to insert as mention."},
+  "composer.queue": {"selector": "[role=\"group\"][aria-label=\"Queued messages\"]", "means": "The queued message row on top of the composer while the agent works; pair it with the message's text."},
+  "composer.queueButton": {"selector": "[role=\"group\"][aria-label=\"Queued messages\"] button", "means": "A button of the queued message row: edit, send; pair it with its text."},
+  "composer.control": {"selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]", "means": "A menu of the composer footer: the model, thinking, the agent; pair it with its text (Build, Plan)."},
+  "composer.permissions": {"selector": "[data-chat-input-footer] button[aria-label=\"Permissions: {mode}\"]", "means": "The shield in the composer footer, by the mode it names: ask every time, or the auto-accept one."},
+  "composer.historySearch": {"selector": "[data-prompt-history-search-input]", "means": "The field of the prompt history search Cmd/Ctrl+Arrow Up opens over the composer."},
+  "composer.historyRow": {"selector": "[data-prompt-history-search-row]", "means": "A prompt in the prompt history search; pair it with its text."}
 }
