@@ -5,11 +5,6 @@ import { isPlainRecord, parseTrackedItem } from './items.js';
 const FILE_NAME = 'tracked-items.json';
 const VERSION = 1;
 
-/**
- * The last known state of followed items, so a restart starts from it. Only
- * a cache: a missing, unreadable or malformed file restores nothing, and the
- * next answers rebuild it.
- */
 export function createTrackedItemsPersistence({ dataDir, fs = fsPromises }) {
   const filePath = path.join(dataDir, FILE_NAME);
   return {
@@ -30,7 +25,6 @@ export function createTrackedItemsPersistence({ dataDir, fs = fsPromises }) {
       });
     },
     async save(items) {
-      // Temp file in the same directory, so the rename is atomic on one device.
       const tmpPath = `${filePath}.${process.pid}.tmp`;
       await fs.writeFile(tmpPath, JSON.stringify({ version: VERSION, items }), 'utf8');
       await fs.rename(tmpPath, filePath);
