@@ -7,13 +7,6 @@ import { GUEST_REQUEST_RESPONSE_MAX, GUEST_REQUEST_TIMEOUT_MS, requestedGuestCap
 
 import { shouldForwardProxyResponseHeader } from '../../../proxy-headers.js';
 
-/**
- * Everything an approved service may ask OpenCode, each one a GET. A route
- * joins this list only when it changes nothing and starts nothing: a read that
- * names a directory (agents, models, files) starts that location's MCP servers,
- * and `/api/info` hands out the server's address. Anything unlisted is refused,
- * so a route OpenCode adds later stays out until someone lists it here.
- */
 const READS = [
   /^\/api\/project$/,
   /^\/api\/session$/,
@@ -41,7 +34,6 @@ const answer = (response, status, code, message) => {
   response.end(JSON.stringify({ error: { code, message } }));
 };
 
-/** Stops a transfer at the size limit, and holds each chunk until `mayDeliver` says it can still reach the service. */
 const relay = (mayDeliver) => {
   let bytes = 0;
   return new Transform({
@@ -53,7 +45,6 @@ const relay = (mayDeliver) => {
   });
 };
 
-/** Owns the loopback read transport, service leases, authorization and upstream selection. */
 export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const leases = new Map();
   let listening = null;
@@ -107,7 +98,7 @@ export const createGuestOpenCodeProvider = ({ currentGuest, buildOpenCodeUrl, ge
             return;
           }
           for (const [name, value] of Object.entries(incoming.headers)) {
-            // Native HTTP leaves compressed bytes intact, unlike fetch-based proxies.
+            // external: https://nodejs.org/api/http.html Native HTTP preserves compressed response bytes, so content-encoding must be forwarded.
             if (value !== undefined && name !== 'set-cookie' && (name === 'content-encoding' || shouldForwardProxyResponseHeader(name))) response.setHeader(name, value);
           }
           response.writeHead(incoming.statusCode);

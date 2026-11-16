@@ -11,23 +11,11 @@ import {
   requestedGuestCapabilities,
 } from '@openchamber/sdk';
 
-/**
- * Services that run with nobody asking: `service.keepRunning` and
- * `service.schedule`. The catalog decides, at every `reconcile()` and again
- * before every run, so a pause or a withdrawn approval ends both.
- *
- * A kept service is started once and held, which suspends any role's idle
- * stop. A check every `CHECK_INTERVAL_MS` brings a stopped one back, and a
- * process that keeps dying waits longer each time, up to `RESTART_DELAY_MAX_MS`.
- *
- * A scheduled run is at most once: a run missed while the host was down, or
- * that the service failed to take, is gone. Each host arms its own timers.
- */
 
 const CHECK_INTERVAL_MS = 15_000;
 const RESTART_DELAY_MIN_MS = 5_000;
 const RESTART_DELAY_MAX_MS = 5 * 60_000;
-/** A timer past this is armed again rather than left to overflow `setTimeout`. */
+// external: https://nodejs.org/api/timers.html#settimeoutcallback-delay-args Delays above 2147483647 become 1 ms, so distant runs rearm the timer.
 const TIMER_MAX_MS = 2 ** 31 - 1;
 const RESULT_MAX = 4_096;
 const HEALTH_PATH = '/health';
@@ -76,9 +64,7 @@ export const createServiceLifetime = ({
   createId = () => randomUUID(),
   warn = (...args) => console.warn(...args),
 }) => {
-  /** Per guest: the kept service's latest row, hold and restart state. */
   const kept = new Map();
-  /** Per `<guestId>:<scheduleId>`: the armed timer and the cron it was armed from. */
   const armed = new Map();
   let checkTimer = null;
   let stopped = false;
@@ -136,8 +122,6 @@ export const createServiceLifetime = ({
     }
     if (kept.size > 0 && checkTimer === null) {
       checkTimer = timers.setInterval(() => {
-        // A restart reads the catalog first: a grant withdrawn while the
-        // process ran must not start it again.
         if ([...kept.values()].some(needsStart)) void reconcile();
       }, CHECK_INTERVAL_MS);
       checkTimer.unref?.();
@@ -163,7 +147,6 @@ export const createServiceLifetime = ({
     } catch {
       return;
     }
-    // The catalog decides at the moment of the run: a pause since arming ends it.
     const guest = guests.find((row) => row.id === guestId);
     if (!eligible(guest)) return;
     try {
@@ -214,14 +197,12 @@ export const createServiceLifetime = ({
     for (const [key, { guestId, entry }] of wanted) if (!armed.has(key)) arm(guestId, entry);
   };
 
-  /** The catalog changed, or the host started: bring the running set to what it says. */
   const reconcile = async () => {
     if (stopped) return;
     let guests;
     try {
       guests = await listGuests();
     } catch {
-      // A catalog that cannot be read changes nothing: it is not an empty catalog.
       return;
     }
     if (stopped || !Array.isArray(guests)) return;

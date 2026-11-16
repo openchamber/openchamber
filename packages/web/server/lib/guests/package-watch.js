@@ -10,7 +10,6 @@ import { createFolderChangeWatch } from '../fs/folder-change-watch.js';
 const POLL_MS = 500;
 const SCRIPT_MODULE = /\.[cm]?js$/;
 
-/** Every script a service can import: `.js`, `.mjs` and `.cjs` under its entry's folder, outside `node_modules` and dot folders. */
 const serviceModules = async (root, folder, fs) => {
   const found = [];
   const entries = await fs.readdir(path.join(root, folder), { withFileTypes: true }).catch(() => []);
@@ -23,13 +22,6 @@ const serviceModules = async (root, folder, fs) => {
   return found;
 };
 
-/**
- * What the host loads from a package: the manifest, the panel icon, the
- * provider logos, each page with the scripts, links, and images it loads, and
- * the service's scripts. Read from the manifest itself, so a package that does not load yet
- * still names the files its build will write. Anything else a service writes
- * beside them does not count.
- */
 const loadedFiles = async (root, fs) => {
   const files = ['package.json'];
   const raw = await fs.readFile(path.join(root, 'package.json'), 'utf8').catch(() => null);
@@ -69,16 +61,6 @@ const fingerprint = async (root, fs) => {
   return files.map((file, index) => `${file}=${stamps[index]}`).join('\n');
 };
 
-/**
- * Watches folder installs, the packages an author rebuilds in place, and calls
- * `onChange(root)` when the files the host loads have changed and then held
- * still for one check. Copies (ZIP, Git) change only through install and
- * update, which report themselves.
- *
- * Tree signals trigger fingerprints of loaded files only. A slow safety check
- * reopens watchers so deleted and recreated roots recover on every platform.
- * `sync()` follows the installed folders; calls run one after another.
- */
 export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs = POLL_MS, fsPromises = fs, fsWatch, timers }) => {
   const watched = new Map();
   let syncing = Promise.resolve();

@@ -58,9 +58,6 @@ const rememberPending = (state, entry) => {
   pendingByGuestId.set(entry.guestId, { ...entry, state });
 };
 
-// `state` is the only thing that ties a callback to the click that started
-// it. Accepting a callback without it would let any link visited during the
-// pending window attach a stranger's account, so a missing state is a refusal.
 const takePending = (guestId, state) => {
   const trimmed = readTrimmedString(state);
   if (!trimmed) {
@@ -169,28 +166,19 @@ export const guestAuthorizationHeader = (token, authorization) => {
     return `Bearer ${token}`;
   }
   if (authorization === 'basic') {
-    // `basic` stores the already-encoded `username:token` pair; see saveGuestAccessToken.
     return `Basic ${token}`;
   }
   return token;
 };
 
-/** Encodes `username:token` for a `basic` integration. Stored as the access token so requests need no username. */
 export const encodeBasicCredential = (username, token) => Buffer.from(`${username}:${token}`, 'utf8').toString('base64');
 
 export const guestRedirectUri = (origin, guestId) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
 
-/**
- * With `integration`, `hasClient` is false for a client entered for endpoints
- * the package no longer names, and a `secret` field's value stays here: it is
- * named in `secretsSet` when one is stored, and only the service reads it.
- */
 export const toPublicGuestAuth = (entry, integration) => {
   const stored = entry?.settings && typeof entry.settings === 'object' ? entry.settings : {};
   const declared = integration?.settings ?? [];
   const secretIds = new Set(declared.filter((field) => field.secret).map((field) => field.id));
-  // Only a field the package declares now and does not mark secret: a value
-  // stored while it was a secret stays here after an update stops declaring it.
   const publicIds = new Set(declared.filter((field) => !field.secret).map((field) => field.id));
   return {
     connected: Boolean(entry?.accessToken),
@@ -201,11 +189,6 @@ export const toPublicGuestAuth = (entry, integration) => {
   };
 };
 
-/**
- * What a guest's card links read from its settings: the stored value of each
- * field a `card.link.url` names, when the package declares the field now and
- * does not mark it secret. An empty value and every other field are left out.
- */
 export const toolLinkSettingsOf = (entry, guest) => {
   const visible = toPublicGuestAuth(entry, guest.integration).settings;
   return Object.fromEntries(guestToolLinkSettingIds(guest.tools)
@@ -275,10 +258,6 @@ const sameTarget = (a, b) => Boolean(a && b)
   && (a.authorizeUrl ?? null) === (b.authorizeUrl ?? null)
   && (a.tokenUrl ?? null) === (b.tokenUrl ?? null);
 
-/**
- * Whether the stored tokens were minted for the integration as it is now.
- * Tokens without a recorded target never count.
- */
 export const storedTokensUsable = (stored, integration) => (
   Boolean(stored?.accessToken) && sameTarget(stored.target, credentialTarget(integration))
 );
@@ -315,13 +294,6 @@ export const takeUsableGuestAuth = async (guest, persistPath) => {
   return getGuestAuth(guest.id, persistPath);
 };
 
-/**
- * Save the OAuth client the user entered on the Integrations card. The
- * client is bound to the endpoints the package names now. An empty secret
- * keeps the stored one only for the same client id and the same endpoints;
- * a new id or moved endpoints drop the old secret instead of carrying it
- * over. Decided under the store lock against the entry as it is then.
- */
 export const saveGuestOAuthClient = async ({ guest, persistPath, clientId, clientSecret }) => {
   if (resolveIntegrationAuth(guest.integration ?? {}) !== 'oauth') {
     throw new GuestOAuthError('This guest does not declare OAuth.', 'NO_INTEGRATION');
@@ -394,8 +366,6 @@ export const startGuestAuthorization = async ({ guest, persistPath, origin }) =>
     guestId: guest.id,
     codeVerifier: verifier,
     redirectUri,
-    // The exchange goes to the endpoints the user saw when they clicked
-    // Connect, and only if the package still names the same ones.
     target: credentialTarget(guest.integration),
     expiresAt: Date.now() + PENDING_AUTHORIZATION_TTL_MS,
   });
@@ -461,8 +431,6 @@ export const consumeGuestAuthorization = async ({ guest, persistPath, code, stat
   } catch {
     account = '';
   }
-  // The client that made this exchange must still be the one on file, for
-  // the same endpoints, when the tokens land.
   const saved = await patchGuestAuth(guest.id, {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
@@ -498,9 +466,6 @@ export const refreshGuestAccessToken = async ({ guest, persistPath }) => {
     client_id: clientId,
     client_secret: clientSecret,
   });
-  // The round trip took time. If the entry moved on meanwhile (a new
-  // Connect for other endpoints, a disconnect), this answer belongs to the
-  // old entry and is dropped rather than written under the new target.
   const saved = await patchGuestAuth(guest.id, {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken ?? refreshToken,
@@ -526,9 +491,4 @@ export const clearGuestPendingForTests = () => {
   pendingByGuestId.clear();
 };
 
-/**
- * The token exchange and the refresh request, for the tracker role's own
- * PKCE flow (`../trackers/extension-oauth.js`): the same wire as a guest
- * integration's, so the two cannot drift in how they talk to a token endpoint.
- */
 export { exchangeAuthorizationCode, postForm as postTokenForm };
