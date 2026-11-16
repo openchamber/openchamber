@@ -21,18 +21,11 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
 
-  // `onPayload` consumers speak the server's own event vocabulary, so the v2
-  // wire payload is translated here rather than in each consumer. An event of
-  // an isolated space keeps the space's id beside it: its session lives in that
-  // space's OpenCode, never in the host's.
-  // `onWirePayload` sees the untranslated payload too, so a consumer can react
-  // to events the translation drops (an archive, a message write).
   const emitTranslated = (payload, spaceId = null) => {
     onWirePayload?.(payload, { spaceId });
     for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
   };
 
-  // A failed read on connect must not break the stream it reacts to.
   const notifyConnected = () => {
     if (!onConnect) return;
     void Promise.resolve().then(onConnect).catch((error) => {
@@ -63,8 +56,6 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     const signal = abortController.signal;
 
     if (globalEventHub) {
-      // The events of isolated spaces feed this watcher too, so live status, unread marks and
-      // notifications work for a space's sessions as for the host's.
       unsubscribeEvent = globalEventHub.subscribeEvent((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
         if (!payload || typeof payload !== 'object') {
@@ -87,7 +78,6 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (status.type === 'disconnect' || status.type === 'error' || status.type === 'initial-error') onDisconnect?.();
       });
       globalEventHub.start();
-      // A hub a browser already started announced its connect before this subscription.
       if (globalEventHub.isConnected()) notifyConnected();
       return;
     }

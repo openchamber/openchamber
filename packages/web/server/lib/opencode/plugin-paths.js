@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Physical identity when available; missing declarations still keep their path. */
 export function canonicalPluginPath(filePath) {
   try {
     return fs.realpathSync(filePath);
@@ -11,7 +10,6 @@ export function canonicalPluginPath(filePath) {
   }
 }
 
-/** OpenCode resolves local declarations relative to the declaring config file. */
 export function resolveLocalPluginPath(spec, sourcePath) {
   if (spec.startsWith('file://')) {
     try {

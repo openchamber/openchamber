@@ -4,7 +4,6 @@ import { registerThemeCatalogRoutes } from './theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 
-// Install before any routes or body parsers so early 4xx responses are covered too.
 export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
     res.once('finish', () => {
@@ -38,10 +37,6 @@ const parseLoopbackUrl = (rawUrl) => {
   return url;
 };
 
-/**
- * Whether a request carries credentials /api would accept, without refusing
- * it: routes open before login use this to leave private details out.
- */
 export const isRequestAuthorized = async (req, res, { tunnelAuthController, uiAuthController }) => {
   const scope = tunnelAuthController?.classifyRequestScope?.(req);
   if (scope === 'tunnel' || scope === 'unknown-public') {
@@ -60,26 +55,14 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
-    // Port this OpenChamber instance serves on and the tunnel public URL (if
-    // a tunnel is active). Exposed on /api/system/info so the UI can surface
-    // the active instance's service URLs. Optional: older wiring omits them
-    // and the endpoint reports null.
     getServerPort = () => null,
     getTunnelUrl = () => null,
-    // Stable server identity (hash of the public signing key — not a secret).
-    // Exposed on /health and /api/version so a client can verify that a
-    // learned/probed address belongs to the expected server BEFORE sending its
-    // bearer token there. Optional: older wiring omits it.
     getServerId = async () => null,
     tunnelAuthController = null,
     uiAuthController = null,
-    // Loaded OpenCode directories and process counts for the diagnostic
-    // export (`../diagnostics/opencode-load.js`); older wiring omits it.
     readOpenCodeLoad = null,
   } = dependencies;
 
-  // The identity is immutable for the process lifetime; resolve once, and never
-  // let an identity failure break health reporting.
   let cachedServerId = null;
   const resolveServerId = async () => {
     if (cachedServerId) return cachedServerId;
@@ -126,14 +109,11 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       'realtime.sse.v1',
       'realtime.websocket.global-events.v1',
       'terminal.websocket.v1',
-      // Message pages honour `x-openchamber-part-shells` (message-shells.js).
       'api.message-part-shells.v1',
     ],
   };
 
   const isDevShutdownAllowed = () => {
-    // Dev-only escape hatch: allow terminating the whole dev process group.
-    // This should never be enabled in production runtimes.
     return process.env.OPENCHAMBER_DEV_SHUTDOWN === 'true';
   };
 
@@ -250,9 +230,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     });
   });
 
-  // This is a local support export, not an API for connected remote clients.
-  // Check the socket address rather than proxy-provided forwarding headers.
-  // The private relay also dials loopback, and stamps every request it forwards.
   const requireLocalDiagnostics = (req, res, next) => {
     if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress)
       || req.headers['x-openchamber-relay-connection']
@@ -335,8 +312,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
     res.json({ ok: true });
 
-    // Terminate the entire dev process group so `bun run dev` leaves no orphans.
-    // We still run graceful shutdown to clean up OpenCode, terminals, websockets.
     try {
       const rawPreviewUrls = Array.isArray(req.body?.previewUrls) ? req.body.previewUrls : [];
       const previewPorts = Array.from(new Set(
@@ -344,15 +319,12 @@ export const registerServerStatusRoutes = (app, dependencies) => {
           .map((value) => parseLoopbackPort(value))
           .filter((port) => typeof port === 'number')
       ));
-      // Attempt to stop preview servers that may have daemonized away from the PTY.
-      // This is dev-only and limited to loopback ports supplied by the UI.
       await Promise.all(previewPorts.map((port) => killListenPort(port)));
 
       const pgid = await resolveProcessGroupId(process.pid);
       const ppid = typeof process.ppid === 'number' ? process.ppid : null;
       const parentPgid = ppid ? await resolveProcessGroupId(ppid) : null;
 
-      // Kick off shutdown cleanup first.
       void gracefulShutdown({ exitProcess: false });
 
       const pgidsToKill = Array.from(new Set([pgid, parentPgid].filter(Boolean)));
@@ -372,7 +344,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
         }
       }, 1500).unref?.();
 
-      // Ensure the server process itself exits even if the group kill fails.
       setTimeout(() => {
         try {
           process.exit(0);
@@ -381,7 +352,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       }, 2500).unref?.();
     } catch (error) {
       console.error('Dev shutdown request failed:', error?.message || error);
-      // As a last resort, exit.
       try {
         process.exit(0);
       } catch {
@@ -390,9 +360,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
   });
 
   app.get('/api/system/info', async (req, res) => {
-    // Open before login: the CLI matches `pid` against its pid file to tell
-    // its own server from whatever else holds the port. Where this server is
-    // reachable (port, tunnel address) is for signed-in callers only.
     const info = {
       openchamberVersion,
       runtime: runtimeName,
@@ -406,8 +373,6 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     res.json(info);
   });
 
-  // Allocates a best-effort free TCP port hint on 127.0.0.1.
-  // Another process can still claim it before the preview server binds.
   app.get('/api/system/free-port', async (_req, res) => {
     try {
       const port = await allocateLoopbackPort();
@@ -431,26 +396,12 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     clientPairingRuntime,
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
-    // Returns the relay pairing candidate ({ type:'relay', relayUrl, serverId,
-    // hostEncPubJwk, priority }) when the host relay is enabled, else null.
-    // Injected lazily because the relay service is constructed after these routes.
     getRelayPairingCandidate = async () => null,
-    // Re-evaluate the relay lifecycle after pairing/device changes.
     reconcileRelay = async () => {},
-    // Drops the push registrations of the given clients' devices.
     removeClientPushDevices = async () => {},
-    // Returns { local, lan, relayAvailable } — the direct transport URLs the
-    // server can actually be reached on (LAN derived from the server bind, not
-    // the UI origin), for the create-device dialog.
     getPairingTransports = () => ({ local: null, lan: null, relayAvailable: true }),
-    // Returns ALL direct LAN URLs the server is currently reachable on (client-
-    // reached address first, then interface scan) for the candidates-refresh
-    // endpoint. Empty when the server is loopback-only.
     getDirectCandidateUrls = () => [],
-    // Stable server identity for client-side verification of learned addresses.
     getServerId = async () => null,
-    // Display name a paired device shows for THIS server (issuing machine's
-    // hostname), distinct from the per-device pairing label typed by the operator.
     getServerLabel = () => 'OpenChamber',
   } = dependencies;
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
@@ -546,8 +497,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   };
 
   const requestIp = (req) => {
-    // Do not use req.ip here: Express rewrites it from X-Forwarded-For when
-    // trust proxy is enabled, and redeem is unauthenticated before this limit.
     return req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
   };
 
@@ -616,16 +565,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
-  // `preferredServerUrl` is the caller-supplied externally reachable URL (the
-  // desktop UI reaches its own server over loopback, so the request origin is not
-  // scannable — it passes the LAN URL instead). Falls back to the request origin
-  // for remote callers where the Host header IS the reachable address.
-  //
-  // `includeRelay` is the per-link transport choice from the create-link dialog:
-  //   true  → add the relay candidate, enabling the relay host on demand;
-  //   false → direct only, never relay;
-  //   undefined → legacy: advertise relay only if it is already enabled.
-  // `includeDirect === false` produces a relay-only link (no direct candidate).
   const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
     const candidates = [];
     if (includeDirect) {
@@ -635,19 +574,10 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       if (direct) {
         candidates.push({ type: candidateUrlType(direct), url: direct, priority: 10 });
       }
-      // The origin the creator is browsing over (e.g. a public https domain in
-      // front of a reverse proxy) is a reachable address the server cannot
-      // discover from its own interfaces. Carry it as an additional direct
-      // candidate so the paired device can keep using that same domain instead
-      // of depending on LAN hairpin behavior or relay availability. Loopback
-      // origins (desktop shell, localhost dev) are unreachable from another
-      // device and are skipped.
       if (origin && direct && origin !== direct && !isLoopbackCandidateUrl(origin)) {
         candidates.push({ type: candidateUrlType(origin), url: origin, priority: 20 });
       }
     }
-    // The client races candidates and falls back to relay only if the direct URL
-    // is unreachable (relay carries a higher priority number).
     if (includeRelay !== false) {
       try {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
@@ -664,44 +594,23 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     res.status(statusCode).json({ error: 'Invalid or expired pairing session' });
   };
 
-  /**
-   * Endpoints that carry their own authority instead of a UI session.
-   *
-   * The repository credential helper runs from Git itself, in a terminal or
-   * the agent's shell, wherever a repository names it in `.git/config`. It
-   * authenticates with the secret the server writes beside its endpoint file,
-   * rotated every start, and the route refuses any peer that is not this
-   * machine. It has no UI session and cannot obtain one, so leaving it behind
-   * the session guard would make a repository's account silently unusable on
-   * every instance that sets a UI password, which Docker requires.
-   */
   const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
 
-  // An extension tracker's OAuth callback (`/tracker/ext-<id>/oauth/callback`)
-  // is the same kind of page: the tracker redirects the browser here with no
-  // UI bearer, and the route accepts only a `state` this process issued.
   const isGuestOauthCallback = (req) => (
     req.method === 'GET'
     && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
   );
 
-  // An MCP server's OAuth callback lands on the OpenChamber origin because a
-  // browser on another machine cannot reach OpenCode's loopback listener. The
-  // route forwards it there only for a state bound to a live sign-in.
   const isMcpOauthCallback = (req) => (
     req.method === 'GET'
     && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
   );
 
-  // An HTML preview runs in an opaque-origin sandbox and carries no session.
-  // The grant in its path is the capability; the fs route checks it.
   const isFilePreviewRead = (req) => (
     req.method === 'GET'
     && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
   );
 
-  // An extension frame is sandboxed the same way and loads its package
-  // through a grant in the path; the guests route checks it.
   const isGuestFrameFileRead = (req) => (
     req.method === 'GET'
     && /^\/guest-files\/[^/]+\/./.test(req.path || '')
@@ -866,9 +775,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     await runWithClientManagementAuth(req, res, next, async (authContext) => {
       if (authContext.type === 'client') {
         const client = await clientRecordFromAuthContext(authContext);
-        // The desktop shell's local client is the trusted operator of this
-        // server; it manages devices just like a browser UI session. Every
-        // other client token is scoped to its own record.
         if (client?.clientKind !== 'desktop-local') {
           return res.json({ clients: client ? [client] : [] });
         }
@@ -894,8 +800,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     await runWithClientManagementAuth(req, res, next, async (authContext) => {
       if (authContext.type === 'client') {
         const actingClient = await clientRecordFromAuthContext(authContext);
-        // The desktop shell's local client manages every device; other client
-        // tokens may only revoke themselves.
         if (actingClient?.clientKind !== 'desktop-local') {
           const clientId = clientIdFromAuthContext(authContext);
           if (!clientId || clientId !== req.params?.id) {
@@ -907,9 +811,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       if (!result.revoked) {
         return res.status(404).json({ revoked: false, error: 'Client not found' });
       }
-      // The revocation is already written, and the page acts on its success (the
-      // desktop drops its own token), so a failure here stays a log line. Sends
-      // skip this client's key, and clearing it from the list retries the rest.
       await removeClientPushDevices([req.params.id]).catch((error) => {
         console.warn('Failed to remove push registrations of a revoked client:', error?.message ?? error);
       });
@@ -922,14 +823,10 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     await runWithClientManagementAuth(req, res, next, async (authContext) => {
       if (authContext.type === 'client') {
         const actingClient = await clientRecordFromAuthContext(authContext);
-        // Purging revoked devices is a whole-server management action; only the
-        // trusted desktop shell client (or a UI session) may do it.
         if (actingClient?.clientKind !== 'desktop-local') {
           return res.status(403).json({ purged: 0, error: 'Client tokens cannot purge revoked devices' });
         }
       }
-      // Before the rows go: once a row is gone its registrations can no longer
-      // be told from a cookie session's. A failure keeps the rows for a retry.
       const clients = await remoteClientAuthRuntime.listClients();
       await removeClientPushDevices(clients.filter((client) => client.revokedAt).map((client) => client.id));
       const result = await remoteClientAuthRuntime.purgeRevokedClients();
@@ -961,15 +858,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     });
   });
 
-  // Current reachable transports for an ALREADY-PAIRED device. Pairing-payload
-  // candidates are a snapshot: when DHCP hands this machine a new address, the
-  // device's saved LAN candidate goes stale and it is stuck on the relay forever.
-  // A client that connected over any live transport calls this to learn the
-  // server's present LAN URLs (plus the relay candidate when enabled) and update
-  // its saved candidate set. `serverId` lets the client bind the response — and
-  // later /health probes of the learned addresses — to this server's identity
-  // before trusting them with its bearer token.
-  // Auth: UI session or client bearer; never the short-lived URL token.
   app.get('/api/client-auth/connection/candidates', async (req, res, next) => {
     await runWithClientManagementAuth(req, res, next, async () => {
       const candidates = [];
@@ -1003,7 +891,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     });
   });
 
-  // Direct transports the server can be reached on (for the create-device dialog).
   app.get('/api/client-auth/pairing/transports', async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       res.setHeader('Cache-Control', 'no-store');
@@ -1011,8 +898,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     });
   });
 
-  // Pending pairing sessions (link created, device not yet connected) for the
-  // "pending devices" list. Secrets are never included.
   app.get('/api/client-auth/pairing/sessions', async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       const pending = await clientPairingRuntime.listPendingSessions();
@@ -1054,8 +939,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         dedupeKey: req.body?.dedupeKey,
       });
       clearPairingRedeemRateLimit(req);
-      // The session became a device: relay demand may have moved from the pending
-      // session to the paired device (or a non-relay redeem may drop it).
       void reconcileRelay();
       res.setHeader('Cache-Control', 'no-store');
       res.json({
@@ -1211,9 +1094,6 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 };
 
 export const registerCommonRequestMiddleware = (app, dependencies) => {
-  // `skipBodyParsing(req)` names a request whose body must reach its route untouched: a
-  // request the isolated-spaces dispatcher streams into a space, where a parsed body would
-  // otherwise be consumed here and lost.
   const { express, verboseRequestLogs = false, skipBodyParsing = () => false } = dependencies;
 
   app.use((req, res, next) => {

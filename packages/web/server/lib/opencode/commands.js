@@ -28,16 +28,10 @@ import {
   isRecord,
 } from './config-v2.js';
 
-// ============== COMMAND SCOPE HELPERS ==============
-//
-// OpenCode 2 discovers commands from `command/` and `commands/`. OpenChamber
-// reads both and writes only `commands/`; a command already living in the v1
-// directory is rewritten at its own path in v2 shape.
 
 const USER_COMMAND_DIRS = [COMMAND_DIR, path.join(OPENCODE_CONFIG_DIR, 'command')];
 const PROJECT_COMMAND_DIR_NAMES = ['commands', 'command'];
 
-/** Ensure the v2 project command directory exists. */
 function ensureProjectCommandDir(workingDirectory) {
   const projectCommandDir = path.join(workingDirectory, '.opencode', 'commands');
   if (!fs.existsSync(projectCommandDir)) {
@@ -48,8 +42,6 @@ function ensureProjectCommandDir(workingDirectory) {
 
 function getProjectCommandPath(workingDirectory, commandName) {
   const preferred = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
-  // Same walk as agents: every `.opencode` from the working directory up to
-  // the project root is a source; nested names (`team/review`) map onto paths.
   const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
   for (const base of getAncestors(workingDirectory, worktreeRoot)) {
     for (const dirName of PROJECT_COMMAND_DIR_NAMES) {
@@ -69,10 +61,6 @@ function getUserCommandPath(commandName) {
   return preferred;
 }
 
-/**
- * Determine command scope based on where the .md file exists
- * Priority: project level > user level > null (built-in only)
- */
 function getCommandScope(commandName, workingDirectory) {
   if (workingDirectory) {
     const projectPath = getProjectCommandPath(workingDirectory, commandName);
@@ -89,9 +77,6 @@ function getCommandScope(commandName, workingDirectory) {
   return { scope: null, path: null };
 }
 
-/**
- * Get the path where a command should be written based on scope
- */
 function getCommandWritePath(commandName, workingDirectory, requestedScope) {
   const existing = getCommandScope(commandName, workingDirectory);
   if (existing.path) {
@@ -112,7 +97,6 @@ function getCommandWritePath(commandName, workingDirectory, requestedScope) {
   };
 }
 
-// ============== READ ==============
 
 function getCommandSources(commandName, workingDirectory) {
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
@@ -169,7 +153,6 @@ function getCommandSources(commandName, workingDirectory) {
   return sources;
 }
 
-/** Canonical v2 command entity plus where it came from. */
 function getCommandConfig(commandName, workingDirectory) {
   const { path: mdPath, scope } = getCommandScope(commandName, workingDirectory);
   if (mdPath) {
@@ -198,7 +181,6 @@ function getCommandConfig(commandName, workingDirectory) {
   return { source: 'none', scope: null, path: null, legacy: false, config: {} };
 }
 
-// ============== WRITE ==============
 
 function writeCommandMd(targetPath, entity) {
   const { fields, template } = fromCommandEntity(entity);
@@ -243,8 +225,6 @@ function createCommand(commandName, config, workingDirectory, scope) {
   return { scope: targetScope, path: targetPath };
 }
 
-// Clearing a v1 field has to reach its v2 location: `subtask` is `subagent`,
-// and `variant` is the suffix on `model`.
 function deleteCommandField(entity, field) {
   if (field === 'variant') {
     const parsed = parseModelSelection(entity.model);
@@ -264,7 +244,6 @@ function applyCommandUpdates(entity, updates) {
       deleteCommandField(next, field);
       continue;
     }
-    // `subtask` is the v1 spelling of `subagent`; accept it from older clients.
     next[field === 'subtask' ? 'subagent' : field] = value;
   }
   return toCommandEntity(next);
@@ -304,7 +283,6 @@ function updateCommand(commandName, updates, workingDirectory) {
     return { source: 'json', scope: current.scope, path: targetPath };
   }
 
-  // Built-in override: materialize a user-level v2 markdown command.
   const { scope, path: targetPath } = getCommandWritePath(commandName, workingDirectory, COMMAND_SCOPE.USER);
   writeCommandMd(targetPath, entity);
   console.log(`Created command override: ${commandName} (scope: ${scope}, path: ${targetPath})`);
