@@ -110,6 +110,42 @@ The historical summarization API is shared with notifications and notes, but cur
 
 The server-side TTS approach bypasses mobile Safari's audio context restrictions by generating audio on the server and streaming to clients.
 
+## Invariants
+
+- Enterprise mode keeps speech and transcription on this machine: `normalizeCustomOpenAIBaseURL` refuses every non-local host, whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime allows, because the audio carries conversation content.
+- A custom endpoint path is judged on its decoded segments. The URL parser collapses `%2e%2e` into a parent segment when a pathname is assigned, so an encoded dot segment is rejected before it can walk out of the configured base path.
+- The endpoint-path fetch rewrites a string or `URL` input whose pathname ends in the default resource path, and leaves a `Request` untouched: a `Request` carries its own body, which a URL rewrite would drop.
+- Every `STOPWORDS` list in `language-detect.js` has the same length, so scores are comparable across languages.
+- For Cyrillic text the letter markers decide Ukrainian or Russian; function words only settle text that shows neither marker set, and a tie with no Russian-only letter goes to Ukrainian.
+- `X-Speech-Voice` is percent-encoded: HTTP header values must be printable latin1, Node rejects non-latin1 header content, and macOS voice names can be localized (`Milena (Русский (Россия))`).
+- The startup `say` capability probe is a promise shared with `/api/tts/say/status`; an early status request awaits that result rather than starting another probe.
+- `/api/tts/speak` ignores the historical summarization request fields; the model-backed summarization provider is retired.
+- `PUT /api/voice/keys`: a string sets a key, `null` or `''` removes it, and an absent kind stays as it is.
+- STT derives the upload filename extension from the MIME type so a Whisper server can infer the codec when the stream header does not say.
+
+## Decisions
+
+### Why the OpenAI SDK loads on first call
+The SDK is about 200 modules and only speech and transcription use it. Loading it on the first call keeps server startup light; an eager import would pay that cost for every run.
+
+### Why the endpoint path rewrites only the last segment
+A compatible server can copy OpenAI's request body, auth and response while naming the resource differently. Replacing only `/audio/speech` or `/audio/transcriptions` is enough: the origin, base URL prefix, query and every request option stay as they are.
+
+### Why language detection is local and dependency free
+The writing system decides most cases outright, and Latin-script languages are told apart by function words and characteristic letters. The result is a best effort for voice selection, not a linguistic claim, so an unknown language falls back to English rather than failing.
+
+### Why a kana character settles Japanese
+Kana settles Japanese even when Han characters dominate the count; a text with no kana and at least 30% Han is Chinese.
+
+### Why a characteristic letter can outrank stopword counts
+A letter that belongs to one Latin-script language is evidence a quoted foreign word cannot cancel: a German text quoting "façade" stays German unless another language clearly dominates the function words.
+
+### Why macOS `say` output is m4a
+The route asks `say` for `--data-format=aac`, which writes an m4a file that browsers decode.
+
+### Why `language: 'auto'` keeps the chosen voice when nothing matches
+A language with no installed voice still gets read in the chosen voice, with an accent, rather than failing. The voice switches only when an installed voice speaks the detected language.
+
 ## Notes for contributors
 
 ### Adding new TTS features
