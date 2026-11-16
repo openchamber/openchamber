@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { z } from 'zod';
@@ -301,8 +301,23 @@ test('note autosave keeps whitespace in the editor and accepts later peer change
   serverContext = { ...serverContext, notes: [peerNote] };
   await mount();
   const editor = await openNoteEditor();
-  await editor.type('  Local draft \n');
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
+  // Run the autosave callback explicitly so the test does not depend on timer timing.
+  const originalTimeout = browser.setTimeout.bind(browser);
+  let save: () => void = () => { throw new Error('Autosave was not scheduled'); };
+  const timeout = spyOn(browser, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    if (delay !== 400) return originalTimeout(callback, delay, ...args);
+    save = () => callback(...args);
+    const handle = originalTimeout(() => undefined, 0);
+    browser.clearTimeout(handle);
+    return handle;
+  });
+  try {
+    await editor.type('  Local draft \n');
+    expect(noteWrites).toEqual([]);
+    await act(async () => save());
+  } finally {
+    timeout.mockRestore();
+  }
   expect(noteWrites).toEqual([JSON.stringify({ body: 'Local draft' })]);
   expect(editor.text()).toBe('  Local draft \n');
 
