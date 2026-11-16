@@ -2,7 +2,7 @@ import { documentDataUrl } from '../source-control/document-versions.js'; import
 import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
-import { resolveGitLabProjectsFromDirectory } from './repo.js'; import { isPlainObject, isString } from './validation.js'; import { gitlabAssignees, gitlabItemWrites, gitlabWithWriteAccess } from './item-writes.js';
+import { resolveGitLabProjectsFromDirectory } from './repo.js'; import { isPlainObject, isString } from './validation.js'; import { gitlabAssignees, gitlabItemFlags, gitlabItemWrites } from './item-writes.js';
 
 // GitLab has no draft parameter on merge-request create or edit; draft state is the
 // title prefix GitLab itself recognizes ("Draft:", "[Draft]", "(Draft)").
@@ -759,7 +759,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return { target, projectId: target.project.id, number: payload.number };
   };
 
-  return { ...gitlabItemWrites({ client, isPlainObject, isString, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest }),
+  return { ...gitlabItemWrites({ client, isPlainObject, isString, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest, requestStatus, mutationTargetInvalid }),
     async resolveCreateMutation(context, expected, options = {}) {
       if (options.remote !== undefined && options.remote !== context.primaryRemote) {
         throw Object.assign(new Error('GitLab mutation remote does not match the bound primary remote'), {
@@ -1396,7 +1396,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         ci,
       };
       if (chain !== undefined) context.stack = chain;
-      Object.assign(context, gitlabWithWriteAccess({}, target.raw, isPlainObject));
+      Object.assign(context, gitlabItemFlags({}, target.raw, raw, isPlainObject));
       if (!options.includeTimeline) return context;
       if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
       return {
@@ -1445,7 +1445,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const raw = await client.Issues.show(number, { projectId: target.project.id });
       const issue = canonicalReads ? requireIssue(raw, target.project)
         : requireMapped(mapGitLabIssue(raw, identity, target.project), 'GitLab returned an invalid issue');
-      return gitlabWithWriteAccess(issue, target.raw, isPlainObject);
+      return gitlabItemFlags(issue, target.raw, raw, isPlainObject);
     },
 
     /**

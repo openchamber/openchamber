@@ -259,7 +259,7 @@ const MUTATION_ROUTES = [
   ['/pr/state', 'state'],
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
-  ['/issues/labels', 'labels'], ['/issues/assignees', 'issues'],
+  ['/issues/labels', 'labels'], ['/issues/assignees', 'issues'], ['/issues/lock', 'issues'], ['/issues/subscription', 'issues'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
   ['/pr/review/comment', 'reviewDrafts'],
@@ -269,10 +269,9 @@ const MUTATION_ROUTES = [
   ['/discussions/comment', 'discussions'],
   ['/discussions/comment/update', 'commentEdit'],
   ['/discussions/comment/delete', 'commentEdit'],
-  ['/discussions/state', 'discussions'],
-  ['/discussions/answer', 'discussions'],
+  ['/discussions/state', 'discussions'], ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
-  ['/discussions/update', 'discussions'], ['/pr/base', 'changeRequests'], ['/pr/update-branch', 'changeRequests'], ['/pr/rebase', 'changeRequests'],
+  ['/discussions/update', 'discussions'], ['/pr/base', 'changeRequests'], ['/pr/update-branch', 'changeRequests'], ['/pr/rebase', 'changeRequests'], ['/pr/lock', 'changeRequests'], ['/pr/subscription', 'changeRequests'],
 ];
 
 /**
@@ -877,16 +876,12 @@ export function registerProviderRoutes(app, {
     }
 
     // The project's labels, and who can review or be assigned in it, for the board's pickers.
-    boundRead('labels', '/references/labels', async ({ req, res, impl, instance, directory, trustedContext }) => {
-      const read = requireResource(impl, 'listLabels');
-      const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json({ connected: true, items: await read({ session, directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote }) });
-    }, { validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null) });
-    boundRead('reviewers', '/references/reviewers', async ({ req, res, impl, instance, directory, trustedContext }) => {
-      const read = requireResource(impl, 'listReviewerCandidates');
-      const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json({ connected: true, items: await read({ session, directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote, role: requestText(req.query?.role) || undefined }) });
-    }, {
+    boundRead('labels', '/references/labels', async ({ req, res, impl, instance, directory, trustedContext }) => res.json({
+      connected: true, items: await requireResource(impl, 'listLabels')({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote }),
+    }), { validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null) });
+    boundRead('reviewers', '/references/reviewers', async ({ req, res, impl, instance, directory, trustedContext }) => res.json({
+      connected: true, items: await requireResource(impl, 'listReviewerCandidates')({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, project: optionalProject(req), context: trustedContext, remote: trustedContext.primaryRemote, role: requestText(req.query?.role) || undefined }),
+    }), {
       validate: (req) => (!namesProject(req) ? 'a complete project selector is required'
         : !['', 'assignee', 'reviewer'].includes(requestText(req.query?.role)) ? 'role must be assignee or reviewer' : null),
     });
@@ -1076,9 +1071,8 @@ export function registerProviderRoutes(app, {
 
     for (const [suffix, method] of [['/issues/get', 'getIssue'], ['/issues/comments', 'issueComments']]) {
       boundRead('issues', suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
-        const session = await sessionFor(impl, instance, trustedContext.accountId);
         return res.json(await impl.resources[method]({
-          session,
+          session: await sessionFor(impl, instance, trustedContext.accountId),
           directory,
           number: requestIssueNumber(req.query?.number),
           project: optionalProject(req),
@@ -1092,9 +1086,14 @@ export function registerProviderRoutes(app, {
     }
 
     boundRead('projects', '/repo/upstream', async ({ res, impl, instance, directory, trustedContext }) => {
-      const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json(await impl.resources.projectUpstream({ session, directory, context: trustedContext, remote: trustedContext.primaryRemote }));
+      return res.json(await impl.resources.projectUpstream({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }));
     });
+    for (const [suffix, resource] of [['/repo/scopes', 'credentialScopes'], ['/repo/capabilities', 'repoCapabilities']]) {
+      boundRead('projects', suffix, async ({ res, impl, instance, directory, trustedContext }) => {
+        if (!(impl.resources?.[resource] instanceof Function)) return unsupportedCapability(res);
+        const value = await impl.resources[resource]({ session: await sessionFor(impl, instance, trustedContext.accountId), directory, context: trustedContext, remote: trustedContext.primaryRemote }); return res.json(resource === 'credentialScopes' ? { scopes: Array.isArray(value) ? value : null } : value);
+      });
+    }
 
     boundRead('projects', '/repo/branches', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);

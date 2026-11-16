@@ -6,7 +6,7 @@ import type {
   SourceControlReconcileData,
 } from '@openchamber/sdk';
 
-import type { Call, GiteaBranchRef, GiteaComment, GiteaIssue, GiteaPull, GiteaUser, ProviderTarget } from './types.ts';
+import type { Call, GiteaBranchRef, GiteaComment, GiteaIssue, GiteaPull, GiteaSubscriptionCheck, GiteaUser, ProviderTarget } from './types.ts';
 
 type Input = SourceControlJsonObject;
 
@@ -111,6 +111,13 @@ export const createMutations = ({
     });
   };
 
+  const currentLogin = async (call: Call): Promise<string> => {
+    const known = call.session.user?.login;
+    if (known) return known;
+    const { data } = await api<GiteaUser>(call, 'GET', '/user');
+    return data.login;
+  };
+
   const perform = async (call: Call, input: Input): Promise<SourceControlMutationResult> => {
     const kind = text(input, 'kind');
     const normalized = objectOf(input, 'input');
@@ -169,6 +176,14 @@ export const createMutations = ({
         if (answered.length !== logins.length || !answered.every((login) => logins.includes(login))) {
           throw new CallError('The forge answered an unexpected assignee set', 502);
         }
+        return {};
+      }
+      case 'issue-subscription':
+      case 'change-request-subscription': {
+        const login = await currentLogin(call);
+        const path = `${repo}/issues/${providerTarget.number}/subscriptions/${seg(login)}`;
+        if (normalized.subscribed === true) await api(call, 'PUT', path);
+        else await api(call, 'DELETE', path);
         return {};
       }
       case 'change-request-merge': {
@@ -246,6 +261,11 @@ export const createMutations = ({
         const current = (data.assignees ?? []).map((user) => user.login);
         return current.length === logins.length && current.every((login) => logins.includes(login))
           ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+      }
+      case 'issue-subscription':
+      case 'change-request-subscription': {
+        const { data } = await api<GiteaSubscriptionCheck>(call, 'GET', `${repo}/issues/${providerTarget.number}/subscriptions/check`);
+        return data.subscribed === (normalized.subscribed === true) ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
       }
       case 'change-request-merge': {
         const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);

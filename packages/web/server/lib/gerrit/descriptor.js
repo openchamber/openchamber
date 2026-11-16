@@ -121,6 +121,7 @@ export const gerritDescriptor = Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: false, issueCloseReason: false,
       commentEdit: false,
+      lock: false, subscription: false,
       // The commit message is the description; there is no template.
       changeRequestTemplates: Object.freeze([]),
       // A change's head is a patchset ref, not a branch to stack on.

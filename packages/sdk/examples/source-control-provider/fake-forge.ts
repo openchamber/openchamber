@@ -25,6 +25,8 @@ type ForgeItem = {
   state: 'open' | 'closed';
   comments: ForgeComment[];
   assignees: string[];
+  /** Whether the acting account follows the item's conversation. */
+  subscribed?: boolean;
   /** `headRepo` is the id of the repository the head branch lives in. */
   pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean };
 };
@@ -314,6 +316,14 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       const item = byNumber(number);
       if (!item) return notFound;
+      if (action === 'subscriptions' && rest.length === 4) {
+        if (method === 'GET' && rest[3] === 'check') return { status: 200, body: { subscribed: item.subscribed === true } };
+        if (method === 'PUT' || method === 'DELETE') {
+          item.subscribed = method === 'PUT';
+          writes.push({ method, path });
+          return { status: 204, body: null };
+        }
+      }
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);

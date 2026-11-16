@@ -17,6 +17,8 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         number
         body
         viewerCanUpdate
+        locked
+        viewerSubscription
         assignees(first: 30) { nodes { login avatarUrl } }
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
       }
@@ -24,6 +26,8 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         number
         body
         viewerCanUpdate
+        locked
+        viewerSubscription
         state
         reviewDecision
         # The preview's checks, from the PR itself rather than the list's batch.

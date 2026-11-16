@@ -1849,7 +1849,7 @@ export type RepositoryReferenceDetail = {
    */
   body?: string;
   /** Whether this account may replace the item's title and body; absent when the host does not say. */
-  viewerCanUpdate?: boolean; assignees?: RepositoryReferenceReviewer[];
+  viewerCanUpdate?: boolean; assignees?: RepositoryReferenceReviewer[]; locked?: boolean; viewerSubscribed?: boolean;
   /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
   comments: RepositoryReferenceComment[];
   /** How many conversation comments the item has in all. */
@@ -2099,7 +2099,7 @@ export interface SourceControlAPI extends SourceControlWrites {
     number: number,
     project?: { owner: string; name: string },
   ): Promise<IssueComment[]>;
-  projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>;
+  projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>; credentialScopes(context: SourceControlReadContext): Promise<string[] | null>; repoCapabilities(context: SourceControlReadContext): Promise<{ lock: boolean | null }>;
   projectBranches(context: SourceControlReadContext, owner: string, project: string): Promise<string[]>;
 
   /**

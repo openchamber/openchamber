@@ -85,10 +85,10 @@ import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
-import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references'; import { createBranchWrites } from './source-control-branch-writes';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references'; import { createBranchWrites } from './source-control-branch-writes'; import { createConversationWrites, readCredentialScopes, readRepoCapabilities } from './source-control-conversation-writes';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 
-interface ErrorResponse {
+export interface ErrorResponse {
   error?: string;
   code?: string;
   /** The provider whose card an instance belongs on (`SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER`). */
@@ -400,7 +400,7 @@ export const configureWebAuxiliaryBinding = async (
   return { status: 'configured', binding: parseRepositoryBinding(payload) };
 };
 
-const request = async <TResult extends ErrorResponse | null>(
+export const request = async <TResult extends ErrorResponse | null>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -427,7 +427,7 @@ const request = async <TResult extends ErrorResponse | null>(
   return payload;
 };
 
-const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
+export const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
   const query = new URLSearchParams({
     directory: context.directory,
     repositoryId: context.repositoryId,
@@ -882,7 +882,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
     || issue.assignees.some((user) => !hasMatchingIdentity(user, identity)))) {
     throw new Error('Source control response contained invalid issue assignees');
   }
-  if (issue.writeAccess !== undefined && Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access');
+  if (issue.writeAccess !== undefined && Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access'); if (issue.locked !== undefined && Object.prototype.toString.call(issue.locked) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue lock'); if (issue.subscribed !== undefined && Object.prototype.toString.call(issue.subscribed) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue subscription');
   if (issue.labels !== undefined && (!Array.isArray(issue.labels) || issue.labels.some((label) => !label
     || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color))))) {
     throw new Error('Source control response contained invalid issue labels');
@@ -900,7 +900,7 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.author !== undefined) result.author = issue.author ? parseSourceUser(issue.author, identity) : null;
   if (issue.assignees !== undefined) result.assignees = issue.assignees.map((user) => parseSourceUser(user, identity));
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
-  if (issue.writeAccess !== undefined) { if (Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access'); result.writeAccess = issue.writeAccess; }
+  if (issue.writeAccess !== undefined) { if (Object.prototype.toString.call(issue.writeAccess) !== '[object Boolean]') throw new Error('Source control response contained an invalid issue write access'); result.writeAccess = issue.writeAccess; } if (issue.locked !== undefined) result.locked = issue.locked; if (issue.subscribed !== undefined) result.subscribed = issue.subscribed;
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
   return result;
@@ -1568,7 +1568,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
-    ...createBranchWrites(fetch),
+    ...createBranchWrites(fetch), ...createConversationWrites(fetch), credentialScopes: (context) => readCredentialScopes(fetch, context), repoCapabilities: (context) => readRepoCapabilities(fetch, context),
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {
@@ -1693,7 +1693,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
       }
-      if (payload.writeAccess !== undefined) { if (!isBooleanValue(payload.writeAccess)) throw new Error('Source control response contained an invalid write access'); result.writeAccess = payload.writeAccess; }
+      if (payload.writeAccess !== undefined) { if (!isBooleanValue(payload.writeAccess)) throw new Error('Source control response contained an invalid write access'); result.writeAccess = payload.writeAccess; } if (payload.locked !== undefined) { if (!isBooleanValue(payload.locked)) throw new Error('Source control response contained an invalid lock'); result.locked = payload.locked; } if (payload.subscribed !== undefined) { if (!isBooleanValue(payload.subscribed)) throw new Error('Source control response contained an invalid subscription'); result.subscribed = payload.subscribed; }
       // A review host's labels, requirements and revisions; absent for every other host.
       if (payload.voteLabels !== undefined) {
         if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');

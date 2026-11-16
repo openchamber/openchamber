@@ -280,6 +280,19 @@ export function createStandardMutations(descriptor) {
     },
   };
 
+  if (descriptor.presentation?.features?.subscription === true) for (const [route, kind] of [['/issues/subscription', 'issue-subscription'], ['/pr/subscription', 'change-request-subscription']]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (Object.prototype.toString.call(input.subscribed) !== '[object Boolean]') {
+          throw invalidMutationContext('subscribed must be true or false');
+        }
+        return { subscribed: input.subscribed, digest: { subscribed: input.subscribed } };
+      },
+    };
+  }
+
   const entryFor = (route) => {
     if (!Object.hasOwn(entries, route)) throw invalidMutationContext('Source control mutation is unsupported');
     return entries[route];

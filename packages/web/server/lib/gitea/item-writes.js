@@ -3,14 +3,27 @@ const giteaWriteAccess = (raw) => {
   return push === true || push === false ? push : undefined;
 };
 
-export const withGiteaWriteAccess = (value, raw) => {
+export const withGiteaWriteAccess = (value, raw, itemRaw) => {
   const writeAccess = giteaWriteAccess(raw);
-  return writeAccess === undefined ? value : { ...value, writeAccess };
+  const flags = { ...value };
+  if (writeAccess !== undefined) flags.writeAccess = writeAccess;
+  const locked = itemRaw?.is_locked ?? itemRaw?.locked;
+  if (locked === true || locked === false) flags.locked = locked;
+  return flags;
+};
+
+export const readGiteaSubscription = async (client, repoPath, isPlainObject, repo, number) => {
+  try {
+    const answer = await client.get(`${repoPath(repo)}/issues/${number}/subscriptions/check`);
+    return isPlainObject(answer) && (answer.subscribed === true || answer.subscribed === false) ? answer.subscribed : null;
+  } catch {
+    return null;
+  }
 };
 
 export const giteaItemWrites = ({
   client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId,
-  malformed, requireExpected, readTargetPull, repoUsers,
+  malformed, requireExpected, readTargetPull, repoUsers, readCurrentLogin, isPlainObject,
 }) => {
   const assigneeLogins = async (providerTarget, assignees) => {
     const repo = targetRepo(providerTarget);
@@ -26,6 +39,31 @@ export const giteaItemWrites = ({
   };
 
   return {
+    async setSubscription({ providerTarget, subscribed }) {
+      const login = await readCurrentLogin();
+      const path = `${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/subscriptions/${encodeURIComponent(login)}`;
+      if (subscribed) await client.put(path);
+      else await client.delete(path);
+      return {};
+    },
+
+    async reconcileSubscription(providerTarget, subscribed) {
+      const current = await readGiteaSubscription(client, repoPath, isPlainObject, targetRepo(providerTarget), providerTarget.number);
+      return current !== null && current === subscribed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
+    async setConversationLock({ providerTarget, locked }) {
+      const path = `${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/lock`;
+      if (locked) await client.put(path, { lock: true });
+      else await client.delete(path);
+      return {};
+    },
+
+    async reconcileLockMutation(providerTarget, locked) {
+      const issue = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`);
+      const current = issue?.is_locked ?? issue?.locked;
+      return current === locked ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
     async setChangeRequestBase({ providerTarget, base, expectedTarget }) {
       const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}`, { base });
       if (branchRepoId(raw?.base) !== providerTarget.repoId) throw malformed(`${providerLabel} returned a pull request outside the resolved mutation target`);

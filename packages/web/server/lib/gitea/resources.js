@@ -7,7 +7,7 @@ import {
   mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaCommit, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
   mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff,
 } from './mappers.js';
-import { resolveGiteaReposFromDirectory } from './repo.js'; import { giteaItemWrites, withGiteaWriteAccess } from './item-writes.js';
+import { resolveGiteaReposFromDirectory } from './repo.js'; import { giteaItemWrites, readGiteaSubscription, withGiteaWriteAccess } from './item-writes.js'; import { instanceCapabilities } from './capabilities.js';
 
 // Gitea caps a page at `[api] MAX_RESPONSE_ITEMS` (50 by default).
 const PAGE_LIMIT = 50;
@@ -362,7 +362,7 @@ export function createGiteaResourceService({
     return comments;
   };
 
-  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, repoUsers }),
+  return { ...giteaItemWrites({ client, targetRepo, repoPath, providerLabel, isString, requireIssue, requirePull, projectOfTarget, branchRepoId, malformed, requireExpected, readTargetPull, repoUsers, readCurrentLogin, isPlainObject }), repoCapabilities: instanceCapabilities(client, origin, provider),
     async changeRequestStatus(directory, branch, remote) {
       const sources = await resolveDirectoryRepos(directory, remote);
       const targets = await withParents(sources, { requireComplete: true });
@@ -445,8 +445,7 @@ export function createGiteaResourceService({
 
     async changeRequestContext(directory, number, options = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
-      const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, viewer] = await Promise.all([
+      const repo = repoPath(target.project); const [comments, reviews, diffText, changedFiles, ci, headProject, commits, subscribed, viewer] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -455,7 +454,7 @@ export function createGiteaResourceService({
           : Promise.resolve([]),
         readCI(target.project, request.headSha),
         headProjectOf(raw, target, net.targets),
-        options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null),
+        options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null), readGiteaSubscription(client, repoPath, isPlainObject, target.project, number),
         // Only the viewer's own comments may be changed; an unread login just hides both actions.
         readCurrentLogin().catch(() => null),
       ]);
@@ -495,7 +494,7 @@ export function createGiteaResourceService({
         diff: diffText,
         ci,
       };
-      Object.assign(context, withGiteaWriteAccess({}, target.raw)); if (!options.includeTimeline) return context;
+      Object.assign(context, withGiteaWriteAccess({}, target.raw, raw)); if (subscribed !== null) context.subscribed = subscribed; if (!options.includeTimeline) return context;
       return {
         ...context,
         commits: commits.items,
@@ -530,8 +529,9 @@ export function createGiteaResourceService({
     },
 
     async getIssue(directory, number, selector, remote, { linked } = {}) {
-      const { target } = await network(directory, selector, remote, { linked });
-      return withGiteaWriteAccess(requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project), target.raw);
+      const { target } = await network(directory, selector, remote, { linked }); const raw = await client.get(`${repoPath(target.project)}/issues/${number}`);
+      const issue = withGiteaWriteAccess(requireIssue(raw, target.project), target.raw, raw);
+      const subscribed = await readGiteaSubscription(client, repoPath, isPlainObject, target.project, number); return subscribed === null ? issue : { ...issue, subscribed };
     },
 
     async issueComments(directory, number, selector, remote, { linked } = {}) {

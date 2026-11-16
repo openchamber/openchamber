@@ -9,9 +9,10 @@ export type GiteaRepo = {
 export type GiteaBranchRef = { ref: string; sha: string; repo_id?: number; repo?: GiteaRepo };
 export type GiteaIssue = {
   number: number; title: string; body?: string; state: 'open' | 'closed'; html_url: string; user?: GiteaUser;
-  assignees?: GiteaUser[];
+  assignees?: GiteaUser[]; locked?: boolean;
   created_at?: string; updated_at?: string; pull_request?: object | null;
 };
+export type GiteaSubscriptionCheck = { subscribed?: boolean };
 export type GiteaPull = GiteaIssue & {
   draft?: boolean; merged?: boolean; mergeable?: boolean; head: GiteaBranchRef; base: GiteaBranchRef;
   /** The commit the pull request's diff is taken against. */

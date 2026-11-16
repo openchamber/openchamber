@@ -268,6 +268,13 @@ export function createProvider({
       getIssue: resources.getIssue,
       issueComments: resources.issueComments,
       projectUpstream: resources.projectUpstream,
+      credentialScopes: async ({ session }) => {
+        const response = await accountOf(session).octokit.request('GET /');
+        const header = response?.headers?.['x-oauth-scopes'];
+        return Object.prototype.toString.call(header) === '[object String]'
+          ? header.split(',').map((scope) => scope.trim()).filter(Boolean)
+          : null;
+      },
       projectBranches: resources.projectBranches,
       listLabels: resources.listLabels,
       listReviewerCandidates: resources.listReviewerCandidates,

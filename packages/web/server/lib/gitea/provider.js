@@ -2,6 +2,7 @@ import { createPatAccountAuth } from '../source-control/pat-account-auth.js';
 import { createStandardMutations } from '../source-control/standard-mutations.js';
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
+import { withGiteaLock } from './lock-writes.js';
 import { createGtCli } from './gt-cli.js';
 import { createGiteaResourceService } from './resources.js';
 import { normalizeSshUrl, parseSshUrl } from '../source-control/ssh-url.js';
@@ -157,6 +158,18 @@ function mutationOperations() {
     perform: (service, normalized, resolved) => service.setIssueAssignees(call(resolved, { assignees: normalized.names })),
     reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
   };
+  for (const route of ['/issues/subscription', '/pr/subscription']) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.setSubscription(call(resolved, { subscribed: normalized.subscribed })),
+      reconcile: (service, resolved, normalized) => service.reconcileSubscription(resolved.providerTarget, normalized.subscribed),
+    };
+  }
+  for (const [route, kind] of [['/pr/lock', 'change-request-lock'], ['/issues/lock', 'issue-lock']]) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.setConversationLock(call(resolved, { kind, locked: normalized.locked })),
+      reconcile: (service, resolved, normalized) => service.reconcileLockMutation(resolved.providerTarget, normalized.locked),
+    };
+  }
   return operations;
 }
 
@@ -238,7 +251,7 @@ export function createGiteaFamilyProvider({
     return service;
   };
 
-  const standardMutations = createStandardMutations(descriptor);
+  const standardMutations = withGiteaLock(createStandardMutations(descriptor));
   const operations = mutationOperations();
 
   const projectSelector = (sourceRepo) => (sourceRepo ? { owner: sourceRepo.owner, name: sourceRepo.repo } : undefined);
@@ -260,6 +273,7 @@ export function createGiteaFamilyProvider({
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
+      repoCapabilities: ({ session }) => serviceFor(session).repoCapabilities(),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
       listReviewerCandidates: ({ session, directory, project, remote, role }) => serviceFor(session).listReviewerCandidates(directory, project, remote, { role }),

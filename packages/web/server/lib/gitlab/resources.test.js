@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createGitLabResourceService } from './resources.js';
+import { gitlabItemFlags } from './item-writes.js';
+import { isPlainObject } from './validation.js';
 
 const origin = 'https://gitlab.example.com';
 const sourceProject = {
@@ -1334,5 +1336,95 @@ describe('GitLab write access', () => {
 
   it.each([30, 40])('allows write access at or above Developer (%i)', async (level) => {
     await expect(getIssueWith({ project_access: { access_level: level } })).resolves.toMatchObject({ writeAccess: true });
+  });
+});
+
+describe('GitLab conversation writes', () => {
+  const targetProject = { id: '2', owner: 'team', name: 'repo' };
+  const issueRaw = { iid: 3, title: 'Bug', web_url: `${origin}/team/repo/-/issues/3`, state: 'opened', discussion_locked: false, subscribed: false };
+  const conversationService = (issues, mergeRequests) => createGitLabResourceService({
+    origin,
+    client: { Projects: { show: vi.fn(async (id) => (Number(id) === 2 ? targetProject : sourceProject)) }, Issues: issues, MergeRequests: mergeRequests },
+    resolveProjects: vi.fn(),
+  });
+
+  it('maps locked and subscribed beside write access, and leaves out what the host does not answer', () => {
+    expect(gitlabItemFlags({}, { permissions: { project_access: { access_level: 30 } } }, { discussion_locked: true, subscribed: false }, isPlainObject))
+      .toEqual({ writeAccess: true, locked: true, subscribed: false });
+    expect(gitlabItemFlags({}, {}, { discussion_locked: null }, isPlainObject)).toEqual({ locked: false });
+    expect(gitlabItemFlags({}, {}, {}, isPlainObject)).toEqual({});
+  });
+
+  it('locks an issue and a merge request through discussion_locked', async () => {
+    const issues = { edit: vi.fn(async (_id, _iid, options) => ({ ...issueRaw, discussion_locked: options.discussionLocked })), show: vi.fn(async () => ({ ...issueRaw, discussion_locked: true })) };
+    const mergeRequests = { edit: vi.fn(async (_id, _iid, options) => ({ ...openMR, discussion_locked: options.discussionLocked })) };
+    const service = conversationService(issues, mergeRequests);
+
+    await expect(service.setConversationLock({ kind: 'issue-lock', locked: true, providerTarget: { projectId: '2', number: 3 }, targetProject }))
+      .resolves.toEqual({});
+    await expect(service.setConversationLock({ kind: 'change-request-lock', locked: false, providerTarget: { projectId: '2', number: 5 }, targetProject: { id: '2', owner: 'team', name: 'repo' } }))
+      .resolves.toEqual({});
+
+    expect(issues.edit).toHaveBeenCalledWith('2', 3, { discussionLocked: true });
+    expect(mergeRequests.edit).toHaveBeenCalledWith('2', 5, { discussionLocked: false });
+    await expect(service.reconcileLockMutation({ projectId: '2', number: 3 }, 'issue-lock', true))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+  });
+
+  it('treats a lock the host did not apply, and a mismatched read-back, as unknown or refused', async () => {
+    const issues = {
+      edit: vi.fn(async () => ({ ...issueRaw, discussion_locked: false })),
+      show: vi.fn(async () => ({ ...issueRaw, discussion_locked: true })),
+    };
+    const service = conversationService(issues, {});
+
+    await expect(service.setConversationLock({ kind: 'issue-lock', locked: true, providerTarget: { projectId: '2', number: 3 }, targetProject }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+    await expect(service.reconcileLockMutation({ projectId: '2', number: 3 }, 'issue-lock', false))
+      .resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('subscribes and unsubscribes an issue and a merge request, and reads the state back', async () => {
+    const issues = {
+      subscribe: vi.fn(async () => ({ ...issueRaw, subscribed: true })),
+      unsubscribe: vi.fn(async () => ({ ...issueRaw, subscribed: false })),
+      show: vi.fn(async () => ({ ...issueRaw, subscribed: true })),
+    };
+    const mergeRequests = {
+      subscribe: vi.fn(async () => ({ ...openMR, subscribed: true })),
+      unsubscribe: vi.fn(async () => ({ ...openMR, subscribed: false })),
+    };
+    const service = conversationService(issues, mergeRequests);
+
+    await expect(service.setConversationSubscription({ kind: 'issue-subscription', subscribed: true, providerTarget: { projectId: '2', number: 3 }, targetProject }))
+      .resolves.toEqual({});
+    await expect(service.setConversationSubscription({ kind: 'issue-subscription', subscribed: false, providerTarget: { projectId: '2', number: 3 }, targetProject }))
+      .resolves.toEqual({});
+    await expect(service.setConversationSubscription({ kind: 'change-request-subscription', subscribed: false, providerTarget: { projectId: '2', number: 5 }, targetProject }))
+      .resolves.toEqual({});
+
+    expect(issues.subscribe).toHaveBeenCalledWith('2', 3);
+    expect(issues.unsubscribe).toHaveBeenCalledWith('2', 3);
+    expect(mergeRequests.unsubscribe).toHaveBeenCalledWith('2', 5);
+    await expect(service.reconcileSubscriptionMutation({ projectId: '2', number: 3 }, 'issue-subscription', true))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileSubscriptionMutation({ projectId: '2', number: 3 }, 'issue-subscription', false))
+      .resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('takes a 304 as success only when the read-back already matches', async () => {
+    const notModified = () => Promise.reject(Object.assign(new Error('Not Modified'), { response: { status: 304 } }));
+    const matching = conversationService(
+      { subscribe: vi.fn(notModified), show: vi.fn(async () => ({ ...issueRaw, subscribed: true })) },
+      {},
+    );
+    const mismatched = conversationService(
+      { subscribe: vi.fn(notModified), show: vi.fn(async () => ({ ...issueRaw, subscribed: false })) },
+      {},
+    );
+    const payload = { kind: 'issue-subscription', subscribed: true, providerTarget: { projectId: '2', number: 3 }, targetProject };
+
+    await expect(matching.setConversationSubscription(payload)).resolves.toEqual({});
+    await expect(mismatched.setConversationSubscription(payload)).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
   });
 });

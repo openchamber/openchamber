@@ -436,6 +436,8 @@ var mapPull = (call, raw, project) => {
   };
   if (raw.body !== undefined)
     request.body = raw.body;
+  if (raw.locked !== undefined)
+    request.locked = raw.locked;
   stamp(request, raw);
   if (request.state === "open" && raw.mergeable !== undefined) {
     request.mergeable = raw.mergeable;
@@ -459,6 +461,8 @@ var mapIssue = (call, raw, project) => {
     issue.assignees = raw.assignees.flatMap((person) => mapUser(call, person) ?? []);
   if (raw.body !== undefined)
     issue.body = raw.body;
+  if (raw.locked !== undefined)
+    issue.locked = raw.locked;
   stamp(issue, raw);
   return issue;
 };
@@ -649,11 +653,12 @@ var handlers = {
     const number = integer(input, "number");
     const repo = repoPath(project);
     const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, check] = await Promise.all([
       readPull(call, project, number),
       api(call, "GET", `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(""),
-      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([])
+      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      api(call, "GET", `${repo}/issues/${number}/subscriptions/check`).catch(() => null)
     ]);
     const pull = mapPull(call, raw, project);
     const patches = splitUnifiedDiff(diff);
@@ -664,6 +669,7 @@ var handlers = {
         mapped.patch = patch;
       return mapped;
     });
+    const subscribed = check?.data.subscribed;
     return {
       identity: call.identity,
       project,
@@ -672,7 +678,8 @@ var handlers = {
       reviewComments: [],
       files,
       diff,
-      ci: null
+      ci: null,
+      ...subscribed === true || subscribed === false ? { subscribed } : undefined
     };
   },
   listIssues: async (call, input) => {
@@ -686,10 +693,16 @@ var handlers = {
   },
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
-    const { data } = await api(call, "GET", `${repoPath(project)}/issues/${integer(input, "number")}`);
+    const number = integer(input, "number");
+    const { data } = await api(call, "GET", `${repoPath(project)}/issues/${number}`);
     if (data.pull_request)
       throw new CallError(`#${data.number} is a pull request`, 404);
-    return mapIssue(call, data, project);
+    const issue = mapIssue(call, data, project);
+    const check = await api(call, "GET", `${repoPath(project)}/issues/${number}/subscriptions/check`).catch(() => null);
+    const subscribed = check?.data.subscribed;
+    if (subscribed === true || subscribed === false)
+      issue.subscribed = subscribed;
+    return issue;
   },
   issueComments: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));

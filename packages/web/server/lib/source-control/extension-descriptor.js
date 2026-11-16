@@ -33,7 +33,7 @@ import { extensionProviderId } from './provider-id.js';
  *   presentation: {
  *     abbreviation: string, promptNoun: string, sharedNumberSpace: boolean, iconPath?: string,
  *     urls: { changeRequest: string[], issue: string[] },
- *     features: { authorCanReview: boolean, issueCloseReason: boolean, submitRequirements?: boolean },
+ *     features: { authorCanReview: boolean, issueCloseReason: boolean, submitRequirements?: boolean, subscription?: boolean },
  *     changeRequestTemplates: string[],
  *   },
  * }} SourceControlContribution
@@ -282,6 +282,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         // The same switch as the capability: it gates the edit and delete routes,
         // so publishing it from anywhere else would offer a write that 501s.
         commentEdit: capabilities.commentEdit === true,
+        lock: false,
+        subscription: presentation.features.subscription === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

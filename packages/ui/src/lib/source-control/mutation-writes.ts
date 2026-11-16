@@ -3,14 +3,26 @@ import type { SourceControlExistingMutationTarget, SourceControlMutationContext 
 declare module './types' {
   interface Issue {
     writeAccess?: boolean;
+    locked?: boolean;
+    subscribed?: boolean;
   }
   interface ChangeRequestContext {
     writeAccess?: boolean;
+    locked?: boolean;
+    subscribed?: boolean;
   }
 }
 
 export interface SetAssigneesInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   assignees: string[];
+}
+
+export interface SetConversationLockInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  locked: boolean;
+}
+
+export interface SetItemSubscriptionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  subscribed: boolean;
 }
 
 export interface SetChangeRequestBaseInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {

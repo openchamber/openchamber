@@ -143,6 +143,8 @@ export interface ProviderDescriptor {
        * Absent means no: posting a comment is not permission to change one.
        */
       commentEdit?: boolean;
+      lock?: boolean;
+      subscription?: boolean;
     };
   };
   /** GitHub only, declarative: the `/api/github` aliases its routes keep. */

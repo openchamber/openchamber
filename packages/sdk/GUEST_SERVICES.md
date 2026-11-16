@@ -343,7 +343,7 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit?, baseChange?, updateBranch? }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements?, issueEdit?, changeRequestEdit?, baseChange?, updateBranch?, subscription? }, changeRequestTemplates[] }` |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
 
@@ -358,6 +358,7 @@ A host that reviews one change at a time, with numbered revisions and per-label 
 | `capabilities.revisions: true` | `changeRequestContext`, `readChangeRequestPatch` and `readChangeRequestFile` may carry `revision`, a 40-hex commit sha, to read that revision. The context lists them as `revisions`, oldest first. Without the capability a read with `revision` is a 400 and never reaches the service |
 | `capabilities.merge: { methods: ["submit"] }` | The merge button reads Submit. `/pr/merge` carries `{ method: "submit" }` |
 | `presentation.features.submitRequirements: true` | The context carries `submitRequirements`, `[{ name, status, description? }]`, and the UI lists the unmet ones by the Submit button |
+| `presentation.features.subscription: true` | The descriptor publishes `features.subscription`, so the preview offers Follow and the service receives `issue-subscription` and `change-request-subscription`. Lock stays off for an extension's host (`features.lock` is always false) |
 | `token: { header: "authorization", scheme: "basic", username: true }` | Settings asks for a username beside the token. The proxy sends `Authorization: Basic base64(<login>:<token>)` with the account's stored login. `auth.verify` goes out with the username the user typed; a login with a `:` or a control character is refused |
 
 `changeRequestStatus` may add `localRevision: { sha, changeId, uploadedAs }` (the local tip, the change id in its commit message or `null`, the revision number it was uploaded as or `null`) and `stack: { number: null, base, layers }` with layers bottom first.
@@ -436,6 +437,7 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `issues` | `/issues/assignees` | `issue-assignees` | `{ names }`: the whole set, as the assignee candidates name it |
+| `subscription` (`presentation.features`) | `/issues/subscription`, `/pr/subscription` | `issue-subscription`, `change-request-subscription` | `{ subscribed }`: follow or unfollow the item as the acting account. The service names the account itself; there is no lock route for an extension's host |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
 | `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |
 

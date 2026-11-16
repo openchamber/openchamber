@@ -5,7 +5,7 @@ import { createGitLabResourceService } from './resources.js';
 import { reviewDraftEntries } from '../source-control/review-position.js';
 import { verifyGitLabToken } from './verify.js'; import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
-import { digestMutationInput } from '../source-control/mutation-executor.js'; import { changeRequestBaseEntry, changeRequestRebaseEntry, issueAssigneesEntry } from './change-request-writes.js';
+import { digestMutationInput } from '../source-control/mutation-executor.js'; import { changeRequestBaseEntry, changeRequestRebaseEntry, issueAssigneesEntry } from './change-request-writes.js'; import { conversationEntries } from './conversation-writes.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
 
 /**
@@ -406,7 +406,7 @@ function mutationTable(descriptor) {
     };
   }
   entries['/issues/assignees'] = issueAssigneesEntry(nameList, descriptor.limits.reviewersMax, descriptor.limits.reviewerId, invalidMutationContext);
-  return entries;
+  return Object.assign(entries, conversationEntries(invalidMutationContext));
 }
 
 /**

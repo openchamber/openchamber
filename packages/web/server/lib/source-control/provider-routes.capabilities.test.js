@@ -228,5 +228,32 @@ describe('provider routes for change hosts', () => {
     const response = await request(app).get('/api/source-control/review/capabilities').query({ instance }).expect(200);
     expect(response.body).toMatchObject({ mergeChangeRequests: true, mergeMethods: ['submit'] });
   });
+
+  it('answers the instance lock capability where a provider reads it, and 501 where it does not', async () => {
+    const appFor = (resources) => {
+      const impl = {
+        ...fakeImplementation(),
+        auth: { ...fakeImplementation().auth, resolveAccount: vi.fn(async () => ({ instance, accountId: 'account' })) },
+        resources,
+      };
+      const providers = createSourceControlProviders({
+        descriptors: createProviderDescriptors([acme]),
+        loaders: { acme: async () => ({ createProvider: () => impl }) },
+      });
+      const app = express();
+      app.use(express.json());
+      const context = { provider: 'acme', instance, accountId: 'account', directory: '/repo', primaryRemote: 'origin' };
+      registerProviderRoutes(app, { providers, validateReadContext: async () => context });
+      return app;
+    };
+
+    const answered = await request(appFor({ repoCapabilities: vi.fn(async () => ({ lock: true })) }))
+      .get('/api/source-control/acme/repo/capabilities').query({ instance, directory: '/repo' }).expect(200);
+    expect(answered.body).toEqual({ lock: true });
+
+    const unsupported = await request(appFor({}))
+      .get('/api/source-control/acme/repo/capabilities').query({ instance, directory: '/repo' }).expect(501);
+    expect(unsupported.body.code).toBe('SOURCE_CONTROL_CAPABILITY_UNSUPPORTED');
+  });
 });
 

@@ -304,6 +304,8 @@ const detailSchema = z.object({
         // Optional so a host that does not send the description or the permission still reads.
         body: z.string().optional(),
         viewerCanUpdate: z.boolean().optional(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
         assignees: z.object({
           nodes: z.array(z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() })),
         }).optional(),
@@ -314,6 +316,8 @@ const detailSchema = z.object({
         number: z.number().int(),
         body: z.string().optional(),
         viewerCanUpdate: z.boolean().optional(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
         state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         headCommit: z.object({
@@ -586,6 +590,13 @@ const editableText = (item) => {
   return text;
 };
 
+const conversationFlags = (item) => {
+  const flags = {};
+  if (item.locked !== undefined) flags.locked = item.locked;
+  if (item.viewerSubscription !== undefined) flags.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+  return flags;
+};
+
 /**
  * Comments of one issue or PR, oldest first, and for a PR its size, review
  * decision and checks. A PR's reviews join the comments: a review's own text
@@ -620,7 +631,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     return entry;
   });
   if (item.__typename === 'Issue') {
-    const detail = { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null };
+    const detail = { number: item.number, ...editableText(item), ...conversationFlags(item), comments, commentTotal: item.comments.totalCount, pull: null };
     const writeAccess = writeAccessOf(parsed.repository?.viewerPermission);
     if (writeAccess !== undefined) detail.writeAccess = writeAccess;
     if (item.assignees !== undefined) {
@@ -673,6 +684,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   const detail = {
     number: item.number,
     ...editableText(item),
+    ...conversationFlags(item),
     comments,
     commentTotal: item.comments.totalCount,
     pull: {

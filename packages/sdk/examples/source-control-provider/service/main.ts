@@ -28,7 +28,7 @@ import {
   type SourceControlProviderResult,
 } from '@openchamber/sdk';
 import type {
-  Call, GiteaBranch, GiteaBranchRef, GiteaChangedFile, GiteaComment, GiteaIssue, GiteaPull, GiteaRepo, GiteaUser, GiteaVersion, ProviderTarget,
+  Call, GiteaBranch, GiteaBranchRef, GiteaChangedFile, GiteaComment, GiteaIssue, GiteaPull, GiteaRepo, GiteaSubscriptionCheck, GiteaUser, GiteaVersion, ProviderTarget,
 } from './types.ts';
 import type { MutationDeps, Mutations } from './mutations.ts';
 
@@ -145,12 +145,12 @@ type User = Identity & { id: string; username: string; name?: string; avatarUrl?
 type Dated = { createdAt?: string; updatedAt?: string };
 type Issue = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
-  state: 'open' | 'closed'; author: User | null; assignees?: User[]; labels: [];
+  state: 'open' | 'closed'; author: User | null; assignees?: User[]; labels: []; locked?: boolean; subscribed?: boolean;
 };
 type ChangeRequest = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
   state: 'open' | 'closed' | 'merged'; draft: boolean; base: string; head: string; headSha: string;
-  author: User | null; labels: []; mergeable?: boolean; mergeableState?: 'clean' | 'dirty';
+  author: User | null; labels: []; mergeable?: boolean; mergeableState?: 'clean' | 'dirty'; locked?: boolean;
 };
 type Comment = Identity & Dated & {
   id: string; url: string; body: string; author: User | null;
@@ -226,6 +226,7 @@ const mapPull = (call: Call, raw: GiteaPull, project: Project): ChangeRequest =>
     labels: [],
   };
   if (raw.body !== undefined) request.body = raw.body;
+  if (raw.locked !== undefined) request.locked = raw.locked;
   stamp(request, raw);
   if (request.state === 'open' && raw.mergeable !== undefined) {
     request.mergeable = raw.mergeable;
@@ -248,6 +249,7 @@ const mapIssue = (call: Call, raw: GiteaIssue, project: Project): Issue => {
   };
   if (raw.assignees?.length) issue.assignees = raw.assignees.flatMap((person) => mapUser(call, person) ?? []);
   if (raw.body !== undefined) issue.body = raw.body;
+  if (raw.locked !== undefined) issue.locked = raw.locked;
   stamp(issue, raw);
   return issue;
 };
@@ -462,11 +464,12 @@ const handlers = {
     const number = integer(input, 'number');
     const repo = repoPath(project);
     const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const [raw, { data: comments }, diff, changed, check] = await Promise.all([
       readPull(call, project, number),
       api<GiteaComment[]>(call, 'GET', `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(''),
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      api<GiteaSubscriptionCheck>(call, 'GET', `${repo}/issues/${number}/subscriptions/check`).catch(() => null),
     ]);
     const pull = mapPull(call, raw, project);
     const patches = splitUnifiedDiff(diff);
@@ -476,7 +479,7 @@ const handlers = {
       if (patch) mapped.patch = patch;
       return mapped;
     });
-    return {
+    const subscribed = check?.data.subscribed; return {
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -485,6 +488,7 @@ const handlers = {
       files,
       diff,
       ci: null,
+      ...(subscribed === true || subscribed === false ? { subscribed } : undefined),
     };
   },
 
@@ -500,9 +504,14 @@ const handlers = {
 
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, 'directory'), text(input, 'remote'), selectorOf(input, 'project'));
-    const { data } = await api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${integer(input, 'number')}`);
+    const number = integer(input, 'number');
+    const { data } = await api<GiteaIssue>(call, 'GET', `${repoPath(project)}/issues/${number}`);
     if (data.pull_request) throw new CallError(`#${data.number} is a pull request`, 404);
-    return mapIssue(call, data, project);
+    const issue = mapIssue(call, data, project);
+    const check = await api<GiteaSubscriptionCheck>(call, 'GET', `${repoPath(project)}/issues/${number}/subscriptions/check`).catch(() => null);
+    const subscribed = check?.data.subscribed;
+    if (subscribed === true || subscribed === false) issue.subscribed = subscribed;
+    return issue;
   },
 
   issueComments: async (call, input) => {

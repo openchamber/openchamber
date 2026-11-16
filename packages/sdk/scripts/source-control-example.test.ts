@@ -266,6 +266,20 @@ describe('source-control provider example', () => {
     expect(stale).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' } });
   });
 
+  test('follows and unfollows an issue and a pull request, and reconciles from the check', async () => {
+    const resolve = await data('mutation.resolveTarget', { context: mutationContext({ number: 1 }), kind: 'issue-subscription', input: { subscribed: true } });
+    const follow = {
+      route: '/issues/subscription', kind: 'issue-subscription', input: { subscribed: true },
+      resolved: { providerTarget: field(resolve, 'providerTarget'), target: field(resolve, 'target') },
+    };
+    expect(await data('mutation.perform', follow)).toEqual({});
+    expect(await data('mutation.reconcile', follow)).toEqual({ state: 'succeeded', result: {} });
+
+    const unfollow = { ...follow, route: '/pr/subscription', kind: 'change-request-subscription', input: { subscribed: false } };
+    expect(await data('mutation.perform', unfollow)).toEqual({});
+    expect(await data('mutation.reconcile', unfollow)).toEqual({ state: 'succeeded', result: {} });
+  });
+
   test('a comment is edited or deleted only on the item it belongs to', async () => {
     const commentsOn = async (number: number): Promise<Array<{ id: number; body: string }>> => (
       await fetch(`${forge.origin}/api/v1/repos/mona/teapot/issues/${number}/comments`, { headers: { authorization: 'token good' } })

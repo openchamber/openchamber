@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
-import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useAvatarImage } from '@/hooks/useAvatarImage'; import { useCredentialScopes } from '@/hooks/useCredentialScopes'; import { useRepoCapabilities } from '@/hooks/useRepoCapabilities';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -35,7 +35,7 @@ import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimeli
 import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
-import { useCopyReferenceLink } from './useCopyReferenceLink'; import { MetaRow, ReferenceAssignees, ReferenceBase } from './ReferenceMetaEditors';
+import { useCopyReferenceLink } from './useCopyReferenceLink'; import { MetaRow, ReferenceAssignees, ReferenceBase } from './ReferenceMetaEditors'; import { ReferenceConversationActions } from './ReferenceConversationActions'; import { conversationActions } from './conversationActions';
 import {
     repositoryStateLook,
     labelColor,
@@ -520,7 +520,7 @@ const RepositoryPreview: React.FC<{
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
-    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : []; const writeRefresh = onWriteRefresh ?? onRefresh; const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined;
+    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : []; const writeRefresh = onWriteRefresh ?? onRefresh; const writeAccess = detail.status === 'ready' ? detail.value.writeAccess : undefined; const followScopes = useCredentialScopes(conversationWriteContext && reference.provider === 'github' ? conversationWriteContext : null); const lockScopes = conversationWriteContext && (reference.provider === 'gitea' || reference.provider === 'forgejo') ? conversationWriteContext : null; const lockCapabilities = useRepoCapabilities(lockScopes); const conversation = conversationActions(reference, detail, conversationWriteContext, followScopes, descriptor.features, lockCapabilities?.lock);
     const canChangeBase = reference.kind === 'pull' && reference.linked !== true && descriptor.features.baseChange && writeAccess !== false && conversationWriteContext != null;
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
@@ -535,8 +535,7 @@ const RepositoryPreview: React.FC<{
     // flight belong to the item they started on: another item never shows,
     // saves or closes them.
     const draftKey = referenceTextDraftKey(reference);
-    const currentDraftKey = React.useRef(draftKey);
-    currentDraftKey.current = draftKey;
+    const currentDraftKey = React.useRef(draftKey); currentDraftKey.current = draftKey;
     const [openEditor, setOpenEditor] = React.useState<{ key: string; title: string; body: string } | null>(null);
     const editing = openEditor?.key === draftKey ? openEditor : null;
     const [savingKeys, setSavingKeys] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -700,7 +699,8 @@ const RepositoryPreview: React.FC<{
                                 </button>
                             </ButtonTooltip>
                         ) : null}
-                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit ? undefined : 'ms-auto'} />
+                        {conversationWriteContext ? <ReferenceConversationActions reference={reference} context={conversationWriteContext} state={conversation} onRefresh={onRefresh} className={cn('shrink-0', showEdit || refresh ? undefined : 'ms-auto')} /> : null}
+                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit || conversation.showLock || conversation.showSubscription ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a

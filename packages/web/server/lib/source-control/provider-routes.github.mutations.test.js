@@ -2167,6 +2167,101 @@ describe('canonical GitHub mutations', () => {
   });
 });
 
+describe('GitHub conversation writes', () => {
+  const target = { project: { owner: 'acme', name: 'app' }, number: 5 };
+  const subscriptionQuery = (entry) => entry.body?.query?.includes('updateSubscription');
+  const recordRequests = (respond) => {
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      return respond(entry);
+    }));
+    return requests;
+  };
+  const noContent = () => new Response(null, { status: 204 });
+
+  it('locks and unlocks an issue and a pull request through the issues API', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const requests = recordRequests((entry) => {
+      if (entry.method !== 'GET') return noContent();
+      if (entry.path.endsWith('/pulls/7')) return jsonResponse(pullRequest({ number: 7, html_url: 'https://github.com/acme/app/pull/7' }));
+      return jsonResponse({ number: 5, locked: true });
+    });
+    const { app, store } = makeApp();
+
+    const locked = await request(app).post('/api/source-control/github/issues/lock')
+      .send({ ...context(account.accountId, { target }), locked: true }).expect(200);
+    const unlocked = await request(app).post('/api/source-control/github/pr/lock')
+      .send({ ...context(account.accountId, { target: { ...target, number: 7 }, idempotencyKey: 'request-two' }), locked: false }).expect(200);
+
+    expect(locked.body.result).toEqual({});
+    expect(unlocked.body.result).toEqual({});
+    expect(requests.filter((entry) => entry.method !== 'GET')).toEqual([
+      { method: 'PUT', path: '/repos/acme/app/issues/5/lock', body: null },
+      { method: 'DELETE', path: '/repos/acme/app/issues/7/lock', body: null },
+    ]);
+    expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-lock', state: 'succeeded' });
+    expect(store.records.get('request-two')).toMatchObject({ kind: 'change-request-lock', state: 'succeeded' });
+  });
+
+  it('refuses a pull request number on the issue lock and subscription routes', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const requests = recordRequests(() => jsonResponse({ ...pullRequest(), pull_request: { url: 'https://api.github.com/repos/acme/app/pulls/7' } }));
+    const { app } = makeApp();
+
+    await request(app).post('/api/source-control/github/issues/lock')
+      .send({ ...context(account.accountId, { target: { ...target, number: 7 } }), locked: true }).expect(409);
+    await request(app).post('/api/source-control/github/issues/subscription')
+      .send({ ...context(account.accountId, { target: { ...target, number: 7 }, idempotencyKey: 'request-two' }), subscribed: true }).expect(409);
+
+    expect(requests.filter((entry) => entry.method !== 'GET')).toEqual([]);
+  });
+
+  it('subscribes through GraphQL on the node id and reconciles from viewerSubscription', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    const requests = recordRequests((entry) => {
+      if (entry.method === 'GET' && entry.path.endsWith('/pulls/5')) return jsonResponse(pullRequest({ number: 5, node_id: 'PR_five' }));
+      if (entry.method === 'GET') return jsonResponse({ number: 5, node_id: 'I_five' });
+      return jsonResponse({ data: { updateSubscription: { clientMutationId: null } } });
+    });
+    const { app, store } = makeApp();
+
+    await request(app).post('/api/source-control/github/issues/subscription')
+      .send({ ...context(account.accountId, { target }), subscribed: true }).expect(200);
+    await request(app).post('/api/source-control/github/pr/subscription')
+      .send({ ...context(account.accountId, { target, idempotencyKey: 'request-two' }), subscribed: false }).expect(200);
+
+    expect(requests.filter(subscriptionQuery)).toEqual([
+      expect.objectContaining({ path: '/graphql', body: expect.objectContaining({ variables: { subscribableId: 'I_five', state: 'SUBSCRIBED' } }) }),
+      expect.objectContaining({ path: '/graphql', body: expect.objectContaining({ variables: { subscribableId: 'PR_five', state: 'UNSUBSCRIBED' } }) }),
+    ]);
+    expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-subscription', state: 'succeeded' });
+    expect(store.records.get('request-two')).toMatchObject({ kind: 'change-request-subscription', state: 'succeeded' });
+
+    const reconciled = {
+      repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+      project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+    };
+    const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+    const input = { kind: 'issue-subscription', actor, credential: credentialFor(account), target: reconciled, subscribed: true };
+    const storeWithRunning = makeStore([{ key: 'request-one', inputDigest: digestMutationInput(input), kind: 'issue-subscription', actor, target: reconciled, state: 'running' }]);
+    const { app: replayApp } = makeApp({ store: storeWithRunning });
+    const fetch = vi.fn(async (_url, options) => {
+      const body = options.body ? JSON.parse(options.body) : null;
+      return body?.query
+        ? jsonResponse({ data: { repository: { issueOrPullRequest: { viewerSubscription: 'SUBSCRIBED' } } } })
+        : jsonResponse({ number: 5, node_id: 'I_five' });
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const replay = await request(replayApp).post('/api/source-control/github/issues/subscription')
+      .send({ ...context(account.accountId, { target }), subscribed: true }).expect(200);
+    expect(replay.body).toMatchObject({ status: 'succeeded', replayed: true });
+    expect(storeWithRunning.records.get('request-one').state).toBe('succeeded');
+  });
+});
+
 describe('legacy GitHub mutations', () => {
   it('retires ambient reads and writes without provider calls', async () => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });

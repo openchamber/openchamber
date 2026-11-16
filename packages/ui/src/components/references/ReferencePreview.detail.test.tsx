@@ -12,6 +12,7 @@ import { useTrackerRegistry } from '@/lib/trackers/registry';
 import { createWebAPIs } from '../../../../web/src/api';
 import { fetchRepositoryReferenceDetail } from '../../../../web/src/api/repository-references';
 import { ReferencePreview } from './ReferencePreview';
+import { conversationActions } from './conversationActions';
 import type { CachedValue } from './referenceCache';
 import type { ReferencePickerItem } from './referencePickerItems';
 
@@ -104,5 +105,39 @@ describe('ReferencePreview on the host detail path', () => {
         const container = render({ source: 'repository', reference: pull }, detail, true);
 
         expect(container.querySelector('[aria-label="Edit base branch"]')).not.toBeNull();
+    });
+
+    test('withholds the lock from an account that may not write, and shows Follow anyway', async () => {
+        const detail = await detailFrom({
+            number: 1, comments: [], commentTotal: 0, pull: null, locked: true, viewerSubscribed: false, writeAccess: false,
+        }, 1, 'issue');
+
+        const container = render({ source: 'repository', reference: issue }, detail, true);
+
+        expect(container.querySelector('[aria-label="Unlock conversation"]')).toBeNull();
+        expect(container.querySelector('[aria-label="Subscribe"]')).not.toBeNull();
+    });
+
+    test('shows the lock where the account may write and the host reports its state', async () => {
+        const detail = await detailFrom({
+            number: 1, comments: [], commentTotal: 0, pull: null, locked: true, writeAccess: true,
+        }, 1, 'issue');
+
+        const container = render({ source: 'repository', reference: issue }, detail, true);
+
+        expect(container.querySelector('[aria-label="Unlock conversation"]')).not.toBeNull();
+    });
+
+    test('keeps Follow only when the credential scopes are unknown or carry notifications', () => {
+        const detail: CachedValue<RepositoryReferenceDetail> = { status: 'ready', value: { number: 1, comments: [], commentTotal: 0, pull: null, viewerSubscribed: false } };
+        const features = { lock: true, subscription: true };
+
+        expect(conversationActions(issue, detail, readContext, null, features)).toMatchObject({ showSubscription: true });
+        expect(conversationActions(issue, detail, readContext, ['repo', 'notifications'], features)).toMatchObject({ showSubscription: true });
+        expect(conversationActions(issue, detail, readContext, ['repo'], features)).toMatchObject({ showSubscription: false });
+        expect(conversationActions(issue, detail, readContext, null, features, false)).toMatchObject({ showLock: false });
+        expect(conversationActions(issue, { status: 'ready', value: { ...detail.value, locked: true, writeAccess: true } }, readContext, null, features, false)).toMatchObject({ showLock: false });
+        expect(conversationActions(issue, { status: 'ready', value: { ...detail.value, locked: true, writeAccess: true } }, readContext, null, features, true)).toMatchObject({ showLock: true });
+        expect(conversationActions(issue, { status: 'ready', value: { ...detail.value, locked: true, writeAccess: true } }, readContext, null, features, null)).toMatchObject({ showLock: true });
     });
 });

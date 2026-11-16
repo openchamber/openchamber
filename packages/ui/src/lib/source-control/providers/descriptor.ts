@@ -173,6 +173,8 @@ const descriptorSchema = z.object({
     advancedSearch: z.boolean().default(false).catch(false),
     /** A comment may be edited or removed by the account that wrote it. */
     commentEdit: z.boolean().default(false).catch(false),
+    lock: z.boolean().default(false).catch(false),
+    subscription: z.boolean().default(false).catch(false),
   }),
   /**
    * The installed extension that serves this provider; absent for a built-in.
@@ -241,7 +243,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       issueEdit: false, changeRequestEdit: false, baseChange: false, updateBranch: false, rebase: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false, lock: false, subscription: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

@@ -19,7 +19,7 @@ export const isForgejoVersion = (value) => isString(value) && FORGEJO_SUFFIX.tes
  * The Gitea version a `/version` string names. Forgejo's compatible Gitea
  * version wins over its own. Null when the string names no version.
  */
-function parseGiteaVersion(value) {
+export function parseGiteaVersion(value) {
   if (!isString(value)) return null;
   const match = value.match(FORGEJO_SUFFIX) ?? value.match(/^v?(\d+)\.(\d+)/);
   return match ? [Number(match[1]), Number(match[2])] : null;

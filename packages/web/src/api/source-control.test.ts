@@ -16,7 +16,7 @@ import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { buildManagedAccountOptions } from '@openchamber/ui/lib/source-control/identity';
 import { githubLikeDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor.fixture';
-import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
+import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control'; import { fetchRepositoryReferenceDetail } from './repository-references';
 
 const runtimeFetchMock = vi.fn(async (_input: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 const identity: SourceControlIdentity = { provider: 'github', instance: 'https://GitHub.com/' };
@@ -1061,6 +1061,97 @@ describe('createWebSourceControlAPI', () => {
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/discussions/update', expect.objectContaining({
       body: JSON.stringify({ ...authority, title: 'New title' }),
     }));
+  });
+
+  it('locks and subscribes an issue and a pull request on their own routes', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+
+    await expect(api.issueSetLock({ ...mutationContext, locked: true })).resolves.toEqual(mutationReceipt());
+    await expect(api.changeRequestSetLock({ ...mutationContext, locked: false })).resolves.toEqual(mutationReceipt());
+    await expect(api.issueSetSubscription({ ...mutationContext, subscribed: true })).resolves.toEqual(mutationReceipt());
+    await expect(api.changeRequestSetSubscription({ ...mutationContext, subscribed: false })).resolves.toEqual(mutationReceipt());
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/lock', expect.objectContaining({
+      body: expect.stringContaining('"locked":true'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/pr/lock', expect.objectContaining({
+      body: expect.stringContaining('"locked":false'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(3, '/api/source-control/github/issues/subscription', expect.objectContaining({
+      body: expect.stringContaining('"subscribed":true'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/pr/subscription', expect.objectContaining({
+      body: expect.stringContaining('"subscribed":false'),
+    }));
+  });
+
+  it('reads the credential scopes, and answers null where the host does not report them', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ scopes: ['repo', 'notifications'] }))
+      .mockResolvedValueOnce(Response.json({ scopes: null }))
+      .mockResolvedValueOnce(Response.json({ scopes: [7] }));
+
+    await expect(api.credentialScopes(readContext)).resolves.toEqual(['repo', 'notifications']);
+    await expect(api.credentialScopes(readContext)).resolves.toBeNull();
+    await expect(api.credentialScopes(readContext)).rejects.toThrow('invalid credential scopes');
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/repo/scopes', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one', accountId: 'github.com#7',
+        bindingRevision: '4', primaryRemote: 'upstream',
+      }),
+      headers: { Accept: 'application/json' },
+    }));
+  });
+
+  it('reads the instance lock capability, and refuses an answer that is not a boolean or null', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ lock: true }))
+      .mockResolvedValueOnce(Response.json({ lock: null }))
+      .mockResolvedValueOnce(Response.json({ lock: 'yes' }));
+
+    await expect(api.repoCapabilities(readContext)).resolves.toEqual({ lock: true });
+    await expect(api.repoCapabilities(readContext)).resolves.toEqual({ lock: null });
+    await expect(api.repoCapabilities(readContext)).rejects.toThrow('invalid capabilities');
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/repo/capabilities', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one', accountId: 'github.com#7',
+        bindingRevision: '4', primaryRemote: 'upstream',
+      }),
+    }));
+  });
+
+  it('carries the conversation flags a host reports, and refuses ones that are not booleans', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const issue = {
+      provider: 'github', instance: 'github.com', id: 'openchamber/openchamber#17', number: 17,
+      project: { provider: 'github', instance: 'github.com', id: 'openchamber/openchamber', owner: 'openchamber', name: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
+      title: 'Migrate source control', url: 'https://github.com/openchamber/openchamber/issues/17', state: 'open',
+      locked: true, subscribed: false,
+    };
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(issue))
+      .mockResolvedValueOnce(Response.json({ ...issue, locked: 'yes' }))
+      .mockResolvedValueOnce(Response.json({ ...issue, subscribed: 'no' }));
+
+    await expect(api.issueGet(readContext, 17)).resolves.toMatchObject({ locked: true, subscribed: false });
+    await expect(api.issueGet(readContext, 17)).rejects.toThrow('invalid issue lock');
+    await expect(api.issueGet(readContext, 17)).rejects.toThrow('invalid issue subscription');
+  });
+
+  it('keeps locked and viewerSubscribed in a reference detail instead of stripping them', async () => {
+    const result = await fetchRepositoryReferenceDetail(
+      async () => Response.json({ connected: true, detail: { number: 1, comments: [], commentTotal: 0, pull: null, locked: true, viewerSubscribed: false } }),
+      readContext,
+      { owner: 'openchamber', repo: 'openchamber', number: 1 },
+    );
+    expect(result).toMatchObject({ connected: true, detail: { locked: true, viewerSubscribed: false } });
   });
 
   it("posts comments and reviews to their routes and reads whether a review's text posted", async () => {

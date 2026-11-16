@@ -237,6 +237,18 @@ describe('Gitea mutation input', () => {
     expect(fixtures.errors.reviewRequestChangesWithoutBody.status).toBe(422);
     expect(calls).toHaveLength(0);
   });
+
+  it('takes a lock on the issue and pull request routes, and refuses a missing state', async () => {
+    const { impl } = await setup();
+    const prepare = (route, input) => impl.mutations.prepare({
+      route, input, context: { target: { number: 1 } }, actor: 'actor', credential: 'credential',
+    });
+
+    expect(impl.mutations.routes).toEqual(expect.arrayContaining(['/issues/lock', '/pr/lock']));
+    expect(prepare('/issues/lock', { locked: true })).toMatchObject({ kind: 'issue-lock', input: { locked: true } });
+    expect(prepare('/pr/lock', { locked: false })).toMatchObject({ kind: 'change-request-lock', input: { locked: false } });
+    expect(() => prepare('/issues/lock', {})).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+  });
 });
 
 describe('Gitea through the gt login', () => {

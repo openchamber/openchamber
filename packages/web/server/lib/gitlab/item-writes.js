@@ -8,9 +8,26 @@ const gitlabWriteAccess = (raw, isPlainObject) => {
   return levels.some((level) => level >= DEVELOPER_ACCESS_LEVEL);
 };
 
-export const gitlabWithWriteAccess = (value, raw, isPlainObject) => {
+const gitlabWithWriteAccess = (value, raw, isPlainObject) => {
   const writeAccess = gitlabWriteAccess(raw, isPlainObject);
   return writeAccess === undefined ? value : { ...value, writeAccess };
+};
+
+const gitlabLockFlag = (raw, isPlainObject) => {
+  if (!isPlainObject(raw) || !Object.hasOwn(raw, 'discussion_locked')) return undefined;
+  if (raw.discussion_locked === null) return false;
+  return raw.discussion_locked === true || raw.discussion_locked === false ? raw.discussion_locked : undefined;
+};
+
+const gitlabSubscriptionFlag = (raw) => (raw?.subscribed === true || raw?.subscribed === false ? raw.subscribed : undefined);
+
+export const gitlabItemFlags = (value, projectRaw, itemRaw, isPlainObject) => {
+  const flags = { ...value, ...gitlabWithWriteAccess({}, projectRaw, isPlainObject) };
+  const locked = gitlabLockFlag(itemRaw, isPlainObject);
+  if (locked !== undefined) flags.locked = locked;
+  const subscribed = gitlabSubscriptionFlag(itemRaw);
+  if (subscribed !== undefined) flags.subscribed = subscribed;
+  return flags;
 };
 
 export const gitlabAssignees = (assignees, identity, mapUser) => assignees.flatMap((user) => {
@@ -22,8 +39,63 @@ export const gitlabAssignees = (assignees, identity, mapUser) => assignees.flatM
 });
 
 export const gitlabItemWrites = ({
-  client, isPlainObject, isString, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest,
+  client, isPlainObject, isString, showProject, requireIssue, requireMutationResponse, requireMutationMergeRequest, requestStatus, mutationTargetInvalid,
 }) => ({
+  async setConversationLock(payload) {
+    const { projectId, number } = payload.providerTarget;
+    const raw = payload.kind === 'issue-lock'
+      ? await client.Issues.edit(projectId, number, { discussionLocked: payload.locked })
+      : await client.MergeRequests.edit(projectId, number, { discussionLocked: payload.locked });
+    const target = payload.kind === 'issue-lock'
+      ? requireIssue(raw, payload.targetProject)
+      : requireMutationResponse(raw, payload.targetProject, payload.providerTarget, payload.expectedTarget);
+    if (target.number !== number) throw mutationTargetInvalid('GitLab answered another target for the lock write');
+    if (raw?.discussion_locked !== payload.locked) throw mutationTargetInvalid('GitLab returned an unexpected lock state');
+    return {};
+  },
+
+  async reconcileLockMutation(providerTarget, kind, locked) {
+    const { projectId, number } = providerTarget;
+    const raw = kind === 'issue-lock'
+      ? await client.Issues.show(number, { projectId })
+      : await client.MergeRequests.show(projectId, number);
+    return raw?.discussion_locked === locked ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+  },
+
+  async setConversationSubscription(payload) {
+    const { projectId, number } = payload.providerTarget;
+    const write = payload.subscribed ? 'subscribe' : 'unsubscribe';
+    const readBack = async () => (payload.kind === 'issue-subscription'
+      ? client.Issues.show(number, { projectId })
+      : client.MergeRequests.show(projectId, number));
+    let raw;
+    try {
+      raw = payload.kind === 'issue-subscription'
+        ? await client.Issues[write](projectId, number)
+        : await client.MergeRequests[write](projectId, number);
+    } catch (error) {
+      if (requestStatus(error) !== 304) throw error;
+      if ((await readBack())?.subscribed !== payload.subscribed) {
+        throw mutationTargetInvalid('GitLab returned an unexpected subscription state');
+      }
+      return {};
+    }
+    const target = payload.kind === 'issue-subscription'
+      ? requireIssue(raw, payload.targetProject)
+      : requireMutationResponse(raw, payload.targetProject, payload.providerTarget, payload.expectedTarget);
+    if (target.number !== number) throw mutationTargetInvalid('GitLab answered another target for the subscription write');
+    if (raw?.subscribed !== payload.subscribed) throw mutationTargetInvalid('GitLab returned an unexpected subscription state');
+    return {};
+  },
+
+  async reconcileSubscriptionMutation(providerTarget, kind, subscribed) {
+    const { projectId, number } = providerTarget;
+    const raw = kind === 'issue-subscription'
+      ? await client.Issues.show(number, { projectId })
+      : await client.MergeRequests.show(projectId, number);
+    return raw?.subscribed === subscribed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+  },
+
   async setIssueAssignees(payload) {
     const { projectId, number } = payload.providerTarget;
     const ids = payload.assignees.map(Number);

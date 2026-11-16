@@ -70,6 +70,14 @@ describe('extension source-control descriptors', () => {
     });
   });
 
+  it('publishes subscription only when the manifest declares it, and never lock', () => {
+    expect(build().presentation.features).toMatchObject({ lock: false, subscription: false });
+    const declared = build({
+      presentation: { ...contribution().presentation, features: { authorCanReview: true, issueCloseReason: false, subscription: true } },
+    });
+    expect(declared.presentation.features).toMatchObject({ lock: false, subscription: true });
+  });
+
   it('fixes what the host owns whatever the extension declares', () => {
     const descriptor = build();
     expect(descriptor.authMethods).toEqual({ device: false, pat: true, cli: false });

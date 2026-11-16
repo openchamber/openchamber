@@ -293,6 +293,8 @@ export const fetchListBackedReferenceDetail = async (
         };
         if (assignees.length > 0) detail.assignees = assignees;
         if (issue && issue.writeAccess !== undefined) detail.writeAccess = issue.writeAccess;
+        if (issue && issue.locked !== undefined) detail.locked = issue.locked;
+        if (issue && issue.subscribed !== undefined) detail.viewerSubscribed = issue.subscribed;
         return detail;
     }
     // The size comes from the changed files, which the neutral read only lists with their
@@ -311,5 +313,7 @@ export const fetchListBackedReferenceDetail = async (
         pull: pullDetail(changeRequestContext),
     };
     if (changeRequestContext.writeAccess !== undefined) detail.writeAccess = changeRequestContext.writeAccess;
+    if (changeRequestContext.locked !== undefined) detail.locked = changeRequestContext.locked;
+    if (changeRequestContext.subscribed !== undefined) detail.viewerSubscribed = changeRequestContext.subscribed;
     return detail;
 };

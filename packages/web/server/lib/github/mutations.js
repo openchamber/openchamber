@@ -1,7 +1,7 @@
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { reviewCommentPosition } from '../source-control/review-position.js';
-import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js'; import { baseReconciled, normalizeChangeRequestWrite, performChangeRequestWrite, reconcileUpdateBranch } from './mutations-change-request.js'; import { normalizeAssignees, normalizeStateOperation, performAssignees, performIssueState, reconcileAssignees, reconcileIssueState } from './mutations-items.js';
+import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js'; import { baseReconciled, normalizeChangeRequestWrite, performChangeRequestWrite, reconcileUpdateBranch } from './mutations-change-request.js'; import { normalizeAssignees, normalizeStateOperation, performAssignees, performIssueState, reconcileAssignees, reconcileIssueState } from './mutations-items.js'; import { normalizeConversationWrite, performConversationWrite, reconcileConversationWrite, subscriptionTarget } from './mutations-lock.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -28,10 +28,10 @@ import { readPendingReview } from './review-draft.js';
  */
 
 const ISSUE_KINDS = new Set([
-  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update', 'issue-assignees',
+  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels', 'issue-update', 'issue-assignees', 'issue-lock', 'issue-subscription',
   // A pull request's conversation comments are issue comments to GitHub, so
   // their record kinds are issue kinds too; only their target differs.
-  'change-request-comment-update', 'change-request-comment-delete',
+  'change-request-comment-update', 'change-request-comment-delete', 'change-request-lock', 'change-request-subscription',
 ]);
 const DISCUSSION_KINDS = new Set([
   'discussion-comment', 'discussion-comment-update', 'discussion-comment-delete',
@@ -69,9 +69,9 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/issues/update': 'issue-update',
   '/issues/comment/update': 'issue-comment-update',
   '/issues/comment/delete': 'issue-comment-delete',
-  '/pr/state': 'state',
+  '/pr/state': 'state', '/pr/lock': 'change-request-lock', '/pr/subscription': 'change-request-subscription',
   '/pr/base': 'base', '/pr/update-branch': 'update-branch',
-  '/issues/state': 'issue-state',
+  '/issues/state': 'issue-state', '/issues/lock': 'issue-lock', '/issues/subscription': 'issue-subscription',
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels', '/issues/assignees': 'issue-assignees',
   '/pr/reviewers': 'reviewers',
@@ -271,7 +271,7 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
     const commentId = nodeId(body.commentId, 'commentId');
     return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
-  if (operation === 'issue-assignees') return normalizeAssignees(body, limits, digestOf, nameList);
+  if (operation === 'issue-assignees') return normalizeAssignees(body, limits, digestOf, nameList); const conversationWrite = normalizeConversationWrite(operation, body, digestOf, mutationError); if (conversationWrite) return conversationWrite;
   if (operation === 'reviewers') {
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
     return { input: { reviewers }, digest: (target) => digestOf({ target, reviewers }) };
@@ -901,7 +901,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     // never sent short of guessing from its text, so the outcome stays unknown.
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
-    if (operation === 'update-branch') return reconcileUpdateBranch(octokit, target, input, { requireMutationPullRequest, unknownOutcome });
+    if (operation === 'update-branch') return reconcileUpdateBranch(octokit, target, input, { requireMutationPullRequest, unknownOutcome }); if (operation === 'issue-lock' || operation === 'change-request-lock' || operation === 'issue-subscription' || operation === 'change-request-subscription') return reconcileConversationWrite(octokit, operation, target, input, unknownOutcome);
     const project = target.project;
     // A text edit is only certain when the item reads as asked: a human edit in
     // the crash window looks the same as a write that never landed.
@@ -1073,7 +1073,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (CONVERSATION_COMMENT_KINDS.has(operation)) {
         await requireConversationComment(octokit, input.commentId, expectedProject, issue.number);
       }
-      return { providerTarget: {}, target: { ...baseTarget(context, expectedProject), number: issue.number } };
+      return { providerTarget: subscriptionTarget(operation, issue, optionalText, invalidProviderPayload), target: { ...baseTarget(context, expectedProject), number: issue.number } };
     }
     const response = await octokit.rest.pulls.get({ owner: expectedProject.owner, repo: expectedProject.name, pull_number: expected.number });
     const pr = requireMutationPullRequest(response?.data, 'GitHub returned an invalid pull request', octokit);
@@ -1110,7 +1110,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (!already && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
       return { providerTarget: { already, nodeId: nodeId ?? null }, target };
     }
-    return { providerTarget: {}, target };
+    return { providerTarget: subscriptionTarget(operation, pr, optionalText, invalidProviderPayload), target };
   };
 
   const performOperation = async (octokit, operation, input, { providerTarget, target }) => {
@@ -1162,7 +1162,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return setLabels(octokit, project, target.number, input.labels);
       case 'reviewers':
         return setReviewers(octokit, project, target.number, input.reviewers);
-      case 'issue-assignees': return performAssignees(octokit, project, target, input, { rejected, requireProviderArray, isProviderString, sameNames, invalidProviderPayload });
+      case 'issue-assignees': return performAssignees(octokit, project, target, input, { rejected, requireProviderArray, isProviderString, sameNames, invalidProviderPayload }); case 'issue-lock': case 'change-request-lock': case 'issue-subscription': case 'change-request-subscription': return performConversationWrite(octokit, operation, input, { providerTarget, target }, { rejected, graphqlWrite });
       case 'state':
         return setState(() => octokit.rest.pulls.update({ owner: project.owner, repo: project.name, pull_number: target.number, state: input.state }), input.state);
       case 'base': case 'update-branch':
