@@ -21,9 +21,6 @@ export const StatusImage: React.FC<{
   onLoad?: (image: HTMLImageElement) => void;
 }> = ({ src, alt, variant, className, style, imgClassName, imgStyle, lazy, onLoad }) => {
   const { t } = useI18n();
-  // Kept with the URL and the attempt it belongs to: a reset in an effect on a
-  // new URL would run after the load event of a fast (cached or data) image
-  // and hide it again.
   const [attempt, setAttempt] = React.useState(0);
   const [settled, setSettled] = React.useState<{ key: string; status: ImageStatus } | null>(null);
   const key = `${src}:${attempt}`;

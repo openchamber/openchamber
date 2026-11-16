@@ -4,12 +4,6 @@ const GUARD_ATTRIBUTE = "data-glass-redraw-guard"
 
 let openPopups = 0
 
-/**
- * Rendered inside a glass popup (menu, select, tooltip): while any is open,
- * <html> carries data-glass-redraw-guard and design-system.css mounts the
- * full-viewport blurred layer that keeps Chromium from repainting glass under
- * the popup from a stale blur. Only open popups pay for that layer.
- */
 function GlassRedrawGuard(): null {
   React.useLayoutEffect(() => {
     openPopups += 1

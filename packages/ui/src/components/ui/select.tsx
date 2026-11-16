@@ -160,7 +160,6 @@ function SelectTrigger({
     <BaseSelect.Trigger
       data-slot="select-trigger"
       className={cn(
-        // Shared trigger chrome: one source of truth for every dropdown trigger.
         dropdownTriggerVariants(),
         "w-fit data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
@@ -214,8 +213,6 @@ function SelectContent({
   const portalContext = React.useContext(SelectPortalContext);
   const alignItemWithTrigger = position === "item-aligned";
   const portalContainer = portalContext?.portalContainer ?? null;
-  // Floating UI bounds the viewport, but native status/home areas live inside
-  // that viewport. Include the app's resolved insets in collision sizing too.
   const [collisionPadding, setCollisionPadding] = React.useState({ top: 8, right: 8, bottom: 8, left: 8 });
 
   React.useLayoutEffect(() => {
@@ -233,7 +230,6 @@ function SelectContent({
       frame = requestAnimationFrame(measure);
     };
     measure();
-    // Native safe-area updates can arrive after the viewport resize event.
     const observer = new MutationObserver(scheduleMeasure);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
     window.addEventListener('resize', scheduleMeasure);
@@ -258,8 +254,6 @@ function SelectContent({
     });
   };
 
-  // `contents`: inside a dialog the portal node is one more flex child, and
-  // the dialog's gap grew the dialog by a row while the popup was open.
   return (
     <BaseSelect.Portal className="contents" container={portalToBody ? undefined : portalContainer || undefined}>
       <BaseSelect.Positioner

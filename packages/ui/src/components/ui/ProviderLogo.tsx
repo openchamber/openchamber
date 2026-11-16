@@ -15,24 +15,13 @@ interface ProviderLogoProps {
     alt?: string;
     className?: string;
     onError?: () => void;
-    /** Show the provider's own logo even when the user uploaded a logo or picked an icon for it. */
     ignoreCustomIcon?: boolean;
-    /** Shown when this provider has no chosen icon and no logo. `null` shows nothing. */
     fallback?: React.ReactNode;
-    /**
-     * Draw the app's monochrome logo in the text colour (a mask), so a caller
-     * can mute it like an icon. Uploaded and extension logos keep their colours.
-     */
     tint?: boolean;
 }
 
 const NO_URLS: ReadonlySet<string> = new Set();
 
-/**
- * A provider's mark, first match wins: the logo the user uploaded, the icon
- * they picked, an active extension's logo, the bundled logo, the models.dev
- * logo, the generic fallback.
- */
 export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     providerId,
     alt,
@@ -48,7 +37,6 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     const wantsUploadedLogo = Boolean(storedLogo) && !ignoreCustomIcon && providerLogoUploadSupported();
     const themeVariant = useOptionalThemeSystem()?.currentTheme.metadata.variant === 'light' ? 'light' : 'dark';
     const uploadedLogo = useUploadedProviderLogoUrl(providerId, wantsUploadedLogo ? storedLogo : undefined, themeVariant);
-    // Images the browser fetched but cannot draw (an SVG without its namespace).
     const [undrawableUrls, setUndrawableUrls] = React.useState(NO_URLS);
     const standsIn = (image: RuntimeObjectUrl) => !image.failed && !(image.url && undrawableUrls.has(image.url));
     const showsUpload = wantsUploadedLogo && standsIn(uploadedLogo);
@@ -63,9 +51,6 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
         externalOnError?.();
     }, [handleInternalError, externalOnError]);
 
-    // An upload or an extension's logo keeps its own colours; only the app's
-    // monochrome logos below are inverted. Holds its place while it loads, and
-    // a failed fetch or draw falls through to the next mark.
     const drawnImage = (url: string) => (
         <img
             src={url}
@@ -86,7 +71,6 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
 
     if (wantsGuestLogo && standsIn(guestLogoUrl)) {
         if (guestLogoUrl.url) return drawnImage(guestLogoUrl.url);
-        // A bundled logo costs no request, so it stays until this one arrives; a models.dev one would be fetched for nothing.
         if (!isBundled) return slot;
     }
 
@@ -96,11 +80,6 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     }
 
     if (tint) {
-        // The logo's shape in the current text colour, for any theme. A mask
-        // reports no load failure, so a hidden image of the same file still
-        // does, and a logo that fails falls back as an untinted one would.
-        // A mask is fetched in CORS mode; the image asks the same way, so the
-        // two share one request instead of fetching the file twice.
         return (
             <>
             <img src={src} alt="" aria-hidden hidden crossOrigin="anonymous" onError={handleError} />

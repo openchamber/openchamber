@@ -8,26 +8,19 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   hideDelayMs?: number;
   as?: React.ElementType;
   outerClassName?: string;
-  /** Style of the outer frame, for a size given as a value (a max height from a prop). */
   outerStyle?: React.CSSProperties;
   scrollbarClassName?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
   fillContainer?: boolean;
-  /** Prevent scroll from propagating to parent when at boundaries */
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
-  /** The opaque colour behind the scroller: the fades become bands in it, not a mask. */
   scrollShadowSurface?: string;
-  /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
-  /** Suppress the bottom fade while retaining scroll-state tracking. */
   hideBottomScrollShadow?: boolean;
   userIntentOnly?: boolean;
-  /** Pixels kept clear above the vertical scrollbar track. */
   verticalTrackStart?: number;
-  /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
 

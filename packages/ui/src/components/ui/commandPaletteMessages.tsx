@@ -33,7 +33,6 @@ export const MessageHitItem: React.FC<{
     ? t('commandPalette.messages.byYou')
     : hit.role === 'reasoning' ? t('commandPalette.messages.inReasoning') : t('commandPalette.messages.byAgent');
   return (
-    // A reply and its reasoning are two hits of one message.
     <CommandItem value={`message:${hit.role}:${hit.id}`} onSelect={() => onSelect(hit)} className="items-start">
       <Icon
         name={ROLE_ICON[hit.role]}

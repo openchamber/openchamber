@@ -40,7 +40,6 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
-// The wrapper owns `actionsRef` to close the menu on window blur.
 type DropdownMenuProps = Omit<React.ComponentProps<typeof BaseMenu.Root>, "actionsRef"> & {
   disableGlobalShortcuts?: boolean;
 };
@@ -75,8 +74,7 @@ function DropdownMenu({
   }, [isOpen]);
 
   const handleOpenChange: NonNullable<React.ComponentProps<typeof BaseMenu.Root>['onOpenChange']> = (nextOpen, eventDetails) => {
-    // Base UI treats a state-driven opening as hover-dismissible because it has
-    // no opening DOM event. Filtering can move the popup off a stationary mouse.
+    // external: https://base-ui.com/react/components/menu Controlled openings lack an opening DOM event, so hover dismissal must follow the opening reason.
     if (!nextOpen && eventDetails.reason === 'trigger-hover' && !openedOnHoverRef.current) {
       eventDetails.cancel();
       return;
@@ -169,12 +167,8 @@ function DropdownMenuContent({
 }: ContentProps) {
   const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
-  // Content that changes while the menu is open (a filtered picker list,
-  // items that arrive late) eases the popup into its new height.
   const morphHeight = useHeightMorphRef();
   const [popup, setPopup] = React.useState<HTMLDivElement | null>(null);
-  // Returns its cleanup (React 19), so a caller's ref keeps its own: a
-  // cleanup it returned runs, else it gets null as before.
   const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
     morphHeight(node);
     setPopup(node);
@@ -229,8 +223,6 @@ function DropdownMenuContent({
           {children}
           <GlassRedrawGuard />
         </BaseMenu.Popup>
-        {/* A menu scrolls only where its caller gave it overflow; the thumb
-            shows only then. */}
         <PopupOverlayScrollbar scroller={popup} />
       </BaseMenu.Positioner>
     </BaseMenu.Portal>
