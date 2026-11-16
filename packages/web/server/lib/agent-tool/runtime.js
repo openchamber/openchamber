@@ -249,7 +249,11 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
-  tiers: { type: 'array', description: 'For render.tierChooser: one { tier, model } object per tier; the model is the candidate for that tier, as provider/model or a bare model id', items: { type: 'object', properties: { tier: { type: 'string' }, model: { type: 'string' } } } },
+  tiers: { type: 'array', description: 'For render.tierChooser and render.quotaFallback: one { tier, model } object per tier; the model is the candidate for that tier, as provider/model or a bare model id', items: { type: 'object', properties: { tier: { type: 'string' }, model: { type: 'string' } } } },
+  currentTier: { type: 'string', description: 'For render.quotaFallback: the tier whose quota ran out; must be one of the tiers candidates' },
+  currentProvider: { type: 'string', description: 'For render.quotaFallback: the provider whose quota ran out; defaults to the current tier model provider' },
+  resetAt: { type: 'string', description: 'For render.quotaFallback: when the quota resets, as reported by the error, when known' },
+  message: { type: 'string', description: 'For render.quotaFallback: the quota context shown on the card (which provider/quota was hit)' },
 };
 
 // When to act (link an issue, save a memory, draw a page) is stated once, in

@@ -163,6 +163,7 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
   { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
   { action: 'render.tierChooser', title: 'Ask for a model tier', description: 'Build the tier chooser card (tiers: [{ tier, model }]); returns the page html to show with render.page awaitAnswer — the pick returns as that call\'s answer { tier, model }' },
+  { action: 'render.quotaFallback', title: 'Ask how to ride out a quota limit', description: 'Build the quota fallback card (tiers: [{ tier, model }], currentTier, resetAt when known); returns the page html to show with render.page awaitAnswer — the choice returns as that call\'s answer { action: "fallback", provider, tier }' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
