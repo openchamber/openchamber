@@ -52,11 +52,8 @@ export const Radio = React.memo<RadioProps>(function Radio({
       aria-label={ariaLabel}
       className={cn(
         'group/radio relative flex size-3.5 min-h-3.5 min-w-3.5 shrink-0 self-center items-center justify-center rounded-full outline-none',
-        // Match checkbox outlines without strengthening borders across the app.
         '[--choice-border:color-mix(in_srgb,var(--foreground)_40%,var(--interactive-border))]',
         'transition-[background-color,box-shadow] duration-200 ease-out',
-        // fill driven from props so first paint is correct
-        // Checked state stays neutral, matching the checkbox.
         checked
           ? 'bg-transparent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--foreground)_60%,var(--interactive-border))] hover:bg-[var(--interactive-hover)]'
           : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--choice-border)] hover:bg-[var(--interactive-hover)]',

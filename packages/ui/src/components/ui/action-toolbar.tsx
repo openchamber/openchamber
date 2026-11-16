@@ -18,50 +18,28 @@ import { useI18n } from '@/lib/i18n';
 import { cancelWhenLayoutSettled, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { cn } from '@/lib/utils';
 
-/**
- * One icon action of a toolbar row. A toggle sets `pressed`; its label names
- * the option ("Wrap lines"), never what the next click does, because the fill
- * already says whether it is on.
- */
 export interface ToolbarAction {
   id: string;
   label: string;
   icon: IconName;
   onSelect?: () => void;
-  /** Picked from the "More actions" menu, where a check after the click is never seen. Defaults to `onSelect`. */
   onMenuSelect?: () => void;
-  /** A toggle: on draws the selection fill on the button and a check in the menu. */
   pressed?: boolean;
   disabled?: boolean;
-  /** A check stands in for the icon for a moment after the action worked. */
   done?: boolean;
-  /** The icon's colour while something it started runs (read aloud). */
   iconClassName?: string;
-  /** Items of a menu the button opens; in "More actions" they become a submenu. */
   menu?: React.ReactNode;
-  /** Never moves into "More actions". */
   pinned?: boolean;
-  /** Attributes on the button and on its "More actions" menu item, for code that recognises either (outside-click checks). */
   buttonAttributes?: Record<`data-${string}`, string>;
-  /** The action's keyboard shortcut as the shortcuts dialog writes it (`formatShortcutForDisplay`), shown in its tooltip and menu item. */
   shortcut?: string;
-  /** Deletes or discards: drawn as a destructive item in "More actions". */
   destructive?: boolean;
 }
 
-/** Actions that belong together, set apart from the next group by space. */
 export type ToolbarGroup = ReadonlyArray<ToolbarAction | null | false | undefined>;
 
 const REST_CLASS = 'text-muted-foreground hover:bg-transparent hover:text-foreground focus-visible:text-foreground active:bg-transparent';
-/** The toggle-on fill, shared with the markdown wrap toggles that keep their own geometry. */
 export const PRESSED_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground active:bg-interactive-selection';
 
-/**
- * The 24px icon button every toolbar row shares. Three looks: an action rests
- * muted and brightens on hover, a toggle that is on carries the selection
- * fill, a disabled one fades. Hover changes colour only, so a row of them
- * never flickers fills under the pointer.
- */
 export function ToolbarButton({
   label,
   icon,
@@ -94,18 +72,11 @@ export function ToolbarButton({
   );
 }
 
-/** A label with its keyboard shortcut after it, muted, for a tooltip. */
 export function TooltipLabelWithShortcut({ label, shortcut }: { label: React.ReactNode; shortcut?: string }) {
   if (!shortcut) return <>{label}</>;
   return <span className="inline-flex items-center gap-2">{label}<span className="text-muted-foreground">{shortcut}</span></span>;
 }
 
-/**
- * A tooltip over one button. The span takes the hover a disabled button refuses,
- * so it also fits a button that can be disabled, and a menu, popover or select
- * trigger goes inside it. `className` is what the span needs from its row, such
- * as `shrink-0`. A button repeated on every row of a list uses `row-tooltip.tsx`.
- */
 export function ButtonTooltip({ label, side, sideOffset = 6, className, children }: {
   label: React.ReactNode;
   side?: 'top' | 'bottom';
@@ -123,7 +94,6 @@ export function ButtonTooltip({ label, side, sideOffset = 6, className, children
   );
 }
 
-/** A `ToolbarButton` with its tooltip, which opens below so it never covers the row. */
 export function ToolbarTooltipButton({ label, shortcut, ...props }: React.ComponentProps<typeof ToolbarButton> & { shortcut?: string }) {
   return (
     <ButtonTooltip label={<TooltipLabelWithShortcut label={label} shortcut={shortcut} />} side="bottom">
@@ -138,17 +108,10 @@ const FOLD_ATTRIBUTE = 'data-folded';
 
 const fits = (row: HTMLElement): boolean => row.scrollWidth <= row.clientWidth + 1;
 
-/**
- * Folds actions into "More actions" from the end of the row while it does not
- * fit, and returns which ones it folded. Attributes are set on the DOM
- * directly: React never renders `data-folded`, so a render cannot undo a fit,
- * and the fit needs no render per step.
- */
 const fitRow = (row: HTMLElement): string[] => {
   const items = Array.from(row.querySelectorAll<HTMLElement>('[data-toolbar-fold]'));
   const more = row.querySelector<HTMLElement>('[data-toolbar-more]');
   for (const item of items) item.removeAttribute(FOLD_ATTRIBUTE);
-  // A menu with items of its own stays; an empty one shows only once something folds.
   const moreAlways = more?.dataset.toolbarMore === 'always';
   if (moreAlways) more?.removeAttribute(FOLD_ATTRIBUTE);
   else more?.setAttribute(FOLD_ATTRIBUTE, '');
@@ -166,20 +129,6 @@ const fitRow = (row: HTMLElement): string[] => {
 
 const sameIds = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((id, index) => id === b[index]);
 
-/**
- * A row of icon actions over a document: the Files editor, a plan, a page or
- * diagram in the chat.
- *
- * Groups sit apart by space. `start` (a file path) takes the free width and
- * gives it up first; with `fold`, actions that still do not fit move into
- * "More actions" from the end of the row, while pinned ones and `trailing`
- * (full screen) stay. `status` holds a slot whose width the caller keeps
- * steady, such as save state.
- *
- * The set of actions a caller passes should depend on what the document is,
- * never on its mode: an action that works in one mode only switches to it,
- * so changing modes moves no button.
- */
 export function ActionToolbar({
   groups,
   start,
@@ -192,15 +141,12 @@ export function ActionToolbar({
   className,
 }: {
   groups: ReadonlyArray<ToolbarGroup>;
-  /** Settings of the document that live in "More actions" only, after whatever folded. */
   menuOnly?: ToolbarGroup;
   start?: React.ReactNode;
   status?: React.ReactNode;
-  /** Shown before the groups while open, such as an inline go-to-line field. */
   inline?: React.ReactNode;
   trailing?: ToolbarGroup;
   fold?: boolean;
-  /** Each menu the row opens reports here, so a caller can hold focus handling while one is open. */
   onMenuOpenChange?: (open: boolean) => void;
   className?: string;
 }) {
@@ -231,7 +177,6 @@ export function ActionToolbar({
   React.useEffect(() => {
     const row = rowRef.current;
     if (!fold || !row) return;
-    // A side column's animation resizes the row on every frame: fit once, at its end.
     const observer = new ResizeObserver(() => runWhenLayoutSettled(refit));
     observer.observe(row);
     for (const slot of row.querySelectorAll('[data-toolbar-measure]')) observer.observe(slot);
@@ -323,7 +268,6 @@ export function ActionToolbar({
       {status ? <div data-toolbar-measure="" className="flex shrink-0 items-center">{status}</div> : null}
       {inline ? <div data-toolbar-measure="" className="flex shrink-0 items-center empty:hidden">{inline}</div> : null}
       {shownGroups.map((group, index) => (
-        // A group whose every action folded takes no gap.
         <div key={group[0].id} data-toolbar-group={index} className="flex shrink-0 items-center gap-0.5 [&:not(:has(>:not([data-folded])))]:hidden">
           {group.map((action) => (
             <span

@@ -11,11 +11,6 @@ type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
   hideTopShadow?: boolean;
   hideBottomShadow?: boolean;
   observeMutations?: boolean;
-  /**
-   * The colour behind the scroller, when it is opaque. The edge fades are then
-   * drawn by `ScrollShadowBands`, which the caller renders right after this
-   * element inside a positioned frame, instead of by a mask on the scroller.
-   */
   surface?: string;
   onVisibilityChange?: (state: ScrollShadowVisibility) => void;
 };
@@ -93,7 +88,6 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
 
 ScrollShadow.displayName = "ScrollShadow";
 
-/** The edge fades of a `ScrollShadow` that was given the same `surface`. */
 export function ScrollShadowBands({ surface, size = 48 }: { surface: string; size?: number }) {
   // SAFETY: custom properties the band classes read.
   const style = { "--scroll-fade-surface": surface, "--scroll-shadow-size": `${size}px` } as React.CSSProperties;

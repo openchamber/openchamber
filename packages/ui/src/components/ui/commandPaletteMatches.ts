@@ -7,10 +7,6 @@ export const splitRelativePath = (relativePath: string): { name: string; directo
     : { name: relativePath.slice(slash + 1), directory: relativePath.slice(0, slash) };
 };
 
-/**
- * A file row shows its name, then its folder. The matcher ran on the whole
- * relative path, so each part takes the matches inside it.
- */
 export const fileRowMatchRanges = (
   path: string,
   ranges: ReadonlyArray<MatchRange>,
@@ -24,11 +20,6 @@ export const fileRowMatchRanges = (
   };
 };
 
-/**
- * A project row shows its name, then its path. The matcher ran on
- * `"<label> <path>"`; a project without a label is named after the path's
- * last segment, so the name takes that segment's matches.
- */
 export const projectRowMatchRanges = (
   project: { label?: string; path: string; displayName: string },
   ranges: ReadonlyArray<MatchRange>,

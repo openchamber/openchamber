@@ -18,12 +18,6 @@ const variants = [
   },
   {
     variant: "generate-effect",
-    // One CSS sweep over the whole text (`.oc-text-generate` in index.css),
-    // not a span and a JS animation per character: streaming tool rows
-    // mount these constantly, and the per-character version cost a quarter
-    // of the main thread's work in an agent run. The sweep plays once on mount;
-    // text that changes afterwards (a title resolving on completion)
-    // updates in place without replaying it.
     component: ({ children, className, ...props }) => {
       if (children === null || children === undefined || children === "") return null;
 

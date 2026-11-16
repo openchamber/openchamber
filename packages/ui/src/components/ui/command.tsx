@@ -15,9 +15,6 @@ function Command({
   return (
     <CommandPrimitive
       data-slot="command"
-      // Let the parent (DropdownMenuContent, DialogContent, etc.) paint the
-      // background and provide elevation. Overriding bg here would cover the
-      // parent's inset shadows (our inner light ring) and flatten the edge.
       style={{
         color: 'var(--surface-elevated-foreground)',
         ...style,
@@ -134,11 +131,6 @@ function CommandItem({
   )
 }
 
-/**
- * A command's shortcut as the shared formatter writes it ("⌘ + ⇧ + N"), in
- * the same muted interface text tooltips use, so a shortcut looks the same
- * wherever it appears.
- */
 function CommandShortcut({
   className,
   ...props
