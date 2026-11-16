@@ -106,6 +106,7 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 - Code fences, links and ordinary bracket prose keep their Markdown behavior.
 - Content inside lists and quotes keeps its Markdown behavior.
 - Incomplete delimiters keep their Markdown behavior.
+- Remend reads `>` in a formula during its unfinished HTML tag handling.
 - Formulas inside a list nested in a quote remain unsupported.
 - If extension identifier rules, repository references or emoji shortcodes are active, the preparer leaves the source unchanged.
 - Numeric single-dollar formulas follow the existing currency rule.
@@ -117,5 +118,6 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 Streamdown parses and groups `$$` formulas across blank lines.
 The preparer changes bracket delimiters to dollar delimiters of the same length.
 During streaming, it replaces formula punctuation with unused private-use characters.
-Remend cannot interpret those characters as Markdown.
-The final Remend handler restores the punctuation before parsing.
+One Remend handler restores `>` before the HTML tag handler runs.
+Without it, an unfinished tag before a formula can hide the rest of the message.
+The final Remend handler restores the remaining punctuation before parsing.

@@ -72,6 +72,68 @@ describe('standalone bracket math with blank lines', () => {
     expect(body.querySelector('annotation')?.textContent).toContain('x \\in [0,1)');
   });
 
+  test('keeps earlier text when an incomplete HTML tag precedes math', () => {
+    const source = 'See <DEMO-2\n\n\\[\nx > 0\n\ny\n\\]';
+    const prepared = prepareMarkdownMath(source, true);
+    const html = renderToStaticMarkup(<Streamdown
+      mode="streaming" isAnimating parseIncompleteMarkdown controls={false}
+      plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+      remend={prepared.remend}
+      {...getMarkdownProcessingOptions(false, false)}
+    >{prepared.content}</Streamdown>);
+    const body = new Window().document.createElement('div');
+    body.innerHTML = html;
+    expect(body.textContent).toContain('DEMO-2');
+    expect(body.querySelector('annotation')?.textContent).toContain('x > 0');
+    expect(body.textContent).not.toContain('<another');
+  });
+
+  test('rechecks the HTML boundary when text follows a prepared formula', () => {
+    const prepare = createMarkdownMathPreparer();
+    const source = 'See <DEMO-2\n\n\\[\nx > 0\n\ny\n\\]\n\n';
+    prepare(source, true);
+    const continued = `${source}<another`;
+    const prepared = prepare(continued, true);
+    const html = renderToStaticMarkup(<Streamdown
+      mode="streaming" isAnimating parseIncompleteMarkdown controls={false}
+      plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+      remend={prepared.remend}
+      {...getMarkdownProcessingOptions(false, false)}
+    >{prepared.content}</Streamdown>);
+    const body = new Window().document.createElement('div');
+    body.innerHTML = html;
+    expect(body.textContent).toContain('DEMO-2');
+    expect(body.querySelector('annotation')?.textContent).toContain('x > 0');
+    expect(body.textContent).not.toContain('<another');
+  });
+
+  test('renders interval formulas without removing later text', () => {
+    for (const source of [
+      'Before\n\n\\[\nA=[0,1](0,1]\n\n+1\n\\]\n\nImportant text',
+      'See <DEMO-2\n\n\\[\nA=[0,1](0,1]>0\n\n+1\n\\]\n\nImportant text',
+      '\\[\nx\n\ny\n\\]\n\nBetween\n\n\\[\nA=[0,1)\\cup[2,3)\n\n+1\n\\]',
+      '\\[\nx<y\n\n+1\n\\]',
+      'Code `<div`\n\n\\[\nx > 0\n\n+1\n\\]',
+      '    $$\n\n\\[\nx<y\n\n+1\n\\]\n\nImportant text',
+    ]) {
+      const prepared = prepareMarkdownMath(source, true);
+      const html = renderToStaticMarkup(<Streamdown
+        mode="streaming" isAnimating parseIncompleteMarkdown controls={false}
+        plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+        remend={prepared.remend}
+        {...getMarkdownProcessingOptions(false, false)}
+      >{prepared.content}</Streamdown>);
+      const body = new Window().document.createElement('div');
+      body.innerHTML = html;
+      expect(body.querySelector('.katex-display')).not.toBeNull();
+      const annotations = Array.from(body.querySelectorAll('annotation'), (node) => node.textContent ?? '');
+      if (source.includes('[0,1')) expect(annotations.some((text) => text.includes('[0,1'))).toBe(true);
+      if (source.includes('x<y')) expect(annotations.some((text) => text.includes('x<y'))).toBe(true);
+      if (source.includes('`<div`')) expect(body.querySelector('code')?.textContent).toBe('<div');
+      if (source.includes('Important text')) expect(body.textContent).toContain('Important text');
+    }
+  });
+
   test('reuses the prepared prefix and rechecks appended math and private-use characters', () => {
     const prepare = createMarkdownMathPreparer();
     const finish = (prepared: ReturnType<typeof prepareMarkdownMath>) => {

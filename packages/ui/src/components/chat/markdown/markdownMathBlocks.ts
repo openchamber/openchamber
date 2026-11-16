@@ -109,10 +109,14 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
   result += source.slice(offset);
   const remend = streaming ? {
     ...defaultRemend,
-    handlers: [{ name: 'restore-display-math', priority: 101, handle: (text: string) => text.replace(/[\uE000-\uF8FF]/g, (character) => {
-      const index = mask.indexOf(character);
-      return index < 0 ? character : punctuation[index];
-    }) }],
+    handlers: [
+      { name: 'restore-math-greater-than', priority: 9, handle: (text: string) => text
+        .replaceAll(mask[punctuation.indexOf('>')], '>') },
+      { name: 'restore-display-math', priority: 101, handle: (text: string) => text.replace(/[\uE000-\uF8FF]/g, (character) => {
+        const index = mask.indexOf(character);
+        return index < 0 ? character : punctuation[index];
+      }) },
+    ],
   } satisfies NonNullable<StreamdownProps['remend']> : defaultRemend;
   return { content: result, remend, reserved: mask, resumeAt: changes[changes.length - 1] + 2, parsed: source };
 }
