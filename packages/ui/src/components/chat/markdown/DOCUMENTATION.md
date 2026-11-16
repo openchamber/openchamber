@@ -88,3 +88,33 @@ An `svg` fence in the Files Markdown preview draws as an image (`MarkdownSvg`). 
 ### Why an image and not inline markup
 
 Inline markup needs a sanitizer, and the app has none for SVG: `rehype-sanitize` strips `svg`, and a hand-written allowlist would be code to keep current against new attack forms. An image load gives the same picture for the case asked for (a static diagram) with no sanitizer, at the cost that the figure does not inherit page fonts or `currentColor`.
+
+# Bracket display math
+
+## Ownership
+
+`remarkMathCompatibility` parses inline and display math.
+`markdownMathBlocks` finds standalone bracket formulas with blank lines at the document root.
+It uses the shared Markdown parser.
+It prepares formulas before Streamdown completes partial text and divides a document into blocks.
+
+## Invariants
+
+- Formula contents stay unchanged in TeX annotations.
+- The file source for selection comments stays unchanged.
+- Code fences, links and ordinary bracket prose keep their Markdown behavior.
+- Content inside lists and quotes keeps its Markdown behavior.
+- Incomplete delimiters keep their Markdown behavior.
+- Bracket formulas with blank lines inside lists and quotes are unsupported.
+- If extension identifier rules, repository references or emoji shortcodes are active, the preparer leaves the source unchanged.
+- Numeric single-dollar formulas follow the existing currency rule.
+
+## Decisions
+
+### Why Streamdown receives dollar delimiters
+
+Streamdown parses and groups `$$` formulas across blank lines.
+The preparer changes bracket delimiters to dollar delimiters of the same length.
+During streaming, it replaces formula punctuation with unused private-use characters.
+Remend cannot interpret those characters as Markdown.
+The final Remend handler restores the punctuation before parsing.

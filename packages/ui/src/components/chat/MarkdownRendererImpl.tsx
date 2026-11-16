@@ -7,7 +7,6 @@ import {
   type BlockProps,
   type Components,
   type HighlightResult,
-  type StreamdownProps,
 } from 'streamdown';
 import type { Pluggable } from 'unified';
 import type { Part } from '@/lib/opencode/model';
@@ -61,6 +60,7 @@ import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
+import { createMarkdownMathPreparer } from './markdown/markdownMathBlocks';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
 
@@ -172,7 +172,6 @@ const renderers = [
   { language: 'svg', component: MarkdownSvg },
 ];
 const linkSafety = { enabled: false };
-const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 // Static mode renders the document whole and never reads the block split, but
 // Streamdown still computes it, running the marked lexer over the full text.
 const wholeDocument = (markdown: string) => [markdown];
@@ -440,6 +439,11 @@ export function MarkdownContent({
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
   const activeGuestLinks = guestLinks && guestLinks.length > 0 && !purpose ? guestLinks : null;
+  const prepareMath = React.useMemo(createMarkdownMathPreparer, []);
+  const preparedMath = React.useMemo(
+    () => prepareMath(content, isStreaming && (windowed || mode === 'streaming'), !activeGuestLinks && !repositoryLinks && !emojiShortcodes),
+    [activeGuestLinks, content, emojiShortcodes, isStreaming, mode, prepareMath, repositoryLinks, windowed],
+  );
   const processing = React.useMemo(() => {
     const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
@@ -496,7 +500,7 @@ export function MarkdownContent({
       lineNumbers
       controls={false}
       linkSafety={linkSafety}
-      remend={remend}
+      remend={preparedMath.remend}
       data-oc-html-mode={allowRawHtml ? 'sanitize' : 'text'}
       data-oc-export-highlighted={preparedHighlights ? 'ready' : undefined}
       data-oc-directory={directory}
@@ -507,7 +511,7 @@ export function MarkdownContent({
       data-table-wrap={tableWrap ? 'true' : 'false'}
       className="min-w-0 space-y-0"
     >
-      {content}
+      {preparedMath.content}
     </Streamdown>
   );
 

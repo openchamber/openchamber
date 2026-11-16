@@ -22,6 +22,7 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   const lineStart = this.previous === null || this.previous < -2;
   let bracket = false;
   let hasContent = false;
+  let valueOpen = false;
   function start(code: number | null) {
     effects.enter('ocMath');
     effects.enter('ocMathMarker');
@@ -34,7 +35,6 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
     if (bracket && !lineStart) return nok(code);
     effects.consume(code);
     effects.exit('ocMathMarker');
-    effects.enter('ocMathValue');
     return inside;
   }
   function inside(code: number | null): State | undefined {
@@ -45,10 +45,16 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   function content(code: number | null) {
     hasContent = true;
     if (code !== null && code <= -3) {
+      if (valueOpen) effects.exit('ocMathValue');
+      valueOpen = false;
       effects.enter('lineEnding');
       effects.consume(code);
       effects.exit('lineEnding');
       return inside;
+    }
+    if (!valueOpen) {
+      effects.enter('ocMathValue');
+      valueOpen = true;
     }
     effects.consume(code);
     return inside;
@@ -56,21 +62,26 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   const close: Construct = { tokenize(closeEffects, closeOk, closeNok) {
     return slash;
     function slash(code: Code) {
+      closeEffects.enter('ocMathMarker');
       closeEffects.consume(code);
       return marker;
     }
     function marker(code: Code) {
       if (!hasContent || code !== (bracket ? 93 : 41)) return closeNok(code);
       closeEffects.consume(code);
-      return bracket ? lineEnd : closeOk;
+      if (bracket) return lineEnd;
+      closeEffects.exit('ocMathMarker');
+      return closeOk;
     }
     function lineEnd(code: Code): State | undefined {
       if (code === 32 || code === 9) { closeEffects.consume(code); return lineEnd; }
-      return code === null || code < 0 ? closeOk(code) : closeNok(code);
+      if (code !== null && code >= 0) return closeNok(code);
+      closeEffects.exit('ocMathMarker');
+      return closeOk(code);
     }
   } };
   function closing(code: number | null) {
-    effects.exit('ocMathValue');
+    if (valueOpen) effects.exit('ocMathValue');
     effects.enter('ocMathMarker');
     effects.consume(code);
     return endMarker;

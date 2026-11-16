@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { unified, type Plugin } from 'unified';
 import remarkParse from 'remark-parse';
 import { defaultRemarkPlugins } from 'streamdown';
+import { getMarkdownCjk } from '@/components/chat/markdown/streamdownPlugins';
 import type { Root, RootContent } from 'mdast';
 
 export type ChatQuoteAnchor = {
@@ -267,6 +268,13 @@ export function resolveChatQuoteAnchor(root: Element, anchor: ChatQuoteAnchor): 
 // Streamdown 2.7.1 exports GFM as a plugin/options tuple, typed as Pluggable.
 const gfmEntry = defaultRemarkPlugins.gfm as [Plugin<[{ singleTilde?: boolean }?], Root>, Record<string, unknown>];
 const legacyQuoteParser = unified().use(remarkParse).use(gfmEntry[0], { singleTilde: false });
+const cjk = getMarkdownCjk(false);
+const markdownStructureParser = unified().use(remarkParse)
+    .use(cjk.remarkPluginsBefore)
+    .use(gfmEntry[0], { singleTilde: false })
+    .use(cjk.remarkPluginsAfter);
+
+export const parseMarkdownStructure = (source: string): Root => markdownStructureParser.parse(source);
 
 /** Anchor for a quote sent before anchors existed: its text, found only if unique. */
 export function legacyChatQuoteAnchor(quote: string): ChatQuoteAnchor {
