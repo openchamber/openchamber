@@ -79,6 +79,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `open` `session` | Loads the app, at that session when given |
 | `reload` | Reloads the page |
 | `click`, `hover` `on` | Moves the real mouse to the element's centre, once it stands still and nothing covers it |
+| `drag` `on`, `to` | Presses on the element, moves to the centre of `to` (an object with its own `on`, `text`, `index`) with the button held, and releases there; both ends must be on screen together |
 | `wheel` `on`, `dy`, `times` | Scrolls with the wheel over the element |
 | `type` `text`; `press` `key`, `mods`, `times` | Types into the focused element; presses a key (`mods`: `shift`, `alt`, `ctrl`, `meta`, `mod` for Cmd on macOS and Ctrl elsewhere) |
 | `see` `on`, `count`, `disabled`, `inView` | Waits until the element shows (exactly `count` of them; `count: 0` asserts none; `inView` on screen: some innermost element holding `text` intersects the viewport) |

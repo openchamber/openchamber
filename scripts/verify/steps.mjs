@@ -176,6 +176,16 @@ const ACTIONS = {
   async hover(step, ctx) {
     if (!await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step))) fail(`nothing to hover: ${describe(step)} is not visible`)
   },
+  async drag(step, ctx) {
+    if (!step.to?.on) fail("a drag needs \"to\" with its own \"on\"")
+    const from = await ctx.page.point(resolveTarget(step, ctx), timeoutOf(step))
+    if (!from) fail(`nothing to drag from: ${describe(step)} is not visible`)
+    // Scrolling to the destination would move the origin already measured, so
+    // both ends have to be on screen together.
+    const to = await ctx.page.point({ ...resolveTarget(step.to, ctx), noScroll: true }, timeoutOf(step))
+    if (!to?.hits) fail(`nothing to drag to: ${describe(step.to)} is not on screen with ${describe(step)}`)
+    await ctx.page.drag(from, to)
+  },
   async wheel(step, ctx) {
     const point = await ctx.page.point({ ...resolveTarget(step, ctx), noScroll: true }, timeoutOf(step))
     if (!point) fail(`nothing to scroll: ${describe(step)} is not visible`)

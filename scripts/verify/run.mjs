@@ -61,6 +61,7 @@ const loadMap = () => {
         for (const [index, step] of scenario.steps.entries()) {
           if (!ACTION_NAMES.includes(step.do)) problems.push(`${id} step ${index + 1}: unknown step "${step.do}"`)
           if (step.on && !vocabulary[step.on]) problems.push(`${id} step ${index + 1}: "${step.on}" is not in the vocabulary`)
+          if (step.to?.on && !vocabulary[step.to.on]) problems.push(`${id} step ${index + 1}: "${step.to.on}" is not in the vocabulary`)
         }
       }
     }

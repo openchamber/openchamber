@@ -173,6 +173,19 @@ export class Page {
     return point
   }
 
+  // Presses at `from`, moves to `to` in small steps with the button held, and
+  // releases there, so pointermove handlers see the path between the two.
+  async drag(from, to, moves = 8) {
+    await this.mouse("mouseMoved", from)
+    await this.mouse("mousePressed", from, { button: "left", buttons: 1, clickCount: 1 })
+    for (let move = 1; move <= moves; move += 1) {
+      const point = { x: from.x + (to.x - from.x) * move / moves, y: from.y + (to.y - from.y) * move / moves }
+      await this.mouse("mouseMoved", point, { button: "left", buttons: 1 })
+      await wait(30)
+    }
+    await this.mouse("mouseReleased", to, { button: "left", buttons: 0, clickCount: 1 })
+  }
+
   async moveMouseAway() {
     await this.mouse("mouseMoved", { x: 2, y: 2 })
   }
