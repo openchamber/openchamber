@@ -64,8 +64,8 @@ idle-stop rules.
   envelope that names the extension and says the words are its own; `<` and
   `>` are removed from the summary, the label and the title, and the SDK caps
   the summary at `WAIT_SUMMARY_MAX`.
-- Delivery follows `../pr-watch`: never into a running turn or while a
-  subagent runs, one wake at a time per session, the message id minted and
+- Delivery follows `../pr-watch`: never into a running turn, while running
+  subagents and workflow agents do not hold it (see pr-watch's decision), one wake at a time per session, the message id minted and
   persisted before the first attempt, OpenCode's 409 counts as delivered, 404
   ends the wait, eight failed attempts give up.
 
@@ -102,7 +102,8 @@ after a restart every due wait is checked on the next tick.
 `description` `<title> (<label>): <first line of the summary>` (the chat shows
 it as a notice row), and `metadata` `{ source: 'openchamber-wait', waitId,
 extension, type, title, label, outcome }`, `extension` being `null` for a
-timer. A timer's text is the host's own (`Timer (10 min) fired: 10 minutes
+timer, which also carries `minutes` so the chat names it in the user's
+language. A timer's text is the host's own (`Timer (10 min) fired: 10 minutes
 passed.`), not quoted as an extension's words.
 
 ## Routes and events

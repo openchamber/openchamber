@@ -41,11 +41,13 @@ const guest = (extra = {}) => ({
 
 /** OpenCode's session routes the runtime uses, with a log of what it admitted. */
 const createOpenCode = () => {
-  const state = { active: {}, admitted: [], seen: new Set() };
+  const state = { active: {}, sessions: {}, admitted: [], seen: new Set() };
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     if (pathname === '/api/session/active') return json({ data: state.active });
     if (pathname === '/api/session') return json({ data: [], cursor: {} });
+    const record = state.sessions[decodeURIComponent(pathname.split('/').at(-1))];
+    if (record) return json({ data: record });
     const match = pathname.match(/^\/api\/session\/([^/]+)\/synthetic$/);
     if (!match) return json({ error: 'not found' }, 404);
     const body = JSON.parse(init.body);
@@ -90,7 +92,6 @@ const createRuntime = async ({ dataDir, catalog = [guest()], service = createSer
     now: () => clock.now,
     quietMs: 0,
     retryDelayMs: () => 5,
-    subagentRecheckMs: 5,
     warn: () => {},
     ...(timers ? { timers } : {}),
     insideSpace,
@@ -551,6 +552,20 @@ describe('createExtensionWaitsRuntime', () => {
       expect(openCode.state.admitted[0].text).toContain('Timer (5 min) fired: 5 minutes passed.');
       expect(await until(() => runtime.snapshot().waits.length === 0)).toBe(true);
       expect(service.calls).toHaveLength(0);
+    });
+
+    it('wakes the idle session on time while its subagent and workflow agent still run', async () => {
+      const { runtime, openCode, advance } = await createRuntime({ catalog: [] });
+      openCode.state.sessions = {
+        sub: { id: 'sub', parentID: SESSION },
+        agent: { id: 'agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: SESSION } } },
+      };
+      openCode.state.active = { sub: { type: 'running' }, agent: { type: 'running' } };
+
+      await startTimer(runtime, { minutes: 20 });
+      await advance(20 * MINUTE);
+      expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+      expect(openCode.state.admitted[0]).toMatchObject({ sessionID: SESSION, metadata: { outcome: 'fired', minutes: 20 } });
     });
 
     it('refuses minutes that are not whole, in range and alone, and keeps nothing', async () => {

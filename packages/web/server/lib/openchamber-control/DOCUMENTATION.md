@@ -518,17 +518,21 @@ other.
   description as agent-owned. Existing `metadata.openchamber.workTitle` with
   `by: 'user'` makes the carried title user-owned. Explicit creation titles and
   UI renames still record that marker; no metadata migration runs.
-- `pr.watch` and `pr.unwatch` let the calling session wait on its pull
-  requests without polling: `pr.watch` takes the address in the control tool's
-  own `url` input and hands it to `prWatch` (`../pr-watch/DOCUMENTATION.md`),
-  which reads it, follows it and wakes the session once when it changes.
-  `pr.unwatch` stops the one at `url`, or every one without it. Both act only
-  on the calling session, never one the input names.
-- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for the
-  built-in timer and for what an extension's service follows
-  (`../extension-waits/DOCUMENTATION.md`): `wait.start` takes `source`
-  (`timer` or `<extension>/<wait>`) and `args`, `wait.stop` an optional
-  `waitId`, all three only for the calling session.
+- `wait.list`, `wait.start` and `wait.stop` are the agent's one way to wait,
+  only for the calling session: on the built-in timer and what an extension's
+  service follows (`../extension-waits/DOCUMENTATION.md`), and on a pull
+  request (`../pr-watch/DOCUMENTATION.md`). `wait.start` takes `source`
+  (`timer`, `pr` or `<extension>/<wait>`) and `args`; `pr` reads `args.url`,
+  or `url` beside it, and is handed to `prWatch`, which keeps its own store.
+  `wait.list` merges both stores, `pr` listed after the timer while `prWatch`
+  offers it (never inside a space). A pull request's `waitId` is its address,
+  every other one is `wait_…`, so `wait.stop` routes by the id and without
+  one stops both kinds.
+- `pr.watch` and `pr.unwatch` are the same pull request wait under its older
+  names. They stay for the CLI and for transcripts that call them, and are off
+  the agent's tool (`agentExposed: false`): an agent that saw two ways to wait
+  looked only in `wait.list`, found no pull request there and decided it could
+  not wait on one.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

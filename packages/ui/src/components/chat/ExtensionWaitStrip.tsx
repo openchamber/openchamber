@@ -6,11 +6,10 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useExtensionWaitsStore, type ExtensionWait } from '@/sync/extension-waits';
 import { stopExtensionWaits } from '@/sync/extension-waits-sync';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
+import { timerMinutesLeft, waitOrigin, waitSubject } from './waitPresentation';
 
 const NO_WAITS: readonly ExtensionWait[] = [];
-
-/** "Timer (10 s)": the wait's title with the label its extension, or the host for a timer, gave it. */
-const subjectOf = (wait: ExtensionWait): string => (wait.label ? `${wait.title} (${wait.label})` : wait.title);
 
 /**
  * The agent ended its turn to wait on a timer or on something an extension
@@ -24,7 +23,12 @@ export const ExtensionWaitStrip = memo(({ sessionId }: { sessionId: string | nul
   const waits = useExtensionWaitsStore(React.useCallback((state) => (sessionId ? state.bySession.get(sessionId) ?? NO_WAITS : NO_WAITS), [sessionId]));
   const shown = waits.find((wait) => wait.status === 'waking') ?? waits[0];
 
+  const now = useMinuteTickerNow(shown?.source === 'timer' && shown.status === 'waiting');
+
   if (!shown) return null;
+  const describe = (wait: ExtensionWait) => [waitSubject(wait, t), waitOrigin(wait)].filter(Boolean).join(' · ');
+  const origin = waitOrigin(shown);
+  const minutesLeft = shown.status === 'waiting' ? timerMinutesLeft(shown, now) : undefined;
 
   const handleStop = () => {
     void stopExtensionWaits(shown.sessionID).catch((error) => {
@@ -37,12 +41,13 @@ export const ExtensionWaitStrip = memo(({ sessionId }: { sessionId: string | nul
     <div
       role="status"
       className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
-      title={waits.map((wait) => `${subjectOf(wait)} · ${wait.extension}`).join('\n')}
+      title={waits.map(describe).join('\n')}
     >
       <Icon name="timer" className="size-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {t('chat.extensionWait.title', { title: subjectOf(shown) })}
-        <span className="text-muted-foreground"> · {shown.extension}</span>
+        {t('chat.extensionWait.title', { title: waitSubject(shown, t) })}
+        {origin ? <span className="text-muted-foreground"> · {origin}</span> : null}
+        {minutesLeft !== undefined ? <span className="text-muted-foreground"> · {t('chat.waits.remaining', { minutes: minutesLeft })}</span> : null}
         {shown.status === 'waking' ? <span className="text-muted-foreground"> · {t('chat.extensionWait.status.waking')}</span> : null}
         {waits.length > 1 ? <span className="text-muted-foreground"> · +{waits.length - 1}</span> : null}
       </span>

@@ -82,6 +82,7 @@ const extensionWaitNoticeSchema = z.object({
   subject: z.string().min(1),
   outcome: z.enum(["fired", "ended"]),
   summary: z.string(),
+  timerMinutes: z.number().optional(),
   text: z.string(),
 })
 
@@ -146,13 +147,19 @@ const readPullRequestWake = (text: string, metadata: Metadata): PullRequestNotic
 
 const extensionWaitWakeSchema = extensionWaitNoticeSchema.pick({ subject: true, outcome: true, summary: true }).extend({
   source: z.literal("openchamber-wait"),
+  extension: z.string().nullable().optional().catch(undefined),
+  type: z.string().optional().catch(undefined),
+  minutes: z.number().optional().catch(undefined),
 })
 
 const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitNotice | undefined => {
   const parsed = extensionWaitWakeSchema.safeParse(metadata)
   if (!parsed.success) return undefined
-  const { subject, outcome, summary } = parsed.data
-  return { kind: "extension-wait", subject, outcome, summary, text }
+  const { subject, outcome, summary, extension, type, minutes } = parsed.data
+  const builtInTimer = extension === null && type === "timer" && minutes !== undefined
+  return builtInTimer
+    ? { kind: "extension-wait", subject, outcome, summary, timerMinutes: minutes, text }
+    : { kind: "extension-wait", subject, outcome, summary, text }
 }
 
 const pageAnswerWakeSchema = z.object({

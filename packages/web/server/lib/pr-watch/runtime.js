@@ -29,7 +29,6 @@ const INTEREST_OWNER = 'pr-watch';
 const MAX_WATCHES = 200;
 // Idle events arrive in bursts around a turn boundary.
 const QUIET_MS = 500;
-const SUBAGENT_RECHECK_MS = 5_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 // A wake that keeps failing is given up, so a broken session does not retry forever.
@@ -199,7 +198,7 @@ const buildWakeMessage = (watch) => {
   const finished = watch.wake.events.some((event) => event === 'merged' || event === 'closed');
   const next = finished
     ? 'There is nothing more to wait for.'
-    : 'You are no longer watching it. Read what changed and act on it; call pr.watch again when you need to wait for it once more.';
+    : 'You are no longer watching it. Read what changed and act on it; call wait.start with source "pr" again when you need to wait for it once more.';
   return {
     text: `<openchamber-pull-request url="${escapeAttribute(watch.url)}" number="${number}">\nPull request #${number}: ${changes.join('; ')}.\n${next}\n</openchamber-pull-request>`,
     description: `Pull request #${number}: ${changes.join(', ')}`,
@@ -233,6 +232,28 @@ const toPublicWatch = (watch) => ({
   startedAt: watch.startedAt,
 });
 
+const PR_WAIT_SOURCE = 'pr';
+const PR_WAIT = {
+  source: PR_WAIT_SOURCE,
+  extension: 'OpenChamber',
+  title: 'Pull request',
+  description: 'Wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. Each pull request is its own wait; starting one again starts it over',
+  params: { url: { type: 'string', description: 'Address of a GitHub pull request or GitLab merge request', required: true } },
+};
+
+const toPublicWait = (watch) => ({
+  waitId: watch.url,
+  sessionID: watch.sessionID,
+  directory: watch.directory,
+  source: PR_WAIT_SOURCE,
+  extension: PR_WAIT.extension,
+  title: [`#${numberOf(watch)}`, watch.last?.title].filter(Boolean).join(' '),
+  label: statusOf(watch),
+  args: { url: watch.url },
+  startedAt: watch.startedAt,
+  status: watch.wake ? 'waking' : 'waiting',
+});
+
 /** A session waits on each pull request once; session ids have no spaces. */
 const keyOf = (watch) => `${watch.sessionID} ${trackedItemKey(watch.item)}`;
 
@@ -251,7 +272,6 @@ export function createPrWatchRuntime({
   now = Date.now,
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
-  subagentRecheckMs = SUBAGENT_RECHECK_MS,
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
   /** `keyOf(watch)` → watch */
@@ -459,10 +479,6 @@ export function createPrWatchRuntime({
     if (!isCurrent(watch)) return undefined;
     if (!statuses) return retry(watch, 'OpenCode could not be asked');
     if (statuses[sessionID]) return undefined; // its idle event arms the next attempt
-    const subagents = await activityProbe.hasWorkingChildren(sessionID, statuses);
-    if (!isCurrent(watch)) return undefined;
-    if (subagents === null) return retry(watch, 'OpenCode could not be asked');
-    if (subagents) return arm(sessionID, subagentRecheckMs);
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(watch)) return undefined;
     if (archived) return drop(...watchesOf(sessionID));
@@ -636,6 +652,12 @@ export function createPrWatchRuntime({
     return { watching: watchesOf(sessionID).map(toPublicWatch), stopped: ending.length > 0 };
   };
 
+  const waitSource = () => (insideSpace ? null : { ...PR_WAIT, params: { ...PR_WAIT.params } });
+  const listWaits = async (sessionID) => {
+    await load();
+    return watchesOf(sessionID).map(toPublicWait);
+  };
+
   const processPayload = (payload) => {
     if (stopped) return;
     const deleted = parse(deletedEventSchema, payload);
@@ -689,6 +711,8 @@ export function createPrWatchRuntime({
     snapshot,
     watch,
     unwatch,
+    waitSource,
+    listWaits,
     attach,
     processPayload,
     start,

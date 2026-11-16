@@ -12,6 +12,7 @@ import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createTerminalReadAction } from './terminal-read.js';
+import { runWaitAction } from './waits.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
@@ -1444,11 +1445,10 @@ export const createOpenChamberControlService = (dependencies) => {
         const sessionID = asNonEmptyString(options.contextSessionId);
         if (!sessionID) throw new OpenChamberControlError(`${action} must be called from a session`, 400);
         try {
-          if (action === 'wait.list') return await extensionWaits.listWaits(sessionID);
-          if (action === 'wait.stop') return await extensionWaits.stopWaits(sessionID, asNonEmptyString(input.waitId));
-          const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
-          return await extensionWaits.startWait({ sessionID, directory, source: input.source, args: input.args });
+          const resolveDirectory = async () => (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
+          return await runWaitAction({ action, input, sessionID, extensionWaits, prWatch, resolveDirectory });
         } catch (error) {
+          if (error instanceof OpenChamberControlError) throw error;
           throw new OpenChamberControlError(error?.message ?? String(error), Number.isInteger(error?.status) ? error.status : 500);
         }
       }
