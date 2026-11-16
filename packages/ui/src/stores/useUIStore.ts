@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { EMPTY_NOTIFICATION_TEMPLATES, isLegacyDefaultTemplates } from './utils/notificationTemplates';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -151,41 +152,6 @@ type EventStreamStatus =
   | 'paused'
   | 'offline'
   | 'error';
-
-const LEGACY_DEFAULT_NOTIFICATION_TEMPLATES = {
-  completion: { title: '{agent_name} is ready', message: '{last_message}' },
-  error: { title: 'Tool error', message: '{last_message}' },
-  question: { title: '{agent_name} needs input', message: '{last_message}' },
-  subtask: { title: 'Subtask complete', message: '{last_message}' },
-} as const;
-
-const EMPTY_NOTIFICATION_TEMPLATES = {
-  completion: { title: '', message: '' },
-  error: { title: '', message: '' },
-  question: { title: '', message: '' },
-  subtask: { title: '', message: '' },
-} as const;
-
-const isSameTemplateValue = (
-  a: { title: string; message: string } | undefined,
-  b: { title: string; message: string }
-) => {
-  if (!a) return false;
-  return a.title === b.title && a.message === b.message;
-};
-
-const isLegacyDefaultTemplates = (value: unknown): boolean => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const candidate = value as Record<string, { title: string; message: string } | undefined>;
-  return (
-    isSameTemplateValue(candidate.completion, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.completion)
-    && isSameTemplateValue(candidate.error, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.error)
-    && isSameTemplateValue(candidate.question, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.question)
-    && isSameTemplateValue(candidate.subtask, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.subtask)
-  );
-};
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -1187,6 +1153,7 @@ interface UIStore {
   agentRenderToolEnabled: boolean;
   agentSecretToolEnabled: boolean;
   agentWorkflowToolEnabled: boolean;
+  agentWorkflowAutoApprove: boolean;
   /** The isolated-spaces switch as saved; the server applies it at its next start. */
   isolatedSpacesEnabled: boolean;
   /** The permission mode the server writes onto each new top-level session. */
@@ -1776,6 +1743,7 @@ export const useUIStore = create<UIStore>()(
         agentRenderToolEnabled: true,
         agentSecretToolEnabled: true,
         agentWorkflowToolEnabled: false,
+        agentWorkflowAutoApprove: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,

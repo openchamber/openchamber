@@ -20,8 +20,7 @@
 import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
 import type { DesktopWindowControlsPosition, DesktopWindowControlsStyle } from '@/lib/desktop';
 import { getDirectoryShowHidden, setDirectoryShowHidden } from '@/lib/directoryShowHidden';
-import type { DraftStarterRef } from '@/lib/draftStarters';
-import { sanitizeStarterRefs } from '@/lib/draftStarters';
+import { sanitizeStarterRefs, type DraftStarterRef } from '@/lib/draftStarters';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { UI_FONT_WEIGHT_OPTIONS, isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { LOCALES } from '@/lib/i18n/runtime';
@@ -318,6 +317,7 @@ export const SETTINGS_REGISTRY = {
   agentMemoryDreamingVariant: field({ scope: 'instance', parse: fromSchema(z.string()), ui: uiStore('agentMemoryDreamingVariant', (v) => useUIStore.getState().setAgentMemoryDreamingVariant(v)) }),
   agentKnowledgeToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentKnowledgeToolEnabled', (v) => useUIStore.getState().setAgentKnowledgeToolEnabled(v)) }),
   agentWorkflowToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowToolEnabled', (v) => useUIStore.getState().setAgentWorkflowToolEnabled(v)) }),
+  agentWorkflowAutoApprove: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowAutoApprove', setUi('agentWorkflowAutoApprove')) }),
   // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
   // next start, which the settings row says. Never shown in VS Code (decision 16 of the design).
   isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),

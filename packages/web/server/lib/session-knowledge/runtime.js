@@ -287,7 +287,8 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
   + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list, tools.openchamber inside execute, when you have it):'
   + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
-  + ' Start the run once the user agrees to the models.';
+  + ' Start the run once the user agrees to the models.'
+  + ' When the user lets runs start without approval in Settings, workflow.run starts the run at once instead of showing it for approval, so agree on the plan and the models in the chat first all the same.';
 
 /**
  * When to ask for a secret on a card, stated in every session that has the
