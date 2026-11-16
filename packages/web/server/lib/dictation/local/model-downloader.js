@@ -1,8 +1,3 @@
-/**
- * Downloads and extracts local sherpa-onnx STT model archives.
- * Archives (.tar.bz2) come from the k2-fsa GitHub releases. Windows uses
- * bundled 7-Zip to decompress bzip2 before the system `tar` extracts them.
- */
 
 import { createWriteStream } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
@@ -62,12 +57,7 @@ async function downloadToFile(url, outputPath, onProgress) {
   }
 }
 
-/**
- * The error to show for a failed `tar` run. GNU tar hands .tar.bz2 to an
- * external `bzip2` program; minimal Linux images often lack it, and the bare
- * exit code gave no hint (#2887). Windows decodes bzip2 before invoking tar
- * because its bundled bsdtar can also require an external decompressor.
- */
+// external: #2887 GNU tar can require an absent bzip2 executable; report that dependency when extraction fails.
 export function describeTarFailure(code, stderr) {
   const detail = String(stderr || '').trim();
   if (/bzip2/i.test(detail)) {
@@ -85,7 +75,6 @@ async function runArchiveTool(command, args, describeFailure) {
     });
     let stderr = '';
     child.stderr.on('data', (chunk) => {
-      // Only the tail matters for the message; keep memory bounded.
       stderr = (stderr + chunk.toString()).slice(-4096);
     });
     child.on('error', reject);
@@ -105,9 +94,8 @@ async function extractTarArchive(archivePath, destDir) {
   let tarPath = archivePath;
   if (process.platform === 'win32') {
     const { default: sevenZip } = await import('7zip-bin');
-    // A spawned executable must be on disk, outside Electron's ASAR archive.
+    // external: https://www.electronjs.org/docs/latest/tutorial/asar-archives#executing-binaries-inside-asar-archive Spawned executables must be outside app.asar.
     const decoderPath = sevenZip.path7za.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-    // Decode to disk so tar never uses the external Windows bzip2 pipe.
     await runArchiveTool(decoderPath, ['x', '-tbzip2', '-y', '-bso0', '-bsp0', archivePath, `-o${destDir}`], (code, stderr) => {
       const detail = stderr.trim();
       return detail ? `7-Zip exited with code ${code}: ${detail}` : `7-Zip exited with code ${code}`;
@@ -158,8 +146,6 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
     return modelDir;
   }
 
-  // A directory that exists but fails the required-files check is a partial
-  // extraction from an earlier interrupted attempt — remove it before retrying.
   await rm(modelDir, { recursive: true, force: true }).catch(() => undefined);
 
   const downloadsDir = path.join(modelsDir, '.downloads');
@@ -176,8 +162,6 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
 
     const stagedModelDir = path.join(stagingDir, spec.extractedDir);
     if (!(await hasRequiredFiles(stagedModelDir, spec.requiredFiles))) {
-      // Bad archive (truncated download / corrupt cache): drop it so the next
-      // attempt re-downloads instead of re-extracting the same broken bytes.
       await rm(archivePath, { force: true }).catch(() => undefined);
       throw new Error(
         `Extracted ${archiveFilename}, but required model files are missing or empty. The archive was discarded; retry to re-download.`,
@@ -187,8 +171,6 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress }) {
     await rename(stagedModelDir, modelDir);
   } catch (error) {
     await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
-    // Any extraction failure means the cached archive can't be trusted
-    // (corrupt bz2, truncated download). Discard it so retry re-downloads.
     await rm(archivePath, { force: true }).catch(() => undefined);
     throw error;
   }

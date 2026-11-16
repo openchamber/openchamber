@@ -1,15 +1,3 @@
-/**
- * Catalog of local sherpa-onnx STT models available for dictation.
- * Models are downloaded on demand from the k2-fsa GitHub releases and
- * extracted under the OpenChamber speech-models directory.
- *
- * `type` selects the recognizer construction path in the worker:
- * - 'nemo_transducer': encoder/decoder/joiner transducer (Parakeet)
- * - 'whisper': encoder/decoder Whisper export
- * - 'qwen3_asr': conv frontend/encoder/decoder plus a Hugging Face tokenizer
- *   directory; it has no tokens.txt
- * `files` maps logical roles to file names inside the extracted directory.
- */
 
 import path from 'path';
 
@@ -40,9 +28,6 @@ export const LOCAL_STT_MODEL_CATALOG = {
     },
     description: 'NVIDIA Parakeet TDT v3 (25 European languages, auto-detected)',
   },
-  // Moondream's post-trained v3: same architecture, tokenizer and speed.
-  // k2-fsa publishes no sherpa export of it, so OpenChamber hosts its own:
-  // the sherpa v3 export script run on the Ultra .nemo (archive README).
   'parakeet-ultra-int8': {
     type: 'nemo_transducer',
     archiveUrl:
@@ -95,15 +80,6 @@ export const LOCAL_STT_MODEL_CATALOG = {
   },
 };
 
-/**
- * Local text-to-speech models (sherpa-onnx OfflineTts). Downloaded and
- * managed through the same pipeline as the STT models.
- *
- * `languages` lists the languages a model speaks well; the speech service
- * uses it to pick a model for the language a text is written in. Kokoro
- * models carry speaker ids (`voices`); a Piper model is one voice for one
- * language. `lexicon` entries are joined with commas for sherpa-onnx.
- */
 export const LOCAL_TTS_MODEL_CATALOG = {
   'kokoro-en-v0_19': {
     type: 'kokoro',
@@ -122,8 +98,7 @@ export const LOCAL_TTS_MODEL_CATALOG = {
   'kokoro-multi-lang-v1_1': {
     type: 'kokoro',
     languages: ['zh', 'en'],
-    // sherpa-onnx wires this Kokoro build for Chinese and English only;
-    // speakers 0-2 are English, 3-102 Chinese.
+    // external: https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html This build supports Chinese and English; speakers 0-2 are English and 3-102 Chinese.
     defaultSpeakerByLanguage: { en: 0, zh: 3 },
     archiveUrl:
       'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_1.tar.bz2',
@@ -139,12 +114,6 @@ export const LOCAL_TTS_MODEL_CATALOG = {
     lexicon: ['lexiconEnglish', 'lexiconChinese'],
     description: 'Kokoro TTS (Chinese and English, 103 voices)',
   },
-  // The larger `ukrainian_tts-medium` build is a character-level model
-  // (`phoneme_type: text`); sherpa-onnx phonemizes every Piper model through
-  // espeak-ng, which turns that one into noise. `vits-coqui-uk-mai` sounds
-  // better but reads Cyrillic only and drops every Latin word (file names,
-  // product names), which is unusable in a coding chat. Lada is an espeak
-  // model: small, but it reads mixed text.
   'piper-uk_UA-lada-x_low': {
     type: 'vits',
     languages: ['uk'],
@@ -305,16 +274,10 @@ export const LOCAL_TTS_MODEL_CATALOG = {
 
 export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-ultra-int8';
 
-/** The default before v3; kept for users who never picked a model and have it installed. */
 export const PREVIOUS_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
 
-/** The default before Ultra; used while Ultra downloads for users who never picked a model. */
 export const REPLACED_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
-/**
- * Extracted directories of models the catalog no longer offers. Settings can
- * no longer show or delete them, so the service removes them from disk.
- */
 export const RETIRED_LOCAL_MODEL_DIRS = ['sherpa-onnx-whisper-base'];
 
 export const DEFAULT_LOCAL_TTS_MODEL = 'kokoro-en-v0_19';
