@@ -1,12 +1,3 @@
-/**
- * Loader for the sherpa-onnx-node native addon.
- *
- * sherpa-onnx-node ships its native addon and shared libraries in a
- * platform-specific package (e.g. sherpa-onnx-darwin-arm64). The shared
- * libraries must be findable via the platform's dynamic-loader search path,
- * so the loader prepends the platform package directory to LD_LIBRARY_PATH /
- * DYLD_LIBRARY_PATH / PATH before requiring the addon.
- */
 
 import { createRequire } from 'module';
 import path from 'path';
@@ -42,11 +33,7 @@ function prependEnvPath(existing, value) {
   return [value, ...parts].join(path.delimiter);
 }
 
-/**
- * Case-insensitive env key lookup: on Windows `{...process.env}` yields a
- * plain object where PATH may be stored as `Path`. Using a hardcoded 'PATH'
- * would create a duplicate key and break the child process PATH.
- */
+// external: https://nodejs.org/api/child_process.html#child_processspawncommand-args-options Windows environment keys are case-insensitive; duplicate PATH keys break child-process lookup.
 function findEnvKey(env, key) {
   const lower = key.toLowerCase();
   for (const k of Object.keys(env)) {
@@ -59,28 +46,17 @@ function findEnvKey(env, key) {
 
 function resolveSherpaLibDir(platform = process.platform, arch = process.arch) {
   const packageName = sherpaPlatformPackageName(platform, arch);
-  // The platform package is an optional dependency of sherpa-onnx-node, so it
-  // lives in sherpa-onnx-node's own dependency tree. In a hoisted npm install
-  // it is also reachable from this module, but an isolated install (bun's
-  // default layout, pnpm) keeps it nested inside sherpa-onnx-node's
-  // node_modules, where resolving from here fails. Resolve from the wrapper's
-  // own location first so the fallback below can actually find the addon.
   const resolvers = [];
   try {
     resolvers.push(createRequire(require.resolve('sherpa-onnx-node')));
   } catch {
-    // The wrapper itself may be missing; the fallback below still resolves
-    // from this module's own tree.
   }
   resolvers.push(require);
 
   for (const resolver of resolvers) {
     try {
       const pkgJson = resolver.resolve(`${packageName}/package.json`);
-      // Electron packages node_modules inside app.asar, but native addons and
-      // their shared libraries are extracted to app.asar.unpacked. The dynamic
-      // loader (dlopen/DYLD/LD) cannot read from the asar archive, so point the
-      // search path at the unpacked copy.
+      // external: https://www.electronjs.org/docs/latest/tutorial/asar-archives#extra-unpacking-on-some-apis Native addons and shared libraries must load from app.asar.unpacked.
       const dir = path.dirname(pkgJson);
       const unpacked = dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
       return existsSync(unpacked) ? unpacked : dir;
@@ -107,10 +83,6 @@ export function applySherpaLoaderEnv(env) {
   return { key, libDir };
 }
 
-/**
- * Load the sherpa-onnx-node module, trying the upstream entry first and then
- * the platform addon directly.
- */
 export function loadSherpaOnnxNode() {
   if (cached) {
     return cached;
