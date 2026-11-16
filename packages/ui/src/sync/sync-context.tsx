@@ -2090,7 +2090,7 @@ const recordTurnOutcomeNotification = (
   appendErrorNotification({
     directory,
     session: sessionID,
-    time: Date.now(),
+    time: payload.type === "session.error" ? payload.properties.time ?? Date.now() : Date.now(),
     error: { ...errorSummary, responseBody },
   })
 }
@@ -2281,7 +2281,7 @@ export function handleEvent(
   // Turn-complete and error notifications are recorded before the directory
   // store lookup. Unopened directories are never bootstrapped and have no
   // store, yet their collapsed sidebar rows still need the unread dot.
-  if ((payload.type === "session.idle" || payload.type === "session.error") && directory && directory !== "global") {
+  if ((payload.type === "session.idle" || payload.type === "session.error") && directory && directory !== "global" && expectedRuntimeKey === getRuntimeKey()) {
     recordTurnOutcomeNotification(payload, directory, childStores, batch)
   }
 

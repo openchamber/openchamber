@@ -120,6 +120,7 @@ describe("translateWireEvent", () => {
     })
     expect(failed.map((e) => e.type)).toEqual(["session.patched", "session.error"])
     expect(failed[0]).toMatchObject({ properties: { patch: { outcome: "failed", time: { idle: 1000 } } } })
+    expect(failed[1]).toMatchObject({ properties: { time: 1000 } })
     const done = translateWireEvent({ ...base, type: "session.execution.succeeded", durable, data: { sessionID: "ses_1" } })
     expect(done.map((e) => e.type)).toEqual(["session.patched", "session.idle"])
   })

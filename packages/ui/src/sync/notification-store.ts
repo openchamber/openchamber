@@ -10,6 +10,7 @@
 import { create } from "zustand"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch"
 import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
 export type ErrorNotification = {
@@ -32,15 +33,24 @@ function pruneNotifications(list: ErrorNotification[]): ErrorNotification[] {
 
 interface NotificationStore {
   list: ErrorNotification[]
+  runtimeKey: string
   append: (notification: ErrorNotification) => void
 }
 
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   list: [],
+  runtimeKey: getRuntimeKey(),
   append: (notification) => {
-    set({ list: pruneNotifications([...get().list, notification]) })
+    const runtimeKey = getRuntimeKey()
+    const list = get().runtimeKey === runtimeKey ? get().list : []
+    if (notification.session && list.some((entry) => entry.session === notification.session && entry.time > notification.time)) return
+    set({ runtimeKey, list: pruneNotifications([...list, notification]) })
   },
 }))
+
+subscribeRuntimeEndpointChanged(({ runtimeKey, previousRuntimeKey }) => {
+  if (runtimeKey !== previousRuntimeKey) useNotificationStore.setState({ runtimeKey, list: [] })
+})
 
 export function appendErrorNotification(notification: ErrorNotification) {
   useNotificationStore.getState().append(notification)

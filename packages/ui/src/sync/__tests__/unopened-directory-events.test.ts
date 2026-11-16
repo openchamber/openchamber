@@ -73,6 +73,15 @@ describe("events for directories without a store", () => {
     expect(useNotificationStore.getState().list).toEqual([])
   })
 
+  test("an error buffered by a previous runtime is not recorded for the current runtime", () => {
+    handleEvent("/far", {
+      type: "session.error",
+      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "old runtime" } },
+    }, childStores, createEventRoutingIndex(), "retired-runtime")
+
+    expect(useNotificationStore.getState().list).toEqual([])
+  })
+
   test("a directory-less status event for a cached session is not filed into the only open store", () => {
     const routingIndex = createEventRoutingIndex()
     const open = childStores.getChild("/open")!
