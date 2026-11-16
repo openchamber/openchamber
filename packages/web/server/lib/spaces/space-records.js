@@ -45,10 +45,14 @@ const isHttpUrl = (value) => {
   }
 };
 const upstreamSchema = z.string().url().refine(isHttpUrl, 'http or https');
-/** Where the host finds a secret again, never the secret: an environment variable of the host's by name, or the user typed it once. */
+/**
+ * Where the host finds a secret again, never the secret: an environment variable of the host's by
+ * name, the key the host's OpenCode stores for an integration, or the user typed it once.
+ */
 export const secretSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('env'), name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,255}$/) }).strict(),
   z.object({ kind: z.literal('typed') }).strict(),
+  z.object({ kind: z.literal('stored'), integration: z.string().regex(GRANT_ID_PATTERN) }).strict(),
 ]);
 /**
  * A grant as the host remembers it. Strict, so a value under any name is refused rather than

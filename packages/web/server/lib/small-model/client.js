@@ -179,3 +179,12 @@ export function findModelInfo(models, providerID, modelID) {
     ?? ofProvider.find((model) => model.modelID === modelID)
     ?? null;
 }
+
+/** @param {string | null} directory */
+export async function readOpenCodeCatalog(directory) {
+  const client = getSmallModelClient(directory);
+  if (!client) throw new Error('OpenCode on this computer is not running');
+  const [providers, models] = await Promise.all([client.provider.list(), client.model.list()]);
+  if (!Array.isArray(providers?.data) || !Array.isArray(models?.data)) throw new Error('OpenCode answered no provider list');
+  return { providers: providers.data, models: models.data };
+}

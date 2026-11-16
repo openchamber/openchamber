@@ -61,6 +61,7 @@ type SessionDraftsActions = {
    * rather than bringing it back.
    */
   discard: (draftId: string, options?: { final?: boolean }) => Promise<void>;
+  move: (draftId: string, directory: string) => Promise<void>;
 };
 
 /** A new draft's id: the server keeps ids of letters, digits, `_`, `.` and `-`. */
@@ -192,6 +193,30 @@ export const useSessionDraftsStore = create<SessionDraftsState & SessionDraftsAc
         set((state) => ({ drafts: state.drafts.some((draft) => draft.id === draftId) ? state.drafts : [...state.drafts, removed] }));
       }
       throw new Error('Failed to discard the draft');
+    }),
+
+    move: (draftId, directory) => enqueue(draftId, async () => {
+      const key = uploadKey(draftId);
+      const runtimeKey = getRuntimeKey();
+      const draft = draftsOf(runtimeKey).find((entry) => entry.id === draftId);
+      if (!draft || finishedDraftKeys.has(key) || draft.directory === directory) return;
+      bumpRevision(runtimeKey);
+      const response = await runtimeFetch(`/api/session-drafts/${encodeURIComponent(draftId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        // An attachment named by its id alone keeps what the server stores for it.
+        body: JSON.stringify({
+          directory,
+          projectId: draft.projectId,
+          text: draft.text,
+          mentions: draft.mentions,
+          attachments: draft.attachments.map(({ id, filename, mimeType, size }) => ({ id, filename, mimeType, size })),
+        }),
+      }).catch(() => null);
+      if (!response?.ok) throw new Error(`Failed to move the draft (${response?.status ?? 'offline'})`);
+      const parsed = savedSchema.safeParse(await response.json().catch(() => null));
+      if (!parsed.success || runtimeKey !== getRuntimeKey()) return;
+      set({ drafts: [...draftsOf(runtimeKey).filter((entry) => entry.id !== draftId), parsed.data.draft], runtimeKey });
     }),
   };
 });

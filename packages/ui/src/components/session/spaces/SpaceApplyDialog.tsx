@@ -215,17 +215,16 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
           {nothingChanged ? null : (
             <div className="space-y-2">
               {option('branch', t('spaces.apply.as.branch'), false)}
-              {chosen === 'branch' ? (
-                <div className="space-y-1 ps-6">
-                  <Input
-                    value={branch}
-                    onChange={(event) => { setBranch(event.target.value); if (branchRefusal) setRefusal(null); }}
-                    className="max-w-sm font-mono"
-                    aria-label={t('spaces.apply.branch.label')}
-                  />
-                  {branchRefusal ? <p className="typography-meta text-status-error">{refusalText(branchRefusal)}</p> : null}
-                </div>
-              ) : null}
+              <div className="space-y-1 ps-6">
+                <Input
+                  value={branch}
+                  onChange={(event) => { setBranch(event.target.value); if (branchRefusal) setRefusal(null); }}
+                  className="max-w-sm font-mono"
+                  aria-label={t('spaces.apply.branch.label')}
+                  disabled={chosen !== 'branch'}
+                />
+                {chosen === 'branch' && branchRefusal ? <p className="typography-meta text-status-error">{refusalText(branchRefusal)}</p> : null}
+              </div>
               {option('changes', t('spaces.apply.as.changes'), changesClosed)}
               {changesClosed ? <p className="ps-6 typography-meta text-muted-foreground">{t('spaces.apply.changes.closed')}</p> : null}
               {!changesClosed && preview.newPathsUndecided ? <p className="ps-6 typography-meta text-status-warning">{t('spaces.apply.changes.undecided')}</p> : null}

@@ -14,6 +14,7 @@
 import { z } from 'zod';
 
 import { SpaceError } from './errors.js';
+import { addressThroughWindow } from './host-catalog.js';
 import { tail } from './exec-http.js';
 import { IMAGE_ONLY_PATH, IMAGE_SH, LEGACY_SPACE_OPENCODE_CONFIG_PATH, spaceOpenCodeConfigDirectory, spaceOpenCodeConfigPath, spaceWindowUrl } from './layout.js';
 import { providerIdSchema } from './space-records.js';
@@ -38,11 +39,13 @@ const writeConfigScriptOf = (spaceId) => {
  * composer offers the host's catalog, and the same provider id inside is what makes that choice
  * work in the space unchanged. Decided with the maintainer on 2026-09-26.
  */
-export function buildProviderConfig(grants, customProviders = new Map()) {
+export function buildProviderConfig(grants, customProviders = new Map(), catalogProviders = new Map()) {
   const provider = {};
   const providers = {};
   for (const grant of grants) {
-    if (grant.kind === 'model') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
+    const catalog = grant.kind === 'model' ? catalogProviders.get(grant.provider) : undefined;
+    if (catalog) providers[grant.provider] = catalogEntryOf(grant, catalog);
+    else if (grant.kind === 'model') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
     // A login takes its token from the row below, so no placeholder key. Copilot's plugin reads
     // its address from the row and not from here, so a Copilot login writes nothing.
     if (grant.kind === 'login') {
@@ -63,6 +66,19 @@ export function buildProviderConfig(grants, customProviders = new Map()) {
   if (Object.keys(providers).length > 0) config.providers = providers;
   return config;
 }
+
+const catalogEntryOf = (grant, catalog) => {
+  const window = spaceWindowUrl(grant.id);
+  const settings = { apiKey: WINDOW_PLACEHOLDER_KEY };
+  const base = catalog.baseURL === null ? null : addressThroughWindow(catalog.baseURL, grant.upstream, window);
+  if (base) settings.baseURL = base;
+  const models = {};
+  for (const model of catalog.models) {
+    const address = model.baseURL === null ? null : addressThroughWindow(model.baseURL, grant.upstream, window);
+    if (address) models[model.id] = { settings: { baseURL: address } };
+  }
+  return Object.keys(models).length > 0 ? { settings, models } : { settings };
+};
 
 /**
  * The variable a space container carries OpenCode's start configuration in. OpenCode reads it
@@ -321,8 +337,8 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
    * Writes the whole configuration beside the project from the model grants the record holds;
    * `customProviders` holds the host's definition of each custom provider among them, by id.
    */
-  const writeProviderConfig = async (spaceId, grants, customProviders = new Map()) => {
-    const text = `${JSON.stringify(buildProviderConfig(grants, customProviders), null, 2)}\n`;
+  const writeProviderConfig = async (spaceId, grants, customProviders = new Map(), catalogProviders = new Map()) => {
+    const text = `${JSON.stringify(buildProviderConfig(grants, customProviders, catalogProviders), null, 2)}\n`;
     const result = await exec(spaceId, [IMAGE_SH, '-c', writeConfigScriptOf(spaceId)], { stdin: text });
     if (result.code !== 0) {
       throw new SpaceError('space_setup_failed', `Could not write the provider configuration inside the space: ${tail(result.stderr) || `exit code ${result.code}`}`);

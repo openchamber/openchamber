@@ -829,7 +829,13 @@ when reopened here. The first draft opened in a folder takes over the text
 that folder kept under the old per-folder key
 (`readChatDraftClaimingFolderDraft`). Search leaves drafts out. The phone lists
 and opens the same drafts. VS Code has no shared drafts: it keeps the
-per-folder key, where a new draft finds the text left in that folder.
+per-folder key, where a new draft finds the text left in that folder. A draft
+left in an isolated space that is gone (deleted, applied with "Delete the space
+afterwards", or a failed creation dismissed) moves to its project's root with
+its text and attachments once the host's space list no longer names the space,
+and so does the draft open in the composer (`lib/spaces/space-drafts.ts`):
+kept on the space, it opened on a folder nothing answers for and could never
+be sent.
 
 Every way into a new session opens a fresh, empty draft, so several drafts can
 wait in one folder. The draft's project and branch row ends with a "N drafts"

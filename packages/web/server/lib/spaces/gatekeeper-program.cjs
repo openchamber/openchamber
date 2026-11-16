@@ -712,7 +712,7 @@ async function serveWindow(request, response) {
   const headers = { ...request.headers };
   for (const name of Object.keys(headers)) {
     const lower = name.toLowerCase();
-    if (['authorization', 'x-api-key', 'proxy-authorization'].includes(lower) || lower === grant.header) delete headers[name];
+    if (['authorization', 'x-api-key', 'x-goog-api-key', 'proxy-authorization'].includes(lower) || lower === grant.header) delete headers[name];
   }
   headers.host = upstream.host;
   if (grant.secret !== null) {
@@ -927,7 +927,7 @@ function makeServer(listener, maxConnections, handler) {
   // parser threw out never reaches a decision, and without a record here a space could probe with
   // targets the parser rejects and leave the user's view of its attempts blind by construction.
   server.on('clientError', (error, socket) => {
-    noteRefusedTraffic(listener, 'deny:unreadable-request');
+    if (error?.code !== 'ECONNRESET' && error?.code !== 'EPIPE') noteRefusedTraffic(listener, 'deny:unreadable-request');
     if (!socket.destroyed && socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     socket.destroy();
   });

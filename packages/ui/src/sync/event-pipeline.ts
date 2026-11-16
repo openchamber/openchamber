@@ -223,7 +223,7 @@ const openchamberSpaceProgressSchema = z.object({
   type: z.literal("openchamber:space-progress"),
   properties: z.object({
     spaceId: z.string().regex(/^[0-9a-f]{12}$/),
-    step: z.union([spaceCreationStepSchema, z.literal("failed")]),
+    step: z.union([spaceCreationStepSchema, z.literal("failed"), z.literal("removed")]),
     failure: z.object({ code: z.string(), message: z.string() }).nullable(),
   }),
 })

@@ -21,7 +21,7 @@ import { branchPathRevisions, isBranchScopeAvailable, isBranchScopeDefinitelyUna
 import { CommitSection } from '@/components/views/git/CommitSection';
 import { ConflictDialog } from '@/components/views/git/ConflictDialog';
 import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
-import { SyncActions } from '@/components/views/git/SyncActions';
+import { GitPanelSyncActions } from '@/components/views/git/GitPanelSyncActions';
 import { gitRequestErrorMessage } from '@/components/views/git/gitRequestErrorMessage';
 import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
 import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
@@ -1517,7 +1517,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl), instanceSshHosts) : { applicable: true };
             }}
           />
-          <SyncActions
+          <GitPanelSyncActions
             syncAction={operationRecovery.entry?.executing ? syncAction : null}
             remotes={effectiveRemotes}
             onFetch={(remote) => void handleSyncAction('fetch', remote)}

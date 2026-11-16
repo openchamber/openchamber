@@ -6,7 +6,8 @@ import React from 'react';
 import { create } from 'zustand';
 import { z } from 'zod';
 
-import { listSpaces, readSpaceCustomProviders, spaceTaskTitleSchema, type SpaceTaskTitle, type SpaceCustomProvider, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
+import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
+import { listSpaces, readSpaceCatalogProviders, readSpaceCustomProviders, spaceTaskTitleSchema, type SpaceTaskTitle, type SpaceCatalogProvider, type SpaceCustomProvider, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
 import { spaceIdOfDirectory } from './space-route';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { SpaceProgress } from '@/sync/event-pipeline';
@@ -81,6 +82,8 @@ type SpacesState = {
    */
   customProviders: ReadonlyMap<string, readonly SpaceCustomProvider[]>;
   noteCustomProviders: (projectDirectory: string, providers: readonly SpaceCustomProvider[]) => void;
+  catalogProviders: ReadonlyMap<string, readonly SpaceCatalogProvider[]>;
+  noteCatalogProviders: (projectDirectory: string, providers: readonly SpaceCatalogProvider[]) => void;
   /** The grant dialog, open on one space and, when opened for a missing key, on its provider. */
   accessDialog: { spaceId: string; providerId: string | null } | null;
   openAccessDialog: (spaceId: string, providerId?: string | null) => void;
@@ -126,7 +129,7 @@ const EMPTY: ReadonlyMap<string, SpaceMark> = new Map();
 // earlier keeps the step the event gave rather than its own older view.
 const progressAt = new Map<string, number>();
 
-const withProgress = (entry: SpaceEntry, progress: SpaceProgress): SpaceEntry => (progress.step === 'failed'
+const withProgress = (entry: SpaceEntry, progress: SpaceProgress & { step: Exclude<SpaceProgress['step'], 'removed'> }): SpaceEntry => (progress.step === 'failed'
   ? { ...entry, state: 'failed', failure: progress.failure }
   : { ...entry, state: progress.step === 'ready' ? 'running' : 'preparing', step: progress.step === 'ready' ? null : progress.step, failure: null });
 
@@ -185,6 +188,12 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     return { journey, progressRevision };
   }),
   customProviders: new Map(),
+  catalogProviders: new Map(),
+  noteCatalogProviders: (projectDirectory, providers) => set((current) => {
+    const catalogProviders = new Map(current.catalogProviders);
+    catalogProviders.set(projectDirectory, providers);
+    return { catalogProviders };
+  }),
   noteCustomProviders: (projectDirectory, providers) => set((current) => {
     const customProviders = new Map(current.customProviders);
     customProviders.set(projectDirectory, providers);
@@ -219,12 +228,13 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     const revision = get().progressRevision + 1;
     progressAt.set(progress.spaceId, revision);
     const entry = get().journey?.get(progress.spaceId);
-    if (!entry) {
+    const { step } = progress;
+    if (!entry || step === 'removed') {
       set({ progressRevision: revision });
       return false;
     }
     const journey = new Map(get().journey);
-    journey.set(progress.spaceId, withProgress(entry, progress));
+    journey.set(progress.spaceId, withProgress(entry, { ...progress, step }));
     set({ journey, progressRevision: revision });
     return true;
   },
@@ -242,7 +252,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   resetForRuntimeSwitch: () => {
     progressAt.clear();
     journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, customProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, customProviders: new Map(), catalogProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
   },
   forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));
@@ -259,15 +269,27 @@ export const spacesRuntimeGeneration = (): number => journeyGeneration;
 export const refreshSpacesJourney = async (): Promise<void> => {
   const generation = journeyGeneration;
   const revision = useSpacesStore.getState().progressRevision;
+  const { prepareGoneSpaceDraftMove } = await import('./space-drafts');
+  const moveGoneSpaceDrafts = prepareGoneSpaceDraftMove();
   const entries = await listSpaces();
   if (generation !== journeyGeneration) return;
   useSpacesStore.getState().applyJourney(entries, revision);
+  const listedIds = new Set(entries.map((entry) => entry.id));
+  if (Array.from(useSpacesStore.getState().spaces.keys()).some((spaceId) => !listedIds.has(spaceId))) void import('@/stores/useGlobalSessionsStore').then(({ refreshGlobalSessions }) => refreshGlobalSessions()).catch(() => undefined);
+  void moveGoneSpaceDrafts(listedIds);
   // The composer judges a model of the user's own provider by this list, so it is read once per
   // project the spaces belong to, before any dialog opens.
   for (const directory of new Set(entries.flatMap((entry) => (entry.projectDirectory ? [entry.projectDirectory] : [])))) {
     if (!useSpacesStore.getState().customProviders.has(directory)) void loadSpaceCustomProviders(directory);
+    if (!useSpacesStore.getState().catalogProviders.has(directory)) void loadSpaceCatalogProviders(directory);
   }
 };
+
+useSessionDraftsStore.subscribe((state, previous) => {
+  const journey = useSpacesStore.getState().journey;
+  if (state.drafts === previous.drafts || !journey) return;
+  if (state.drafts.some((draft) => { const spaceId = spaceIdOfDirectory(draft.directory); return spaceId !== null && !journey.has(spaceId); })) void refreshSpacesJourney().catch(() => undefined);
+});
 
 const customProviderReads = new Map<string, Promise<void>>();
 
@@ -285,6 +307,20 @@ export const loadSpaceCustomProviders = (projectDirectory: string): Promise<void
     .catch(() => undefined)
     .finally(() => { customProviderReads.delete(projectDirectory); });
   customProviderReads.set(projectDirectory, read);
+  return read;
+};
+
+const catalogProviderReads = new Map<string, Promise<void>>();
+
+export const loadSpaceCatalogProviders = (projectDirectory: string): Promise<void> => {
+  const pending = catalogProviderReads.get(projectDirectory);
+  if (pending) return pending;
+  const generation = journeyGeneration;
+  const read = readSpaceCatalogProviders(projectDirectory)
+    .then((providers) => { if (generation === journeyGeneration) useSpacesStore.getState().noteCatalogProviders(projectDirectory, providers); })
+    .catch(() => undefined)
+    .finally(() => { catalogProviderReads.delete(projectDirectory); });
+  catalogProviderReads.set(projectDirectory, read);
   return read;
 };
 

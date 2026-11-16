@@ -17,6 +17,8 @@ const KNOWN: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
   ['project_not_registered', 'spaces.failure.projectNotRegistered'],
   ['isolated_spaces_off', 'spaces.failure.featureOff'],
   ['secret_source_missing', 'spaces.failure.envNotSet'],
+  ['stored_key_missing', 'spaces.failure.storedKeyMissing'],
+  ['host_catalog_unreadable', 'spaces.failure.hostCatalogUnreadable'],
   ['login_not_found', 'spaces.failure.loginNotFound'],
   ['login_expired', 'spaces.failure.loginExpired'],
   ['login_not_supported', 'spaces.failure.loginNotSupported'],
