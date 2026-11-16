@@ -1,12 +1,3 @@
-/**
- * Two capabilities, two tools.
- *
- * Controlling sessions and driving a page are different intents, and a single
- * tool description covering both is vaguer than either — which is how a model
- * ends up calling the wrong one. Separate tools also mean turning one off
- * removes it entirely, parameters included, rather than leaving its inputs
- * visible in a shared schema.
- */
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
@@ -46,12 +37,6 @@ const AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS = OPENCHAMBER_CONTROL_ACTION_DEFI
   .filter(({ agentExposed }) => agentExposed !== false);
 const isScheduleAction = ({ action }) => action.startsWith('schedule.');
 
-/**
- * The control service runs sessions and scheduled tasks alike, for the CLI
- * too, but agents get them as two tools: scheduling is its own intent, carries
- * ten inputs of its own, and the user can switch it off without losing
- * session control.
- */
 export const OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS = Object.freeze(
   AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS.filter((definition) => !isScheduleAction(definition)),
 );
@@ -93,17 +78,6 @@ export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
   OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Memory is its own tool for the same reason web is: remembering across
- * sessions is a distinct intent from controlling one, and a shared description
- * would blur both. It also has to switch off cleanly and completely, which a
- * shared schema cannot do.
- *
- * The session already carries an index of stored titles and says to read an
- * entry before acting on it (../session-knowledge/runtime.js), so memory.read
- * takes a title as the index spells it and memory.list is for a missing or
- * stale index.
- */
 export const OPENCHAMBER_MEMORY_ACTION_DEFINITIONS = Object.freeze([
   { action: 'memory.read', title: 'Read a stored memory', description: 'Full text of one memory; requires title or memoryId' },
   { action: 'memory.list', title: 'List stored memories', description: 'Titles, when the session index is missing, stale or cut short' },
@@ -115,14 +89,6 @@ export const OPENCHAMBER_MEMORY_ACTIONS = Object.freeze(
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Project knowledge is its own tool: keeping the Notes, Todos and Plans the
- * user sees in the panel is a distinct intent from running sessions, and the
- * user switches it off on its own without losing session control. One small
- * vocabulary with `kind` keeps the bare verbs unambiguous, the way memory's are.
- * Plans are markdown files, so reading one and small edits use the agent's
- * own file tools on the path list gives.
- */
 export const OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS = Object.freeze([
   { action: 'knowledge.list', title: 'List project knowledge', description: 'Notes with text, todos with state and links, plans with their file paths and session. Optional planId and ready filters. List before adding, to avoid duplicates' },
   { action: 'knowledge.save', title: 'Save project knowledge', description: 'Requires kind and body; with id it replaces. A plan body is the whole markdown, and the answer gives its path. An update may send only the fields it changes: completed, planId or dependsOn; sessionId on a plan, without body' },
@@ -134,10 +100,6 @@ export const OPENCHAMBER_KNOWLEDGE_ACTIONS = Object.freeze(
   OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Notify is its own tool so it can stay off by default and disappear
- * completely: an agent that can page the user is a choice the user makes.
- */
 export const OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS = Object.freeze([
   { action: 'notify.send', title: 'Notify the user', description: 'Requires title' },
 ]);
@@ -146,12 +108,6 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
   OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Render is its own tool: a page drawn into the chat is a distinct intent from
- * any of the others, and its long layout guidance should cost context only for
- * users who keep it on. The page itself travels in the call's input, which the
- * chat already stores and syncs, so the action only checks it.
- */
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
   { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
 ]);
@@ -160,10 +116,6 @@ export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Image generation is its own tool: off by default, and while on it calls a
- * second model the user chose, which costs money of its own.
- */
 export const OPENCHAMBER_IMAGE_ACTION_DEFINITIONS = Object.freeze([
   { action: 'image.generate', title: 'Generate an image', description: 'Requires prompt' },
 ]);
@@ -172,12 +124,6 @@ export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
   OPENCHAMBER_IMAGE_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Asking for a secret is its own tool: it is the one action that takes a
- * credential from the user, so it can be switched off alone. `secret.run`
- * hands the values to one command's environment; `secret.request` writes one
- * to a private file and only its path reaches the agent.
- */
 export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
   { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
   { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
@@ -188,11 +134,6 @@ export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
   OPENCHAMBER_SECRET_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Usage is its own tool: reading provider quotas is a distinct intent from
- * the others, it is off until the user turns it on, and each read asks every
- * configured provider, so it has to disappear completely when off.
- */
 export const OPENCHAMBER_USAGE_ACTION_DEFINITIONS = Object.freeze([
   { action: 'usage.read', title: 'Read usage limits', description: 'Usage windows, percentages and resets of every configured provider, as Settings > Usage shows them; providerId reads one' },
 ]);
@@ -201,12 +142,6 @@ export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
   OPENCHAMBER_USAGE_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * The terminal panel, read-only. It is its own tool because a terminal holds
- * whatever the user typed into it, secrets included: off until the user turns
- * it on, and then only listing and reading, never typing, starting or
- * stopping.
- */
 export const OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'terminal.list', title: 'List terminals', description: "This folder's terminal panels: sessionId, cwd, status, createdAt, mode and purpose, without their output; directory lists another folder's" },
   { action: 'terminal.read', title: 'Read a terminal', description: 'The output a terminal from terminal.list printed, as plain text end-aligned to a line; maxBytes caps it, truncated says older output was dropped and retainedBytes how much this server still holds' },
@@ -216,11 +151,6 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
   OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Workflows are their own tool: fanning a large task out to many agents is a
- * distinct intent with its own scripting guidance, and the tool is off until
- * the user turns it on, so it has to disappear completely.
- */
 export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
   { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },
   { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The run waits for the user to approve it in the chat, or starts at once when their settings allow that; the report arrives here as a message when the run ends. Returns runId and state at once' },
@@ -236,13 +166,6 @@ export const OPENCHAMBER_WORKFLOW_ACTIONS = Object.freeze(
   OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * How a workflow agent asked for a schema answer hands it over. A tool of its
- * own: the managed config denies it in every session
- * (`../agent-tool/runtime.js`, `managedPermissionRules`) and the session of a
- * workflow agent asked for one allows it (`../workflows/agent-session.js`), so
- * no other session carries its declaration.
- */
 export const WORKFLOW_ANSWER_TOOL = 'openchamber_workflow_answer';
 
 export const OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS = Object.freeze([
@@ -253,16 +176,6 @@ export const OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS = Object.freeze(
   OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
-/**
- * Which actions each managed tool may ask for.
- *
- * The callback needs this because models routinely drop the namespace: asked
- * for `memory.read` from a tool already called `openchamber_memory`, they send
- * `read`, since the tool's own name appears to have said "memory" already. The
- * name is unambiguous inside one tool's action set even when it is not across
- * all of them (`delete` belongs to both schedule and memory), so resolution
- * starts from the tool that asked.
- */
 const ACTIONS_BY_TOOL = Object.freeze({
   openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,
   openchamber_schedule: OPENCHAMBER_SCHEDULE_ACTIONS,
@@ -289,12 +202,6 @@ const uniqueMatch = (candidates, requested) => {
   return matches.length === 1 ? matches[0] : null;
 };
 
-/**
- * The canonical action for what a tool asked, or the reason it could not be
- * resolved. The reason lists what the tool can actually do: an error that only
- * says "unsupported" leaves the model to guess again, which is how one wrong
- * name becomes three.
- */
 export const resolveAgentToolAction = (requested, toolName) => {
   const value = typeof requested === 'string' ? requested.trim() : '';
   const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
@@ -305,8 +212,6 @@ export const resolveAgentToolAction = (requested, toolName) => {
   }
   if (value) {
     const resolved = uniqueMatch(known, value)
-      // A tool that did not identify itself still gets the benefit when the
-      // bare name means only one thing across every action.
       ?? (scoped ? null : uniqueMatch(OPENCHAMBER_ALL_ACTIONS, value));
     if (resolved) {
       return { action: resolved };
@@ -318,7 +223,6 @@ export const resolveAgentToolAction = (requested, toolName) => {
   };
 };
 
-/** Everything the callback route will dispatch, whichever tool asked. */
 export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_CONTROL_ACTIONS,
   ...OPENCHAMBER_WEB_ACTIONS,

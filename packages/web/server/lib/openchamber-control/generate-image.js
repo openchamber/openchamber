@@ -1,18 +1,3 @@
-/**
- * `image.generate`: an image model the user chose in Settings makes or edits
- * pictures for any agent, through OpenCode's `POST
- * /api/experimental/generate/image` (OpenCode 2.2). The session keeps its own
- * model; the request names the image model itself, and OpenCode resolves its
- * provider and credentials.
- *
- * The bytes go to a file, never back into the conversation: a picture inline
- * would be stored with the session and synced to every client, a few
- * megabytes per call. The agent gets the path and reads the file when it
- * wants to look. Without a path of its own the file lands in OpenCode's
- * temporary folder, which OpenCode tells agents they may read and write
- * without asking. The chat draws the files from the call's result
- * (`../markdown-image-grants/routes.js`).
- */
 
 import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
@@ -23,17 +8,14 @@ import { z } from 'zod';
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
 
-/** OpenCode's temporary folder (`paths.tmp` of `/api/info`), the default home of a generated file. */
 export const GENERATED_IMAGE_DIRECTORY = path.join(os.tmpdir(), 'opencode', 'generated-images');
 
 const MAX_PROMPT_LENGTH = 8_000;
 const MAX_SOURCE_IMAGES = 8;
 const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_COUNT = 4;
-// Image models take tens of seconds; a stuck provider must not hold the turn forever.
 const GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
 
-// A harness can stringify a number or send one path bare on the way.
 const countSchema = z.union([z.number(), z.string().regex(/^\d+$/).transform(Number)])
   .pipe(z.number().int().min(1).max(MAX_COUNT));
 const sourcesSchema = z.union([z.string().transform((source) => [source]), z.array(z.string())])
@@ -82,15 +64,9 @@ const readSourceImage = async (fsPromises, value, directory) => {
 
 const pad = (value, length = 2) => String(value).padStart(length, '0');
 
-/** File-safe local timestamp, the time the user's clock showed, that sorts chronologically. */
 const stamp = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
   + `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
 
-/**
- * Where image `index` of `count` goes. A path the agent named takes the first
- * image; the rest get `-2`, `-3` before the extension. A path without an
- * extension gets the one of the image's format.
- */
 const targetPath = ({ requested, directory, index, count, mime, now }) => {
   const extension = EXTENSION_BY_MIME[mime] ?? 'png';
   if (!requested) {
@@ -104,7 +80,6 @@ const targetPath = ({ requested, directory, index, count, mime, now }) => {
   return path.join(parsed.dir, `${parsed.name}${suffix}${ext}`);
 };
 
-/** OpenCode's tagged generation errors, as the agent can act on them. */
 const toControlError = (error, model) => {
   const tag = error?._tag;
   const message = asNonEmptyString(error?.message) || 'Image generation failed';
@@ -120,7 +95,6 @@ const toControlError = (error, model) => {
   return new OpenChamberControlError(message, 502);
 };
 
-/** `provider/model`; the model id may hold slashes of its own. */
 const parseModel = (value) => {
   const text = asNonEmptyString(value);
   const separator = text ? text.indexOf('/') : -1;
@@ -170,14 +144,11 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
     const sources = parsedSources.data;
     const requestedPath = asNonEmptyString(input.path);
     const workDirectory = asNonEmptyString(directory);
-    // A path the call cannot save to is refused before the provider bills the image.
     if (requestedPath) resolvePath(requestedPath, workDirectory);
     const images = await Promise.all(sources.map((source) => readSourceImage(fsPromises, source, workDirectory)));
 
-    // Generation takes no location: OpenCode resolves the model in its global config.
     const client = await getClient();
     const deadline = AbortSignal.timeout(GENERATION_TIMEOUT_MS);
-    // Only what the agent set travels, so the model's own defaults apply to the rest.
     const request = { model, prompt };
     if (images.length > 0) request.images = images;
     if (count > 1) request.n = count;
@@ -203,16 +174,11 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
       saved.push({ path: file, mime: image.mime });
     }
     const output = { model: modelName, images: saved };
-    // The provider reports cost only sometimes; the agent hears it when it does.
     if (Number.isFinite(result.cost)) output.cost = result.cost;
     return output;
   }
 );
 
-/**
- * The files an `image.generate` result names, from the text the tool stored:
- * the plugin's JSON envelope. Anything else names none.
- */
 export const generatedImagePaths = (text) => {
   let envelope;
   try {

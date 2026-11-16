@@ -257,6 +257,51 @@ other.
 
 ## Invariants
 
+- A directory whose OpenCode configuration runs untrusted code requires the
+  user's approval in the app before the control service opens it. Agent-selected
+  directories, including pull request checkouts, pass the same trust check.
+- Hidden sessions are excluded from lists and active counts. Sessions in pinned
+  worktrees cannot enter In work, under `../session-work/membership.js`.
+- A scheduled task's thinking level belongs to its selected model. Replacing
+  that model clears the previous level before any new level is applied.
+- The OpenCode client receives the server origin because it adds `/api` itself;
+  directory scope travels in `x-opencode-directory`. Message records carry user
+  text in `text` and assistant text in `content`, without an `info`/`parts` wrapper.
+- Session lists deduplicate ids and stop at a repeated cursor to bound malformed
+  upstream pagination. Message reads send `order` only on the first page because
+  OpenCode rejects it alongside a cursor; they stop at an empty page or repeated
+  cursor and return gathered text oldest first. A bounded read stops once enough
+  matching text messages are collected.
+- Model search follows the picker's hidden, favorite and recent preferences.
+  Family folding keeps every unranked candidate tied for the newest release,
+  since distinct models can share a release date.
+- Rendered content's character cap leaves room for multibyte text inside the
+  callback's 1 MB JSON body. Answer limits reserve the reply for choices and
+  values. The local-image budget bounds memory because the chat holds data URLs
+  and the browser also holds decoded images.
+- Local-image matching stays aligned with
+  `packages/ui/src/components/chat/message/parts/renderPageImages.ts` because
+  the rendered page cannot read files itself. Quoted paths allow spaces;
+  unquoted CSS URLs end at whitespace or parentheses. Once a readable image
+  exceeds the page budget, subsequent readable images are also omitted so the
+  visible images remain a prefix. Unreadable files consume no budget.
+- Later-page writes wait for a successful load, so a read failure cannot erase
+  saved pages. A failed write undoes its memory change. Revisions increase across
+  restarts and rollbacks because clients discard older updates. One invalid
+  stored page is dropped without discarding valid pages.
+- Secret redaction finds overlapping matches in the original output before
+  replacing them, so one replacement cannot create a new partial match. The
+  longest covering value names each hidden character. A byte-truncated output
+  window also hides a leading secret suffix after skipping replacement characters
+  from a split UTF-8 sequence. NUL values are refused because a process cannot
+  receive them and a runtime error could quote them.
+- Secret answer bodies are never logged or echoed. An unread user message
+  prevents `secret.run` even when all values are remembered, since it can arrive
+  during command approval. Remembered values are kept before execution so a
+  failed command can be corrected without asking for them again.
+- Screenshot result paths use forward slashes because Windows separators act
+  as escapes in Markdown and commit messages. Stored tool envelopes accept
+  JSON quoted once more by Code Mode, which can return the envelope as a string.
 - `projects.list` offers registered projects and the server's Chats destination.
   `session.create` accepts its `openchamber:chats` id to create a separate managed
   chat directory. With no explicit scope, creation still uses the caller's directory.
@@ -636,6 +681,71 @@ other.
 
 ## Decisions
 
+### Why agent capabilities have separate tools
+
+Distinct intents have their own descriptions and inputs so models can choose
+between them. Turning a capability off removes its complete schema and guidance;
+image generation spends money on another model, notifications interrupt the user,
+and terminal reads can expose secrets. The workflow-answer tool is denied by
+default and allowed only in workflow sessions whose prompts request a schema
+answer, so unrelated sessions never carry its declaration. Memory reads use the
+title index already in the session; listing serves a missing or stale index.
+
+### Why bare actions resolve inside the calling tool
+
+Models omit namespaces already implied by a tool's name, while verbs such as
+`delete` belong to several capabilities. Resolution uses the calling tool's
+allowlist, accepts a globally unique bare name when the tool is unknown, and
+lists the applicable actions on failure so another call needs no guessing.
+
+### Why embedded helpers stay self-contained
+
+The agent plugin embeds `secretRunCommand`, `secretRunCommandLine` and
+`isAgentPrompt` with `toString()`, so imports or closed-over helpers cannot
+resolve there. Command validation precedes permission requests and bounds the
+whole line because a shell script can occupy one argument. The displayed line
+escapes invisible and directional characters so approval describes what runs.
+
+### Why service form answers are completed like the chat's answers
+
+OpenCode supplies no defaults and rejects inactive fields, so service answers
+use the same defaults and conditions as `formCardState.ts`. An untouched boolean
+is false, and an unanswered dependency matches neither `eq` nor `neq`. External
+fields bypass conditions so the service can answer a link only the user can open.
+
+### Why a chat message dismisses open forms before dispatch
+
+OpenCode holds a prompt until its form settles, which otherwise leaves the
+message behind a form the user has left. The service reads open forms from
+OpenCode because its local pending map is empty after a restart, and sends
+extension form and permission actions to the session's own directory because
+another instance can acknowledge them without answering anything.
+
+### Why image generation validates before the provider call
+
+An invalid relative output path is refused before the provider bills an image.
+Optional generation settings are sent only when supplied so the model's defaults
+apply; a five-minute deadline bounds a stuck provider. Numeric strings and a
+single bare source path remain accepted because callers can serialize those
+inputs that way. Generated filenames use local time so they match the user's
+clock, and model parsing preserves slashes inside the model id.
+
+### Why browser validation and timeouts belong in the service
+
+Invalid calls return correctable usage errors before waking a renderer or waiting
+for a round trip. Navigation and upload get a longer budget than quick actions;
+navigation's budget exceeds the client's own wait so a slow page can be
+distinguished from an unreachable browser. Upload scope comes from the calling
+session, and provider context comes from the plugin, so model-supplied directories
+cannot widen those boundaries.
+
+### Why plan saves warn about a missing steps checklist
+
+The panel derives progress from a plan's `## Steps` checklist, so the save result
+warns while the agent can still add one. Omitted plan links and dependencies stay
+undefined through the control layer so the storage runtime preserves their
+existing values and owns their validation.
+
 ### Why time-only patches require an unambiguous schedule
 
 A once task has one time and a single-time weekly task has one slot to replace.
@@ -843,4 +953,3 @@ the raw PTY stream, and returns it as plain text: the replay keeps colours,
 titles and cursor controls for the panel to redraw, which a model would read as
 noise. It lives in memory, so the copy cannot block the PTY or move
 `lastActivity`.
-

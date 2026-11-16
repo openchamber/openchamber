@@ -1,15 +1,3 @@
-// Pages an agent showed with `answerLater` (render.page): the call returned at
-// once, and the page stays open until the user answers it, across restarts
-// (known limits: DOCUMENTATION.md). The answer reaches the session as one
-// synthetic message, steered into a running turn or starting one when the
-// session is idle.
-//
-// Delivery follows `../extension-waits` (from `../pr-watch`): the message id is
-// minted and saved before the first attempt, OpenCode refusing a second
-// admission of that id (409) counts as delivered, 404 means nobody is left to
-// tell, other failures are tried again. Unlike a wake, the answer does not wait
-// for the turn to end: the user answered a question the agent asked, and the
-// agent reads it at its next step.
 
 import fs from 'fs';
 import path from 'path';
@@ -21,13 +9,9 @@ import { readPageAnswer } from './render-page.js';
 
 const FILE_NAME = 'render-later-pages.json';
 const FILE_VERSION = 1;
-// Open pages are never evicted; an answered one is kept to show its answer and
-// makes room for a new page, oldest first.
 const MAX_PAGES = 500;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
-// Past this many failures the answer is tried every few minutes, never dropped:
-// the user answered, and the agent must hear it once OpenCode takes it.
 const MAX_DELIVERY_FAILURES = 8;
 const SLOW_RETRY_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
@@ -42,14 +26,11 @@ const pageSchema = z.object({
   callId: z.string().min(1),
   directory: z.string().min(1).nullable(),
   title: z.string(),
-  // What the page asked (renderPageQuestion); pages saved before it was kept have none.
   question: z.string().catch(''),
-  // Set when question is only an excerpt of what the user saw (renderPageQuestion).
   questionCaptured: z.enum(['static-text', 'truncated', 'none']).optional().catch(undefined),
   openedAt: z.number().finite().nonnegative(),
   answer: answerSchema.nullable(),
   answeredAt: z.number().finite().nonnegative().nullable(),
-  // Minted with the answer, before the first attempt; null once delivered (or nobody was left to tell).
   messageID: z.string().nullable(),
 });
 const storedFileSchema = z.object({ revision: z.number().int().nonnegative().optional(), pages: z.array(z.unknown()) });
@@ -62,15 +43,8 @@ const parse = (schema, value) => {
 
 const keyOf = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
-// JSON inside the envelope: a `<` in the user's text cannot close it.
 const envelopeJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
 
-/**
- * The message that tells the agent what the user answered on its page. Every
- * field that came from the page or the client (title, question, summary, data,
- * errors) sits in one JSON line, never in the prose around it: an html title
- * is entity-decoded, so as raw text it could close the envelope.
- */
 const buildLaterAnswerMessage = (page) => {
   const { answer } = page;
   const title = page.title || 'Page';
@@ -99,13 +73,11 @@ const buildLaterAnswerMessage = (page) => {
   ];
   return {
     text: `<openchamber-page-answer call="${escapeAttribute(page.callId)}" outcome="${outcome}">\n${lines.join('\n')}\n</openchamber-page-answer>`,
-    // The chat shows a synthetic message's description as its notice row.
     description: answer.answered ? `${title}: ${answer.summary.split('\n')[0].slice(0, 160)}` : `${title}: ${outcome === 'declined' ? 'declined' : 'could not be drawn'}`,
     metadata: { source: LATER_PAGE_ANSWER_SOURCE, callId: page.callId, title, outcome },
   };
 };
 
-// `undelivered`: the answer is saved but OpenCode has not taken it yet (an attempt failed).
 const toPublicPage = (page, undelivered) => {
   const { answer } = page;
   const known = { sessionID: page.sessionId, callID: page.callId, status: !answer ? 'open' : answer.answered ? 'answered' : answer.reason };
@@ -117,10 +89,7 @@ export function createLaterPages({
   dataDir,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  // Publishes `openchamber:render-later.updated` on the control stream.
   broadcastUiEvent = null,
-  // Archive is OpenChamber's (sessionArchive.archiveState): 'archived' gets the
-  // answer without being woken; 'unknown' waits for the next attempt.
   readArchiveState = async () => 'active',
   archiveReadTimeoutMs = FETCH_TIMEOUT_MS,
   fetchImpl = fetch,
@@ -131,7 +100,6 @@ export function createLaterPages({
   warn = (...args) => console.warn(...args),
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
-  /** session + call → page, in the order they opened */
   const pages = new Map();
   let revision = 0;
   let loadPromise = null;
@@ -163,7 +131,6 @@ export function createLaterPages({
       warn(`[render.page] the later pages file was unreadable and moved to ${backup}`);
       return { pages: [], revision: 0 };
     }
-    // One unreadable page is dropped alone.
     return { pages: stored.pages.map((value) => parse(pageSchema, value)).filter(Boolean), revision: stored.revision ?? 0 };
   };
 
@@ -175,11 +142,9 @@ export function createLaterPages({
             const key = keyOf(page.sessionId, page.callId);
             if (!pages.has(key)) pages.set(key, page);
           }
-          // Clients drop anything older than what they applied; the clock keeps it rising across restarts.
           revision = Math.max(revision, stored.revision, now());
         })
         .catch((error) => {
-          // A failed read must not pass for "no pages": writes wait for a load that succeeds.
           loadPromise = null;
           throw error;
         });
@@ -204,11 +169,6 @@ export function createLaterPages({
     }
   };
 
-  /**
-   * A change that counts only once it is on disk. `apply` changes memory and
-   * answers how to undo it, or null for no change; a failed write undoes it,
-   * so what the caller was told is what a restart restores.
-   */
   const mutate = (apply, sessionIds) => {
     const run = writePromise.then(async () => {
       await load();
@@ -234,7 +194,6 @@ export function createLaterPages({
 
   const snapshot = () => ({ revision, pages: Array.from(pages.values(), publicPage) });
 
-  /** Keeps the page of this call open until the user answers it; resolves once it is saved. */
   const open = async ({ sessionId, callId, title, question = '', questionCaptured, directory }) => {
     const key = keyOf(sessionId, callId);
     try {
@@ -258,7 +217,6 @@ export function createLaterPages({
     }
   };
 
-  /** The chat's answer: saved with the id its message goes out under, then delivered. A page answers once. */
   const answer = async (input) => {
     const { sessionId, callId, answer: given } = readPageAnswer(input);
     const key = keyOf(sessionId, callId);
@@ -309,7 +267,6 @@ export function createLaterPages({
     const count = (deliveryFailures.get(key) ?? 0) + 1;
     deliveryFailures.set(key, count);
     if (count === 1) {
-      // The chat shows the answer as not delivered yet.
       revision += 1;
       broadcast([page.sessionId]);
     }
@@ -319,7 +276,6 @@ export function createLaterPages({
     arm(key, count >= MAX_DELIVERY_FAILURES ? slowRetryMs : retryDelayMs(count));
   };
 
-  // Bounded like the POST: a read that fails, stalls or answers anything else is 'unknown'.
   const readArchive = (sessionId) => {
     const signal = AbortSignal.timeout(archiveReadTimeoutMs);
     const timedOut = new Promise((resolve) => signal.addEventListener('abort', () => resolve('unknown'), { once: true }));
@@ -336,10 +292,6 @@ export function createLaterPages({
     if (delivering.has(key)) return;
     delivering.add(key);
     try {
-      // Asked before every attempt: the user may archive the session while an
-      // answer waits. An archived session keeps the message but is not woken,
-      // as dispatch results do. An unknown state sends nothing: waking a
-      // session that may be archived is worse than answering a little later.
       const archive = await readArchive(page.sessionId);
       if (archive === 'unknown') {
         retry(key, page, 'the archive state of the session could not be read');
@@ -352,7 +304,6 @@ export function createLaterPages({
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       }).catch((error) => ({ ok: false, status: 0, error }));
       await response.body?.cancel?.().catch(() => undefined);
-      // 409: an earlier attempt landed. 404: nobody is left to tell.
       if (!response.ok && response.status !== 409 && response.status !== 404) {
         retry(key, page, response.error?.message ?? `OpenCode answered ${response.status}`);
         return;
@@ -386,7 +337,6 @@ export function createLaterPages({
     const unsubscribeEvent = globalEventHub?.subscribeEvent((event) => {
       for (const payload of event?.translated?.() ?? []) processPayload(payload);
     });
-    // An answer given while OpenCode was away goes out once it is back.
     const unsubscribeStatus = globalEventHub?.subscribeStatus((status) => {
       if (status?.type === 'connect') deliverPending();
     });

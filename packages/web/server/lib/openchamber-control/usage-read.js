@@ -1,26 +1,7 @@
-/**
- * `usage.read`: the provider quotas Settings > Usage shows, for an agent that
- * wants to check a limit before a large task or report on it from a
- * scheduled task.
- *
- * It runs the same readers the Usage page runs when it loads, in the same
- * order: one read of which providers have a credential, then one read per
- * configured provider. Nothing is cached here; the readers' own protections
- * still apply (concurrent reads of one provider share a request, Claude
- * answers from its last sample during a rate-limit cooldown). Only the
- * providers the page reads are asked (`listUsagePageProviders`), so an agent
- * never causes a request the page would not make.
- *
- * Failures stay apart from usage: a provider that fails or does not answer in
- * time is its own failed entry, and a provider list that cannot be read falls
- * back to asking every provider, as the page does, never to "none configured".
- */
 
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
 
-// The Usage page's own deadlines (packages/ui/src/lib/quota/fetchQuota.ts):
-// the provider list, then each provider.
 const LIST_TIMEOUT_MS = 10_000;
 const PROVIDER_TIMEOUT_MS = 30_000;
 
@@ -34,8 +15,6 @@ const withDeadline = (promise, timeoutMs) => {
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 };
 
-// A cancelled turn stops waiting; the shared provider reads go on for the
-// other callers of `fetchQuotaForProvider`.
 const untilAborted = (promise, signal) => {
   if (!signal) return promise;
   const cancelled = () => new OpenChamberControlError('OpenChamber action was cancelled', 499);
@@ -50,9 +29,6 @@ const untilAborted = (promise, signal) => {
 
 const seconds = (milliseconds) => Math.round(milliseconds / 1000);
 
-// The account a provider is signed in with (Codex gives an email) stays out:
-// an agent needs the windows and resets, and the result goes to the session's
-// model provider, which may be another company than the one the account is at.
 const withoutAccount = ({ accountLabel: _accountLabel, ...result }) => result;
 
 /**
@@ -68,8 +44,6 @@ export const createUsageReadAction = ({
   listTimeoutMs = LIST_TIMEOUT_MS,
   providerTimeoutMs = PROVIDER_TIMEOUT_MS,
 }) => {
-  // Same shape as every provider's own result (`buildResult`), so the agent
-  // reads one kind of entry.
   const failedRead = ({ providerId, providerName }, error) => ({
     providerId,
     providerName,
