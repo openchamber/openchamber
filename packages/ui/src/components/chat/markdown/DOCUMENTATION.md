@@ -108,7 +108,10 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 - Incomplete delimiters keep their Markdown behavior.
 - Remend reads `>` in a formula during its unfinished HTML tag handling.
 - Formulas inside a list nested in a quote remain unsupported.
-- If extension identifier rules, repository references or emoji shortcodes are active, the preparer leaves the source unchanged.
+- Extension identifiers, repository references, and emoji shortcodes remain active outside formulas.
+- Candidates changed by those rules keep their Markdown behavior.
+- If those rules are active during streaming, the preparer leaves the source unchanged.
+- If those rules and raw HTML are active, documents containing HTML keep their Markdown behavior.
 - Numeric single-dollar formulas follow the existing currency rule.
 
 ## Decisions
@@ -121,3 +124,21 @@ During streaming, it replaces formula punctuation with unused private-use charac
 One Remend handler restores `>` before the HTML tag handler runs.
 Without it, an unfinished tag before a formula can hide the rest of the message.
 The final Remend handler restores the remaining punctuation before parsing.
+
+### Why text rules run on candidate paragraphs
+
+Text rules do not affect every formula.
+The parser applies those rules in the same order as the renderer.
+It leaves a candidate unchanged when a rule changes its text or turns the text into a link.
+
+### Why raw HTML keeps the source with text rules
+
+Raw HTML can wrap Markdown generated across paragraphs and containers.
+The preparer keeps the source when raw HTML nodes are present.
+Its preliminary parse includes math syntax so inline formulas do not count as HTML.
+
+### Why emoji rules carry a version
+
+Streamdown caches processors by the serialized plugin options.
+An emoji table is a `Map`, so its serialized value does not distinguish tables.
+The table version makes a replacement use a new processor.

@@ -1,7 +1,14 @@
 import type { StreamdownProps } from 'streamdown';
 import type { Root, RootContent } from 'mdast';
+import type { Pluggable } from 'unified';
 import { parseMarkdownStructure } from '@/lib/chatQuoteAnchor';
-import { getMarkdownCjk } from './streamdownPlugins';
+import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
+import type { GuestLinkRule } from '@/lib/guests/links';
+import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
+import { getMarkdownCjk, markdownMath } from './streamdownPlugins';
+import { remarkEmojiShortcodes } from './remarkEmojiShortcodes';
+import { remarkGuestLinks } from './remarkGuestLinks';
+import { remarkRepositoryReferences } from './remarkRepositoryReferences';
 
 const opening = /^\\\[[ \t]*\r?\n/;
 const entity = /&(?:#\d+|#x[\da-f]+|[a-z][\da-z]+);/i;
@@ -9,6 +16,11 @@ const punctuation = '\\[]()<>*_~$!#';
 const defaultRemend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 
 type PreparedMath = { content: string; remend: StreamdownProps['remend']; reserved: string[]; resumeAt: number | null; parsed: string | null };
+type MathRules = { guestLinks?: readonly GuestLinkRule[] | null; repositoryLinks?: RepositoryLinkContext | null; emojiShortcodes?: EmojiShortcodes | null; allowRawHtml?: boolean };
+
+function containsRawHtml(node: Root | RootContent): boolean {
+  return node.type === 'html' || ('children' in node && node.children.some(containsRawHtml));
+}
 
 function hasUnescapedDelimiter(source: string): boolean {
   for (let index = 0; index < source.length; index++) {
@@ -38,18 +50,32 @@ function hasUnescapedDelimiter(source: string): boolean {
   return false;
 }
 
-export function prepareMarkdownMath(source: string, streaming: boolean, enabled = true): PreparedMath {
+export function prepareMarkdownMath(source: string, streaming: boolean, enabled = true, rules: MathRules | null = null): PreparedMath {
   const unchanged: PreparedMath = { content: source, remend: defaultRemend, reserved: [], resumeAt: null, parsed: null };
   if (!enabled || !source.includes('\\[') || !source.includes('\\]')) return unchanged;
   unchanged.parsed = source;
   const changes: number[] = [];
+  const textBefore = new WeakMap<object, string>();
+  const transforms: Pluggable[] = [];
+  if (rules?.guestLinks?.length || rules?.repositoryLinks || rules?.emojiShortcodes) {
+    transforms.push(() => (tree: Root) => {
+      const walk = (node: Root | RootContent): void => {
+        if (node.type === 'text') textBefore.set(node, node.value);
+        else if ('children' in node) node.children.forEach(walk);
+      };
+      walk(tree);
+    });
+    if (rules.emojiShortcodes) transforms.push([remarkEmojiShortcodes, { shortcodes: rules.emojiShortcodes, version: 0 }]);
+    if (rules.repositoryLinks) transforms.push([remarkRepositoryReferences, rules.repositoryLinks]);
+    if (rules.guestLinks?.length) transforms.push([remarkGuestLinks, rules.guestLinks]);
+  }
   function findCandidates(parent: Root | RootContent): void {
     if (!('children' in parent)) return;
     let candidate: number | null = null;
     let startLine: number | null = null;
     for (const node of parent.children) {
       if (node.type !== 'paragraph' || node.position?.start.offset === undefined || node.position.end.offset === undefined
-        || node.children.some((child) => child.type !== 'text')) {
+        || node.children.some((child) => child.type !== 'text' || (transforms.length > 0 && textBefore.get(child) !== child.value))) {
         candidate = null;
         startLine = null;
         if (node.type === 'list' || node.type === 'listItem' || node.type === 'blockquote') findCandidates(node);
@@ -104,8 +130,13 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
     }
   }
   const cjk = getMarkdownCjk(false);
-  findCandidates(parseMarkdownStructure(source, cjk.remarkPluginsBefore, cjk.remarkPluginsAfter));
+  const tree = parseMarkdownStructure(source, cjk.remarkPluginsBefore, cjk.remarkPluginsAfter, transforms.length ? transforms : undefined);
+  findCandidates(tree);
   if (changes.length === 0) return unchanged;
+  if (rules?.allowRawHtml && transforms.length && source.includes('<')) {
+    const htmlTree = parseMarkdownStructure(source, cjk.remarkPluginsBefore, [...cjk.remarkPluginsAfter, markdownMath.remarkPlugin]);
+    if (containsRawHtml(htmlTree)) return unchanged;
+  }
   const mask: string[] = [];
   if (streaming) {
     for (let code = 0xe000; code <= 0xf8ff && mask.length < punctuation.length; code++) {
@@ -139,7 +170,7 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
   return { content: result, remend, reserved: mask, resumeAt: changes[changes.length - 1] + 2, parsed: source };
 }
 
-export function createMarkdownMathPreparer(): (source: string, streaming: boolean, enabled?: boolean) => PreparedMath {
+export function createMarkdownMathPreparer(rules: MathRules | null = null): (source: string, streaming: boolean, enabled?: boolean) => PreparedMath {
   let previous: { source: string; prepared: ReturnType<typeof prepareMarkdownMath>; safeTail: boolean } | null = null;
   return (source: string, streaming: boolean, enabled = true) => {
     if (enabled && streaming && previous?.safeTail && source.startsWith(previous.source)) {
@@ -154,7 +185,7 @@ export function createMarkdownMathPreparer(): (source: string, streaming: boolea
         return prepared;
       }
     }
-    const prepared = prepareMarkdownMath(source, streaming, enabled);
+    const prepared = prepareMarkdownMath(source, streaming, enabled, rules);
     let tail = prepared.resumeAt === null ? '' : source.slice(prepared.resumeAt);
     const closeLine = /^[ \t]*\r?\n/.exec(tail);
     let safeTail = false;

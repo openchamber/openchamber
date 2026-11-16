@@ -268,11 +268,15 @@ export function resolveChatQuoteAnchor(root: Element, anchor: ChatQuoteAnchor): 
 const gfmEntry = defaultRemarkPlugins.gfm as [Plugin<[{ singleTilde?: boolean }?], Root>, Record<string, unknown>];
 const legacyQuoteParser = unified().use(remarkParse).use(gfmEntry[0], { singleTilde: false });
 
-export const parseMarkdownStructure = (source: string, pluginsBefore: Pluggable[], pluginsAfter: Pluggable[]): Root => unified().use(remarkParse)
-    .use(pluginsBefore)
-    .use(gfmEntry[0], { singleTilde: false })
-    .use(pluginsAfter)
-    .parse(source);
+export const parseMarkdownStructure = (source: string, pluginsBefore: Pluggable[], pluginsAfter: Pluggable[], transforms?: Pluggable[]): Root => {
+    const processor = unified().use(remarkParse)
+        .use(pluginsBefore)
+        .use(gfmEntry[0], { singleTilde: false })
+        .use(transforms ?? [])
+        .use(pluginsAfter);
+    const tree = processor.parse(source);
+    return transforms ? processor.runSync(tree, source) : tree;
+};
 
 /** Anchor for a quote sent before anchors existed: its text, found only if unique. */
 export function legacyChatQuoteAnchor(quote: string): ChatQuoteAnchor {

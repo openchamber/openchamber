@@ -5,7 +5,7 @@ import { replaceEmojiShortcodes, type EmojiShortcodes } from '@/lib/emoji/shortc
 const SKIPPED: ReadonlySet<string> = new Set(['inlineCode', 'code', 'html', 'math', 'inlineMath']);
 
 /** `:tada:` in text reads as 🎉, the way GitHub and GitLab show it; code keeps what it says. */
-export function remarkEmojiShortcodes(shortcodes: EmojiShortcodes) {
+export function remarkEmojiShortcodes({ shortcodes }: { shortcodes: EmojiShortcodes; version: number }) {
   return (tree: Root) => {
     const walk = (node: Root | RootContent): void => {
       if (SKIPPED.has(node.type)) return;

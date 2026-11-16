@@ -87,6 +87,19 @@ const defaultMermaidControls: MermaidControls = {
   showPanZoomControls: true,
 };
 
+type MarkdownRule = RepositoryLinkContext | EmojiShortcodes;
+const markdownRuleVersions = new WeakMap<MarkdownRule, number>();
+let nextMarkdownRuleVersion = 1;
+const markdownRuleVersion = (rule: MarkdownRule | null | undefined): number => {
+  if (!rule) return 0;
+  let version = markdownRuleVersions.get(rule);
+  if (version === undefined) {
+    version = nextMarkdownRuleVersion++;
+    markdownRuleVersions.set(rule, version);
+  }
+  return version;
+};
+
 const ExportSafeImage: typeof MarkdownImage = (props) => {
   const { purpose } = useMarkdownPresentation();
   if (!purpose) return <MarkdownImage {...props} />;
@@ -439,15 +452,16 @@ export function MarkdownContent({
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
   const activeGuestLinks = guestLinks && guestLinks.length > 0 && !purpose ? guestLinks : null;
-  const prepareMath = React.useMemo(createMarkdownMathPreparer, []);
+  const prepareMath = React.useMemo(() => createMarkdownMathPreparer({ guestLinks: activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml: allowRawHtml && !literalText }), [activeGuestLinks, repositoryLinks, emojiShortcodes, allowRawHtml, literalText]);
+  const streamingMath = isStreaming && (windowed || mode === 'streaming');
   const preparedMath = React.useMemo(
-    () => prepareMath(content, isStreaming && (windowed || mode === 'streaming'), !activeGuestLinks && !repositoryLinks && !emojiShortcodes),
-    [activeGuestLinks, content, emojiShortcodes, isStreaming, mode, prepareMath, repositoryLinks, windowed],
+    () => prepareMath(content, streamingMath, !(isStreaming && (activeGuestLinks || repositoryLinks || emojiShortcodes))),
+    [activeGuestLinks, content, emojiShortcodes, isStreaming, prepareMath, repositoryLinks, streamingMath],
   );
   const processing = React.useMemo(() => {
     const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
-    if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
+    if (emojiShortcodes) extra.push([remarkEmojiShortcodes, { shortcodes: emojiShortcodes, version: markdownRuleVersion(emojiShortcodes) }]);
     if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
     if (literalText) extra.push(remarkLiteralText);
     // A copy or an image keeps the text as written.
@@ -505,6 +519,7 @@ export function MarkdownContent({
       data-oc-export-highlighted={preparedHighlights ? 'ready' : undefined}
       data-oc-directory={directory}
       data-oc-guest-links={activeGuestLinks ? guestLinksVersion(activeGuestLinks) : undefined}
+      data-oc-reference-rules={repositoryLinks || emojiShortcodes ? `${markdownRuleVersion(repositoryLinks)}:${markdownRuleVersion(emojiShortcodes)}` : undefined}
       data-oc-runtime={runtimeKey}
       data-oc-file-references={fileReferences ? 'enabled' : 'disabled'}
       data-code-wrap={codeWrap ? 'true' : 'false'}
