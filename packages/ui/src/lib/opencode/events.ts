@@ -1,17 +1,3 @@
-/**
- * Sync events: the vocabulary the sync layer reduces.
- *
- * OpenCode v2 publishes a durable event log (`session.text.delta`,
- * `session.tool.called`, `session.step.ended`, ...). The sync stores keep
- * working in terms of messages and parts, so every wire event is translated
- * here into one or more `SyncEvent`s that name the store field they touch:
- * a message appeared, a part grew, a tool call changed state. The reducer
- * never sees wire shapes, and this translation is pure (no store access), so
- * the pipeline can coalesce deltas before the reducer runs.
- *
- * Part identity follows `partIds` in `./model`: text and reasoning items are
- * addressed by `(assistantMessageID, ordinal)`, tool calls by their call id.
- */
 
 import type { OpenCodeEvent } from "@opencode/client"
 import type { WorkflowRun } from "@/lib/workflows/model"
@@ -36,11 +22,7 @@ import {
 import { projectInboxMessage, sessionParentID, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
 import { runningShellFromWire, type RunningShell, type ShellEnd } from "./background-shell"
 
-// ---------------------------------------------------------------------------
-// Event vocabulary
-// ---------------------------------------------------------------------------
 
-/** Fields of a session that change after creation. `null` clears a value. */
 export type SessionPatch = {
   title?: string
   directory?: string
@@ -53,13 +35,10 @@ export type SessionPatch = {
   permissions?: PermissionRuleset
   revert?: Session["revert"] | null
   outcome?: Session["outcome"]
-  /** Full replacement of the session's metadata. */
   metadata?: Metadata
-  /** `archived: null` restores an archived session. */
   time?: Partial<Omit<Session["time"], "archived">> & { archived?: number | null }
 }
 
-/** Fields of a message that change after it appeared. */
 export type MessagePatch = {
   time?: { created?: number; firstToken?: number; streamed?: number; completed?: number }
   finish?: Extract<Message, { role: "assistant" }>["finish"]
@@ -68,11 +47,9 @@ export type MessagePatch = {
   tokens?: TokenUsageInfo
   snapshot?: { start?: string; end?: string; files?: string[] }
   retry?: Extract<Message, { role: "assistant" }>["retry"] | null
-  /** Shell messages: exit status and captured output. */
   shell?: { status: "running" | "exited" | "timeout" | "killed"; exit?: number; signal?: string; output?: Extract<Message, { role: "shell" }>["output"] }
 }
 
-/** State transitions of a tool call that need the part's existing state to apply. */
 export type ToolTransition =
   | { kind: "input"; raw: string }
   | { kind: "called"; input: Record<string, JsonValue>; executed: boolean; start: number }
@@ -80,11 +57,6 @@ export type ToolTransition =
   | { kind: "success"; output: string; attachments?: FilePart[]; metadata?: Metadata; executed: boolean; end: number }
   | { kind: "failed"; error: string; errorType?: string; output?: string; metadata?: Metadata; executed: boolean; end: number }
 
-/**
- * What OpenCode rebuilt. v2 watches its own config files and announces the
- * rebuilt slice without saying which entry changed, so each kind names the
- * lists that have to be re-read.
- */
 export type CatalogKind =
   | "config"
   | "agent"
@@ -95,21 +67,10 @@ export type CatalogKind =
   | "model"
   | "credential"
   | "project"
-  /** Web search providers or the default choice changed (`websearch.updated`). */
   | "websearch"
 
-/**
- * When a running turn began, on this device's clock. `host` is the OpenChamber
- * host's own record, the same for every client; `live` is this device seeing
- * the turn begin, for hosts that keep no record.
- */
 export type SessionTurnStart = { at: number; source: "host" | "live" }
 
-/**
- * A start the host reported on its own clock, moved onto this device's: the
- * time that has passed by the host's clock, counted back from now here. A
- * phone whose clock is off still shows the host's elapsed time.
- */
 export const hostTurnStart = (startedAt: number, hostNow: number): SessionTurnStart => ({
   at: Date.now() - Math.max(0, hostNow - startedAt),
   source: "host",
@@ -121,28 +82,11 @@ export type SyncEvent =
   | { type: "session.created"; properties: { info: Session } }
   | { type: "session.patched"; properties: { sessionID: string; patch: SessionPatch } }
   | { type: "session.deleted"; properties: { sessionID: string } }
-  /**
-   * A session was forked. OpenCode 2.x publishes no `session.created` for the
-   * fork and this event carries ids only, so the sync layer reads the fork's
-   * record and applies it as a `session.created`.
-   */
+  // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/session Fork events carry IDs without a session.created event; sync fetches the fork record.
   | { type: "session.forked"; properties: { sessionID: string; parentID: string } }
-  /**
-   * A staged revert became permanent: OpenCode deleted the boundary message
-   * `to` and everything after it. The reducer trims the same range locally,
-   * because no `message.removed` follows and a later fetch keeps whatever the
-   * store still holds.
-   */
+  // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/session Committing a revert removes the boundary and later messages without message.removed events.
   | { type: "session.revert.committed"; properties: { sessionID: string; to: string } }
-  /**
-   * `turnStart` is set when the event knows when the running turn began: the
-   * host's record, or this device seeing the turn begin.
-   */
   | { type: "session.status"; properties: { sessionID: string; status: SessionStatus; turnStart?: SessionTurnStart } }
-  /**
-   * `outcome` is set when the event ends a turn (`session.execution.*`) and
-   * absent for a bare status change. Only `interrupted` is an explicit stop.
-   */
   | { type: "session.idle"; properties: { sessionID: string; outcome?: SessionOutcome } }
   | { type: "session.error"; properties: { sessionID: string; error: StructuredError } }
   | { type: "message.updated"; properties: { info: Message } }
@@ -152,7 +96,6 @@ export type SyncEvent =
   | { type: "message.part.delta"; properties: { sessionID: string; messageID: string; partID: string; field: "text" | "raw"; delta: string } }
   | { type: "message.tool.transition"; properties: { sessionID: string; messageID: string; partID: string; transition: ToolTransition } }
   | { type: "message.parts.replaced"; properties: { sessionID: string; messageID: string; parts: Part[] } }
-  /** Text appended to the summary of the compaction currently running in the session. */
   | { type: "message.compaction.delta"; properties: { sessionID: string; delta: string } }
   | { type: "permission.asked"; properties: PermissionRequest }
   | { type: "permission.replied"; properties: { sessionID: string; requestID: string } }
@@ -162,42 +105,25 @@ export type SyncEvent =
     properties: {
       sessionID: string
       formID: string
-      /** Replies veto recovery; cancellations need tool-specific evidence. */
       disposition?: "replied" | "cancelled"
     }
   }
-  /** A session's shell command started; commands that belong to no session are not reported. */
   | { type: "shell.started"; properties: { shell: RunningShell } }
-  /** A shell command exited or was removed. */
   | { type: "shell.ended"; properties: { shellID: string; end: ShellEnd; endedAt: number } }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
-  /** A file someone asked OpenCode to watch (`lib/watchedFiles`) changed or was removed; `file` is absolute. */
   | { type: "filesystem.changed"; properties: { file: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogKind } }
-  /**
-   * OpenCode dropped the cached services for this directory (idle eviction or
-   * an explicit reload). Everything read from it is now suspect.
-   */
   | { type: "location.shutdown"; properties: Record<never, never> }
-  // OpenChamber's own server frames that ride the same stream.
   | { type: "openchamber.notification"; properties: OpenchamberNotification }
-  // `modes` is the policy; `sessions` is its on/off view for clients from before the modes.
-  // `spaceId` marks the policy of that isolated space, forwarded by the host.
   | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number; spaceId?: string } }
-  /** The server did not answer this request on the user's behalf: it waits for the user. */
   | { type: "openchamber.permission-left-for-user"; properties: { permissionId: string; sessionId: string; directory: string | null; spaceId?: string } }
-  /** A page an agent showed waits for the user's answer (render.page with awaitAnswer). */
   | { type: "openchamber.page-waiting"; properties: { sessionID: string; directory: string | null; page: { id: string; title: string } } }
-  /** That page stopped waiting: answered, answered in the chat, or its turn ended. */
   | { type: "openchamber.page-settled"; properties: { sessionID: string; pageID: string } }
-  /** The server started or stopped waiting to write a session's recap and suggestion. */
   | { type: "openchamber.session-assist"; properties: { sessionID: string; directory: string | null; pending: boolean } }
-  /** A workflow run changed: proposed, approved, an agent moved on, or it ended. */
   | { type: "openchamber.workflow-run"; properties: { run: WorkflowRun } }
   | { type: "openchamber.workflow-run-removed"; properties: { runId: string; parentSessionId: string } }
 
-/** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
   kind?: string
   sessionId?: string
@@ -207,13 +133,11 @@ export type OpenchamberNotification = {
   tag?: string
   requireHidden?: boolean
   showWhenFocused?: boolean
-  /** Show it as a toast only: another window is in use (an answer to a shared page). */
   toastOnly?: boolean
   desktopNotificationDelivered?: boolean
   desktopStdoutActive?: boolean
 }
 
-/** A translated event together with the directory it belongs to. */
 export type RoutedSyncEvent = {
   directory: string
   event: SyncEvent
@@ -221,13 +145,9 @@ export type RoutedSyncEvent = {
 
 export const GLOBAL_EVENT_DIRECTORY = "global"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const ZERO_TOKENS: TokenUsageInfo = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
 
-/** Server events and the messages they create share one id space (`evt_` → `msg_`). */
 export const messageIdFromEvent = (eventID: string): string => eventID.replace(/^evt_/, "msg_")
 
 const eventDirectory = (event: OpenCodeEvent): string => event.location?.directory ?? GLOBAL_EVENT_DIRECTORY
@@ -255,14 +175,7 @@ const toolTransition = (sessionID: string, messageID: string, callID: string, tr
 const finiteExit = (exit: number | "Infinity" | "-Infinity" | "NaN" | undefined): number | undefined =>
   exit === "Infinity" || exit === "-Infinity" || exit === "NaN" ? undefined : exit
 
-// ---------------------------------------------------------------------------
-// Translation
-// ---------------------------------------------------------------------------
 
-/**
- * Translates one wire event. Returns nothing for events the sync layer does
- * not model (usage records, inbox delivery changes, TUI events, ...).
- */
 export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
   switch (event.type) {
     case "server.connected":
@@ -271,7 +184,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "installation.update-available":
       return [{ type: "installation.update-available", properties: { version: event.data.version } }]
 
-    // --- sessions -----------------------------------------------------------
 
     case "session.created": {
       const info: Session = compact({
@@ -293,12 +205,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     }
     case "session.deleted":
       return [{ type: "session.deleted", properties: { sessionID: event.data.sessionID } }]
-    // No `session.created` follows a fork in 2.x; see the sync event's doc.
     case "session.forked":
       return [{ type: "session.forked", properties: { sessionID: event.data.sessionID, parentID: event.data.parentID } }]
     case "session.renamed":
       return [sessionEvent(event.data.sessionID, { title: event.data.title, time: { updated: event.created } })]
-    // OpenCode's record holds the full metadata, so this replaces it.
     case "session.metadata.updated":
       return [sessionEvent(event.data.sessionID, { metadata: event.data.metadata })]
     case "session.moved":
@@ -322,8 +232,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
-    // OpenCode stamps the session's update time with the switch, so a session
-    // read that left the server before it cannot roll the record back.
     case "session.agent.selected":
       return [
         sessionEvent(event.data.sessionID, { agent: event.data.agent, time: { updated: event.created } }),
@@ -363,10 +271,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.permissions":
       return [sessionEvent(event.data.sessionID, { permissions: event.data.permissions })]
     case "session.viewed":
-      // The watermark is the idle transition the viewer saw, not when the view
-      // was recorded: a turn that ended after it stays unread.
       return [sessionEvent(event.data.sessionID, { time: { viewed: event.data.idle } })]
-    // OpenCode stamps the archive time and the update time with the event.
     case "session.archived":
       return [sessionEvent(event.data.sessionID, { time: { archived: event.created, updated: event.created } })]
     case "session.unarchived":
@@ -376,21 +281,16 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.revert.cleared":
       return [sessionEvent(event.data.sessionID, { revert: null })]
     case "session.revert.committed":
-      // Trim first, then drop the marker; the global session list only needs
-      // the marker gone.
       return [
         { type: "session.revert.committed", properties: { sessionID: event.data.sessionID, to: event.data.to } },
         sessionEvent(event.data.sessionID, { revert: null }),
       ]
 
-    // --- live status --------------------------------------------------------
 
     case "session.status":
       return [{ type: "session.status", properties: { sessionID: event.data.sessionID, status: event.data.status } }]
     case "session.idle":
       return [{ type: "session.idle", properties: { sessionID: event.data.sessionID } }]
-    // The one event that marks where a turn begins. Stamped on arrival: the
-    // event's own time is OpenCode's clock, not this device's.
     case "session.execution.started":
       return [{
         type: "session.status",
@@ -402,12 +302,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "succeeded" } },
       ]
     case "session.execution.interrupted":
-      // `shutdown` is OpenCode itself going away mid-turn. It keeps the
-      // execution claim and resumes the drain on restart, records no idle
-      // outcome and leaves the assistant message open, so the UI must not
-      // settle the session or mark the turn interrupted either: the status
-      // snapshot after reconnect is the authority. Every other reason is a
-      // real stop.
+      // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/session Shutdown retains the execution claim for restart; reconnect status remains authoritative.
       if (event.data.reason === "shutdown") return []
       return [
         sessionEvent(event.data.sessionID, { outcome: "interrupted", time: { idle: event.created, updated: event.created } }),
@@ -419,7 +314,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         { type: "session.error", properties: { sessionID: event.data.sessionID, error: event.data.error } },
       ]
 
-    // --- user input ---------------------------------------------------------
 
     case "session.inbox.enqueued": {
       const projected = projectInboxMessage(event.data.item, {
@@ -489,8 +383,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               time: { created: event.created },
               text: event.data.text,
               description: `Instructions updated: ${Object.keys(event.data.delta ?? {}).join(", ")}`,
-              // The metadata OpenCode stores with the message, so a live update
-              // reads the same as one loaded from history.
               metadata: { notice: "instructions", instructionSources: Object.keys(event.data.delta ?? {}) },
             },
           },
@@ -498,7 +390,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       ]
     }
 
-    // --- assistant steps ----------------------------------------------------
 
     case "session.step.started":
       return [
@@ -559,7 +450,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           retry: { attempt: event.data.attempt, at: event.data.at, error: event.data.error },
         }),
       ]
-    // --- text and reasoning -------------------------------------------------
 
     case "session.text.started":
       return [
@@ -585,8 +475,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
-    // `ended` carries no start; the reducer keeps the start it saw on
-    // `started`, and this one only stands in when the stream was joined late.
     case "session.text.ended":
       return [
         partUpdated(event.data.sessionID, {
@@ -634,7 +522,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         }),
       ]
 
-    // --- tool calls ---------------------------------------------------------
 
     case "session.tool.input.started":
       return [
@@ -712,7 +599,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         ),
       ]
 
-    // --- shell and compaction -------------------------------------------------
 
     case "session.shell.started":
       return [
@@ -733,8 +619,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         },
       ]
     case "session.shell.ended":
-      // The shell message id is derived from the started event, which we
-      // cannot recover here; the reducer matches shell messages by shellID.
       return [
         {
           type: "message.patched",
@@ -765,8 +649,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
-    // The summary streams into the running compaction record; the event names
-    // only the session, so the reducer finds that record itself.
     case "session.compaction.delta":
       return [{ type: "message.compaction.delta", properties: { sessionID: event.data.sessionID, delta: event.data.text } }]
     case "session.compaction.ended":
@@ -810,7 +692,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         },
       ]
 
-    // --- requests to the user -------------------------------------------------
 
     case "permission.asked":
       return [{ type: "permission.asked", properties: compact({ ...event.data }) }]
@@ -823,7 +704,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "form.cancelled":
       return [{ type: "form.settled", properties: { sessionID: event.data.sessionID, formID: event.data.id, disposition: "cancelled" } }]
 
-    // --- location-level notices ------------------------------------------------
 
     case "vcs.branch.updated":
       return [{ type: "vcs.branch.updated", properties: compact({ branch: event.data.branch }) }]
@@ -846,9 +726,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       return [{ type: "catalog.updated", properties: { kind: "credential" } }]
     case "project.updated":
       return [{ type: "catalog.updated", properties: { kind: "project" } }]
-    // 2.0.8 replaced the `catalog.updated` storm with two deduplicated
-    // announcements: the provider list changed, and the model list it
-    // materialises changed. Both re-read the provider/model lists.
     case "provider.updated":
       return [{ type: "catalog.updated", properties: { kind: "provider" } }]
     case "model.updated":
@@ -856,54 +733,32 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "websearch.updated":
       return [{ type: "catalog.updated", properties: { kind: "websearch" } }]
 
-    // --- known events the sync layer deliberately does not model -------------
-    //
-    // Every wire event is listed so a new one in a future OpenCode fails the
-    // type-check here instead of being silently dropped.
 
-    // A login or logout changes the integration list; OpenCode republishes
-    // `provider.updated` (and then `model.updated`) for the same change, so
-    // acting here too would only double every read.
+    // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src Integration changes also publish provider.updated and model.updated; handling both doubles catalog reads.
     case "integration.updated":
       return []
-    // Queue-vs-steer placement of a pending inbox item is not shown.
     case "session.inbox.delivery.changed":
       return []
-    // The update is applied by the desktop/CLI updater, not by the UI;
-    // `installation.update-available` is the one the UI acts on.
     case "installation.updated":
       return []
-    // Catalogs OpenChamber does not surface as lists of their own.
     case "models-dev.refreshed":
     case "reference.updated":
       return []
-    // Resources of an MCP server; OpenChamber shows connection status only
-    // (`mcp.status.changed`).
     case "mcp.resources.changed":
       return []
-    // MCP Events (experimental, behind OpenCode's `mcp_events` flag) wake
-    // sessions inside OpenCode; OpenChamber has no view of the raw events.
     case "experimental.mcp.event":
       return []
-    // Only files a client asked to watch (`lib/watchedFiles`) report here; file
-    // listings still refresh from tool and step results (`lib/fileTreeChanges`).
     case "filesystem.changed":
       return [{ type: "filesystem.changed", properties: { file: event.data.file } }]
-    // Worktrees go through OpenChamber's own git API, not OpenCode's.
     case "worktree.updated":
     case "worktree.resolved":
       return []
-    // --- shell commands -------------------------------------------------------
 
-    // A session's running commands keep its turn open (background commands),
-    // so only commands tagged with a session are reported.
     case "shell.created": {
       const shell = runningShellFromWire(event.data.info)
       return shell ? [{ type: "shell.started", properties: { shell } }] : []
     }
     case "shell.exited": {
-      // The wire status type includes `running`, but OpenCode publishes this
-      // event only once a command reached a terminal status.
       const { status } = event.data
       if (status === "running") return []
       const end: ShellEnd = compact({ kind: "exited", status, exit: event.data.exit })
@@ -912,8 +767,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "shell.deleted":
       return [{ type: "shell.ended", properties: { shellID: event.data.id, end: { kind: "removed" }, endedAt: event.created } }]
 
-    // PTYs are the terminal panel's own transport; it does not read them from
-    // this stream.
     case "pty.created":
     case "pty.updated":
     case "pty.deleted":
@@ -922,16 +775,9 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "persistent-pty.removed":
     case "persistent-pty.updated":
       return []
-    // Experimental artifacts (`experimental.artifacts`) have no OpenChamber view.
     case "artifact.updated":
       return []
-    // Never framed onto the public stream in 2.0.8, so they cannot reach here
-    // and are not listed above: `session.message.content.updated` (replay-only
-    // for transcripts written by older releases), `session.usage.recorded`
-    // (side-channel spend; the session totals arrive as `session.usage.updated`)
-    // and `log.synced` (durable-log bookkeeping).
 
-    // Addressed to the TUI client.
     case "tui.command.execute":
     case "tui.prompt.append":
     case "tui.session.select":
@@ -939,8 +785,6 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       return []
 
     default: {
-      // Exhaustiveness: only the open-ended `rpc.*` frames (addressed to a
-      // plugin's RPC endpoint, never to us) may reach here.
       const remaining: `rpc.${string}` = event.type
       void remaining
       return []
@@ -948,13 +792,11 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
   }
 }
 
-/** Translates a wire event and tags every resulting sync event with its directory. */
 export function routeWireEvent(event: OpenCodeEvent): RoutedSyncEvent[] {
   const directory = eventDirectory(event)
   return translateWireEvent(event).map((translated) => ({ directory, event: translated }))
 }
 
-/** Session an event addresses, when it addresses one. */
 export function syncEventSessionID(event: SyncEvent): string | undefined {
   switch (event.type) {
     case "session.created":
@@ -987,7 +829,6 @@ export function syncEventSessionID(event: SyncEvent): string | undefined {
   }
 }
 
-/** Message an event addresses, when it addresses one. */
 export function syncEventMessageID(event: SyncEvent): string | undefined {
   switch (event.type) {
     case "message.updated":
