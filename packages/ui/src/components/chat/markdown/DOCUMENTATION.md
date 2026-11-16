@@ -107,7 +107,9 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 - Content inside lists and quotes keeps its Markdown behavior.
 - Incomplete delimiters keep their Markdown behavior.
 - Remend reads `>` in a formula during its unfinished HTML tag handling.
-- Formulas inside a list nested in a quote remain unsupported.
+- Lists nested in quotes accept formulas when their quote and list prefixes use spaces.
+- A tab in a list prefix or continuation line leaves the source unchanged.
+- A standalone carriage return inside a quoted list formula leaves the source unchanged.
 - If extension identifier rules, repository references or emoji shortcodes are active, the preparer leaves the source unchanged.
 - Numeric single-dollar formulas follow the existing currency rule.
 
@@ -121,3 +123,8 @@ During streaming, it replaces formula punctuation with unused private-use charac
 One Remend handler restores `>` before the HTML tag handler runs.
 Without it, an unfinished tag before a formula can hide the rest of the message.
 The final Remend handler restores the remaining punctuation before parsing.
+
+### Why nested list prefixes with tabs stay unchanged
+
+Tabs change column positions inside quote prefixes and list markers.
+The preparer accepts nested list prefixes when it can compare their source columns directly.

@@ -251,6 +251,22 @@ describe('standalone bracket math with blank lines', () => {
     expect(prepare(`${source} tail`, true).remend).toBe(first.remend);
   });
 
+  test('rechecks a quoted reference definition whose target arrives later', () => {
+    const prepare = createMarkdownMathPreparer();
+    const first = '> - \\[\n>   [ref]\n>\n>   y\n>   \\]\n>\n> [ref]: ';
+    prepare(first, true);
+    const completed = `${first}https://example.test`;
+    expect(prepare(completed, true).content).toBe(prepareMarkdownMath(completed, true).content);
+  });
+
+  test('rechecks a quoted reference definition split at its colon', () => {
+    const prepare = createMarkdownMathPreparer();
+    const first = '> - \\[\n>   [ref]\n>\n>   y\n>   \\]\n>\n> [ref]';
+    prepare(first, true);
+    const completed = `${first}: https://example.test`;
+    expect(prepare(completed, true).content).toBe(prepareMarkdownMath(completed, true).content);
+  });
+
   test('rechecks definitions inside block quotes and can disable preparation for extra plugins', () => {
     const prepare = createMarkdownMathPreparer();
     const source = '\\[\nA\n\n[ref]\n\\]\n\n';
@@ -298,6 +314,29 @@ describe('standalone bracket math with blank lines', () => {
     }
   });
 
+  test('renders a formula inside a list in a quote', () => {
+    for (const source of [
+      '> - \\[\n>   x+\n>\n>   y\n>   \\]',
+      '> 1. \\[\n>    x+\n>\n>    y\n>    \\]',
+      '> - intro\n>\n>   \\[\n>   x+\n>\n>   y\n>   \\]',
+      '>- \\[\n>   x+\n>\n>   y\n>   \\]',
+      ' > - \\[\n>   x+\n>\n>   y\n>   \\]',
+    ]) {
+      for (const streaming of [false, true]) {
+        const prepared = prepareMarkdownMath(source, streaming);
+        const html = renderToStaticMarkup(<Streamdown
+          mode={streaming ? 'streaming' : 'static'} isAnimating={streaming} parseIncompleteMarkdown={streaming} controls={false}
+          plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+          remend={prepared.remend}
+          {...getMarkdownProcessingOptions(false, false)}
+        >{prepared.content}</Streamdown>);
+        const body = new Window().document.createElement('div');
+        body.innerHTML = html;
+        expect(body.querySelector('blockquote li .katex-display annotation')?.textContent).toContain('x+\n\ny');
+      }
+    }
+  });
+
   test('does not match delimiters across different containers or fenced code', () => {
     for (const source of [
       '> \\[\n> x\n\nOutside\n\n> y\n> \\]',
@@ -310,6 +349,18 @@ describe('standalone bracket math with blank lines', () => {
       '> \\[\n> x\n>\n>    y\n>       \\]\n>\n> [link](https://example.test)',
       '> \\[\n> x\n>\n> y\n>\t\\]\n>\n> [link](https://example.test)',
       '> 1.\titem\n>\n>       \\[\n>       x\n>\n>       y\n>         \\]\n>\n>       [link](https://example.test)',
+      '> - \\[\n>   x\n>\n> - y\n>   \\]',
+      '> - \\[\n>   x\n>\n>   y\n> \\]',
+      '> - \\[\n> a\n>\n>   b\n>   \\]\n>\n> Important text',
+      '> - \\[\n>   x\n>   \\]\n>   Important text\n>\n>   \\]',
+      '> - \\[\n>\u00a0\u00a0x\n>\n>   y\n>   \\]\n>\n> Important text',
+      '> - \\[\n>   x\n>\n>   y\n>   \\\\\\]\n>\n>   [Important](https://example.test)',
+      '> - \\[\n>   x\n>\n>   y\n>   \\]\u00a0\n>\n>   [Important](https://example.test)',
+      '> - \\[\n>   x\r> Important\n>\n>   y\n>   \\]\n>\n> [link](https://example.test)',
+      '> - \\[\n>   x \\] and ordinary text\n>\n>   more text\n>   \\]',
+      '> - \\[\n>   x\n>\n>   y\n >  \\]\n >\n > Important text',
+      '>\t- intro\n>\n>     \\[\n>     x\n>\n>     y\n>    \\]\n>\n> Important text',
+      '> - \\[\n>   x\n>\n>   y\n    \\]\n\nImportant text',
       '-\n    intro\n\n  \\[\n  x\n\n  y\n      \\]\n\n  [link](https://example.test)',
       '-   \n  intro\n\n  \\[\n  x\n\n  y\n      \\]\n\n  [link](https://example.test)',
     ]) expect(prepareMarkdownMath(source, true).content).toBe(source);

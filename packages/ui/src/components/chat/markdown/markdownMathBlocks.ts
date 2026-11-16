@@ -38,6 +38,35 @@ function hasUnescapedDelimiter(source: string): boolean {
   return false;
 }
 
+function quotePrefix(line: string): { markers: string; end: number } | null {
+  const match = /^(?: {0,3}> ?)+/.exec(line);
+  if (!match) return null;
+  return { markers: match[0].replaceAll(' ', ''), end: match[0].length };
+}
+
+function quotedListMatches(source: string, candidate: number, end: number, markerOffset: number, markerWidth: number, prefix: string): boolean {
+  if (/\r(?!\n)/.test(source.slice(candidate, end))) return false;
+  const markerLine = source.lastIndexOf('\n', markerOffset - 1) + 1;
+  const markerPrefix = source.slice(markerLine, markerOffset);
+  if (markerPrefix.includes('\t')) return false;
+  const markerQuote = quotePrefix(markerPrefix);
+  const closeQuote = quotePrefix(prefix);
+  if (!markerQuote || !closeQuote || markerQuote.markers !== closeQuote.markers
+    || !/^ *$/.test(markerPrefix.slice(markerQuote.end)) || !/^ *$/.test(prefix.slice(closeQuote.end))) return false;
+  const base = markerPrefix.length - markerQuote.end + markerWidth;
+  const closeIndent = prefix.length - closeQuote.end;
+  if (closeIndent < base || closeIndent > base + 3) return false;
+  for (const line of source.slice(candidate, end).split('\n').slice(1)) {
+    if (line.includes('\t')) return false;
+    const quote = quotePrefix(line);
+    if (!quote || quote.markers !== markerQuote.markers) return false;
+    const rest = line.slice(quote.end).replace(/\r$/, '');
+    const indent = /^ */.exec(rest)?.[0].length ?? 0;
+    if (indent < rest.length && indent < base) return false;
+  }
+  return true;
+}
+
 export function prepareMarkdownMath(source: string, streaming: boolean, enabled = true): PreparedMath {
   const unchanged: PreparedMath = { content: source, remend: defaultRemend, reserved: [], resumeAt: null, parsed: null };
   if (!enabled || !source.includes('\\[') || !source.includes('\\]')) return unchanged;
@@ -70,24 +99,28 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
       if (end !== slashStart) continue;
       const prefix = source.slice(lineStart, slashStart);
       const openingPrefix = source.slice(source.lastIndexOf('\n', candidate - 1) + 1, candidate);
-      const openingMarkers = openingPrefix.replace(/(?:^|[ \t])(?:[-+*]|\d{1,9}[.)])(?=[ \t])/g, '');
+      const openingMarkers = openingPrefix.replace(/(^|[ \t>])(?:[-+*]|\d{1,9}[.)])(?=[ \t])/g, '$1');
       let sameContainer = false;
       if (parent.type === 'root') sameContainer = /^ {0,3}$/.test(prefix);
       else if (!prefix.includes('\t') && prefix.replaceAll(' ', '') === openingMarkers.replace(/[ \t]/g, '')) {
         if (parent.type === 'blockquote') sameContainer = prefix.length - prefix.lastIndexOf('>') - 1 <= 4;
         else if (parent.type === 'listItem') {
           const position = parent.position?.start;
-          if (position?.offset !== undefined && !openingPrefix.includes('>')) {
+          if (position?.offset !== undefined) {
             const marker = /^(?:[-+*]|\d{1,9}[.)])([ \t]*)(?=\S|\r?\n|$)/.exec(source.slice(position.offset));
             if (!marker) continue;
+            if (openingPrefix.includes('>') && (openingPrefix.includes('\t') || marker[1].includes('\t'))) continue;
             const spaces = marker[1].length;
             const next = source[position.offset + marker[0].length];
             let padding = 0;
             if (next === undefined || next === '\r' || next === '\n') padding = 1;
             else for (const character of marker[1]) padding += character === '\t' ? 4 - ((position.column - 1 + marker[0].length - spaces + padding) % 4) : 1;
             if (padding < 1 || padding > 4) padding = 1;
-            const base = position.column - 1 + marker[0].length - spaces + padding;
-            sameContainer = prefix.length >= base && prefix.length <= base + 3;
+            const markerWidth = marker[0].length - spaces + padding;
+            const base = position.column - 1 + markerWidth;
+            sameContainer = source.slice(source.lastIndexOf('\n', position.offset - 1) + 1, position.offset).includes('>')
+              ? quotedListMatches(source, candidate, end, position.offset, markerWidth, prefix)
+              : prefix.length >= base && prefix.length <= base + 3;
           }
         }
       }
