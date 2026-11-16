@@ -5,6 +5,7 @@ import path from 'path';
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 import { OPENCODE_CONFIG_DIR, SKILL_SUPPORTING_FILE_MAX_BYTES } from '../opencode/shared.js';
+import { SKILL_MD_MAX_BYTES } from './scan.js';
 
 // A skill is a SKILL.md plus small supporting text and assets, so an install
 // never needs a large tree. These caps keep a cloned repository from turning
@@ -109,14 +110,15 @@ export async function copyDirectoryNoSymlinks(srcDir, dstDir, cloneRoot) {
   await ensureDir(dstDir);
 
   const copyState = { entries: 0, bytes: 0 };
-  const countEntry = (stat) => {
+  const countEntry = (stat, name) => {
     copyState.entries += 1;
     if (copyState.entries > SKILL_COPY_MAX_ENTRIES) {
       throw new Error(`Skill directory is too large to install: more than ${SKILL_COPY_MAX_ENTRIES} entries`);
     }
     if (!stat.isFile()) return;
-    if (stat.size > SKILL_SUPPORTING_FILE_MAX_BYTES) {
-      throw new Error(`Skill file is too large to install: ${stat.size} bytes exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`);
+    const perFileLimit = name === 'SKILL.md' ? SKILL_MD_MAX_BYTES : SKILL_SUPPORTING_FILE_MAX_BYTES;
+    if (stat.size > perFileLimit) {
+      throw new Error(`Skill file is too large to install: ${stat.size} bytes exceeds the ${perFileLimit} byte limit`);
     }
     copyState.bytes += stat.size;
     if (copyState.bytes > SKILL_COPY_MAX_TOTAL_BYTES) {
@@ -142,14 +144,14 @@ export async function copyDirectoryNoSymlinks(srcDir, dstDir, cloneRoot) {
       }
 
       if (stat.isDirectory()) {
-        countEntry(stat);
+        countEntry(stat, entry.name);
         await ensureDir(nextDst);
         await walk(nextSrc, nextDst);
         continue;
       }
 
       if (stat.isFile()) {
-        countEntry(stat);
+        countEntry(stat, entry.name);
         await ensureDir(path.dirname(nextDst));
         await fs.promises.copyFile(nextSrc, nextDst);
         try {

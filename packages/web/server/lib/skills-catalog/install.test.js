@@ -123,6 +123,27 @@ describe('copyDirectoryNoSymlinks size caps', () => {
       .rejects.toThrow('exceeds the 1048576 byte limit');
   });
 
+  it('installs a SKILL.md up to the 4 MiB limit', async () => {
+    const { clone, src, dst } = setupClone();
+    writeSkill(src, 'big');
+    // 2 MiB SKILL.md: above the 1 MiB supporting-file cap but within the
+    // 4 MiB SKILL.md contract.
+    fs.writeFileSync(path.join(src, 'SKILL.md'), Buffer.alloc(2 * 1024 * 1024));
+
+    await copyDirectoryNoSymlinks(src, dst, clone);
+
+    expect(fs.statSync(path.join(dst, 'SKILL.md')).size).toBe(2 * 1024 * 1024);
+  });
+
+  it('aborts on a SKILL.md above the 4 MiB limit', async () => {
+    const { clone, src, dst } = setupClone();
+    writeSkill(src, 'big');
+    fs.writeFileSync(path.join(src, 'SKILL.md'), Buffer.alloc(4 * 1024 * 1024 + 1));
+
+    await expect(copyDirectoryNoSymlinks(src, dst, clone))
+      .rejects.toThrow('exceeds the 4194304 byte limit');
+  });
+
   it('aborts when the tree passes the total-byte cap', async () => {
     const { clone, src, dst } = setupClone();
     writeSkill(src, 'big');
