@@ -119,6 +119,8 @@ const deferred = <T,>() => {
 };
 
 mock.module('@/stores/utils/safeStorage', () => ({
+  flushDeferredStorage: () => {},
+  listStorageKeys: () => [],
   getDeferredSafeStorage: () => makeStorage(),
   getSafeStorage: () => makeStorage(),
   getSafeSessionStorage: () => makeStorage(),
