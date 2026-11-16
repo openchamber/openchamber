@@ -167,7 +167,7 @@ const ACTIONS = {
   },
   async reload(step, ctx) {
     await ctx.page.reload()
-    await waitForReady(ctx)
+    if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
     const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step))

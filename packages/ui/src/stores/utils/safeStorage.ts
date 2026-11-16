@@ -43,6 +43,10 @@ const registerDeferredFlusher = (flush: () => void) => {
     }
 };
 
+export const flushDeferredStorage = (): void => {
+    for (const flush of deferredFlushers) flush();
+};
+
 const createDeferredJSONStorage = <S>(
     getStorage: () => StateStorage,
     options?: JsonStorageOptions,

@@ -200,6 +200,47 @@ identity `DraftSendError` names: the created session's composer, or the
 reopened draft's, with the text typed meanwhile kept above the sent text
 (*A draft's first send* in `sync/DOCUMENTATION.md`).
 
+A send the page did not live to see settled comes back after the next start.
+On Enter the composer clears its draft and writes the sent text to
+`lib/unconfirmedSends.ts`; `sendMessage`'s `progress` adds the session a draft
+minted, the prompt's message id, and the moment its request leaves, and the
+record goes when the send resolves or its failure path has restored the text.
+A record left by a page that died (reload, app restart, PWA update, renderer
+crash) is restored by the main composer on mount
+(`hooks/useUnconfirmedSendRecovery.ts`) through the same `restoreDraft` a failed
+send uses, so text typed meanwhile stays above it. The target follows the
+failed-send rule: the created session's composer when the server has the
+minted session, the draft's otherwise. A project draft reopens under a new id
+after a reload, so its text goes to the new-session draft on screen when that
+draft is in the same folder, and to the folder's key otherwise (the next draft
+opened there claims it); the old draft is discarded from the shared drafts so
+its row does not list the text a second time. A request that never left comes back
+without asking anything; one that left comes back only when the server answers
+that it has no message with that id, and a command or shell line that left
+(no client-side id) is dropped. A server that cannot answer keeps the record
+for the next start, and so does a runtime switch while the server is asked:
+the answer came from another server. Files stay in memory, so only their names come back, as
+the dashed chips a reloaded draft draws.
+
+### Why an unconfirmed send is its own record and not the draft left in place
+
+Keeping the sent text in the draft until the send settles would show it in a
+second window's composer while the first still sends, and the composer's own
+flush on hide writes the cleared field over it anyway. The record names the
+page that wrote it, and each page holds a Web Lock under its id while it lives,
+so another tab or the Mini Chat window never restores a send that is still
+going; recovery itself runs under one lock, so two windows starting together
+restore a record once. Each record has its own storage key, so two windows
+writing at once never overwrite each other's progress. Where Web Locks do not
+exist (a plain-HTTP LAN address) liveness cannot be told, so the records go to
+the tab's `sessionStorage`: a reload of the same tab still finds them, another
+tab never does. A record is written to storage directly, not through the
+deferred storage the drafts use, because the page can stop before a deferred
+write flushes. Removing it, after a send settles or after recovery, first
+flushes the deferred storage (`flushDeferredStorage`), so the restored draft is
+stored before its record goes and a stop in between never loses both; recovery
+removes it while it still holds its lock, so a second window cannot find it.
+
 ### Why a session whose folder is gone gets a row and keeps its text
 
 OpenCode answers every request of such a session with `LocationNotFoundError`,

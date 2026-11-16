@@ -1,0 +1,197 @@
+import { beforeEach, describe, expect, test } from 'bun:test';
+
+import type { ChatDraftIdentity } from './chatDraftPersistence';
+import {
+  UNCONFIRMED_SEND_KEY_PREFIX,
+  draftRestoreTarget,
+  recoverUnconfirmedSends,
+  trackUnconfirmedSend,
+  type UnconfirmedSend,
+  type UnconfirmedSendServer,
+} from './unconfirmedSends';
+import { getSafeSessionStorage, getSafeStorage, listStorageKeys } from '@/stores/utils/safeStorage';
+
+const storage = globalThis.navigator?.locks ? getSafeStorage() : getSafeSessionStorage();
+let runtimeCounter = 0;
+
+const nextRuntime = () => `runtime-${runtimeCounter += 1}`;
+
+const record = (runtimeKey: string, change: Partial<UnconfirmedSend> = {}): UnconfirmedSend => {
+  const id = `dead-page-${runtimeCounter}-${Math.random()}`;
+  return {
+    id,
+    pageId: 'dead-page',
+    identity: { runtimeKey, directory: '/repo', sessionId: 'ses_existing' },
+    text: 'the prompt',
+    confirmedMentions: ['src/a.ts'],
+    attachmentNames: [],
+    sessionId: 'ses_existing',
+    messageId: null,
+    left: false,
+    ...change,
+  };
+};
+
+const keys = () => listStorageKeys(storage).filter((key) => key.startsWith(UNCONFIRMED_SEND_KEY_PREFIX));
+const store = (...records: UnconfirmedSend[]) => {
+  for (const entry of records) storage.setItem(`${UNCONFIRMED_SEND_KEY_PREFIX}${entry.id}`, JSON.stringify(entry));
+};
+const stored = (): UnconfirmedSend[] => keys().map((key) => JSON.parse(storage.getItem(key) ?? 'null'));
+
+const fakeServer = (state: { sessions?: Record<string, string>; messages?: string[]; failing?: boolean; current?: () => boolean } = {}) => {
+  const calls: string[] = [];
+  const server: UnconfirmedSendServer = {
+    isCurrent: state.current ?? (() => true),
+    ready: async () => { calls.push('ready'); },
+    sessionDirectory: async (sessionId) => {
+      calls.push(`session ${sessionId}`);
+      if (state.failing) throw new Error('offline');
+      return state.sessions?.[sessionId] ?? null;
+    },
+    hasMessage: async (sessionId, messageId) => {
+      calls.push(`message ${sessionId} ${messageId}`);
+      if (state.failing) throw new Error('offline');
+      return state.messages?.includes(messageId) ?? false;
+    },
+  };
+  return { server, calls };
+};
+
+const recoverInto = async (runtimeKey: string, server: UnconfirmedSendServer, shown: ChatDraftIdentity | null = null) => {
+  const restored: Array<{ target: ChatDraftIdentity; text: string; mentions: string[] }> = [];
+  const discarded: string[] = [];
+  await recoverUnconfirmedSends(runtimeKey, {
+    shown: () => shown,
+    restore: (target, text, mentions) => restored.push({ target, text, mentions: [...mentions] }),
+    discardDraft: (workDraftId) => discarded.push(workDraftId),
+  }, server);
+  return Object.assign(restored, { discarded });
+};
+
+describe('unconfirmedSends', () => {
+  beforeEach(() => {
+    for (const key of keys()) storage.removeItem(key);
+  });
+
+  test('a send whose request never left comes back to its session without asking the server', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime));
+    const { server, calls } = fakeServer();
+
+    const restored = await recoverInto(runtime, server);
+
+    expect([...restored]).toEqual([{ target: { runtimeKey: runtime, directory: '/repo', sessionId: 'ses_existing' }, text: 'the prompt', mentions: ['src/a.ts'] }]);
+    expect(calls).toEqual([]);
+  });
+
+  test('a send the server has is dropped, so it cannot go out twice', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime, { left: true, messageId: 'msg_1' }));
+    const { server } = fakeServer({ messages: ['msg_1'] });
+
+    expect([...await recoverInto(runtime, server)]).toEqual([]);
+  });
+
+  test('a request that left and never arrived comes back', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime, { left: true, messageId: 'msg_1' }));
+    const { server } = fakeServer({ messages: [] });
+
+    expect((await recoverInto(runtime, server)).map((entry) => entry.text)).toEqual(['the prompt']);
+  });
+
+  test('a server that cannot answer keeps the record for the next start', async () => {
+    const runtime = nextRuntime();
+    const pending = record(runtime, { left: true, messageId: 'msg_1' });
+    store(pending);
+    const { server } = fakeServer({ failing: true });
+
+    expect([...await recoverInto(runtime, server)]).toEqual([]);
+    expect(stored()).toEqual([pending]);
+  });
+
+  test('an answer that arrives after a runtime switch restores and removes nothing', async () => {
+    const runtime = nextRuntime();
+    const pending = record(runtime, { left: true, messageId: 'msg_1' });
+    store(pending);
+    const { server } = fakeServer({ messages: [], current: () => false });
+
+    expect([...await recoverInto(runtime, server)]).toEqual([]);
+    expect(stored()).toEqual([pending]);
+  });
+
+  test('a command that left has no id to confirm and is dropped', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime, { left: true, text: '/review' }));
+    const { server } = fakeServer();
+
+    expect([...await recoverInto(runtime, server)]).toEqual([]);
+  });
+
+  test('a first send whose session was never created goes back to the draft', async () => {
+    const runtime = nextRuntime();
+    const draft = { runtimeKey: runtime, directory: '__chat__', sessionId: null };
+    store(record(runtime, { identity: draft, sessionId: 'ses_minted' }));
+    const { server } = fakeServer();
+
+    expect((await recoverInto(runtime, server)).map((entry) => entry.target)).toEqual([draft]);
+  });
+
+  test('a project draft that was never created comes back in the draft now open in its folder', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime, { identity: { runtimeKey: runtime, directory: '/repo', sessionId: 'draft:old' }, sessionId: null }));
+    const shown = { runtimeKey: runtime, directory: '/repo', sessionId: 'draft:new' };
+
+    const restored = await recoverInto(runtime, fakeServer().server, shown);
+
+    expect(restored.map((entry) => entry.target)).toEqual([shown]);
+    expect(restored.discarded).toEqual(['old']);
+  });
+
+  test('a first send whose session exists goes to that session', async () => {
+    const runtime = nextRuntime();
+    store(record(runtime, { identity: { runtimeKey: runtime, directory: '/repo', sessionId: 'draft:7' }, sessionId: 'ses_minted', left: true, messageId: 'msg_1' }));
+    const { server, calls } = fakeServer({ sessions: { ses_minted: '/repo/sub' } });
+
+    expect((await recoverInto(runtime, server)).map((entry) => entry.target)).toEqual([{ runtimeKey: runtime, directory: '/repo/sub', sessionId: 'ses_minted' }]);
+    expect(calls).toEqual(['ready', 'session ses_minted', 'message ses_minted msg_1']);
+  });
+
+  test('another runtime and this page\'s own sends are left alone', async () => {
+    const runtime = nextRuntime();
+    const foreign = record('runtime-other');
+    store(foreign);
+    const own = trackUnconfirmedSend({
+      identity: { runtimeKey: runtime, directory: '/repo', sessionId: 'ses_existing' },
+      text: 'in flight here',
+      confirmedMentions: [],
+      attachmentNames: [],
+    });
+
+    expect([...await recoverInto(runtime, fakeServer().server)]).toEqual([]);
+    expect(stored().map((entry) => entry.text).sort()).toEqual(['in flight here', 'the prompt']);
+
+    own.progress.messageMinted('msg_9');
+    own.progress.requestLeaving();
+    expect(stored().find((entry) => entry.text === 'in flight here')).toMatchObject({ messageId: 'msg_9', left: true });
+    own.settle();
+    expect(stored()).toEqual([foreign]);
+  });
+
+  test('a share link\'s key is never stored', () => {
+    const own = trackUnconfirmedSend({
+      identity: { runtimeKey: nextRuntime(), directory: '/repo', sessionId: 'ses_existing' },
+      text: 'see https://evil.test/p/AbCdEfGhIjKlMnOpQrStUv#Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE now',
+      confirmedMentions: [],
+      attachmentNames: [],
+    });
+    expect(stored()[0]?.text).toBe('see https://evil.test/p/AbCdEfGhIjKlMnOpQrStUv now');
+    own.settle();
+  });
+
+  test('a project draft target falls back to its folder when the open composer is elsewhere', () => {
+    const target = { runtimeKey: 'r', directory: '/repo', sessionId: 'draft:old' };
+    expect(draftRestoreTarget(target, { runtimeKey: 'r', directory: '/other', sessionId: 'draft:new' })).toEqual({ ...target, sessionId: null });
+    expect(draftRestoreTarget({ ...target, sessionId: 'ses_1' }, null)).toEqual({ ...target, sessionId: 'ses_1' });
+  });
+});

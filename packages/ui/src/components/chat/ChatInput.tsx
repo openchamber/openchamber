@@ -11,7 +11,7 @@ import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey
 import { readEffortRevision } from '@/lib/modelEfforts';
 import { selectAutoReviewRunning, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type SentMessage } from '@/sync/session-ui-store';
+import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type SendMessageOptions, type SentMessage } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type ComposerAddress, type SyntheticContextPart } from '@/sync/input-store';
@@ -153,7 +153,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { reservedComposerCommandNames, routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { AgentUnavailableError, opencodeClient, type SkillMentions } from '@/lib/opencode/client';
+import { AgentUnavailableError, opencodeClient } from '@/lib/opencode/client';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
 import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
 import { useGitStore } from '@/stores/useGitStore';
@@ -190,6 +190,8 @@ import {
 } from './attachmentCitations';
 import { assignFileAttachmentFilenames, attachmentsCitedIn, withMissingCitations } from '@/lib/attachmentIdentity';
 import { readDraftAttachmentNames, rememberDraftAttachmentNames } from '@/lib/draftAttachmentNames';
+import { trackUnconfirmedSend } from '@/lib/unconfirmedSends';
+import { useUnconfirmedSendRecovery } from '@/hooks/useUnconfirmedSendRecovery';
 import {
     createPastedContextFile,
     isLargePlainTextPaste,
@@ -321,7 +323,6 @@ import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import {
     createInputHistoryIdentity,
     selectInputHistoryEntries,
-    type InputHistorySubmission,
     useInputHistoryStore,
 } from '@/stores/useInputHistoryStore';
 import {
@@ -1693,6 +1694,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         },
     });
+    useUnconfirmedSendRecovery(columnPinned ? null : activeRuntimeKey, restoreDraft, currentChatDraftIdentityRef);
 
     // A project's new draft is shared with the server, which lists it in the
     // sidebar once the user leaves it (the chat identity carries its key only
@@ -2532,20 +2534,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        let sendMessageOptions: {
-            userInitiated?: boolean;
-            target?: NonNullable<typeof capturedTarget>;
-            sessionId?: string;
-            directory?: string;
-            draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
-            historySubmissions?: InputHistorySubmission[];
-            delivery?: 'steer';
-            skills?: SkillMentions;
-            queuedGoal?: QueuedMessageGoal | null;
-            recordEffort?: boolean;
-            effortRevision?: number;
-            onSent?: (route: SentMessage) => void;
-        } | undefined;
+        let sendMessageOptions: SendMessageOptions | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
                 target: { runtimeKey: submitRuntimeKey, sessionId: btwSessionId, directory: btwDirectory },
@@ -2721,6 +2710,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             opencodeClient,
         );
 
+        const unconfirmedSend = !queuedOnly && !isBtwActive && chatDraftIdentity && inputSnapshot.message
+            ? trackUnconfirmedSend({
+                identity: chatDraftIdentity,
+                text: inputSnapshot.message,
+                confirmedMentions: confirmedMentionsSnapshot,
+                attachmentNames: sentAttachedFiles.map((file) => file.filename),
+            })
+            : null;
+        if (unconfirmedSend) sendMessageOptions = { ...sendMessageOptions, progress: unconfirmedSend.progress };
+
         // Clear input (the queue was taken above)
         if (!queuedOnly) {
             setMessage('');
@@ -2775,6 +2774,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     restoreConsumedInput();
                     toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
                 }
+                unconfirmedSend?.settle();
                 return;
             }
         }
@@ -3027,7 +3027,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
 
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
-        });
+        }).finally(() => unconfirmedSend?.settle());
 
         if (!isMobile) {
             composerRef.current?.focus();
