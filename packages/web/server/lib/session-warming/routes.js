@@ -1,19 +1,3 @@
-/**
- * `GET /api/session-warming` answers the snapshot
- * `{ revision, enabled, sessions: [{ sessionId, warmUntil }] }`.
- *
- * `PUT /api/session-warming/mode` takes `{ mode: 'off' | 'all' | 'session' }`.
- * `all` is OpenCode's own `warming` config for every session; `session` is this
- * server warming the sessions the user picks. Only one is on at a time.
- * Answers the snapshot.
- *
- * `PUT /api/session-warming/duration` takes `{ scope: 'all' | 'session', minutes }`
- * with minutes one of 30, 60, 120, 180: `all` writes OpenCode's `warming.duration`
- * (while its warming is on), `session` the per-session hour. Answers the snapshot.
- *
- * `PUT /api/session-warming/sessions/:sessionId` takes `{ directory, warm }`.
- * Answers the snapshot; 409 while per-session warming is off.
- */
 import { z } from 'zod';
 import { isSpaceDirectory } from '../spaces/dispatcher.js';
 import { sessionIdSchema, warmingMinutesSchema } from './runtime.js';
@@ -37,7 +21,6 @@ export const registerSessionWarmingRoutes = (app, { sessionWarmingRuntime, setGl
     if (!parsed.success) return res.status(400).json({ error: "mode must be 'off', 'all' or 'session'" });
     const { mode } = parsed.data;
     try {
-      // OpenCode's config first: when that write fails, nothing changed.
       setGlobalWarming(mode === 'all');
     } catch (error) {
       console.error('Failed to save session warming:', error);
@@ -64,7 +47,6 @@ export const registerSessionWarmingRoutes = (app, { sessionWarmingRuntime, setGl
     const sessionId = sessionIdSchema.safeParse(req.params.sessionId);
     const body = sessionBodySchema.safeParse(req.body);
     if (!sessionId.success || !body.success) return res.status(400).json({ error: 'a session id, directory and warm are required' });
-    // A space's sessions run on the space's own OpenCode, which this server does not ping.
     if (isSpaceDirectory(body.data.directory)) return res.status(400).json({ error: 'sessions in an isolated space cannot be kept warm' });
     const result = sessionWarmingRuntime.setSessionWarm(sessionId.data, body.data.directory, body.data.warm);
     if ('error' in result) return res.status(409).json({ error: 'per-session warming is off' });
