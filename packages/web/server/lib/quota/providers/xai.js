@@ -52,11 +52,6 @@ const accessTokenExpired = (entry) => {
   return Number.isFinite(jwtExpiry) && jwtExpiry <= expiryDeadline;
 };
 
-// xAI rotates (and rejects the previous) refresh token on every exchange, and
-// OpenCode 2.x owns the credential store without exposing a refresh route. A
-// quota read that refreshed here would burn the token OpenCode still holds and
-// sign the user out. Claude's provider makes the same call; wait for OpenCode
-// to refresh and surface the stale state instead.
 const requireFreshAccess = (entry) => {
   const access = nonEmptyString(entry.access);
   if (!access || accessTokenExpired(entry)) {
@@ -77,7 +72,7 @@ const readVarint = (bytes, state) => {
 };
 
 const samePath = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
-// CodexBar observes both the flat billing message and the response envelope.
+// external: https://github.com/steipete/CodexBar xAI billing responses use both flat messages and response envelopes.
 const USAGE_PERCENT_PATHS = [[1], [1, 1]];
 const hasPath = (paths, candidate) => paths.some((path) => samePath(path, candidate));
 

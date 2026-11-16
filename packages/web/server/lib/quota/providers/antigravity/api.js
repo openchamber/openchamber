@@ -1,9 +1,3 @@
-/**
- * Antigravity Provider - API
- *
- * API calls for Antigravity quota provider.
- * @module quota/providers/antigravity/api
- */
 
 import { refreshGoogleAccessToken } from '../google/oauth.js';
 import { antigravityHeaders } from './client.js';

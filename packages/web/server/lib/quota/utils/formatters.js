@@ -83,11 +83,6 @@ export const formatMoney = (value) => {
   return value.toFixed(2);
 };
 
-// Copilot premium interactions are credits, not requests: the endpoint reports
-// them fractionally (`quota_remaining: 39078.5`) while VS Code's own panel shows
-// the same value with one decimal ("20,836.9 / 60,000 used"). A plain
-// `toLocaleString` would round that half credit away and disagree with VS Code
-// by a whole credit on every read.
 export const formatCredits = (value) => {
   if (!Number.isFinite(value)) return null;
   const rounded = Math.round(value * 10) / 10;

@@ -15,8 +15,6 @@ export const providerName = 'NeuralWatt';
 const aliases = ['neuralwatt'];
 const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
 
-// 30d month / 365d year are fixed approximations; real calendars vary but the
-// window is for the UI's progress bar label, not billing decisions.
 const periodToWindowSeconds = (period) => {
   if (period === 'daily') return 86400;
   if (period === 'weekly') return 604800;
@@ -81,9 +79,6 @@ export const fetchQuota = async () => {
       const kwhIncluded = toNumber(subscription.kwh_included);
       const kwhUsed = toNumber(subscription.kwh_used);
       const plan = asNonEmptyString(subscription.plan);
-      // Subscription window title is the plan name; subscription limits reset
-      // monthly even on annual billing plans, but the API exposes no kWh window
-      // start to derive windowSeconds — pass null rather than fabricating a guess.
       const subKey = plan ?? 'plan_limit';
       const usedPercent = inOverage
         ? 100
@@ -101,8 +96,6 @@ export const fetchQuota = async () => {
     if (allowance) {
       const spent = toNumber(allowance.spent_usd);
       const limit = toNumber(allowance.limit_usd);
-      // Credits wallet is reduced by each period's spend before the allowance cap
-      // bites, so the real ceiling is min(limit, creditsRemaining + spent).
       const effectiveSpent = spent ?? 0;
       const effectiveLimit = limit !== null && creditsRemaining !== null
         ? Math.min(limit, creditsRemaining + effectiveSpent)
@@ -114,8 +107,6 @@ export const fetchQuota = async () => {
         : (spent !== null && effectiveLimit !== null && effectiveLimit > 0
             ? Math.max(0, Math.min(100, (spent / effectiveLimit) * 100))
             : null);
-      // Window title is the localized period label (daily/weekly/monthly); the
-      // usage value stays a percent so the UI's display-mode toggle applies.
       const periodKey = (period === 'daily' || period === 'weekly' || period === 'monthly' || period === 'month')
         ? (period === 'month' ? 'monthly' : period)
         : 'billing_cycle';

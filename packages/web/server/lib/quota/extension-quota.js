@@ -18,30 +18,7 @@ import { extensionProviderId } from '../source-control/provider-id.js';
 import { QuotaRouteError } from './route-error.js';
 import { buildResult, toUsageWindow } from './utils/formatters.js';
 
-/**
- * An installed extension's usage provider (`ext-<guestId>`) as a registry
- * entry beside the built-ins (`providers/index.js`): the same `isConfigured`
- * and `fetchQuota` a built-in module exports, answered by the extension's
- * service (`POST /quota` on its loopback, the SDK's wire 1).
- *
- * The service receives, on every read, the entries OpenCode holds for the
- * provider ids the current catalog row lists, as `readOpenCodeCredentials` answers them,
- * and nothing else of the map: the hand-over the user approved in the dialog.
- * A listed credential OpenCode does not hold is the "not configured" state a
- * built-in answers for its own missing key, and the service is not called.
- *
- * Every call reads the guest's current catalog row (`currentGuest`), which
- * applies enterprise policy on each read: a guest that is no longer eligible
- * (paused, unapproved, refused by policy) is refused before anything is sent,
- * and the registered set is reconciled. Answers are checked with the SDK's
- * `quotaProviderSchemasV1`; one that does not parse is `502
- * MALFORMED_PROVIDER_RESPONSE`, never an empty result. The host adds the
- * provider id, the name and the time of the read, and derives each window's
- * remaining share and formatted strings (`toUsageWindow`), so the result
- * matches a built-in's field for field.
- */
 
-/** Whether a catalog row may serve usage; the adapter asks again on every call. */
 export const isQuotaGuest = (guest) => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
   return Boolean(guest)
@@ -53,12 +30,10 @@ export const isQuotaGuest = (guest) => {
     && extensionProviderId(guest.id) !== null;
 };
 
-/** The listed entries OpenCode holds now, keyed by provider id; a listed id OpenCode has no credential for is absent. */
 export const pickCredentials = (auth, providerIds) => Object.fromEntries(
   providerIds.filter((providerId) => Object.hasOwn(auth, providerId) && auth[providerId]).map((providerId) => [providerId, auth[providerId]]),
 );
 
-/** A wire window as the UI draws it: the derived shares and formatted strings of `toUsageWindow`, the structured `value` kept. */
 const toWindow = (wire) => {
   const window = toUsageWindow({
     usedPercent: wire.usedPercent,
@@ -96,10 +71,8 @@ export function createExtensionQuotaProvider({
   const providerName = guest.name;
   const providerIds = contribution.providers;
 
-  /** A built-in's failed result: the card shows `error` and keeps its last sample while `configured`. */
   const failure = (configured, error) => buildResult({ providerId, providerName, ok: false, configured, error });
 
-  /** The guest as the catalog has it now, or null once it may no longer serve; the set is then reconciled. */
   const eligibleGuest = async () => {
     const current = await currentGuest(guest.id);
     if (current && isQuotaGuest(current)) return current;
@@ -110,10 +83,8 @@ export function createExtensionQuotaProvider({
   };
 
   const fetchQuota = async () => {
-    // Thrown when OpenCode cannot be asked; the registry reports that as it does a built-in's throw.
     const auth = await readCredentials();
 
-    // After the read, so nothing withdrawn while it ran is handed over.
     let current;
     try {
       current = await eligibleGuest();
@@ -122,7 +93,6 @@ export function createExtensionQuotaProvider({
     }
     if (!current) return failure(true, `${providerName} could not answer: the extension may no longer report usage`);
 
-    // The list the catalog holds now: a re-approval can narrow it before this adapter is replaced.
     const listed = current.quota.providers;
     const credentials = pickCredentials(auth, listed);
     if (listed.length > 0 && Object.keys(credentials).length === 0) return failure(false, 'Not configured');
@@ -150,7 +120,6 @@ export function createExtensionQuotaProvider({
         idleStopMs: QUOTA_PROVIDER_IDLE_MS,
       });
     } catch (error) {
-      // The service was not reached or did not answer in time: unavailable, as a built-in's API outage reads.
       return failure(true, `${providerName} could not answer (${error?.code ?? 'error'}): ${error?.message ?? error}`);
     }
 
@@ -186,10 +155,8 @@ export function createExtensionQuotaProvider({
   return Object.freeze({
     providerId,
     providerName,
-    /** The extension's icon (a Remixicon name or a package SVG path) and id, for the UI's card. */
     icon: guest.icon,
     guestId: guest.id,
-    /** Configured when OpenCode holds at least one listed credential, and always when the list is empty. */
     isConfigured: (auth) => providerIds.length === 0 || Object.keys(pickCredentials(auth, providerIds)).length > 0,
     fetchQuota,
   });
