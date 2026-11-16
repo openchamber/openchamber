@@ -7,7 +7,8 @@
     "packages/ui/src/components/chat/MessageList.tsx",
     "packages/ui/src/components/chat/ChatMessage.tsx",
     "packages/ui/src/components/chat/message/",
-    "packages/ui/src/components/chat/MarkdownRendererImpl.tsx"
+    "packages/ui/src/components/chat/MarkdownRendererImpl.tsx",
+    "packages/ui/src/components/chat/timeline/"
   ],
   "features": [
     {
