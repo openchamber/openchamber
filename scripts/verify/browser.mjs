@@ -4,6 +4,8 @@ import process from "node:process"
 import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
 
 const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
+// A phone the size of an iPhone 15; the app serves its phone layout at /mobile.html.
+const PHONE_VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 2 }
 const MODIFIERS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 const KEYS = {
   Escape: { code: "Escape", keyCode: 27 },
@@ -165,7 +167,25 @@ export class Page {
     return point
   }
 
+  // Touch from here on, at a phone's size: clicks become taps.
+  async usePhone() {
+    this.phone = true
+    await this.client.send("Emulation.setDeviceMetricsOverride", { ...PHONE_VIEWPORT, mobile: true })
+    await this.client.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })
+  }
+
+  async touch(point, holdMs) {
+    await this.client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: point.x, y: point.y }] })
+    await wait(holdMs)
+    await this.client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+  }
+
   async click(target, timeoutMs, button = "left") {
+    if (this.phone || button === "long") {
+      const point = await this.point(target, timeoutMs)
+      if (point) await this.touch(point, button === "long" ? 800 : 40)
+      return point
+    }
     const point = await this.hover(target, timeoutMs)
     if (!point) return null
     await this.mouse("mousePressed", point, { button, buttons: button === "right" ? 2 : 1, clickCount: 1 })

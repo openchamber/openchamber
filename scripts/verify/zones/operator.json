@@ -8,7 +8,10 @@
     "packages/ui/src/sync/operator-children-done.ts",
     "packages/ui/src/sync/session-take-over.ts",
     "packages/ui/src/components/session/sidebar/sessions/OperatorChildrenCount.tsx",
-    "packages/ui/src/components/session/OperatorChildrenDoneDialog.tsx"
+    "packages/ui/src/components/session/OperatorChildrenDoneDialog.tsx",
+    "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx",
+    "packages/ui/src/apps/mobileSidebar/MobileWorkRows.tsx",
+    "packages/ui/src/apps/mobileSidebar/mobileSessionActions.ts"
   ],
   "features": [
     {
@@ -184,7 +187,7 @@
             },
             {
               "do": "see",
-              "on": "dialog",
+              "on": "operator.doneQuestion",
               "text": "Parser worker"
             },
             {
@@ -198,7 +201,7 @@
             },
             {
               "do": "gone",
-              "on": "dialog"
+              "on": "operator.doneQuestion"
             },
             {
               "do": "gone",
@@ -259,7 +262,7 @@
             },
             {
               "do": "gone",
-              "on": "dialog"
+              "on": "operator.doneQuestion"
             },
             {
               "do": "gone",
@@ -322,7 +325,7 @@
             },
             {
               "do": "see",
-              "on": "dialog",
+              "on": "operator.doneQuestion",
               "text": "Parser worker"
             },
             {
@@ -331,7 +334,7 @@
             },
             {
               "do": "gone",
-              "on": "dialog"
+              "on": "operator.doneQuestion"
             },
             {
               "do": "hover",
@@ -515,6 +518,216 @@
             {
               "do": "gone",
               "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "screenshot",
+              "name": "after"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phone",
+      "name": "The same on the phone",
+      "what": "On the phone layout the worker nests under its agent with the count, a long press takes it over from the session's or the worktree's menu, and Done on the agent asks about running workers.",
+      "reach": "Open /mobile.html, the list button at the top left, then long-press a row.",
+      "proof": "The drawer shows the agent's row with the count and no row for the worker until it is expanded; Take over moves it out; Mark done asks first.",
+      "scenarios": [
+        {
+          "id": "take-over",
+          "kind": "path",
+          "title": "On the phone the worker nests with its count, and a long press takes it over",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "phone.expandChildren",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "nested"
+            },
+            {
+              "do": "click",
+              "on": "phone.anyRow",
+              "text": "Parser worker",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over"
+            },
+            {
+              "do": "gone",
+              "on": "phone.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "taken-over"
+            }
+          ]
+        },
+        {
+          "id": "done",
+          "kind": "path",
+          "title": "On the phone Mark done on the agent asks about its running worker, and Stop it ends it",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "click",
+              "on": "phone.row",
+              "session": "s",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Mark done"
+            },
+            {
+              "do": "see",
+              "on": "operator.doneQuestion",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "question"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Stop it"
+            },
+            {
+              "do": "gone",
+              "on": "operator.doneQuestion"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "0",
+              "finished": "1",
+              "timeout": 10
+            }
+          ]
+        },
+        {
+          "id": "worktree-menu",
+          "kind": "path",
+          "title": "On the phone a long press on the worker's worktree takes the worker over",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker of your own in a new worktree that I may take over on my phone.",
+              "timeout": 120
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "phone.workRow",
+              "label": "openchamber/phone-fix",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over the agent's session"
+            },
+            {
+              "do": "gone",
+              "on": "phone.anyChildCount",
               "session": "s"
             },
             {
