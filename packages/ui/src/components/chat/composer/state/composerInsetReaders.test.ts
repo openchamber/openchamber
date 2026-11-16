@@ -115,7 +115,7 @@ describe('composer inset readers', () => {
         register(spacer);
         registerClearance(overlay);
 
-        publishFloatingPanelClearance(column, 64);
+        publishFloatingPanelClearance(column, { clearance: 64, tailReserve: 64 });
 
         expect(spacer.style.getPropertyValue('--chat-floating-panel-clearance')).toBe('64px');
         expect(overlay.style.getPropertyValue('--chat-floating-panel-clearance')).toBe('64px');
@@ -126,8 +126,23 @@ describe('composer inset readers', () => {
         expect(overlay.style.getPropertyValue('--chat-composer-inset')).toBe('');
     });
 
+    test('a held reserve reaches the tail spacer while the overlays follow the real clearance', () => {
+        const overlay = document.createElement('div');
+        column.append(overlay);
+        register(spacer);
+        registerClearance(overlay);
+
+        publishFloatingPanelClearance(column, { clearance: 44, tailReserve: 296 });
+
+        expect(spacer.style.getPropertyValue('--chat-floating-panel-reserve')).toBe('296px');
+        expect(overlay.style.getPropertyValue('--chat-floating-panel-clearance')).toBe('44px');
+
+        withdrawFloatingPanelClearance(column);
+        expect(spacer.style.getPropertyValue('--chat-floating-panel-reserve')).toBe('');
+    });
+
     test('a clearance reader mounted while a panel is docked takes its clearance', () => {
-        publishFloatingPanelClearance(column, 52);
+        publishFloatingPanelClearance(column, { clearance: 52, tailReserve: 52 });
         const overlay = document.createElement('div');
         column.append(overlay);
         registerClearance(overlay);
@@ -138,14 +153,14 @@ describe('composer inset readers', () => {
     test('the clearance and the insets publish and withdraw independently', () => {
         register(spacer);
         publishComposerInsets(column, { inset: 118, tailInset: 198 });
-        publishFloatingPanelClearance(column, 64);
+        publishFloatingPanelClearance(column, { clearance: 64, tailReserve: 64 });
 
         withdrawFloatingPanelClearance(column);
 
         expect(spacer.style.getPropertyValue('--chat-floating-panel-clearance')).toBe('');
         expect(spacer.style.getPropertyValue('--chat-composer-tail-inset')).toBe('198px');
 
-        publishFloatingPanelClearance(column, 40);
+        publishFloatingPanelClearance(column, { clearance: 40, tailReserve: 40 });
         withdrawComposerInsets(column);
 
         expect(spacer.style.getPropertyValue('--chat-floating-panel-clearance')).toBe('40px');

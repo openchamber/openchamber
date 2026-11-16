@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { GlassPopupMotion } from './GlassPopupMotion';
-import { publishFloatingPanelClearance, withdrawFloatingPanelClearance } from '../state/composerInsetReaders';
+import { publishFloatingPanelClearance, readFloatingPanelTailReserve, withdrawFloatingPanelClearance } from '../state/composerInsetReaders';
 
 interface ComposerFloatingPanelProps {
     header: React.ReactNode;
@@ -11,14 +11,17 @@ interface ComposerFloatingPanelProps {
     ariaLabel?: string;
     /** Bounds the entire surface; shrinkable children receive the remaining height. */
     maxHeight?: number;
+    holdReserve?: boolean;
 }
 
 /** Shared dock for the mutually exclusive BTW, permission, and form panels. */
 /** Panels mounted per chat column, so the marker survives an overlap. */
 const mountedPanels = new WeakMap<HTMLElement, number>();
 
-export function ComposerFloatingPanel({ header, children, compact = false, role, ariaLabel, maxHeight }: ComposerFloatingPanelProps) {
+export function ComposerFloatingPanel({ header, children, compact = false, role, ariaLabel, maxHeight, holdReserve = false }: ComposerFloatingPanelProps) {
     const panelRef = React.useRef<HTMLDivElement | null>(null);
+    const holdReserveRef = React.useRef(holdReserve);
+    holdReserveRef.current = holdReserve;
 
     React.useLayoutEffect(() => {
         const panel = panelRef.current;
@@ -32,9 +35,12 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
         // offset, and the transcript's tail spacer grows by it so the panel
         // never covers the last rows. Written onto those readers, not the
         // column, so a resize does not restyle the whole transcript.
+        let reserve = holdReserveRef.current ? readFloatingPanelTailReserve(column) : 0;
         const update = () => {
             const gap = Number.parseFloat(getComputedStyle(panel).marginBottom) || 0;
-            publishFloatingPanelClearance(column, Math.ceil(panel.getBoundingClientRect().height + gap));
+            const clearance = Math.ceil(panel.getBoundingClientRect().height + gap);
+            reserve = holdReserveRef.current ? Math.max(reserve, clearance) : clearance;
+            publishFloatingPanelClearance(column, { clearance, tailReserve: reserve });
         };
         update();
         const observer = globalThis.ResizeObserver ? new ResizeObserver(update) : null;

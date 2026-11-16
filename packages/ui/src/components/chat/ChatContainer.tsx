@@ -123,7 +123,7 @@ import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
 import { FormDock } from './FormDock';
 import { TranscriptForms } from './TranscriptForms';
-import { resolveFormsInChat } from './formsInChat';
+import { FormDockModeContext, resolveFormDockMode, resolveFormsInChat } from './formsInChat';
 import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 import { SpaceChatPlaceholder } from '@/components/session/spaces/SpaceChatPlaceholder';
@@ -444,7 +444,7 @@ const ChatViewport = React.memo(({
                     height: floatingComposer
                         ? `calc(${sessionIsWorking
                             ? `max(var(--chat-composer-tail-inset, ${FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX}px), var(--chat-composer-inset, 0px) + ${FLOATING_COMPOSER_GAP_PX}px)`
-                            : `var(--chat-composer-tail-inset, ${FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX}px)`} + var(--chat-floating-panel-clearance, 0px))`
+                            : `var(--chat-composer-tail-inset, ${FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX}px)`} + var(--chat-floating-panel-reserve, 0px))`
                         : (isMobile ? '40px' : '10vh'),
                 }}
             >
@@ -2086,6 +2086,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         </div>
                     </div>
                 )}
+                <FormDockModeContext.Provider value={resolveFormDockMode(formsInChat, showScrollButton)}>
                 {promptReadOnly && messageSelectionActive && currentSessionId ? (
                     <div className="chat-input-column w-full pb-4">
                         <MessageSelectionBar
@@ -2111,7 +2112,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                             sessionId={currentSessionId}
                             directory={effectiveSessionDirectory}
                             hidden={sessionPermissions.length > 0}
-                            inChat={formsInChat}
                         />
                         <ReadOnlyPromptBanner
                             text={spaceArchive
@@ -2129,9 +2129,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
-                        formsInChat={formsInChat}
                     />
                 )}
+                </FormDockModeContext.Provider>
             </div>
 
             {/* Inside the chat column, not beside it: as a row sibling it took
