@@ -7,7 +7,7 @@ import { Window } from 'happy-dom';
  * happy-dom cannot reproduce Chromium's visibility scan; the observer checks
  * commit-time focus, before Base UI's passive focus effect.
  */
-const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>) => {
+const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>, remoteBranches = ['main'], isMobile = false) => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -50,11 +50,11 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
           value=""
           placeholder="Choose a branch…"
           title="Based on"
-           localBranches={['main', 'feature/one', 'feature/two']}
-          remoteBranches={['main']}
+          localBranches={['main', 'feature/one', 'feature/two']}
+          remoteBranches={remoteBranches}
           isLoading={false}
-          isMobile={false}
-           onSelect={(branch) => selected.push(branch)}
+          isMobile={isMobile}
+          onSelect={(branch) => selected.push(branch)}
         />
       </I18nProvider>,
     ));
@@ -80,10 +80,10 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
     });
     observer.disconnect();
 
-    const search = document.querySelector<HTMLInputElement>('input[data-slot="command-input"]');
+    const search = document.querySelector<HTMLInputElement>(isMobile ? 'input[placeholder="Search branches..."]' : 'input[data-slot="command-input"]');
     if (!search) throw new Error('Missing branch search input');
     await run(search, selected);
-    expect(focusedWhenPopupLanded).toBe('command-input');
+    if (!isMobile) expect(focusedWhenPopupLanded).toBe('command-input');
   } finally {
     await act(async () => root.unmount());
     await dom.happyDOM.abort();
@@ -95,6 +95,51 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
 };
 
 describe('NewWorktreeBranchPicker desktop dropdown', () => {
+  test('mobile pages expose every branch as a button', async () => {
+    const branches = Array.from({ length: 101 }, (_, index) => `origin/branch-${String(index).padStart(3, '0')}`);
+    await openDesktopDropdown(async (_search, selected) => {
+      const button = (text: string) => [...document.querySelectorAll('button')].find((element) => element.textContent === text)!;
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('1 / 2');
+      expect(button('origin/branch-096')).toBeDefined();
+      expect(button('origin/branch-097')).toBeUndefined();
+      await act(async () => button('Next').click());
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('2 / 2');
+      await act(async () => button('origin/branch-100').click());
+      expect(selected).toEqual([{ value: 'remotes/origin/branch-100', label: 'origin/branch-100' }]);
+    }, branches, true);
+  });
+  test('large branch lists are bounded, navigable by page and reset on search', async () => {
+    const branches = Array.from({ length: 201 }, (_, index) => `origin/branch-${String(index).padStart(3, '0')}`);
+    await openDesktopDropdown(async (search, selected) => {
+      const items = () => [...document.querySelectorAll('[cmdk-item]')];
+      const button = (text: string) => [...document.querySelectorAll('button')].find((element) => element.textContent === text)!;
+      expect(items()).toHaveLength(100);
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('1 / 3');
+      await act(async () => button('Next').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      expect(selected).toEqual([]);
+      await act(async () => button('Next').click());
+      expect(items()).toHaveLength(100);
+      expect(items()[0]?.getAttribute('data-value')).toBe('remotes/origin/branch-097');
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('2 / 3');
+      await act(async () => button('Next').click());
+      expect(items()).toHaveLength(4);
+      expect(items()[3]?.getAttribute('data-value')).toBe('remotes/origin/branch-200');
+      await act(async () => button('Back').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      expect(selected).toEqual([]);
+      await act(async () => button('Back').click());
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('2 / 3');
+      await act(async () => {
+        search.focus();
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'branch-200');
+        search.dispatchEvent(new window.Event('input', { bubbles: true }));
+      });
+      expect(items()).toHaveLength(100);
+      expect(document.querySelector('[role="status"]')?.textContent).toBe('1 / 3');
+      expect(items()[0]?.getAttribute('data-value')).toBe('remotes/origin/branch-200');
+      await act(async () => search.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      expect(selected).toEqual([{ value: 'remotes/origin/branch-200', label: 'origin/branch-200' }]);
+    }, branches);
+  });
   for (const keys of [['ArrowDown', 'ArrowUp'], ['n', 'p']]) {
     test(`${keys.join('/')} navigate filtered branches and Enter selects from the focused search`, async () => {
       await openDesktopDropdown(async (search, selected) => {
