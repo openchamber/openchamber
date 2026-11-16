@@ -166,7 +166,7 @@ const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied
                 // The field types into itself: the menu's own typeahead would
                 // take every character, while Escape still closes the menu.
                 onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
-                className="min-h-0"
+                className="min-h-0 flex-1 h-auto"
             >
                 <CommandInput
                     aria-label={t('references.picker.filter.labels.search')}
@@ -184,7 +184,11 @@ const ReferenceLabelSection: React.FC<LabelSectionProps> = ({ directory, applied
                         });
                     }}
                 />
-                <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-48">
+                <CommandList
+                    aria-label={t('references.picker.filter.group.labels')}
+                    className="min-h-0"
+                    outerClassName="w-full min-h-0 flex-1 max-h-none overflow-x-hidden p-0"
+                >
                     <LabelChoicesState choices={choices} empty={shown.length === 0} />
                     {shown.map((label) => {
                         const checked = applied.includes(label.name);
@@ -382,7 +386,12 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
             </DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
-                className={cn('max-h-[min(var(--available-height),28rem)] overflow-y-auto', labelsAvailable ? 'w-64' : 'w-56')}
+                className={cn(
+                    'max-h-[min(var(--available-height),28rem)]',
+                    // The label list scrolls inside the panel; the panel itself must not, or a wheel
+                    // over the labels scrolls the menu and the list at once.
+                    labelsAvailable ? 'flex w-64 flex-col overflow-hidden' : 'w-56 overflow-y-auto',
+                )}
             >
                 {groups.map((entry, index) => (
                     <React.Fragment key={entry.label}>
