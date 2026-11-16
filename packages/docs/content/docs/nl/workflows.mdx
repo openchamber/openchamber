@@ -19,13 +19,19 @@ Workflows hebben de eigen OpenCode-server van OpenChamber nodig. Ze zijn niet be
 
 1. Vraag er in gewone taal om, bijvoorbeeld "Voer een workflow uit die elk bestand dat op deze branch is gewijzigd reviewt en de gevonden bugs opsomt."
 2. De agent stelt een plan voor en een model per fase. Spreek de modellen af voordat de run start: zie [Modellen en kosten](#modellen-en-kosten).
-3. In de chat verschijnt een kaart met het plan. Kies **Workflow uitvoeren** om te starten of **Niet uitvoeren** om het plan te laten vallen. Er draait niets tot u kiest.
+3. In de chat verschijnt een kaart met het plan. Kies **Workflow uitvoeren** om te starten of **Niet uitvoeren** om het plan te laten vallen. Er draait niets tot u kiest, tenzij u runs zonder goedkeuring laat starten (zie hieronder).
 4. Tijdens de run toont de kaart elke fase en agent. De rij van de sessie in de zijbalk toont **Workflow loopt**, en het onderdeel **Workflows** van het werkstatuspaneel toont de run. Kies **Stoppen** om de run eerder te beëindigen.
 5. Als de run klaar is, komt het rapport als bericht in de sessie. Een voltooide of mislukte run wekt de agent, zodat hij op het resultaat kan reageren. Een run die u hebt gestopt of afgewezen doet dat niet.
 
 Een gestopte of mislukte run kunt u voortzetten met **Hervatten**. Agents die al antwoordden houden hun antwoord, en alleen de rest draait opnieuw.
 
 Agents van een lopende workflow kunnen zelf geen workflow starten.
+
+## Runs starten zonder goedkeuring
+
+Zet onder **Workflowtool** de optie **Runs starten zonder mijn goedkeuring** aan om een run die de agent start meteen te laten beginnen. De kaart toont hem als lopend, zonder knop **Workflow uitvoeren**, en u kunt hem nog steeds beëindigen met **Stoppen**. Dit is bedoeld voor werk dat u hebt afgesproken en daarna hebt losgelaten: u vraagt de agent bijvoorbeeld een paar modellen te proberen op een kleine pilot en het hele werk met het beste uit te voeren, en hij kan die run starten terwijl u weg bent.
+
+De agent stelt het plan en de modellen nog steeds in de chat voor voordat hij een run start. De instelling slaat alleen de klik over. De server leest haar bij elke run, dus met het vakje uitgevinkt wacht elke run weer op u. De limieten hieronder blijven gelijk.
 
 ## Modellen en kosten
 

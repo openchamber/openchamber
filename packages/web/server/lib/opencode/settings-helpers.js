@@ -136,6 +136,12 @@ import {
 } from './input-history-scope.js';
 
 /** `provider/model` dreaming runs on, or empty for the default model. */
+const AGENT_TOOL_BOOLEAN_KEYS = [
+  'agentControlToolEnabled', 'agentScheduleToolEnabled', 'agentMemoryToolEnabled', 'agentMemoryDreamingEnabled',
+  'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentNotifyToolEnabled',
+  'agentRenderToolEnabled', 'agentImageToolEnabled', 'agentSecretToolEnabled', 'agentUsageToolEnabled', 'agentTerminalToolEnabled',
+];
+
 const dreamingModelSchema = z.string().trim().refine((value) => value === '' || /^[^/\s]+\/\S+$/.test(value));
 
 // Icons a custom provider may show instead of its logo; mirrors
@@ -966,51 +972,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
       result.browserProvider = candidate.browserProvider.trim();
     }
-    if (typeof candidate.agentControlToolEnabled === 'boolean') {
-      result.agentControlToolEnabled = candidate.agentControlToolEnabled;
-    }
-    if (candidate.agentScheduleToolEnabled === true || candidate.agentScheduleToolEnabled === false) {
-      result.agentScheduleToolEnabled = candidate.agentScheduleToolEnabled;
-    }
-    if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
-      result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
-    }
-    if (candidate.agentMemoryDreamingEnabled === true || candidate.agentMemoryDreamingEnabled === false) {
-      result.agentMemoryDreamingEnabled = candidate.agentMemoryDreamingEnabled;
+    for (const key of AGENT_TOOL_BOOLEAN_KEYS) {
+      if (typeof candidate[key] === 'boolean') result[key] = candidate[key];
     }
     // Empty is a choice: dreaming then runs on the default model, so it is kept, not dropped.
     const dreamingModel = dreamingModelSchema.safeParse(candidate.agentMemoryDreamingModel);
     if (dreamingModel.success) result.agentMemoryDreamingModel = dreamingModel.data;
     const dreamingVariant = z.string().trim().safeParse(candidate.agentMemoryDreamingVariant);
     if (dreamingVariant.success) result.agentMemoryDreamingVariant = dreamingVariant.data;
-    if (candidate.agentKnowledgeToolEnabled === true || candidate.agentKnowledgeToolEnabled === false) {
-      result.agentKnowledgeToolEnabled = candidate.agentKnowledgeToolEnabled;
-    }
-    if (candidate.agentWorkflowToolEnabled === true || candidate.agentWorkflowToolEnabled === false) {
-      result.agentWorkflowToolEnabled = candidate.agentWorkflowToolEnabled;
-    }
-    if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
-      result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
-    }
-    if (candidate.agentRenderToolEnabled === true || candidate.agentRenderToolEnabled === false) {
-      result.agentRenderToolEnabled = candidate.agentRenderToolEnabled;
-    }
-    if (candidate.agentImageToolEnabled === true || candidate.agentImageToolEnabled === false) {
-      result.agentImageToolEnabled = candidate.agentImageToolEnabled;
-    }
     // `provider/model`; the model id may hold slashes of its own (OpenRouter's `openai/gpt-image-2`).
     const agentImageModel = asNonEmptyString(candidate.agentImageModel);
     if (agentImageModel && /^[^/\s]+\/\S+$/.test(agentImageModel)) {
       result.agentImageModel = agentImageModel;
-    }
-    if (candidate.agentSecretToolEnabled === true || candidate.agentSecretToolEnabled === false) {
-      result.agentSecretToolEnabled = candidate.agentSecretToolEnabled;
-    }
-    if (candidate.agentUsageToolEnabled === true || candidate.agentUsageToolEnabled === false) {
-      result.agentUsageToolEnabled = candidate.agentUsageToolEnabled;
-    }
-    if (candidate.agentTerminalToolEnabled === true || candidate.agentTerminalToolEnabled === false) {
-      result.agentTerminalToolEnabled = candidate.agentTerminalToolEnabled;
     }
     if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
       result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;

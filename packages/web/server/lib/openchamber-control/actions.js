@@ -223,7 +223,7 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
  */
 export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
   { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },
-  { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The user approves the plan in the chat; the report arrives here as a message when the run ends. Returns runId at once' },
+  { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The run waits for the user to approve it in the chat, or starts at once when their settings allow that; the report arrives here as a message when the run ends. Returns runId and state at once' },
   { action: 'workflow.status', title: 'Check a workflow run', description: 'Phases, agents with their state, key and session id, recent log lines and a result preview of runId' },
   { action: 'workflow.result', title: 'Read a workflow result', description: "The whole result of runId; with agent (its key or session id) that agent's prompt and full answer" },
   { action: 'workflow.stop', title: 'Stop a workflow run', description: 'Stop runId; its running agents are interrupted' },

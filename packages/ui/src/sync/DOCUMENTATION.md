@@ -1209,7 +1209,7 @@ a failed or empty completion shows a retry, never an empty result. A page's
 shell never replaces a whole call the store already holds
 (`mergeMaterializedPart`), so a tail refresh cannot undo a completion or a
 live call. Every tool row opens on a click, so the client keeps no tool whole;
-file edits and subagent calls are never shelled by the server. Single-message reads are
+file edits, subagent calls and the results the chat draws a card from (`workflow.run`, `image.generate`) are never shelled by the server. Single-message reads are
 always whole, and so are calls arriving by the event stream, except `read` and
 `skill`: their rows open the file in the app and never show the result, so the
 reducer drops it the moment the call finishes (`withoutUnshownResult`), with

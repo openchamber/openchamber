@@ -59,6 +59,7 @@ const textLength = (content) => {
 // returned.
 const isEnvelopeTool = (name) => name === 'execute' || String(name).startsWith('openchamber');
 const MAX_ENVELOPE_CHARS = 256 * 1024;
+const ACTIONS_THE_CHAT_DRAWS_FROM_THEIR_RESULT = new Set(['workflow.run', 'image.generate']);
 
 // A result of one text item small enough to read: an envelope is a few
 // kilobytes, and a large result is something else.
@@ -90,6 +91,7 @@ const shellTool = (part, keepWhole) => {
   const { output: _output, ...keptMetadata } = metadata;
   if (content.length === 0 && _output === undefined) return tool;
   const envelope = isEnvelopeTool(tool.name) ? envelopeSummary(content) : undefined;
+  if (envelope?.ok && ACTIONS_THE_CHAT_DRAWS_FROM_THEIR_RESULT.has(envelope.action)) return tool;
   const marker = envelope ? { chars: textLength(content), envelope } : { chars: textLength(content) };
   return {
     ...tool,

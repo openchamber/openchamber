@@ -9,6 +9,7 @@ import type { TrackerDescriptor } from '@/lib/trackers/types';
 import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
+import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
 
 /**
  * A title is a translated key, or a literal for an entry named after a
@@ -19,7 +20,7 @@ type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
   | { literalTitle: string; titleKey?: never; titleParams?: never };
 
-type SettingsSearchItem = SettingsSearchTitle & {
+export type SettingsSearchItem = SettingsSearchTitle & {
   id: string;
   page: SettingsPageSlug;
   descriptionKey?: I18nKey;
@@ -909,112 +910,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['opencode', 'cli', 'updates'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'sessions.agent-control-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentControlTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentControlToolSummary',
-    keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'worktree', 'control'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-schedule-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentScheduleTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentScheduleToolSummary',
-    keywords: ['agent', 'tool', 'schedule', 'scheduled', 'task', 'cron', 'recurring', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-web-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentWebTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentWebToolSummary',
-    keywords: ['agent', 'tool', 'web', 'browser', 'page', 'preview', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.browser-provider',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.browserProvider.label',
-    descriptionKey: 'settings.openchamber.tools.browserProvider.info',
-    keywords: ['agent', 'browser', 'provider', 'extension', 'chrome', 'server', 'headless'],
-    // Rendered only while its tool is on.
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
-  },
-  {
-    id: 'sessions.agent-browser-logins',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.agentBrowserLogins.label',
-    descriptionKey: 'settings.openchamber.tools.agentBrowserLogins.info',
-    keywords: ['agent', 'browser', 'login', 'cookies', 'profile', 'session', 'security', 'privacy'],
-    // The desktop browser panel's profiles; rendered only while the web tool is on.
-    isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
-  },
-  {
-    id: 'sessions.agent-notify-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentNotifyTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentNotifyToolSummary',
-    keywords: ['agent', 'tool', 'notify', 'notification', 'alert', 'ping', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-usage-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentUsageTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentUsageToolSummary',
-    keywords: ['agent', 'tool', 'usage', 'quota', 'limit', 'reset', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-terminal-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentTerminalTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentTerminalToolSummary',
-    keywords: ['agent', 'tool', 'terminal', 'shell', 'output', 'command', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-image-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentImageTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentImageToolSummary',
-    keywords: ['agent', 'tool', 'image', 'picture', 'generate', 'draw', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-image-model',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.imageModel.label',
-    keywords: ['agent', 'image', 'model', 'picture', 'generate', 'draw'],
-    // Rendered only while its tool is on.
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentImageToolEnabled,
-  },
-  {
-    id: 'sessions.agent-render-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentRenderTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentRenderToolSummary',
-    keywords: ['agent', 'tool', 'render', 'page', 'html', 'chart', 'table', 'diagram', 'generative', 'ui', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-secret-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentSecretTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentSecretToolSummary',
-    keywords: ['agent', 'tool', 'secret', 'token', 'api key', 'password', 'credential', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.agent-knowledge-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentKnowledgeTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentKnowledgeToolSummary',
-    keywords: ['agent', 'tool', 'project', 'knowledge', 'notes', 'todos', 'plans', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...OPENCHAMBER_TOOLS_SEARCH_ITEMS,
   {
     id: 'general.isolated-spaces',
     page: 'isolated-spaces',
@@ -1042,42 +938,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['machine', 'ssh', 'remote', 'docker', 'space', 'spaces', 'host', 'server'],
     // Rendered only while the switch is on, and never in VS Code.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().isolatedSpacesEnabled,
-  },
-  {
-    id: 'sessions.agent-memory-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolSummary',
-    keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
-    // Unreleased: searching for a setting that is not rendered would take the
-    // user to an empty spot on the page.
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
-  },
-  {
-    id: 'sessions.agent-memory-dreaming',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.dreaming.label',
-    descriptionKey: 'settings.openchamber.tools.dreaming.info',
-    keywords: ['memory', 'organize', 'dream', 'dreaming', 'tidy', 'consolidate', 'clean up', 'background'],
-    // Rendered only while memory is on.
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable && useUIStore.getState().agentMemoryToolEnabled,
-  },
-  {
-    id: 'sessions.agent-memory-dreaming-model',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.dreamingModel.searchTitle',
-    keywords: ['memory', 'organize', 'dream', 'dreaming', 'model', 'tidy'],
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable
-      && useUIStore.getState().agentMemoryToolEnabled,
-  },
-  {
-    id: 'sessions.agent-workflow-tool',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
-    descriptionKey: 'settings.openchamber.tools.field.agentWorkflowToolSummary',
-    keywords: ['agent', 'tool', 'workflow', 'workflows', 'subagents', 'fan out', 'parallel', 'openchamber'],
-    // Only where an OpenChamber server backs workflows, like memory.
-    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable,
   },
   {
     id: 'routing.token',

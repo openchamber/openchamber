@@ -6,13 +6,15 @@ A workflow is a JavaScript script an agent writes to fan a large task out to
 many agents: a review per file, an audit across many routes, a migration of
 many files, research cross-checked across sources. OpenChamber runs the script
 here, in its own server, so the agent that asked stays free. The user approves
-each run's plan in the chat before anything starts, and when the run ends its
-report is delivered into the session that proposed it.
+each run's plan in the chat before anything starts, unless they let agents
+start runs without approval, and when the run ends its report is delivered
+into the session that proposed it.
 
 The tool is off until the user turns it on (`agentWorkflowToolEnabled`, Settings
 → General → OpenChamber Tools). Off means no `openchamber_workflow` tool and no
 session guidance, and the runtime refuses every action that proposes, runs or
-saves one. The app hides the Workflows panel, its rail entry and work-status
+saves one. Under it, `agentWorkflowAutoApprove` (off by default) lets
+`workflow.run` start a run at once. The app hides the Workflows panel, its rail entry and work-status
 section, reads no runs, and a past run's card says workflows are off
 (`packages/ui/src/lib/workflows/availability.ts`).
 
@@ -74,6 +76,10 @@ workflow in `../session-knowledge/runtime.js` (`WORKFLOW_GUIDANCE`).
 
 1. `workflow.run` parses the script (or reads a saved one by name), stores a
    run in `awaiting-approval` and answers at once with its id. Nothing runs.
+   With `agentWorkflowAutoApprove` on, the run is admitted as if approved
+   instead: its first save is already `running`, its first log line says it
+   started without approval, and the answer says so. A failed first save
+   publishes no run.
 2. The chat draws the run as a card in place of the call, with Run and Don't
    run; the work-status panel offers the same. Approve starts it; decline ends
    it as `declined`.
@@ -99,8 +105,11 @@ session proposed. `workflow.save` writes a script to
 
 ## Invariants
 
-- No run starts for the first time without the user's approval through the
-  route; the agent tool has no approve action. `workflow.resume` restarts a
+- No run starts for the first time without the user's approval: their click
+  through the route, or `agentWorkflowAutoApprove`, which the server reads
+  from the settings file on every `workflow.run`. The agent tool has no approve
+  action and no input that skips approval, so no client can start a run
+  without one of the two. `workflow.resume` restarts a
   `failed` or `stopped` run without asking again: it is the plan the user
   already approved, the same script and args, and the agent limit below still
   counts the agents of every attempt.
@@ -299,6 +308,23 @@ A workflow run instead is stored as `awaiting-approval` and the call answers
 at once: the card reads the run from this server, so it survives a reload,
 shows on every device, and the agent's turn is not held while the user reads
 the plan.
+
+### Why approval can be switched off, and why enterprise mode does not gate it
+
+The approval click is what stops an agent from spending many agents unasked,
+and it also stops agreed work at night: a user who asks for a pilot and then
+the full run on the best model is away when the agent is ready. The setting
+removes only the click; the session guidance still has the agent agree the
+plan and models in the chat, and the agent limits stay. A run started this way
+stays inside the enterprise boundary: its agents are OpenCode sessions on this
+machine using the providers the session already uses, so the setting crosses
+nothing enterprise mode guards and has no policy key.
+
+### Why the setting is read on the server at each run
+
+The client only writes the setting. `workflow.run` reads it from the settings
+file when the agent calls it, so a cleared checkbox holds whatever a client
+sends, and a change applies to the next run without an OpenCode restart.
 
 ## Runtime parity
 

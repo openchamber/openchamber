@@ -137,6 +137,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
   const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
+  const agentWorkflowAutoApprove = useUIStore((state) => state.agentWorkflowAutoApprove);
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
@@ -212,6 +213,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     setAgentWorkflowToolEnabled(enabled);
     void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
   }, [setAgentWorkflowToolEnabled]);
+
+  const handleWorkflowAutoApproveChange = React.useCallback((enabled: boolean) => {
+    useUIStore.setState({ agentWorkflowAutoApprove: enabled });
+    void updateDesktopSettings({ agentWorkflowAutoApprove: enabled });
+  }, []);
 
   // The dropdown lists installed extensions, so the catalog has to be loaded
   // here too: this page can be the first thing opened after a fresh start.
@@ -295,7 +301,27 @@ export const OpenChamberToolsSettings: React.FC = () => {
             title={t('settings.openchamber.tools.name.workflow')}
             summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
             ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
-          />
+            reveals={['sessions.agent-workflow-auto-approve']}
+          >
+            {agentWorkflowToolEnabled ? (
+              <div data-settings-item="sessions.agent-workflow-auto-approve" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+                <Checkbox
+                  checked={agentWorkflowAutoApprove}
+                  onChange={handleWorkflowAutoApproveChange}
+                  ariaLabel={t('settings.openchamber.tools.workflowAutoApprove.label')}
+                />
+                <button
+                  type="button"
+                  className="truncate typography-meta text-muted-foreground"
+                  onClick={() => handleWorkflowAutoApproveChange(!agentWorkflowAutoApprove)}
+                >
+                  {t('settings.openchamber.tools.workflowAutoApprove.label')}
+                </button>
+                <SettingsNewBadge items={['sessions.agent-workflow-auto-approve']} />
+                <SettingsInfoHint>{t('settings.openchamber.tools.workflowAutoApprove.info')}</SettingsInfoHint>
+              </div>
+            ) : null}
+          </ToolRow>
         ) : null}
         <ToolRow
           icon="calendar-schedule"

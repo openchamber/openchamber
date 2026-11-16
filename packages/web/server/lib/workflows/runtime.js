@@ -6,6 +6,7 @@ import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { WorkflowAgentStopped } from './agent-session.js';
 import { findSchemaContradiction, parseJsonAnswer, validateJsonSchema } from './json-schema.js';
+import { createLimiter } from './limiter.js';
 import { readWorkflowProcessStart } from './process-owner.js';
 import { runWorkflowSandbox } from './sandbox.js';
 import { WorkflowScriptError, parseWorkflowScript, plannedPhases } from './script.js';
@@ -35,34 +36,6 @@ const asText = (value) => (isString(value) ? value : JSON.stringify(value ?? nul
 const callKey = (prompt, options) => crypto.createHash('sha256').update(JSON.stringify([prompt, options])).digest('hex').slice(0, 24);
 
 const createRunId = () => `wf_${crypto.randomBytes(12).toString('base64url').replace(/[-_]/g, '').slice(0, 16).padEnd(16, '0')}`;
-
-/** A small counting semaphore; waiters give up when the run stops. */
-const createLimiter = (limit) => {
-  let active = 0;
-  const queue = [];
-  const release = () => {
-    active -= 1;
-    const next = queue.shift();
-    if (next) next();
-  };
-  const acquire = (signal) => new Promise((resolve, reject) => {
-    const grant = () => {
-      signal.removeEventListener('abort', cancel);
-      active += 1;
-      resolve(release);
-    };
-    const cancel = () => {
-      const index = queue.indexOf(grant);
-      if (index !== -1) queue.splice(index, 1);
-      reject(new WorkflowAgentStopped());
-    };
-    if (signal.aborted) return cancel();
-    if (active < limit) return grant();
-    queue.push(grant);
-    signal.addEventListener('abort', cancel, { once: true });
-  });
-  return { acquire };
-};
 
 const readAgentOptions = (raw) => {
   const source = isPlainObject(raw) ? raw : {};
@@ -200,8 +173,9 @@ const isPidAlive = (pid) => {
 /**
  * Workflow runs: scripts an agent writes that fan work out to many agents,
  * run here in OpenChamber's server so the agent that asked stays free. The
- * user approves each run's plan before it starts; when it ends the report is
- * delivered into the asking session like a dispatched session's result.
+ * user approves each run's plan before it starts, unless their settings let it
+ * start at once; when it ends the report is delivered into the asking session
+ * like a dispatched session's result.
  */
 export const createWorkflowRuntime = ({
   store,
@@ -209,6 +183,7 @@ export const createWorkflowRuntime = ({
   postSynthetic,
   broadcast = () => {},
   isEnabled = async () => true,
+  startsWithoutApproval = async () => false,
   fsPromises,
   path,
   now = Date.now,
@@ -269,7 +244,7 @@ export const createWorkflowRuntime = ({
           if (!Object.hasOwn(before, key)) delete run[key];
         }
         Object.assign(run, before);
-        announce(run, { immediate: true });
+        if (await store.get(run.id)) announce(run, { immediate: true });
       }
       throw error;
     }
@@ -702,10 +677,13 @@ export const createWorkflowRuntime = ({
     };
   };
 
-  /** Proposes a run; it starts when the user approves it in the chat. */
+  /**
+   * Proposes a run; it starts when the user approves it in the chat, or at
+   * once when `approved` says the user's settings already did.
+   */
   // `scriptDirectory`: where a saved workflow named in `input` is read, when the
   // user runs one of the project's from a worktree session (default: `directory`).
-  const propose = async (input, { sessionId, directory, scriptDirectory = directory }) => {
+  const propose = async (input, { sessionId, directory, scriptDirectory = directory }, { approved = false } = {}) => {
     await assertEnabled();
     if (!sessionId) throw new OpenChamberControlError('workflow.run needs the calling session', 400);
     if (!directory) throw new OpenChamberControlError('workflow.run needs the session directory', 400);
@@ -734,13 +712,20 @@ export const createWorkflowRuntime = ({
       agents: [],
       logs: [],
     };
-    await persist(run, { immediate: true });
+    if (approved) {
+      log(run, 'Started without approval: OpenChamber settings let agents start workflow runs', false);
+      await startInBackground(run);
+    } else {
+      await persist(run, { immediate: true });
+    }
     return {
       runId: run.id,
       state: run.state,
       name: run.name,
       phases: run.phases,
-      note: 'The user sees the plan in the chat and approves or declines it. The report arrives here as a message when the run ends, or a note if they decline. Do not poll or wait for it: end your turn or carry on with other work.',
+      note: approved
+        ? 'The run started without waiting for approval: the user allows that in OpenChamber settings. They see it in the chat and can stop it. The report arrives here as a message when the run ends. Do not poll or wait for it: end your turn or carry on with other work.'
+        : 'The user sees the plan in the chat and approves or declines it. The report arrives here as a message when the run ends, or a note if they decline. Do not poll or wait for it: end your turn or carry on with other work.',
     };
   };
 
@@ -987,7 +972,7 @@ export const createWorkflowRuntime = ({
     const scope = { sessionId, directory };
     switch (action) {
       case 'workflow.check': return check(input, scope);
-      case 'workflow.run': return propose(input, scope);
+      case 'workflow.run': return propose(input, scope, { approved: await startsWithoutApproval() });
       case 'workflow.status': return status(input, scope);
       case 'workflow.result': return result(input, scope);
       case 'workflow.stop': return stop(input, scope);

@@ -73,5 +73,14 @@
   "find.next": {"selector": "[data-diff-find-bar] button[aria-label=\"Next match\"]", "means": "The down arrow of the find bar: the next match."},
   "find.close": {"selector": "[data-diff-find-bar] button[aria-label=\"Close search\"]", "means": "The x that closes the find bar."},
   "find.mark": {"selector": "mark[data-oc-find-mark]", "means": "A find match painted inside a diff row."},
-  "find.currentRow": {"selector": "[data-content] > [data-line]:has(mark[data-oc-find-current])", "means": "The diff row holding the active find match; pair it with the row's text."}
+  "find.currentRow": {"selector": "[data-content] > [data-line]:has(mark[data-oc-find-current])", "means": "The diff row holding the active find match; pair it with the row's text."},
+  "settings.switch": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"]", "means": "The switch of a Settings row, by its search anchor (sessions.agent-workflow-tool)."},
+  "settings.switchOn": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"true\"]", "means": "That switch turned on."},
+  "settings.switchOff": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"false\"]", "means": "That switch turned off."},
+  "settings.checkbox": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"]", "means": "The checkbox of a Settings row, by its search anchor."},
+  "settings.checkboxOn": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"true\"]", "means": "That checkbox checked."},
+  "settings.checkboxOff": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"false\"]", "means": "That checkbox cleared."},
+  "workflow.card": {"selector": "[data-component=\"workflow-run\"]", "means": "A workflow run's card in the chat; pair it with its state's text (Waiting for you, Running, Stopped, Not run)."},
+  "workflow.button": {"selector": "[data-component=\"workflow-run\"] button", "means": "A button on a workflow run's card; pair it with its text (Run workflow, Don't run, Stop)."},
+  "sidebar.settings": {"selector": "button[aria-label=\"Settings\"]", "means": "The gear at the bottom of the left sidebar that opens Settings."}
 }
