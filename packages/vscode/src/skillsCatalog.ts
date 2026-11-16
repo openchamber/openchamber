@@ -450,7 +450,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
   }
 }
 
-async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
+export async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
   const srcReal = await fs.promises.realpath(srcDir);
 
   const ensureDir = async (dirPath: string) => {
