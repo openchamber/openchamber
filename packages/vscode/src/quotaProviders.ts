@@ -4859,7 +4859,7 @@ const COMMAND_CODE_API_BASE_URL = 'https://api.commandcode.ai';
 const COMMAND_CODE_ALIASES = ['command-code', 'commandcode', 'command_code', 'command code'];
 
 /** The Go plan's included monthly credits (Drew's quota READ RULE, 2026-11-01). */
-export const COMMAND_CODE_MONTHLY_INCLUDED_CREDITS = 10;
+const COMMAND_CODE_MONTHLY_INCLUDED_CREDITS = 10;
 
 const commandCodeApiKey = (auth: AuthFile): string | null => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, COMMAND_CODE_ALIASES));
@@ -4869,7 +4869,7 @@ const commandCodeApiKey = (auth: AuthFile): string | null => {
 
 const commandCodeFormatCredits = (value: number): string => String(Math.round((value + Number.EPSILON) * 100) / 100);
 
-export const parseCommandCodeCredits = (payload: QuotaJsonValue): Record<string, UsageWindow> => {
+const parseCommandCodeCredits = (payload: QuotaJsonValue): Record<string, UsageWindow> => {
   const root = asObject(payload);
   const credits = asObject(root?.credits);
   const limits = asObject(root?.windowLimits);
@@ -4958,8 +4958,8 @@ type OpenDesignQuotaDependencies = {
 
 const OPEN_DESIGN_API_BASE_URL = 'https://amr-api.open-design.ai/api';
 
-export const OPEN_DESIGN_IMPORT_REQUIRED_ERROR = 'Import the Open Design session cookie in Settings to read Open Design quota';
-export const OPEN_DESIGN_SESSION_EXPIRED_ERROR = 'Open Design session expired; import a fresh session cookie in Settings';
+const OPEN_DESIGN_IMPORT_REQUIRED_ERROR = 'Import the Open Design session cookie in Settings to read Open Design quota';
+const OPEN_DESIGN_SESSION_EXPIRED_ERROR = 'Open Design session expired; import a fresh session cookie in Settings';
 
 // The console reports plan windows by duration: 18000 seconds is the 5-hour
 // window and 604800 is the 7-day window. Windows of any other duration are
@@ -4969,7 +4969,7 @@ const OPEN_DESIGN_WINDOW_LABELS = new Map<number, string>([
   [604800, '7d'],
 ]);
 
-export const parseOpenDesignCodingPlanWindows = (payload: QuotaJsonValue): Record<string, UsageWindow> | null => {
+const parseOpenDesignCodingPlanWindows = (payload: QuotaJsonValue): Record<string, UsageWindow> | null => {
   const data = asObject(payload);
   if (!data || !Array.isArray(data.windows)) return null;
 

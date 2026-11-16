@@ -55,7 +55,7 @@ export type SessionPageLister = (options: SessionListOptions) => Promise<Session
 // Pathology guard, not a product limit: callers page 200-500 sessions at a
 // time, so 100 pages is 20,000-50,000 sessions - far above any real list -
 // while an ever-new cursor stream still terminates instead of looping.
-export const GLOBAL_SESSION_MAX_PAGES = 100;
+const GLOBAL_SESSION_MAX_PAGES = 100;
 
 export async function listGlobalSessionPages(
     listPage: SessionPageLister,

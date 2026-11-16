@@ -70,8 +70,8 @@ const entryFilePath = (pid) => path.join(resolveRegistryDir(), `${pid}.json`);
 // shapes, so a FIFO or a grown file at a registry path is refused promptly
 // to the existing safe defaults instead of freezing the sync launch
 // decision, wedging the async reaper, or being buffered whole.
-export const MANAGED_PROCESS_ENTRY_MAX_BYTES = 64 * 1024;
-export const MANAGED_PROCESS_CLAIM_MAX_BYTES = 1024;
+const MANAGED_PROCESS_ENTRY_MAX_BYTES = 64 * 1024;
+const MANAGED_PROCESS_CLAIM_MAX_BYTES = 1024;
 
 const readBoundedTextSync = (filePath, maxBytes) => {
   const result = readBoundedFileSync(filePath, maxBytes);

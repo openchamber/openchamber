@@ -12,7 +12,7 @@ export const MAX_SEEN_MESSAGE_IDS = 2000;
 // genuinely expires: an id evicted from the capped seen set cannot
 // re-animate hours later by passing freshness against a stale session
 // start that was never refreshed (regression #2124, Codex review on #1014).
-export const FRESHNESS_WINDOW_MS = 5000;
+const FRESHNESS_WINDOW_MS = 5000;
 
 export class MessageFreshnessDetector {
     private static instance: MessageFreshnessDetector;

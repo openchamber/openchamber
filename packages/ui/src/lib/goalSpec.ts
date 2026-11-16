@@ -24,7 +24,7 @@ export const parseGoalSpecSections = (spec: string): { heading: string; body: st
 /** Just the headings a per-section rewrite can offer, in spec order. */
 export const goalSpecSectionHeadings = (spec: string): string[] => parseGoalSpecSections(spec).map((section) => section.heading);
 
-export type GoalSpecDiffLine = { kind: 'same' | 'add' | 'remove'; text: string };
+type GoalSpecDiffLine = { kind: 'same' | 'add' | 'remove'; text: string };
 
 /**
  * Line diff between the spec a rewrite replaced and the spec it produced, so the

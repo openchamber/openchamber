@@ -162,7 +162,7 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
 
 // The union is derived from the runtime list in appearanceVisibleSettings
 // so the two cannot drift; re-exported here for existing importers.
-export type { VisibleSetting } from './appearanceVisibleSettings';
+;
 import type { VisibleSetting } from './appearanceVisibleSettings';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [

@@ -43,7 +43,7 @@ const toBalanceWindow = (value) => toUsageWindow({
 // payload's monthlyCredits is the REMAINING balance of that bucket,
 // so the monthly plan window is derived from it. The top-up balance
 // (purchasedCredits) is never a quota figure.
-export const MONTHLY_INCLUDED_CREDITS = 10;
+const MONTHLY_INCLUDED_CREDITS = 10;
 
 export const parseCommandCodeCredits = (payload) => {
   const root = asObject(payload);

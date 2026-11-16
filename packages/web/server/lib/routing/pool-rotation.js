@@ -19,7 +19,7 @@
  */
 
 /** The issue's defaults: off, one move per pool every 5 minutes at a 70% projection. */
-export const ROTATION_DEFAULTS = Object.freeze({
+const ROTATION_DEFAULTS = Object.freeze({
   enabled: false,
   paceMinutes: 5,
   triggerRatio: 0.7,

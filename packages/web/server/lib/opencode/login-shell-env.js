@@ -19,7 +19,7 @@
 let provided;
 
 // `snapshot` is the parsed `env -0` map, or null when the host's probe failed.
-export const provideLoginShellEnvSnapshot = (snapshot) => {
+const provideLoginShellEnvSnapshot = (snapshot) => {
   provided = snapshot ? { ...snapshot } : null;
 };
 

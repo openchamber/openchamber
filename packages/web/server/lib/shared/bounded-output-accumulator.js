@@ -3,7 +3,7 @@ import { StringDecoder } from 'string_decoder';
 // Default bound for one stream's held output: once the rolling text or the
 // held partial line grows past this many characters only the newest tail
 // is kept, which is all a URL or a log line can occupy.
-export const BOUNDED_OUTPUT_MAX_CHARS = 64 * 1024;
+const BOUNDED_OUTPUT_MAX_CHARS = 64 * 1024;
 
 // Accumulates one stream's output across chunk boundaries. Shared by the
 // cloudflare and ngrok tunnel modules (extracted for #1705; the two local

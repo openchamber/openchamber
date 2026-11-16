@@ -15,7 +15,7 @@
  * the only mode persistence and tunnel-start logic ever see; the revealed
  * mode decides only which mode sections render.
  */
-export type TunnelSearchRevealMode = "managed-remote" | "managed-local";
+type TunnelSearchRevealMode = "managed-remote" | "managed-local";
 
 const TUNNEL_SEARCH_REVEAL_MODES: Readonly<Record<string, TunnelSearchRevealMode>> = {
   "tunnel.managed-remote": "managed-remote",

@@ -4,9 +4,9 @@ import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** The settings page's key: one send-mode preference for every plan action. */
-export const PLAN_ACTION_SEND_MODE_STORAGE_KEY = 'openchamber.routing.plans.actionSendMode';
+const PLAN_ACTION_SEND_MODE_STORAGE_KEY = 'openchamber.routing.plans.actionSendMode';
 
-export type PlanActionSendMode = 'prefill' | 'autosend';
+type PlanActionSendMode = 'prefill' | 'autosend';
 
 /** The stored send mode, defaulting to prefill when unset or unreadable. */
 export const readPlanActionSendMode = (): PlanActionSendMode => {

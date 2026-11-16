@@ -30,13 +30,13 @@ import {
     type VoiceCaptureState,
 } from './facade-transcription';
 
-export const isFacadeCaptureSupported = (): boolean =>
+const isFacadeCaptureSupported = (): boolean =>
     typeof window !== 'undefined' &&
     typeof navigator !== 'undefined' &&
     typeof navigator.mediaDevices?.getUserMedia === 'function' &&
     typeof window.MediaRecorder === 'function';
 
-export interface PendingAudio {
+interface PendingAudio {
     blob: Blob;
     filename: string;
     mediaType: string;
@@ -45,7 +45,7 @@ export interface PendingAudio {
     url: string;
 }
 
-export interface UseFacadeVoiceCaptureOptions {
+interface UseFacadeVoiceCaptureOptions {
     /** §6.3: the transcript lands in the composer as editable draft text. */
     onInsert: (text: string) => void;
     /**
@@ -59,7 +59,7 @@ export interface UseFacadeVoiceCaptureOptions {
     language?: string;
 }
 
-export interface FacadeVoiceCapture {
+interface FacadeVoiceCapture {
     state: VoiceCaptureState;
     supported: boolean;
     /** Elapsed recording seconds while state === 'recording'. */

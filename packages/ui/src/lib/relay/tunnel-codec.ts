@@ -134,7 +134,7 @@ export const encodeFragmentedMessage = (
 // itself (one largest legitimate message, or equivalent partials), and the
 // number of pending keys is capped so tiny fragments cannot amplify into
 // unbounded Map overhead either.
-export const MAX_PENDING_FRAGMENT_KEYS = 1024;
+const MAX_PENDING_FRAGMENT_KEYS = 1024;
 
 /**
  * Reassembles fragmented messages per (streamId, frameType). Bounded to protect memory:

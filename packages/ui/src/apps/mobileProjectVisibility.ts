@@ -5,13 +5,13 @@ import type { Session } from '@/lib/opencode/model';
     the In work zone (hiddenFromWork) and from All sessions lists
     (hiddenFromAllSessions). The flags live on the project entry; the
     sets below are the sheet-side form of the desktop sets. */
-export type ProjectVisibilitySource = {
+type ProjectVisibilitySource = {
   id: string;
   hiddenFromWork?: boolean;
   hiddenFromAllSessions?: boolean;
 };
 
-export type ProjectVisibilitySets = {
+type ProjectVisibilitySets = {
   hiddenFromWorkProjectIds: ReadonlySet<string>;
   hiddenFromAllProjectIds: ReadonlySet<string>;
 };
@@ -31,7 +31,7 @@ export const projectVisibilitySets = (
     index), or null/undefined when no registered project owns it.
     Ownerless sessions are never hidden: the desktop filter keeps an
     item whose project is unknown. */
-export type SessionProjectOwner = (session: Session) => string | null | undefined;
+type SessionProjectOwner = (session: Session) => string | null | undefined;
 
 export const isSessionHiddenFromWork = (
   session: Session,

@@ -15,7 +15,7 @@
  * error object. Consumers ask `isOpenCodeUpstreamAuthRejection`.
  */
 
-export const OPENCODE_UPSTREAM_AUTH_ORIGIN = 'opencode-credential-source';
+const OPENCODE_UPSTREAM_AUTH_ORIGIN = 'opencode-credential-source';
 
 export class OpenCodeUpstreamAuthError extends Error {
   constructor(message = 'Authentication required', options = undefined) {

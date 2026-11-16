@@ -17,7 +17,7 @@
  */
 
 /** Façade route on the opencode server (design §2.1/§2.2). */
-export const TRANSCRIPTION_ENDPOINT_PATH = '/v1/audio/transcriptions';
+const TRANSCRIPTION_ENDPOINT_PATH = '/v1/audio/transcriptions';
 
 /**
  * Absolute façade URL from the opencode base URL the UI is configured
@@ -40,7 +40,7 @@ export const DEFAULT_TRANSCRIPTION_MODEL = 'openai/whisper-1';
  * registration is a hosted HTTP backend, so every one of these refs has
  * `audio_leaves_machine = true` in the registry (design §3/§5.3).
  */
-export const HOSTED_TRANSCRIPTION_MODELS: ReadonlyArray<string> = [
+const HOSTED_TRANSCRIPTION_MODELS: ReadonlyArray<string> = [
     'openai/whisper-1',
     'deepgram/nova-3',
     'google/gemini-3.5-transcribe',
@@ -58,7 +58,7 @@ export const MAX_AUDIO_DURATION_SECONDS = 600;
  * no usable type, the filename extension decides (§5.1 — the façade
  * still makes the final call and answers `unsupported_media_type`).
  */
-export const ACCEPTED_AUDIO_MEDIA_TYPES: ReadonlyArray<string> = [
+const ACCEPTED_AUDIO_MEDIA_TYPES: ReadonlyArray<string> = [
     'audio/mpeg',
     'audio/mp3',
     'audio/mp4',
@@ -133,7 +133,7 @@ export class FacadeTranscriptionError extends Error {
     }
 }
 
-export interface AudioInputInfo {
+interface AudioInputInfo {
     sizeBytes: number;
     mediaType?: string;
     filename?: string;
@@ -361,7 +361,7 @@ export const parseFacadeError = (status: number, data: unknown): FacadeTranscrip
     return new FacadeTranscriptionError(byStatus, bodyMessage ?? `Transcription failed (HTTP ${status}).`, status);
 };
 
-export interface TranscriptionRequestOptions {
+interface TranscriptionRequestOptions {
     model?: string;
     language?: string;
     prompt?: string;
@@ -386,12 +386,12 @@ export const buildTranscriptionFormData = (
     return form;
 };
 
-export interface TranscriptionFetchInit {
+interface TranscriptionFetchInit {
     method: string;
     body: FormData;
 }
 
-export interface TranscriptionFetchResponse {
+interface TranscriptionFetchResponse {
     ok: boolean;
     status: number;
     json: () => Promise<unknown>;
@@ -400,7 +400,7 @@ export interface TranscriptionFetchResponse {
 /** The slice of the runtime transport this client needs (runtimeFetch in the app). */
 export type TranscriptionFetch = (url: string, init: TranscriptionFetchInit) => Promise<TranscriptionFetchResponse>;
 
-export interface TranscribeViaFacadeInput {
+interface TranscribeViaFacadeInput {
     fetchFn: TranscriptionFetch;
     /** Absolute URL of the façade endpoint (opencode base root + path). */
     url: string;
@@ -482,7 +482,7 @@ export const insertTranscriptIntoDraft = (
  */
 export type VoiceCaptureState = 'idle' | 'recording' | 'reviewing' | 'submitting' | 'inserted' | 'error';
 
-export type VoiceCaptureEvent =
+type VoiceCaptureEvent =
     | { type: 'start_recording' }
     | { type: 'recording_stopped' }
     | { type: 'duration_cap_reached' }

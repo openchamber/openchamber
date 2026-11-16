@@ -26,8 +26,8 @@ import path from 'node:path';
 const TERMINAL_STATUSES = new Set(['success', 'error']);
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
-export const MAX_RUN_HISTORY_ROWS = 5000;
-export const MAX_RUN_HISTORY_LOAD_BYTES = 8 * 1024 * 1024; // 8 MiB, the tracked-items cap
+const MAX_RUN_HISTORY_ROWS = 5000;
+const MAX_RUN_HISTORY_LOAD_BYTES = 8 * 1024 * 1024; // 8 MiB, the tracked-items cap
 
 const runKey = (projectID, taskID, sessionID) =>
   `${projectID}\0${taskID}\0${sessionID ?? ''}`;
