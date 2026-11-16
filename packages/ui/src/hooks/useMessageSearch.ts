@@ -31,12 +31,6 @@ type MessageSearchOptions = {
 
 const IDLE: MessageSearchState = { status: 'idle' };
 
-/**
- * One search at a time: a new query or filter aborts the request in flight,
- * and an answer to anything but the current request is dropped. The hits of
- * the previous query stay visible while the next one loads, so the list does
- * not flash empty between keystrokes.
- */
 export const useMessageSearch = ({ query, enabled, limit, sessionId = null, directories, role = null, includeReasoning = true, order = 'desc', lifecycle }: MessageSearchOptions) => {
   const [state, setState] = React.useState<MessageSearchState>(IDLE);
   const directoriesKey = (directories ?? []).join('\n');
@@ -81,7 +75,6 @@ export const useMessageSearch = ({ query, enabled, limit, sessionId = null, dire
       pageControllerRef.current = null;
       readyKeyRef.current = null;
     };
-    // `requestKey` stands for query, filters and page size together.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, requestKey]);
 

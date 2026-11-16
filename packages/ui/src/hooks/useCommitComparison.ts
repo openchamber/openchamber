@@ -29,8 +29,6 @@ export function useCommitComparison(directory: string | null, branch: string | n
     const requestRuntime = getRuntimeKey();
     setHistory({ key, status: 'loading' });
     try {
-      // A detached worktree reports its branch as the literal `HEAD`, which git
-      // rejects as a branch name, so qualifying it fails the whole request.
       const to = branch && branch !== 'HEAD' ? `refs/heads/${branch}` : 'HEAD';
       if (!git.getGitLog) {
         setHistory({ key, status: 'error', message: t('commitComparison.loadError') });

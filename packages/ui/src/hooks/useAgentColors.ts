@@ -5,8 +5,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { createAgentColorResolver } from '@/lib/agentColors';
 
-// Message footers share one allocation with the composer. Immutable theme and
-// roster identities invalidate it; weak keys release obsolete snapshots.
 const resolvers = new WeakMap<Theme, WeakMap<Agent[], ReturnType<typeof createAgentColorResolver>>>();
 
 export function useAgentColors() {
