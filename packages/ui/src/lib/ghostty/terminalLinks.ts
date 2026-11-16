@@ -1,6 +1,3 @@
-// Adapted from T3 Code's libghostty-vt browser adapter (MIT, T3 Tools Inc.).
-// See LICENSE-T3CODE in this directory.
-
 export interface TerminalLinkMatch {
   readonly text: string;
   readonly start: number;
@@ -46,7 +43,6 @@ function trimClosingDelimiters(value: string): string {
   return output;
 }
 
-/** http(s) URLs in one logical line, with trailing punctuation and unbalanced brackets trimmed. */
 export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
   const matches: TerminalLinkMatch[] = [];
   URL_PATTERN.lastIndex = 0;
@@ -61,10 +57,6 @@ export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
   return matches;
 }
 
-/**
- * Joins a soft-wrapped line back together so a URL that the terminal broke
- * across rows matches as one string, remembering where each row's text sits.
- */
 export function collectWrappedTerminalLinkLine(
   bufferLineNumber: number,
   getLine: (bufferLineIndex: number) => TerminalBufferLineLike | null | undefined,

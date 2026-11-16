@@ -1,6 +1,3 @@
-// Adapted from T3 Code's libghostty-vt browser adapter (MIT, T3 Tools Inc.).
-// See LICENSE-T3CODE in this directory.
-
 import {
   GHOSTTY_CELL_WIDE,
   ghosttyColorsEqual,
@@ -10,7 +7,6 @@ import {
 } from './core';
 import { drawBoxDrawingGlyph, isBoxDrawingText, type BoxDrawingContext } from './boxDrawing';
 
-/** The canvas operations the renderer uses; a CanvasRenderingContext2D satisfies it structurally. */
 export interface GhosttyRenderContext extends BoxDrawingContext {
   readonly canvas: { readonly width: number; readonly height: number };
   font: string;
@@ -53,9 +49,6 @@ function cssColor(color: GhosttyColor): string {
 }
 
 function sameTextStyle(left: GhosttyCell, right: GhosttyCell): boolean {
-  // Selection deliberately does not participate: it only tints the background
-  // overlay, and splitting a text run at a selection boundary visibly shifts
-  // glyph spacing whenever the face's true advance differs from the cell width.
   return (
     ghosttyColorsEqual(left.foreground, right.foreground) &&
     left.bold === right.bold &&
@@ -138,7 +131,6 @@ export function renderGhosttySnapshot(options: {
   readonly focused?: boolean;
   readonly selectionBackground?: string;
   readonly hoveredLinkRange?: GhosttyCellRange | null;
-  /** Vertical origin of row 0; defaults to the horizontal padding. */
   readonly originY?: number;
 }): void {
   const {
@@ -227,8 +219,6 @@ export function renderGhosttySnapshot(options: {
         runStart += 1;
         continue;
       }
-      // Borders, bars and block logos are drawn to the exact cell instead of
-      // through the font, whose glyphs leave a gap at the terminal line height.
       if (isBoxDrawingText(first.text)) {
         if (!first.invisible) {
           drawBoxDrawingGlyph(
@@ -301,7 +291,6 @@ export function renderGhosttySnapshot(options: {
     const top = originY + snapshot.cursorY * metrics.height;
     context.fillStyle = cssColor(snapshot.cursor);
     if (!focused) {
-      // An unfocused terminal draws a hollow cursor so the active pane is obvious.
       context.strokeStyle = cssColor(snapshot.cursor);
       context.strokeRect(left + 0.5, top + 0.5, metrics.width - 1, metrics.height - 1);
     } else if (snapshot.cursorStyle === 0) {
