@@ -109,8 +109,10 @@ export const decideManagedOpenCodeLaunch = ({ state, ownsPid, binary, args, fing
 
 // ---- v2 versioned store (issue #82) ----
 // One document { schema_version: 2, generations: [...], handoffs: [...] },
-// written atomically on every transition. Replaces the v1 state.json +
-// draining.json pair for reads/writes once lifecycle.js is wired to it.
+// written atomically on every transition. Wired into lifecycle.js as a
+// dual-write with the v1 state.json + draining.json pair (kept for one
+// release): the store is the ownership record for action paths, and the
+// v1 pair is retired once the dual-write release has passed.
 export const MANAGED_OPENCODE_STORE_VERSION = 2;
 const MANAGED_OPENCODE_STORE_MAX_BYTES = 256 * 1024;
 
