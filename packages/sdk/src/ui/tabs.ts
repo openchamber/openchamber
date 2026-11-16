@@ -12,7 +12,6 @@ export type TabsProps = {
   items: TabItem[];
   activeId: string;
   onChange: (id: string) => void;
-  /** Paints a faint track behind the pills. */
   trackBackground?: boolean;
 };
 

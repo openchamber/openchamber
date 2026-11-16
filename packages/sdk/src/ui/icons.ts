@@ -2,7 +2,6 @@ import { len } from './style.ts';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** Remixicon outlines. Add a shape only when a primitive paints it. */
 const ICON_PATH = {
   search: 'M18.031 16.617l4.283 4.282-1.415 1.415-4.282-4.283A8.96 8.96 0 0 1 11 20c-4.968 0-9-4.032-9-9s4.032-9 9-9 9 4.032 9 9a8.96 8.96 0 0 1-1.969 5.617zm-2.006-.742A6.977 6.977 0 0 0 18 11c0-3.868-3.133-7-7-7-3.868 0-7 3.132-7 7 0 3.867 3.132 7 7 7a6.977 6.977 0 0 0 4.875-1.975l.15-.15z',
   chevron: 'M12 13.172l4.95-4.95 1.414 1.414L12 16 5.636 9.636 7.05 8.222z',
@@ -17,7 +16,6 @@ export const icon = (name: IconName, size: number, className?: string): SVGSVGEl
   node.setAttribute('viewBox', '0 0 24 24');
   node.setAttribute('width', String(size));
   node.setAttribute('height', String(size));
-  // The attributes are the size where no kit styles apply; the style scales with the frame's text.
   node.style.width = len(size);
   node.style.height = len(size);
   node.setAttribute('aria-hidden', 'true');

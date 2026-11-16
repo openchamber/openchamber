@@ -47,12 +47,7 @@ const isValue = (value: string): boolean => (
   String(value) === value && value.length >= 1 && value.length <= GUEST_STATUS_CONTROL_VALUE_MAX
 );
 
-/**
- * Guest-side fast-fail guard for `setStatusControls`. The host zod schema is
- * still authoritative because JavaScript callers can bypass this SDK method.
- */
 export const isGuestStatusControls = (controls: GuestStatusControl[]): boolean => {
-  // The public type is precise, but this boundary also receives untyped JavaScript callers.
   if (!Array.isArray(controls) || controls.length > GUEST_STATUS_CONTROLS_MAX) return false;
   const ids = new Set<string>();
   for (const control of controls) {
