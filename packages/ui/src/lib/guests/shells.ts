@@ -9,11 +9,6 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { normalizePath } from '@/lib/pathNormalization';
 import { guestProject, guestProjectWorktrees } from './workspace';
 
-/**
- * The sessions a scope covers, or null for every session. A project scope
- * covers the sessions that run in the project root or one of its worktrees,
- * the same membership the workspace projection reports.
- */
 const scopeSessionIds = (scope: GuestShellsScope): ReadonlySet<string> | null => {
   if (scope.kind === 'global') return null;
   const sessions = useGlobalSessionsStore.getState().entityById;
@@ -48,10 +43,6 @@ const guestEndedShell = (shell: EndedShell): GuestEndedShell => (shell.exit === 
   ? { ...guestShell(shell), status: shell.status, endedAt: shell.endedAt }
   : { ...guestShell(shell), status: shell.status, exit: shell.exit, endedAt: shell.endedAt });
 
-/**
- * The running shells a scope covers, oldest first, and the ones that ended,
- * oldest end first with the newest kept. Local store only; never a network read.
- */
 export const readGuestShells = (scope: GuestShellsScope): GuestRunningShellsSnapshot => {
   const store = useBackgroundShellsStore.getState();
   const inScope = scopeSessionIds(scope);
@@ -70,11 +61,6 @@ export const readGuestShells = (scope: GuestShellsScope): GuestRunningShellsSnap
   return { kind: 'shells', scope, shells: shells.slice(0, GUEST_SHELLS_MAX), ended: ended.slice(-GUEST_SHELLS_MAX) };
 };
 
-/**
- * One page of a command's output, running or ended. OpenCode keeps an ended
- * command's output until it evicts the command (it retains the latest 25 per
- * directory); a stopped command's output goes with it at once.
- */
 export const readGuestShellOutput = async (shellId: string, cursor?: number, tailBytes?: number): Promise<GuestShellOutputResult> => {
   const store = useBackgroundShellsStore.getState();
   const ended = store.ended.get(shellId);
@@ -98,7 +84,6 @@ const scopeKey = (scope: GuestShellsScope): string => {
 type Observer = { listeners: Set<(snapshot: GuestRunningShellsSnapshot) => void>; snapshot: GuestRunningShellsSnapshot; dispose: () => void };
 const observers = new Map<string, Observer>();
 
-/** One shared observer per runtime and scope, mirroring the workspace observer lifecycle. */
 export const observeGuestShells = (scope: GuestShellsScope, listener: (snapshot: GuestRunningShellsSnapshot) => void): (() => void) => {
   if (scope.kind === 'project') guestProject(scope.projectId);
   const key = `${getRuntimeKey()}|${scopeKey(scope)}`;

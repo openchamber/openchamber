@@ -11,13 +11,6 @@ type SessionActionTarget = {
   directory: string | null | undefined;
 };
 
-/**
- * Run a session action from a menu: load the conversation when the action
- * asked for it and the grant covers it, then dispatch the declared mode.
- * `loadRecords` answers `null` for a failed load; the caller reports that
- * and nothing opens, so the guest never sees an empty conversation that is
- * really a fetch failure.
- */
 export const runGuestSessionAction = async (input: {
   entry: GuestActionEntry;
   session: SessionActionTarget;

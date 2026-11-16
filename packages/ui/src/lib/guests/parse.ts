@@ -40,7 +40,6 @@ import { z } from 'zod';
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
-/** Characters in one stored setting value, as the server's auth store caps it. */
 const GUEST_TOOL_LINK_SETTING_MAX = 2000;
 const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -75,33 +74,23 @@ const publicServiceSchema = z.object({
     exec: z.array(z.string().trim().min(1)).optional(),
   }).optional(),
   socketBindings: z.array(publicSocketBindingSchema).optional(),
-  // A role this build does not know (a newer server) drops the field, not the
-  // catalog: every other extension must keep working.
   provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).optional().catch(undefined),
   surface: z.literal(true).optional().catch(undefined),
   keepRunning: z.literal(true).optional().catch(undefined),
   schedule: z.array(z.object({ id: z.string(), cron: z.string(), timezone: z.string().optional() })).optional().catch(undefined),
 });
 
-// The Git host a source-control provider extension adds, as the approval
-// dialog shows it. A malformed slice drops the field, never the row.
 const publicSourceControlSchema = z.object({
   label: z.string().trim().min(1).max(64),
   defaultInstances: z.array(z.string().trim().min(1)).max(4),
   custom: z.boolean(),
 });
 
-// The session events a service subscribed to, as the approval dialog lists
-// them. An event type this build does not know is a newer server: the field
-// drops, never the row.
 const publicSessionEventsSchema = z.object({
   events: z.array(z.enum(GUEST_SESSION_EVENT_TYPES)).min(1).max(GUEST_SESSION_EVENT_TYPES.length),
   content: z.boolean(),
 });
 
-// The notification channel a `notifications` service provides, as the
-// approval dialog and the Integrations card show it. A malformed slice drops
-// the field, never the row.
 export const publicNotificationsSchema = z.object({
   label: z.string().trim().min(1).max(64),
   instances: z.union([
@@ -116,8 +105,6 @@ export const publicNotificationsSchema = z.object({
   }),
 });
 
-// The tracker a `tracker` service provides, as the approval dialog and the
-// account card show it. A malformed slice drops the field, never the row.
 const publicTrackerInstancesSchema = z.union([
   z.object({ kind: z.literal('fixed'), origin: z.string().trim().min(1).max(2_048) }),
   z.object({ kind: z.literal('user'), label: z.string().trim().min(1).max(64), placeholder: z.string().trim().max(256).optional() }),
@@ -135,9 +122,6 @@ const publicTrackerSchema = z.object({
   oauth: z.object({ scopes: z.array(z.string().trim().min(1).max(64)).max(32) }).optional(),
 });
 
-// The usage provider a `quota` service provides, as the approval dialog shows
-// it: the OpenCode providers whose credentials the service receives. A
-// malformed slice drops the field, never the row.
 const publicQuotaSchema = z.object({
   providers: z.array(z.string().trim().min(1).max(64)).max(16),
 });
@@ -176,7 +160,6 @@ const guestToolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).optional(),
   columns: z.array(z.string().trim().min(1)).optional(),
-  // The SDK's own schema: a card is drawn from these templates, one of them an `href`.
   card: guestToolCardSchema.optional(),
 });
 
@@ -192,8 +175,6 @@ export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
 
-// `contributes.links` as the server compiled it (`guests/links.js`): literal
-// keys, and link patterns the UI only runs, never a template it compiles.
 const publicLinksSchema = z.object({
   action: z.enum(GUEST_LINK_ACTIONS),
   keys: z.array(z.string().regex(GUEST_LINK_KEY)).max(GUEST_LINK_KEYS_MAX),
@@ -214,7 +195,6 @@ const installedGuestSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().min(1),
   entry: z.string().trim().min(1).optional(),
-  /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
   entryMobile: z.literal(true).optional().catch(undefined),
@@ -241,7 +221,6 @@ const installedGuestSchema = z.object({
   service: publicServiceSchema.optional(),
   sourceControl: publicSourceControlSchema.optional().catch(undefined),
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
-  // Only what the approval dialog names; a malformed slice drops the field, never the row.
   waits: z.array(z.object({
     id: z.string().regex(GUEST_WAIT_ID),
     title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
@@ -261,9 +240,7 @@ const installedGuestSchema = z.object({
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
-  // Values a card link reads; a malformed slice costs those links, never the row.
   toolLinkSettings: z.record(z.string().regex(PANEL_ID), z.string().min(1).max(GUEST_TOOL_LINK_SETTING_MAX)).optional().catch(undefined),
-  // A row with logos this build cannot read keeps the rest of the extension.
   providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   capabilities: z.object({
@@ -281,7 +258,6 @@ const installedGuestSchema = z.object({
   update: guestUpdateSchema.optional(),
 });
 
-// A delivery state this build does not know draws nothing: the card would otherwise offer a button for a case it cannot describe.
 const openCodePluginsSchema = z.object({
   delivery: z.enum(['file', 'restart', 'none', 'remote']),
   globalConfigPath: z.string().nullable(),
@@ -293,19 +269,12 @@ const catalogSchema = z.object({
   opencodePlugins: openCodePluginsSchema.optional().catch(undefined),
 });
 
-// What Settings can still show of a row it cannot read, so the user can
-// remove it. Each field falls back on its own.
 const unreadableGuestSchema = z.object({
   id: z.string().regex(PANEL_ID).nullable().catch(null),
   name: z.string().trim().min(1).nullable().catch(null),
   source: z.string().nullable().catch(null),
 }).catch({ id: null, name: null, source: null });
 
-/**
- * Rows are read one by one: a row this build cannot read (a newer server, a
- * broken package) is listed in `unreadable` and every other row still loads.
- * Only a response without a guest list is a failure.
- */
 export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
   try {
     const parsed = catalogSchema.safeParse(JSON.parse(json));
@@ -326,11 +295,6 @@ export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
   }
 };
 
-/**
- * The answer to an install: the row, `'unreadable'` when the server installed
- * a package and answered with a row this build cannot read, or null when the
- * answer is not an install row at all.
- */
 export const parseInstallAnswerJson = (json: string): InstalledGuest | 'unreadable' | null => {
   try {
     const raw: unknown = JSON.parse(json);

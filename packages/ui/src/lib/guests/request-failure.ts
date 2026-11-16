@@ -8,7 +8,6 @@ export type GuestRequestFailure = {
   | { kind: 'http' | 'invalid-response'; status: number }
 );
 
-/** Diagnostics contain fixed routes and status codes, never credentials or response bodies. */
 export const describeGuestRequestFailure = (failure: GuestRequestFailure, t: ReturnType<typeof useI18n>['t']): string => {
   const request = `${failure.method} ${failure.path}`;
   if (failure.kind === 'network') return `${request}: ${t('settings.extensions.request.noResponse')}`;
