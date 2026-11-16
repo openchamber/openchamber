@@ -829,7 +829,7 @@
       "id": "footer",
       "name": "The turn footer",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnFooter.tsx", "packages/ui/src/components/chat/message/body/AssistantTurnActionButtons.tsx", "packages/ui/src/components/chat/message/body/AssistantCopyButton.tsx", "packages/ui/src/components/chat/message/body/useFooterSheetActions.tsx", "packages/ui/src/components/chat/message/body/useAssistantForkActions.ts", "packages/ui/src/components/chat/message/body/useAssistantPlanActions.ts", "packages/ui/src/components/chat/message/body/useAssistantImageShare.ts", "packages/ui/src/components/chat/message/imageExport.ts", "packages/ui/src/components/chat/message/useCopyMessageLink.ts", "packages/ui/src/components/chat/message/useFactsFit.ts", "packages/ui/src/components/chat/messageSelection/MessageSelectionBar.tsx", "packages/ui/src/components/session/ForkSessionDialog.tsx", "packages/ui/src/components/session/SaveProjectPlanDialog.tsx", "packages/ui/src/components/multirun/AskOtherModelsDialog.tsx"],
-      "what": "Under a turn's final answer: the model and agent that answered, the time it took, and actions on hover: copy, continue from this answer, pin, and a menu with Copy link, Save as image, Select messages, Save as plan.",
+      "what": "Under a turn's final answer: the model and agent that answered, the time it took, and actions on hover: copy, continue from this answer, pin, and a menu with Copy link, Save as image, Save as Markdown, Select messages, Save as plan.",
       "reach": "Open a session with a finished turn, hover the answer.",
       "proof": "The footer names the model and agent; each action does what it says: a fork, a dialog, a draft, a toast, a pressed pin.",
       "scenarios": [
@@ -947,6 +947,20 @@
             {"do": "click", "on": "chat.footerMore"},
             {"do": "click", "on": "menu.item", "text": "Save as image"},
             {"do": "see", "on": "toast", "text": "Image saved"}
+          ]
+        },
+        {
+          "id": "markdown",
+          "kind": "path",
+          "title": "Save as Markdown saves the answer as a Markdown file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer markdown"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Save as Markdown"},
+            {"do": "see", "on": "toast", "text": "Markdown saved"}
           ]
         },
         {

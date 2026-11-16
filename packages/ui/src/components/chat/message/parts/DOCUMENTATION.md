@@ -220,7 +220,9 @@ screen and removes its temporary host after taking the result. Image export
 prepares code highlighting with a bounded wait, then synchronously commits the
 prepared tokens before cloning the result. Export
 disables filesystem probes and media loading, preserves original media source
-metadata, and omits controls and authenticated asset URLs.
+metadata, and omits controls and authenticated asset URLs. The footer also
+saves the whole turn as Markdown: `useAssistantMarkdownSave` (in
+`message/body/`) joins the same text and hands the `.md` file to `saveFile`.
 
 Rich clipboard output normalizes only its detached result: code and Mermaid source become
 semantic `pre/code` with literal source newlines, and media becomes safe text

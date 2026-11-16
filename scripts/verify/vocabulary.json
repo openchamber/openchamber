@@ -44,7 +44,7 @@
   "chat.footer": {"selector": "[data-message-footer]", "means": "The line under a turn's final answer: model, agent, duration, then the actions on hover."},
   "chat.footerBranch": {"selector": "[data-message-footer] button[aria-label=\"Continue from this answer\"]", "means": "The footer button whose menu forks the session or starts a new session or multi-run from the answer."},
   "chat.footerPin": {"selector": "[data-message-footer] button[aria-pressed=\"{pressed}\"]", "means": "The footer pin that keeps the answer in context; pressed true once pinned."},
-  "chat.footerMore": {"selector": "[data-message-footer] button[aria-label=\"More actions\"]", "means": "The footer ...: Copy link, Save as image, Select messages, Save as plan."},
+  "chat.footerMore": {"selector": "[data-message-footer] button[aria-label=\"More actions\"]", "means": "The footer ...: Copy link, Save as image, Save as Markdown, Select messages, Save as plan."},
   "chat.changedFilesToggle": {"selector": "[data-message-footer] button[aria-expanded=\"{expanded}\"]", "means": "The +N chip after the first changed files; it shows the rest, and then hides them again."},
   "chat.answerDivider": {"selector": "[data-message-id] div[aria-hidden=\"true\"].h-px", "means": "The thin line between a turn's steps and its final answer."},
   "chat.selectionBar": {"selector": "[data-message-selection-bar]", "means": "The bar Select messages opens over the composer: the count and the export actions."},
