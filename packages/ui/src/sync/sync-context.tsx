@@ -2090,7 +2090,7 @@ const recordTurnOutcomeNotification = (
   appendErrorNotification({
     directory,
     session: sessionID,
-    time: payload.type === "session.error" ? payload.properties.time ?? Date.now() : Date.now(),
+    time: payload.type === "session.error" ? payload.properties.time : Date.now(),
     error: { ...errorSummary, responseBody },
   })
 }

@@ -49,10 +49,11 @@ describe("events for directories without a store", () => {
 
   test("a turn failing in an unopened directory keeps what OpenCode reported", () => {
     const routingIndex = createEventRoutingIndex()
+    const time = Date.now() - 60_000
     const idle: SyncEvent = { type: "session.idle", properties: { sessionID: "ses_far" } }
     const error: SyncEvent = {
       type: "session.error",
-      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "boom" } },
+      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "boom" }, time },
     }
 
     handleEvent("/far", idle, childStores, routingIndex, getRuntimeKey())
@@ -60,6 +61,7 @@ describe("events for directories without a store", () => {
 
     const recorded = useNotificationStore.getState().list.map(({ session, directory, error }) => ({ session, directory, message: error?.message }))
     expect(recorded).toEqual([{ session: "ses_far", directory: "/far", message: "boom" }])
+    expect(useNotificationStore.getState().list[0]?.time).toBe(time)
     expect(childStores.getChild("/far")).toBeUndefined()
   })
 
@@ -67,7 +69,7 @@ describe("events for directories without a store", () => {
     const routingIndex = createEventRoutingIndex()
     handleEvent("/far", {
       type: "session.error",
-      properties: { sessionID: "ses_far_child", error: { type: "UnknownError", message: "boom" } },
+      properties: { sessionID: "ses_far_child", error: { type: "UnknownError", message: "boom" }, time: Date.now() },
     }, childStores, routingIndex, getRuntimeKey())
 
     expect(useNotificationStore.getState().list).toEqual([])
@@ -76,7 +78,7 @@ describe("events for directories without a store", () => {
   test("an error buffered by a previous runtime is not recorded for the current runtime", () => {
     handleEvent("/far", {
       type: "session.error",
-      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "old runtime" } },
+      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "old runtime" }, time: Date.now() },
     }, childStores, createEventRoutingIndex(), "retired-runtime")
 
     expect(useNotificationStore.getState().list).toEqual([])

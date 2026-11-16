@@ -86,7 +86,7 @@ const buildDeleteEvent = (sessionId: string): SyncEvent => ({
 const buildLifecycleEvent = (type: "session.idle" | "session.error", sessionId: string): SyncEvent => (
   type === "session.idle"
     ? { type, properties: { sessionID: sessionId } }
-    : { type, properties: { sessionID: sessionId, error: { type: "UnknownError", message: "failed" } } }
+    : { type, properties: { sessionID: sessionId, error: { type: "UnknownError", message: "failed" }, time: Date.now() } }
 )
 
 describe("applySessionEventToGlobalSessions", () => {

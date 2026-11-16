@@ -144,7 +144,7 @@ export type SyncEvent =
    * absent for a bare status change. Only `interrupted` is an explicit stop.
    */
   | { type: "session.idle"; properties: { sessionID: string; outcome?: SessionOutcome } }
-  | { type: "session.error"; properties: { sessionID: string; error: StructuredError; time?: number } }
+  | { type: "session.error"; properties: { sessionID: string; error: StructuredError; time: number } }
   | { type: "message.updated"; properties: { info: Message } }
   | { type: "message.patched"; properties: { sessionID: string; messageID: string; patch: MessagePatch } }
   | { type: "message.removed"; properties: { sessionID: string; messageID: string } }

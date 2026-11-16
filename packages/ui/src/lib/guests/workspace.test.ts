@@ -121,7 +121,7 @@ describe('extension workspace projection', () => {
     expect(readB().sessions[0]).toMatchObject({ activity: 'idle', outcome: null });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
     expect(readB().sessions[0]).toMatchObject({ activity: 'running', outcome: null });
-    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.error', properties: { sessionID: 'b-session', error: { type: 'UnknownError', message: 'Failed' } } });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.error', properties: { sessionID: 'b-session', error: { type: 'UnknownError', message: 'Failed' }, time: 1 } });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.idle', properties: { sessionID: 'b-session' } });
     expect(readB().sessions[0]).toMatchObject({ activity: 'idle', outcome: 'failed' });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });

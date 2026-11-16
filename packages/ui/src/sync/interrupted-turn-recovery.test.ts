@@ -157,7 +157,7 @@ describe("settle events", () => {
   test("a failed turn marks the open turn", () => {
     const { store, receive } = setup([user, openAssistant])
 
-    receive({ type: "session.error", properties: { sessionID: "ses_1", error: { type: "unknown", message: "boom" } } })
+    receive({ type: "session.error", properties: { sessionID: "ses_1", error: { type: "unknown", message: "boom" }, time: 1 } })
 
     expect(failedWith(store.getState().message.ses_1[1])).toEqual({ type: "unknown", message: "boom" })
   })

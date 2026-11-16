@@ -153,7 +153,7 @@ describe("session events", () => {
 
   test("session.error settles the status to idle", () => {
     const draft = state({ session_status: { ses_1: { type: "busy" } } })
-    apply(draft, { type: "session.error", properties: { sessionID: "ses_1", error: { type: "x", message: "boom" } } })
+    apply(draft, { type: "session.error", properties: { sessionID: "ses_1", error: { type: "x", message: "boom" }, time: 1 } })
     expect(draft.session_status.ses_1).toEqual({ type: "idle" })
   })
 })
@@ -546,7 +546,7 @@ describe("session status", () => {
     const draft = state()
     const event: SyncEvent = {
       type: "session.error",
-      properties: { sessionID: "ses_1", error: { type: "UnknownError", message: "boom" } },
+      properties: { sessionID: "ses_1", error: { type: "UnknownError", message: "boom" }, time: 1 },
     }
 
     expect(apply(draft, event)).toBe(true)

@@ -160,7 +160,7 @@ describe("global session status index", () => {
 
     applyGlobalSessionStatusEvent("/repo", {
       type: "session.error",
-      properties: { sessionID: "session-a" },
+      properties: { sessionID: "session-a", error: { type: "UnknownError", message: "boom" }, time: 1 },
     } as SyncEvent)
     expect(useSessionOrderingStore.getState().rankById.get("session-a")).toBe(idleRank)
   })
