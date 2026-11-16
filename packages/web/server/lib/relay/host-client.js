@@ -1,7 +1,3 @@
-// Long-lived relay host client: maintains the signed `host-control` socket to
-// the relay, and per connected client a signed `host-data` socket that runs the
-// responder E2EE handshake and feeds decrypted frames into a tunnel-host
-// dispatcher. Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 1).
 
 import { WebSocket } from 'ws';
 import { createRequire } from 'node:module';
@@ -13,13 +9,8 @@ import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-
 import { redactSensitiveText } from '../source-control/url-redaction.js';
 import { z } from 'zod';
 
-// The relay's nudge that a share this host made changed (../share-pages).
 const shareStateMessageSchema = z.object({ type: z.literal('share-state'), shareId: z.string().min(1) });
 
-// The relay asks a peer to close its own socket with this plaintext frame
-// rather than closing it from the relay side, where a close to a peer that is
-// gone holds the relay's handler, billed, until it times out. Mirrors
-// parseRelayRetire in packages/ui/src/lib/relay/protocol.ts.
 const relayRetireSchema = z.object({ type: z.literal('relay-retire'), code: z.number().int(), reason: z.string().catch('') });
 const parseRelayRetire = (raw) => {
   try {
@@ -32,48 +23,20 @@ const parseRelayRetire = (raw) => {
 
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
-// The relay closes a control socket with 4001 when another host holding the
-// same identity connects: a copied data dir, a second machine, a container
-// replica. Reconnecting after the usual 1 s evicts that host in turn, and the
-// pair trade the slot every second for as long as both run.
 const CONTROL_REPLACED_RECONNECT_MS = 60_000;
-// One 4001 is an ordinary takeover, such as a local instance claiming the host
-// for a pairing link. Two within this window mean another host keeps taking the
-// slot back, and the user has to decide which copy keeps the identity.
 const IDENTITY_CONFLICT_WINDOW_MS = 10 * 60_000;
-// A data socket dial that never opens is retried while the relay still reports
-// its client: the relay holds the client and buffers its frames, and sends no
-// new `connected` for it. Without a retry the client waits for the relay's 15 s
-// stuck-control reset, or for its own 30 s handshake timeout when that fails too.
-// The open timeout starts short so a hung dial leaves room for retries inside
-// that 30 s, and doubles per failed dial so a slow network still gets 15 s.
 const DATA_SOCKET_FIRST_OPEN_TIMEOUT_MS = 5000;
 const DATA_SOCKET_OPEN_TIMEOUT_MS = 15000;
 const DATA_SOCKET_REDIAL_BASE_MS = 1000;
 const DATA_SOCKET_REDIAL_CAP_MS = 8000;
-// Clients send a tunnel Ping at least every ~30s when idle, so a data socket
-// with no inbound traffic for 3 ping intervals belongs to a client that died
-// without a WebSocket close (network loss, battery kill). The relay worker may
-// not notice the dead client leg for a long time, so the host must reap these
-// itself — both to free resources and to keep the "N devices connected" status
-// honest instead of counting ghosts.
 const DATA_SOCKET_IDLE_TIMEOUT_MS = 90_000;
 const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
-// Protocol-level keepalive for the control socket. Without it, a network path
-// that dies silently (NAT timeout, relay-edge eviction without close frames)
-// leaves the host believing it is registered while the relay has forgotten it —
-// every client tunnel then hangs in `connecting` forever. A missed pong window
-// terminates the socket, which drives the normal reconnect + re-registration.
 const CONTROL_PING_INTERVAL_MS = 30_000;
 const CONTROL_PONG_GRACE_MS = 10_000;
-// A control dial whose upgrade request never gets a response stays CONNECTING
-// with no error or close, and the keepalive above only watches an open socket.
-// The host times the open itself because Bun's `ws` ignores `handshakeTimeout`.
+// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun's ws shim ignores handshakeTimeout, so the host times control socket opens itself.
 const CONTROL_OPEN_TIMEOUT_MS = 15_000;
 const DEFAULT_BATCH_WINDOW_MS = 150;
 
-// Resolve the frame-batching flush window: explicit option wins, then env, then
-// the 150 ms default. Only applies on directions where batching was negotiated.
 const resolveBatchWindowMs = (option) => {
   if (Number.isFinite(option) && option >= 0) return option;
   const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
@@ -81,9 +44,7 @@ const resolveBatchWindowMs = (option) => {
   return DEFAULT_BATCH_WINDOW_MS;
 };
 
-// Bun's WebSocket puts the full dial URL into its error messages, and that URL
-// carries the signed relay auth in its query string. Every relay error passes
-// through here before it reaches a log line or the relay status.
+// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun WebSocket errors include the signed dial URL, so relay errors require redaction before logging or status reporting.
 export const describeRelayError = (error) => redactSensitiveText(error?.message ?? error);
 
 /**
@@ -114,7 +75,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
   let consecutiveFailures = 0;
   /** @type {Map<string, { socket: WebSocket, tunnel: ReturnType<typeof createTunnelHost> | null, openTimer: NodeJS.Timeout | null }>} */
   const dataSockets = new Map();
-  // Clients the relay reported (`connected`/`sync`) and has not reported gone.
   /** @type {Map<string, { failedDials: number, redialTimer: NodeJS.Timeout | null }>} */
   const announcedClients = new Map();
 
@@ -145,7 +105,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', role);
     url.searchParams.set('serverId', identity.serverId);
-    // Self-reported diagnostics, not part of relay authentication.
     url.searchParams.set('appId', 'openchamber');
     url.searchParams.set('appVersion', version);
     url.searchParams.set('platform', platform);
@@ -174,10 +133,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
   };
 
-  // Only a dial that never opened is retried. Once the relay attached a data
-  // socket, its close makes the relay close the client too, and the client's
-  // reconnect arrives as a new `connected`. With the control socket down the
-  // next `sync` decides which clients still wait.
   const scheduleRedial = (connectionId) => {
     const client = announcedClients.get(connectionId);
     if (stopped || !client || client.redialTimer || controlSocket?.readyState !== WebSocket.OPEN) return;
@@ -237,12 +192,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     const handshake = createHostHandshake(identity.hostEncPrivateKey, { batch: localBatch, flowControl });
     let channel = null;
     let batchNegotiated = false;
-    // Serialize async message handling so encrypted frame order (and the
-    // consecutive decrypt counter) is preserved.
     let processing = Promise.resolve();
-    // Serialize encrypt+send so the per-direction IV counter reaches the wire in
-    // encryption order. One encrypt() == one WS message == one counter tick,
-    // whether it carries a batch or a lone frame.
     let sendChain = Promise.resolve();
     const sendEncryptedPlaintext = (plaintext) => {
       sendChain = sendChain
@@ -260,7 +210,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     };
 
     const failChannel = (closeCode, reason) => {
-      // connectionId + reason only — never payload contents.
       logger.warn(`[Relay] data channel failed connectionId=${connectionId} reason=${reason ?? 'unknown'}`);
       teardownDataSocket(connectionId, closeCode, reason);
     };
@@ -274,8 +223,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
       const current = dataSockets.get(connectionId);
       if (current !== entry) return;
-      // Any inbound message (including the client's keepalive Ping) proves the
-      // client is alive; the idle sweeper reaps sockets this stops updating.
       entry.lastActivityAt = Date.now();
 
       if (!isBinary) {
@@ -314,7 +261,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
 
       if (!channel || !entry.tunnel) {
-        // Encrypted traffic before the handshake completed: fail closed.
         failChannel(RelayCloseCode.ChannelFailure, 'binary frame before handshake');
         return;
       }
@@ -327,8 +273,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       }
       try {
         if (batchNegotiated) {
-          // One encrypted message may carry several tunnel frames; dispatch each
-          // in order through the same per-frame handling as legacy.
           for (const frame of decodeFrameBatch(plaintext)) {
             if (dataSockets.get(connectionId) !== entry) return;
             await dispatchFrame(frame);
@@ -351,7 +295,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         entry.scheduler.acknowledge(decodeDeliveryAck(frame.payload));
         return;
       }
-      // Never await outbound credit on the receive chain: ACKs use this chain too.
       void entry.tunnel.handleFrame(plaintext).catch(() => {
         failChannel(RelayCloseCode.ChannelFailure, 'invalid tunnel frame');
       });
@@ -377,10 +320,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         });
     });
     socket.on('close', (code, reason) => {
-      // One line per device drop, so a host that keeps losing devices shows why
-      // in its log: the code says which side closed and the lifetime how often.
       logger.info?.(`[Relay] data socket closed connectionId=${connectionId} code=${code}${reason?.length ? ` reason=${reason.toString('utf8')}` : ''} after=${Math.round((Date.now() - dialedAt) / 1000)}s`);
-      // A retry may already own this connectionId.
       if (dataSockets.get(connectionId) === entry) teardownDataSocket(connectionId);
     });
     socket.on('error', (error) => {
@@ -420,8 +360,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       teardownDataSocket(message.connectionId);
       return;
     }
-    // A share this host made was opened or answered (../share-pages): read it
-    // now instead of at the next poll. A listener failure never reaches the socket.
     const shareState = shareStateMessageSchema.safeParse(message);
     if (shareState.success) {
       try {
@@ -457,8 +395,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
     controlSocket = socket;
     const dialedAt = Date.now();
-    // The relay retires a control socket with a frame instead of closing it,
-    // and the frame's code stands in for the close code: 4001 still holds off.
     let retiredWith = null;
     let openTimedOut = false;
     const openTimer = setTimeout(() => {
@@ -469,9 +405,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       socket.terminate();
     }, CONTROL_OPEN_TIMEOUT_MS);
 
-    // Liveness: ping on an interval; any pong (or message) proves the path.
-    // A quiet window beyond interval+grace means the connection silently died —
-    // terminate so the close handler reconnects and re-registers at the relay.
     let lastAliveAt = Date.now();
     const pingTimer = setInterval(() => {
       if (controlSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
@@ -515,7 +448,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       handleControlMessage(raw);
     });
     socket.on('error', (error) => {
-      // After an open timeout, keep the timeout as the error over terminate()'s.
       if (controlSocket !== socket || openTimedOut) return;
       lastError = describeRelayError(error);
     });
@@ -530,8 +462,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       if (!lastError && code && code !== 1000) {
         lastError = `control socket closed (${code}${reason ? `: ${reason}` : ''})`;
       }
-      // Data sockets ride their own relay connections; the relay keeps clients
-      // alive through a 30 s control-reconnect grace window, so leave them up.
       cancelRedials();
       const replaced = code === RelayCloseCode.ControlReplaced;
       if (replaced) controlReplacedAt.push(Date.now());
@@ -539,8 +469,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     });
   };
 
-  // Reap data sockets whose client went silent (no frames, no keepalive pings)
-  // — a dead phone leg the relay worker hasn't noticed yet.
   const idleSweepTimer = setInterval(() => {
     const now = Date.now();
     for (const [connectionId, entry] of [...dataSockets.entries()]) {
