@@ -1,19 +1,3 @@
-// Results of sessions an agent dispatched and asked to hear back from.
-//
-// An agent that creates, sends to, or forks a session with `returnResult`
-// gets its answer at once and goes on. When the dispatched session's turn is
-// over, this runtime hands its final answer to the session that dispatched it
-// as a synthetic message and wakes that session, so the agent continues on its
-// own: background primary sessions, the way OpenCode 2 reports a background
-// subagent to its parent (core `session/subagent-completion.ts`).
-//
-// Event-driven like the message queue: the shared upstream hub delivers
-// `session.status`, and an idle transition of a watched session arms a short
-// timer. The tick confirms the turn is over against OpenCode itself (not
-// running, and the `idle` record OpenCode appends when a run ends) before
-// anything is delivered. Pending deliveries are persisted,
-// so a restart in between still delivers.
-
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
@@ -23,26 +7,19 @@ import { createSessionActivityProbe } from '../opencode/session-activity.js';
 const FILE_NAME = 'dispatch-results.json';
 const FILE_VERSION = 1;
 const MAX_ENTRIES = 200;
-// Idle events arrive in bursts around a turn boundary.
 const QUIET_MS = 500;
-// An idle session without the run's `idle` record yet: the record lands with
-// the event, so a few short rechecks cover a projection that trails it.
 const SETTLE_RECHECK_MS = 2_000;
 const SETTLE_RECHECKS = 3;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_PAGE_LIMIT = 50;
-// The answer travels into the parent's context; a session that wrote a book
-// is cut, and the agent can read the rest with session.messages.
 const ANSWER_CHAR_LIMIT = 50_000;
 
 const DISPATCH_RESULT_SOURCE = 'openchamber-session';
 
 const ID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
-// Boundary schemas: the only place raw JSON (the file, OpenCode answers, hub
-// events) is inspected. Everything below branches on what they return.
 const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/);
 const messageIdSchema = z.string().regex(/^msg_[A-Za-z0-9]{8,64}$/);
 const timeSchema = z.number().finite().nonnegative();
@@ -54,8 +31,6 @@ const entrySchema = z.object({
   parentSessionId: sessionIdSchema,
   sessionId: sessionIdSchema,
   dispatchedAt: timeSchema,
-  // The newest end-of-run record before the dispatch; null when there was
-  // none. Entries written before this field compare clock times instead.
   afterIdleId: afterIdleSchema.optional(),
   messageId: messageIdSchema.optional(),
 });
@@ -104,12 +79,6 @@ const retryDelay = (failures) => Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(fa
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
-/**
- * A message id in OpenCode's own ascending format (`msg_` + time + random),
- * minted once per delivery and persisted before the first attempt. OpenCode
- * refuses a second admission of the same id, so a retry after a crash or a
- * lost response can never deliver the answer twice.
- */
 export const createMessageId = (now) => {
   const time = (BigInt(now) * 0x1000n + BigInt(Math.floor(Math.random() * 0x1000))).toString(16).padStart(12, '0').slice(-12);
   let random = '';
@@ -130,33 +99,13 @@ const assistantText = (assistant) => assistant.content
 
 const OUTCOME_STATES = { succeeded: 'completed', failed: 'error', interrupted: 'cancelled' };
 
-/**
- * How the dispatched turn ended, read from the newest page of the session's
- * records (newest first), or null while it has not ended since the dispatch.
- *
- * OpenCode appends an `idle` record with the run's outcome when a run ends,
- * so the outcome is authoritative and survives a restart of either server.
- * The answer is the newest assistant reply of that turn.
- *
- * "Since the dispatch" is decided by record order against `afterIdleId`, the
- * newest idle record before the prompt went out, so OpenChamber's clock never
- * meets OpenCode's: a remote OpenCode whose clock lags would otherwise make a
- * finished turn look older than its own dispatch. Only an entry stored
- * without that baseline (`afterIdleId` undefined) falls back to `dispatchedAt`.
- *
- * `withText` takes the text from the newest reply of the turn that has any,
- * for a caller that forwards the answer: a turn can end on a step that only
- * ran tools. The error still comes from the newest reply.
- */
 export const readDispatchOutcome = (records, dispatchedAt, afterIdleId, { withText = false } = {}) => {
   const idleIndex = records.findIndex((record) => parse(recordTypeSchema, record)?.type === 'idle');
   if (idleIndex === -1) return null;
-  // A malformed idle record proves nothing about the turn: keep waiting.
   const idle = parse(idleRecordSchema, records[idleIndex]);
   if (!idle) return null;
   const byOrder = afterIdleId !== undefined;
   if (byOrder ? idle.id === afterIdleId : idle.time.created < dispatchedAt) return null;
-  // The turn's records sit between its idle record and the baseline one.
   const baselineIndex = byOrder && afterIdleId !== null
     ? records.findIndex((record) => parse(recordIdSchema, record)?.id === afterIdleId)
     : -1;
@@ -186,7 +135,6 @@ const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
   return answer ? `${stopped}\n\nIts last reply:\n${answer}` : stopped;
 };
 
-/** The synthetic message that carries a dispatched session's result to its parent. */
 export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
   const label = title || 'Dispatched session';
   const attributes = `sessionID="${escapeAttribute(sessionId)}" state="${outcome.state}" title="${escapeAttribute(label)}"`;
@@ -206,7 +154,6 @@ export function createDispatchResultsRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   dataDir,
-  // Archive is OpenChamber's: an archived parent records the answer but is not woken.
   isSessionArchived = async () => false,
   fetchImpl = fetch,
   now = Date.now,
@@ -216,19 +163,15 @@ export function createDispatchResultsRuntime({
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
 
-  /** entry id → { id, parentSessionId, sessionId, dispatchedAt, messageId? } */
   const entries = new Map();
   let loadPromise = null;
   let writePromise = Promise.resolve();
   let stopped = false;
 
-  // In memory only: a restart starts every watched session from a fresh tick.
-  const timers = new Map(); // watched sessionId → timeout
-  const failures = new Map(); // watched sessionId → consecutive failed ticks
-  const settleChecks = new Map(); // watched sessionId → rechecks spent waiting for the idle record
-  const ticking = new Set(); // watched sessionIds with a tick in flight
-
-  // --- persistence ---------------------------------------------------------
+  const timers = new Map();
+  const failures = new Map();
+  const settleChecks = new Map();
+  const ticking = new Set();
 
   const readFile = async () => {
     let raw;
@@ -246,14 +189,11 @@ export function createDispatchResultsRuntime({
       reason = error?.message ?? String(error);
     }
     if (!stored) {
-      // Malformed is a failure, not "nothing pending": keep the bytes and
-      // start over rather than overwrite them on the next write.
       const backup = `${filePath}.corrupt-${now()}`;
       await fs.promises.rename(filePath, backup).catch(() => undefined);
       console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${reason}`);
       return [];
     }
-    // One unreadable entry is dropped alone; the rest still deliver.
     return stored.entries.map((entry) => parse(entrySchema, entry)).filter(Boolean);
   };
 
@@ -264,8 +204,6 @@ export function createDispatchResultsRuntime({
           for (const entry of stored) if (!entries.has(entry.id)) entries.set(entry.id, entry);
         })
         .catch((error) => {
-          // A failed read must not pass for "nothing pending": the next write
-          // would clobber the file, so writes wait for a load that succeeds.
           loadPromise = null;
           throw error;
         });
@@ -281,15 +219,11 @@ export function createDispatchResultsRuntime({
       await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
       await fs.promises.rename(tmpPath, filePath);
     });
-    // The chain survives a failed write so later writes still run; the caller
-    // still sees this one fail, since "on disk" is what it waits for.
     writePromise = write.catch((error) => {
       console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
     });
     return write;
   };
-
-  // --- OpenCode access -----------------------------------------------------
 
   const openCodeRequest = async (fetchPath, { method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
@@ -310,11 +244,6 @@ export function createDispatchResultsRuntime({
 
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
 
-  /**
-   * Where the watched session stands: `running`, `ended` with its record page
-   * and title, `deleted`, or null when OpenCode could not be asked. Unknown is
-   * never "ended": a failed read retries instead of reporting a guess.
-   */
   const readWatchedSession = async (sessionId) => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
@@ -325,7 +254,6 @@ export function createDispatchResultsRuntime({
       const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encoded}/message`, {
         query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
       }));
-      // An answer that is not a page is unknown, never an empty history.
       if (!page) return null;
       return { kind: 'ended', title: session?.title?.trim() ?? '', records: page.data };
     } catch (error) {
@@ -334,11 +262,7 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  /** Admits the result into the parent. Resolves true when it is there (now or before). */
   const deliver = async (entry, message) => {
-    // The archive store answers asynchronously; reading its Promise as a
-    // value made every parent look archived, so none was ever woken. A failed
-    // lookup wakes: the agent asked for this result.
     const archived = await Promise.resolve(isSessionArchived(entry.parentSessionId)).catch(() => false);
     const resume = archived !== true;
     try {
@@ -348,9 +272,7 @@ export function createDispatchResultsRuntime({
       });
       return true;
     } catch (error) {
-      // The id is ours and was admitted before: an earlier attempt landed.
       if (error?.status === 409) return true;
-      // The parent is gone; nobody is left to tell.
       if (error?.status === 404) {
         console.log(`[dispatch-results] dropping the result of ${entry.sessionId}: session ${entry.parentSessionId} no longer exists`);
         return true;
@@ -358,8 +280,6 @@ export function createDispatchResultsRuntime({
       throw error;
     }
   };
-
-  // --- delivery loop -------------------------------------------------------
 
   const pendingFor = (sessionId) => Array.from(entries.values()).filter((entry) => entry.sessionId === sessionId);
 
@@ -392,14 +312,11 @@ export function createDispatchResultsRuntime({
 
   async function tick(sessionId) {
     if (stopped || pendingFor(sessionId).length === 0) return;
-    // An idle event that lands while a tick is still reading must not be
-    // lost: that tick may have seen the session running a moment earlier.
     if (ticking.has(sessionId)) return arm(sessionId);
     ticking.add(sessionId);
     try {
       const watched = await readWatchedSession(sessionId);
       if (watched === null) return retryLater(sessionId);
-      // Running: its next idle event re-arms the tick.
       if (watched.kind === 'running') return;
 
       let waiting = false;
@@ -412,32 +329,24 @@ export function createDispatchResultsRuntime({
         else waiting = true;
       }
 
-      // Every ready entry reports the session's newest run, so prompts a
-      // parent steered into one run share one message id and one result. An
-      // entry that already holds an id keeps it: that id may have landed with
-      // an earlier run, and sharing it would swallow this one.
       const unsent = ready.filter(({ entry }) => !entry.messageId);
       if (unsent.length > 0) {
-        const minted = new Map(); // parentSessionId → message id
+        const minted = new Map();
         for (const { entry } of unsent) {
           if (!minted.has(entry.parentSessionId)) minted.set(entry.parentSessionId, createMessageId(now()));
           entry.messageId = minted.get(entry.parentSessionId);
         }
-        // Persisted before the first attempt, so a retry reuses it.
         try {
           await persist();
         } catch (error) {
-          // Unsaved, it could be minted again after a crash and deliver twice.
           for (const { entry } of unsent) delete entry.messageId;
           throw error;
         }
       }
 
-      const deliveries = new Map(); // message id → ready entries
+      const deliveries = new Map();
       for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
       for (const group of deliveries.values()) {
-        // An entry without a baseline compares clocks and can miss a reply
-        // that began before its send; another entry of the run may have it.
         const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
         const message = buildDispatchResultMessage({
           sessionId,
@@ -455,9 +364,6 @@ export function createDispatchResultsRuntime({
         settleChecks.delete(sessionId);
         return;
       }
-      // Idle, yet the run's idle record is not there: either the record trails
-      // the event briefly, or the dispatched prompt has not started. A few
-      // short rechecks cover the first; the next idle event covers the second.
       const spent = settleChecks.get(sessionId) ?? 0;
       if (spent < SETTLE_RECHECKS) {
         settleChecks.set(sessionId, spent + 1);
@@ -477,13 +383,6 @@ export function createDispatchResultsRuntime({
     }
   };
 
-  // --- public --------------------------------------------------------------
-
-  /**
-   * Watches `sessionId` for the end of the turn dispatched at `dispatchedAt`
-   * and delivers its result to `parentSessionId`. Resolves once the entry is
-   * on disk, so a restart right after the tool answers still delivers.
-   */
   const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }) => {
     const parent = parse(sessionIdSchema, parentSessionId);
     const watched = parse(sessionIdSchema, sessionId);
@@ -493,7 +392,6 @@ export function createDispatchResultsRuntime({
     if (at === null) throw new TypeError('dispatchedAt must be a timestamp');
     await load();
     const entry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
-    // Kept only when it is a real baseline (an id, or null for "none yet").
     const baseline = afterIdleSchema.safeParse(afterIdleId);
     if (afterIdleId !== undefined && baseline.success) entry.afterIdleId = baseline.data;
     entries.set(entry.id, entry);
@@ -510,13 +408,9 @@ export function createDispatchResultsRuntime({
     try {
       await persist();
     } catch (error) {
-      // The caller tells the agent no result is coming; delivering one anyway
-      // would contradict it.
       entries.delete(entry.id);
       throw error;
     }
-    // The session may already be done: a short turn can end before this
-    // entry existed, and its idle event would then have found nothing to arm.
     arm(watched);
     return { id: entry.id };
   };
@@ -527,8 +421,6 @@ export function createDispatchResultsRuntime({
     const deleted = parse(deletedEventSchema, payload);
     if (deleted) {
       const deletedSessionId = deleted.properties.sessionID;
-      // A deleted parent has nobody left to tell; a deleted dispatched session
-      // still reports, as stopped, so the agent is not left waiting.
       let changed = false;
       for (const entry of entries.values()) {
         if (entry.parentSessionId === deletedSessionId) {
@@ -536,7 +428,6 @@ export function createDispatchResultsRuntime({
           changed = true;
         }
       }
-      // Logged by persist; the next write saves the same state again.
       if (changed) persist().catch(() => undefined);
       arm(deletedSessionId);
       return;
@@ -589,9 +480,7 @@ export function createDispatchResultsRuntime({
     processPayload,
     start,
     stop,
-    /** Pending entries, oldest first; tests and diagnostics read it. */
     pending: () => Array.from(entries.values()).sort((left, right) => left.dispatchedAt - right.dispatchedAt),
-    /** Drains the pending write; tests and shutdown use it. */
     flush: () => writePromise,
   };
 }
