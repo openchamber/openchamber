@@ -3,8 +3,8 @@
  *
  * The page is still being designed against real work, so it ships dark: with
  * `OPENCHAMBER_OVERVIEW_ENABLED` unset there is no sidebar button, no command
- * palette item, no phone footer button and nothing mounted, so a release can
- * carry the code while users see nothing. The server reports the answer to the
+ * palette item, no item in the phone drawer's More menu and nothing mounted, so
+ * a release can carry the code while users see nothing. The server reports the answer to the
  * client in the settings payload (`overviewFeatureAvailable`); the page itself
  * lives in `packages/ui/src/components/overview`.
  *
