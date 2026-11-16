@@ -223,5 +223,7 @@
   "files.findField": {"selector": "[data-right-slot] .cm-search input[name=\"{field}\"]", "means": "A field of the file editor's find bar, opened by Find in file: search for Find, replace for Replace."},
   "files.findButton": {"selector": "[data-right-slot] .cm-search button[name=\"{button}\"]", "means": "A button of the file editor's find bar: next, prev, select, replace, replaceAll, close."},
   "files.htmlPreview": {"selector": "[data-right-slot] iframe[title=\"HTML Preview\"]", "means": "The rendered page of an HTML file open in the file editor."},
-  "files.image": {"selector": "[data-right-slot] img[alt=\"{name}\"]", "means": "An image file shown as a picture in the file editor, by its file name."}
+  "files.image": {"selector": "[data-right-slot] img[alt=\"{name}\"]", "means": "An image file shown as a picture in the file editor, by its file name."},
+  "toast.action": {"selector": "[data-sonner-toast] button[data-button]", "means": "The action button of a toast, such as Open session; pair it with its label."},
+  "chat.permissionButton": {"selector": "button[data-slot=\"button\"][data-size=\"xs\"]", "means": "A button of the permission request docked above the composer: Allow once, Always allow, Deny; pair it with its label."}
 }
