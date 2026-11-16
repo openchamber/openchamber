@@ -41,7 +41,12 @@ the user can want independently:
   body stays under its 1 MB limit, `title` at most 120) and the setting.
   On by default: enabled while `agentRenderToolEnabled` is not `false`, and the
   control service refuses the action when it is, so a stale plugin cannot
-  keep drawing. When to draw is stated only in the line every session carries
+  keep drawing. The tool description points at UI blocks for tables and
+  charts because a model choosing how to show data reads it, and with only a
+  page named, a weak model drew HTML for a plain comparison. A question is
+  asked with `ui`, which looks the same whatever model writes it, so the
+  descriptions send questions there before `html`. When to draw is stated only
+  in the line every session carries
   (`../session-knowledge/DOCUMENTATION.md`, *When to draw a page*), along with
   the mockup exception: a mockup of the user's own project takes its look from
   that project's code. The tool description keeps the look rules agents broke
@@ -172,10 +177,13 @@ the user can want independently:
   input's description, read while the agent writes one, for the same reason
   render's page rules sit on `html`.
 - `openchamber_workflow_answer` — `workflow.answer`, how a workflow agent
-  asked for a schema answer hands it over. Registered with the workflow tool,
-  but the managed config denies it in every session (`managedPermissionRules`)
-  and only the session of such an agent allows it, so no other session carries
-  its declaration. Direct, never behind Code Mode: the agent's prompt names it,
+  asked for a schema answer hands it over. The `answer` input is a JSON object
+  rather than JSON text in a string: as text, models escaped JSON inside JSON
+  and some looped until their output budget ran out. Registered with the
+  workflow tool, but the managed config denies it in every session
+  (`managedPermissionRules`) and only the session of such an agent allows it,
+  so no other session carries its declaration. Direct, never behind Code Mode:
+  the agent's prompt names it,
   and the sessions that see it are the ones that need it.
 
 Both default to on, are toggled in Settings → General → OpenChamber Tools, and take
@@ -207,10 +215,12 @@ both settings are `false`.
   budget, and with large MCP servers connected ours showed as bare rows such
   as `openchamber_web (1 tool, none shown)`; agents asked to open a page in the
   browser panel fetched it instead and said they had no browser
-  (`scripts/tool-use-bench`). Names and paths stay as they are: agents call
-  `tools.openchamber(...)` straight from the session guidance, and both a
-  control tool renamed into a shared namespace and one with the other tools
-  nested under it made them stop calling it.
+  (`scripts/tool-use-bench`). The line also carries a use the session guidance
+  does not state, where it is always seen, rather than only in the tool
+  description the agent reads after choosing the tool. Names and paths stay as
+  they are: agents call `tools.openchamber(...)` straight from the session
+  guidance, and both a control tool renamed into a shared namespace and one
+  with the other tools nested under it made them stop calling it.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly
@@ -236,6 +246,12 @@ model that fills in the flattened shape, but outside Code Mode the schema
 ships with every request: the copy costs about 8.7k characters per turn when
 all tools are on, and the flattened calls already work through
 `additionalProperties`.
+
+### Why every tool is generated from one template
+
+Both tools speak to the same callback with the same envelope; only the action
+set, the inputs and the description differ. One template keeps the transport,
+metadata and failure handling identical, which is what the caller depends on.
 
 ## Runtime flow
 
@@ -300,6 +316,10 @@ default and when to set it. Field names and JSON types carry the rest.
 - Obvious fields rely on their names and JSON types. Parameter descriptions are
   reserved for formats, dependencies, scope, and behavior that cannot be safely
   inferred from the field name.
+- `title` carries no description in the shared map because it means a session
+  title in the control tool. Memory states what its own `title` is: left
+  undescribed, the model had nothing to go on and sent `name` for it
+  repeatedly.
 - Session dispatches never wait. An agent that needs the outcome sets
   `returnResult`: the call still returns at once, with
   `resultDelivery.status: 'pending'` and a note telling the agent not to poll
@@ -424,9 +444,12 @@ sample the panel on every task.
   the network always arrives with its own address.
   `callback-address.js` owns this rule; the repository credential helper
   (`lib/git/repository-credential-runtime.js`) reaches the server the same way
-  and shares it.
+  and shares it. The bound address is read at call time, so a pipe listener or
+  one not yet up falls back to loopback.
 - The token is never persisted, logged, returned to the UI, or written into
   the materialized plugin.
+- The callback's action allowlist is the union of the managed tools' action
+  sets, which stays narrower than the full control surface.
 - The plugin adds the callback host to `NO_PROXY`/`no_proxy` inside the managed
   child when it loads. Without that, an `HTTP_PROXY` in the child's environment
   would receive a non-loopback callback, token included, because `fetch` has no
@@ -465,7 +488,9 @@ Every completed call returns JSON:
 
 Command and operational failures use the same envelope with `ok: false` and
 an `error` object. OpenCode-level cancellation can still produce a native tool
-error state.
+error state. No output schema is declared, so the envelope travels as text
+content and a result never carries an `output` field: OpenCode rejects a result
+that declares output without a schema.
 
 ## Runtime parity
 
