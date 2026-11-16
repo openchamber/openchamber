@@ -78,6 +78,12 @@ Creating, finding, stopping, starting, and removing isolated spaces on a place, 
 - `errors.js`: `SpaceError` with a `code`.
 - Test support, never imported by product code: `places/contract-suite.js`, `places/escape-suite.js`, `places/memory-place.js`, `places/fake-docker.js`, `places/docker-live-support.js`, and since 3a `code-in-bait.js`, the bait repository and the host state that code in must leave alone. Since 3b `code-in-bait.js` also holds the stand-in for a space in a local folder that the unit tests of both directions use, and knows what code out may change in the user's repository.
 
+## Invariants
+
+- The corridor reserves a tunnel slot before DNS resolution begins. Otherwise concurrent lookups can all pass the cap before any connection takes a slot.
+- A quarantine-size watcher never rejects while the fetch runs beside it. Its caller awaits it only after the fetch ends, so a watcher failure would become an unhandled rejection. The size check after the fetch still enforces the transfer cap.
+- Auto-review updates truncate long error text and still reach the browsers. Dropping the update can leave a completed run displayed as running.
+
 ## Place contract
 
 A place has a non-empty `id` and these operations. The registry rejects a place that lacks one.

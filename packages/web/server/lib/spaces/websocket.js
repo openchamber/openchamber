@@ -1,14 +1,3 @@
-// WebSocket upgrades to a space, by the directory in their query or by the older
-// `/api/spaces/<id>/` prefix, forwarded into the space over a stream of its own from the place's
-// `connect`: the terminal socket, the dev tunnel and the two event
-// sockets of the server inside. The host authenticates the user the way its own socket
-// handlers do, applies the dispatcher's rules and guard, strips the user's credentials, adds
-// the space's session, and then joins the two sockets byte for byte, backpressure both ways.
-// Nothing of the frames is read on the host.
-//
-// A failure before the upgrade is one HTTP answer with a stable code on the client's socket.
-// After the upgrade the client gets a close frame with a code, and the stream inside, one
-// `docker exec`, is killed with the socket.
 
 import { SpaceError } from './errors.js';
 import { isSpaceId } from './labels.js';
@@ -24,26 +13,20 @@ import {
   stripCredentialQuery,
 } from './dispatcher.js';
 
-// The sockets of the server inside that a client may reach through the prefix. Any other
-// upgrade under the prefix is refused: the dictation socket and the guest surfaces are the host's.
 const SPACE_WEBSOCKET_PATHS = Object.freeze(['/api/terminal/ws', '/api/dev-tunnel', '/api/event/ws', '/api/global/event/ws']);
 const DEV_TUNNEL_PATH = '/api/dev-tunnel';
 
-// The client's handshake headers that travel; the dispatcher's list drops them for HTTP.
 const HANDSHAKE_REQUEST_HEADERS = ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions'];
-// The only headers of the answer inside that reach the client.
 const HANDSHAKE_RESPONSE_HEADERS = new Set(['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol', 'sec-websocket-extensions']);
 
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 const MAX_HANDSHAKE_BYTES = 16 * 1024;
-// One `docker exec` per socket; a cap so a page that opens sockets in a loop cannot fork the host.
 const MAX_SOCKETS_PER_SPACE = 72;
 const CLOSE_REASON_BYTES = 123;
 const CLOSE_GRACE_MS = 1_000;
 
 const STATUS_TEXT = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 500: 'Internal Server Error', 502: 'Bad Gateway', 503: 'Service Unavailable' };
 
-/** One HTTP answer on a socket that never got its upgrade, JSON with a stable code. */
 const refuse = (socket, status, code, message) => {
   if (socket.destroyed) return;
   const body = Buffer.from(JSON.stringify({ error: message, code }), 'utf8');
@@ -55,7 +38,7 @@ const refuse = (socket, status, code, message) => {
   }
 };
 
-/** A close frame from the server side, unmasked, as RFC 6455 has it. */
+// external: https://www.rfc-editor.org/rfc/rfc6455#section-5.1 Server WebSocket frames are unmasked.
 export const closeFrame = (code, reason) => {
   const text = Buffer.from(String(reason ?? ''), 'utf8').subarray(0, CLOSE_REASON_BYTES);
   const payload = Buffer.alloc(2 + text.length);
@@ -66,14 +49,10 @@ export const closeFrame = (code, reason) => {
 
 const headerValue = (value) => (Array.isArray(value) ? value.join(', ') : value);
 
-/** The handshake as the server inside gets it: the request line, then the forwarded headers. */
 export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }) => {
   const headers = forwardRequestHeaders(requestHeaders, cookie);
   headers.connection = 'Upgrade';
   headers.upgrade = 'websocket';
-  // The server inside checks the origin of an upgrade against its own host, as the host does.
-  // The client's origin is not what it gets: the loopback origin is, the same one the relay
-  // host presents when it dials the host's loopback.
   headers.origin = `http://${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`;
   for (const name of HANDSHAKE_REQUEST_HEADERS) {
     const value = headerValue(requestHeaders[name]);
@@ -88,7 +67,6 @@ export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }) =>
   return `${lines.join('\r\n')}\r\n\r\n`;
 };
 
-/** The status and the headers of the answer inside, and the bytes that followed its header block. */
 export const parseHandshakeAnswer = (buffer) => {
   const end = buffer.indexOf('\r\n\r\n');
   if (end < 0) return null;
@@ -104,14 +82,9 @@ export const parseHandshakeAnswer = (buffer) => {
   return { status, headers, rest: buffer.subarray(end + 4) };
 };
 
-/**
- * `dispatcher` is the space dispatcher, for its list and its sessions; `connect` is the place's.
- * `uiAuthController`, `isRequestOriginAllowed` and `logger` are the host's.
- */
 export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
   const open = new Map();
 
-  // Handshakes under way count against the cap too: each one is a `docker exec` already.
   const count = (spaceId) => open.get(spaceId)?.size ?? 0;
   const track = (spaceId, pair) => {
     if (!open.has(spaceId)) open.set(spaceId, new Set());
@@ -122,11 +95,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     if (count(spaceId) === 0) open.delete(spaceId);
   };
 
-  /**
-   * Who may open a socket: the same rule as the host's own handler for that socket. The dev
-   * tunnel also takes a client that authenticated with its own token and sends no origin, as
-   * the desktop's tunnel client does; the others need an origin the host trusts.
-   */
   const authorize = async (req, innerPath) => {
     if (isOpaqueOriginRequest(req)) return { status: 403, code: 'invalid_origin', message: 'Invalid origin' };
     if (!uiAuthController?.enabled) {
@@ -147,10 +115,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     return null;
   };
 
-  /**
-   * One handshake inside on a fresh stream. Resolves the stream with the answer, or rejects;
-   * `signal` aborting, the client having left, ends it at once.
-   */
   const handshake = (spaceId, request, signal) => new Promise((resolve, reject) => {
     let stream;
     let settled = false;
@@ -201,7 +165,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     }, fail);
   });
 
-  /** Joins the client's socket and the stream inside until either side ends. */
   const join = ({ spaceId, socket, head, stream, answer, pair }) => {
     pair.stream = stream;
     const lines = ['HTTP/1.1 101 Switching Protocols'];
@@ -218,7 +181,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       ended = true;
       if (!socket.destroyed) {
         try { socket.end(closeFrame(code, reason)); } catch { socket.destroy(); }
-        // A client that never answers the close frame is not waited for.
         setTimeout(() => socket.destroy(), CLOSE_GRACE_MS).unref?.();
       }
       stream.destroy();
@@ -227,8 +189,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     stream.on('error', () => endWith(1011, 'space_unreachable'));
     stream.on('end', () => endWith(1012, 'space_closed'));
     stream.on('close', () => endWith(1012, 'space_closed'));
-    // The host's sockets allow a half-open state: the client's end arrives as `end` long
-    // before `close`, and the stream inside is killed at the first of the two.
     socket.on('error', () => endWith(1011, 'client_gone'));
     socket.on('end', () => endWith(1011, 'client_gone'));
     socket.on('close', () => endWith(1011, 'client_gone'));
@@ -246,14 +206,10 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       refuse(socket, 503, 'space_socket_limit', `Space ${route.spaceId} has too many open sockets.`);
       return;
     }
-    // The slot is taken now, before the first `docker exec`, and given back on every failure.
     const pair = { socket, stream: null };
     track(route.spaceId, pair);
     const gone = new AbortController();
     const onLeave = () => gone.abort();
-    // The socket has to flow for its `end` to be seen, and `end` as well as `close` is needed:
-    // the host's sockets allow a half-open state, see `join`. What the client sends before the
-    // answer, which a WebSocket client does not, is kept for the stream inside.
     const early = [];
     const onEarly = (chunk) => early.push(chunk);
     socket.on('data', onEarly);
@@ -263,8 +219,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       const attempt = async (cookie) => handshake(route.spaceId, buildHandshake({ innerPath: route.path, search, requestHeaders: req.headers, cookie }), gone.signal);
       let result = await attempt(await dispatcher.spaceSessions.cookieFor(route.spaceId));
       if (result.answer.status === 401) {
-        // The server inside refused the session: renewed once, as for HTTP. An upgrade has no
-        // body, so the fresh attempt is the same request.
         result.stream.destroy();
         result = await attempt(await dispatcher.spaceSessions.renew(route.spaceId));
       }
@@ -286,11 +240,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     }
   };
 
-  /**
-   * The `upgrade` handler: takes every upgrade to a space, leaves every other one alone. It runs
-   * before the host's own handlers, each of which takes one exact path; an upgrade addressed by
-   * its directory gets the prefixed form as its URL, so none of them takes it as well.
-   */
   const upgradeHandler = (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const route = spaceRouteOf(req, url);
@@ -328,7 +277,6 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     })();
   };
 
-  /** Ends every open socket into every space. */
   const close = () => {
     for (const pairs of open.values()) {
       for (const pair of pairs) {

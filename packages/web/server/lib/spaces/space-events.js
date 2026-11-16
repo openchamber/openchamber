@@ -1,20 +1,3 @@
-// One event connection per space, with its own state and its own backoff, attached to the
-// host's event hub after the v2 translation layer: a space's events enter the hub as the
-// host's do, numbered, coalesced, replayed and fanned out, marked with the space's id. They
-// feed the same watcher, so live status, unread marks and notifications work for a space's
-// sessions, and the same browser streams, so a client keeps one cursor for everything.
-//
-// Every event is untrusted and passes the session index first: a directory outside the
-// space's root or a session id of the host's drops it. When a connection is made the host
-// asks the space for its live status and enters it the same way. A gap is reported to the
-// clients as `openchamber:space-stream`, so a client re-reads that one space.
-//
-// Two more connections per space read what the server inside keeps for the space's own sessions,
-// since it sees its OpenCode and acts on it: its control stream for changes to a session's message
-// queue and auto-review, and its notification stream for the permission modes and the requests it left for the
-// user. Each change passes the same rules and goes to the browsers marked with the space's id, on
-// the host's stream that carries the host's own; each connection announces itself, so a client
-// re-reads that space's state after a gap.
 
 import { Readable } from 'node:stream';
 
@@ -30,24 +13,18 @@ const QUEUE_UPDATED = 'openchamber:message-queue.updated';
 const AUTO_REVIEW_UPDATED = 'openchamber:auto-review.updated';
 const MODES_UPDATED = 'openchamber:permission-auto-accept.updated';
 const LEFT_FOR_USER = 'openchamber:permission-auto-accept.left-for-user';
-// Both streams inside are quiet but for a heartbeat, every 25 and 20 seconds, so a quiet minute
-// is a dead stream; the reader's default of 20 seconds would drop and remake a healthy idle one.
 const SPACE_STATE_STALL_TIMEOUT_MS = UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS;
 const STATUS_PATH = '/api/sessions/status';
 const STATUS_TIMEOUT_MS = 10_000;
 const MAX_STATUS_BYTES = 4 * 1024 * 1024;
 
-// Backoff between attempts: doubling from one second to a minute, reset by a connection.
 const RECONNECT_BASE_MS = 1_000;
 export const RECONNECT_CAP_MS = 60_000;
 export const reconnectDelayAfter = (failures) => Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** Math.max(0, failures - 1));
 
-// What the host reads of an answer from inside; the rest is carried, not read.
 const liveStatusSchema = z.object({ status: z.enum(['busy', 'idle']) });
 const statusSchema = z.object({ sessions: z.record(z.string(), z.unknown()).default({}) }).passthrough();
 const eventPayloadSchema = z.object({ location: z.object({ directory: z.string() }).passthrough().optional() }).passthrough();
-// A queue change inside, rebuilt from these fields only; the items are the space's own, carried for display.
-// The permission modes of the space's sessions and a request left for the user, rebuilt the same way.
 const modesUpdateSchema = z.object({
   type: z.literal(MODES_UPDATED),
   properties: z.object({ modes: z.record(z.string(), z.enum(['ask', 'safety', 'auto'])), revision: z.number() }),
@@ -68,7 +45,6 @@ const queueUpdateSchema = z.object({
     }),
   }),
 });
-// An auto-review run inside, rebuilt the same way: both of its sessions must be the space's.
 const autoReviewRunSchema = z.object({
   originalSessionID: z.string().min(1),
   reviewSessionID: z.string().min(1),
@@ -79,8 +55,6 @@ const autoReviewRunSchema = z.object({
   maxRounds: z.number().int().positive(),
   startedAt: z.number(),
   updatedAt: z.number(),
-  // Cut, not refused: an update dropped for a long error would leave the run
-  // showing as running in the browsers.
   error: z.string().transform((error) => error.slice(0, 2_000)).optional(),
   dispute: z.string().transform((dispute) => dispute.slice(0, 2_000)).optional(),
 });
@@ -94,7 +68,6 @@ const autoReviewUpdateSchema = z.object({
   }),
 });
 
-/** Reads a whole body up to a cap, as text. */
 const readBody = (response, cap) => new Promise((resolve, reject) => {
   const chunks = [];
   let size = 0;
@@ -111,12 +84,6 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
   response.on('error', reject);
 });
 
-/**
- * `requestInside(spaceId, { path, headers, timeoutMs })` is the dispatcher's; `index` the
- * session index; `hub` the global event hub; `broadcastUiEvent` the host's control stream and
- * `broadcastGlobalUiEvent` its notification stream, and without one the connection that feeds it
- * is not made. `stallTimeoutMs`, `stateStallTimeoutMs` and `now` are for the tests.
- */
 export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, onTaskTitle = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
   const sources = new Map();
   const titleProposalSchema = z.object({ properties: z.object({ spaceId: z.string(), title: z.unknown() }) });
@@ -137,7 +104,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     inject(spaceId, { type: 'openchamber:space-stream', properties: { spaceId, status, wasReady, timestamp: now() } }, 'global');
   };
 
-  /** The live status inside, entered as status events, so a busy session shows busy from the first moment. */
   const seedStatus = async (spaceId) => {
     const response = await requestInside(spaceId, { path: STATUS_PATH, headers: { accept: 'application/json' }, timeoutMs: STATUS_TIMEOUT_MS });
     if (response.statusCode !== 200) {
@@ -154,7 +120,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     }
   };
 
-  /** A stream inside, over the dispatcher's channel, in the shape the reader expects. */
   const fetchInside = (spaceId, path) => async (_url, { headers, signal }) => {
     const response = await requestInside(spaceId, { path, headers });
     const stop = () => response.destroy();
@@ -191,7 +156,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
         if (!parsed.success || !index.acceptSpaceEvent(spaceId, payload)) return;
         inject(spaceId, payload, parsed.data.location?.directory ?? '');
       },
-      // Every failed attempt ends in `onDisconnect`, which is where it is counted.
       onError(error) {
         if (controller.signal.aborted) return;
         logger.warn?.(`[spaces] event stream of space ${spaceId}: ${error?.type ?? 'error'} ${error?.status ?? error?.error?.code ?? ''}`.trim());
@@ -235,14 +199,12 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     void source.reader.start();
   };
 
-  /** Whether a space may speak for one of its sessions; a drop is logged as a code with the space id. */
   const speaksFor = (spaceId, what, sessionId, directory = null) => {
     const code = index.spaceSessionDropCode(spaceId, sessionId, directory);
     if (code !== null) logger.warn?.(`[spaces] dropped ${what} of space ${spaceId}: ${code}`);
     return code === null;
   };
 
-  /** A queue change of a space's session, to the browsers, when the space may speak for that session. */
   const forwardQueueUpdate = (spaceId, payload) => {
     const parsed = queueUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
@@ -251,10 +213,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     broadcastUiEvent({ type: QUEUE_UPDATED, properties: { revision, session, spaceId } });
   };
 
-  /**
-   * An auto-review change of a space's session, to the browsers, when the space may speak for
-   * the reviewed session and, for a run, for its review session in the same directory.
-   */
   const forwardAutoReviewUpdate = (spaceId, payload) => {
     const parsed = autoReviewUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
@@ -270,10 +228,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     broadcastUiEvent({ type: AUTO_REVIEW_UPDATED, properties: { revision, originalSessionID, directory, run, spaceId } });
   };
 
-  /**
-   * The space's permission modes, to the browsers, without the sessions it may not speak for.
-   * `sessions` is the on/off shape older clients read, rebuilt from the modes.
-   */
   const forwardModesUpdate = (spaceId, payload) => {
     const parsed = modesUpdateSchema.safeParse(payload);
     if (!parsed.success) return;
@@ -287,7 +241,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     broadcastGlobalUiEvent({ type: MODES_UPDATED, properties: { sessions, modes, revision: parsed.data.properties.revision, spaceId } });
   };
 
-  /** A request the server inside left for the user, so the browsers show it after all. */
   const forwardLeftForUser = (spaceId, payload) => {
     const parsed = leftForUserSchema.safeParse(payload);
     if (!parsed.success) return;
@@ -296,7 +249,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     broadcastGlobalUiEvent({ type: LEFT_FOR_USER, properties: { permissionId, sessionId, directory, spaceId } });
   };
 
-  /** One stream inside that feeds a space's own state to the browsers, with its own backoff. */
   const startStateReader = (spaceId, signal, { path, announce, forward }) => {
     const state = { failures: 0 };
     const reader = createUpstreamSseReader({
@@ -330,11 +282,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
   };
 
   return {
-    /**
-     * Follows the list of spaces: a connection for each new one, none for one that is gone. A
-     * space in `paused` is kept, with its index, and not connected: its place cannot be asked, and
-     * an attempt would only wait on a machine that is off.
-     */
     sync(spaceIds, { paused = new Set() } = {}) {
       const wanted = new Set(spaceIds);
       for (const spaceId of Array.from(sources.keys())) {
@@ -349,7 +296,6 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
         if (!paused.has(spaceId)) start(spaceId);
       }
     },
-    /** For the tests: whether a space has a connection right now. */
     has: (spaceId) => sources.has(spaceId),
     close() {
       for (const spaceId of Array.from(sources.keys())) stop(spaceId);
