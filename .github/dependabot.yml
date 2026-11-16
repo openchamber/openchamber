@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # This repo is a bun-managed monorepo (root package.json sets
+  # packageManager: bun@1.4.3; a single root bun.lock covers the
+  # packages/* workspaces, and workspace dirs such as /packages/ui carry
+  # no package-lock.json / yarn.lock / pnpm-lock.yaml of their own).
+  # Without this file, Dependabot auto-detects npm_and_yarn per manifest
+  # directory and its security-update job fails on those lockfile-less
+  # workspace dirs with dependency_file_not_supported (issue #2325: the
+  # simple-git job for /packages/ui errored with "Dependabot can't update
+  # vulnerable dependencies for projects without a lockfile ... as the
+  # currently installed version of simple-git isn't known"). Declaring
+  # the repo's real ecosystem here replaces that auto-detection with an
+  # explicit, truthful configuration.
+  #
+  # What this does and does not do, per GitHub's supported-package-managers
+  # table (github/docs, data/reusables/dependabot/supported-package-managers.md):
+  # bun supports Dependabot *version* updates but NOT *security* updates.
+  # So this entry cannot give the repo Dependabot security PRs for its JS
+  # dependencies -- that is a GitHub platform gap for bun-lockfile repos,
+  # not something a config can route around. JS vulnerability remediation
+  # stays with Renovate (renovate.json) and manual bun.lock bumps until
+  # GitHub ships bun security-update support.
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Version-update PRs are owned by Renovate (see renovate.json); keep
+    # Dependabot version updates off so the two bots don't file duplicate
+    # PRs. (The limit governs version updates only; it neither enables nor
+    # disables security updates.)
+    open-pull-requests-limit: 0
