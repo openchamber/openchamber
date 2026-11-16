@@ -95,7 +95,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { isPluginContextPanelMode, pluginModeFromId } from '@/lib/surfaces/modes';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
-import { isCapacitorMobileApp, useMobileWebBackButton, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
+import { isCapacitorMobileApp, useAndroidParentSessionBack, useMobileBackHandlers, useMobileWebBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
@@ -537,15 +537,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   // Settings owns a drill-down of its own (nav → page list → item), so the
   // hardware back button asks it to step up before the shell closes it.
-  const settingsBackRef = React.useRef<(() => boolean) | null>(null);
-  const previewBackRef = React.useRef<(() => boolean) | null>(null);
-  const registerSettingsBackHandler = React.useCallback((handler: (() => boolean) | null) => {
-    settingsBackRef.current = handler;
-  }, []);
-
-  const registerPreviewBackHandler = React.useCallback((handler: (() => boolean) | null) => {
-    previewBackRef.current = handler;
-  }, []);
+  const { settingsBackRef, previewBackRef, parentSessionBackRef, registerSettingsBackHandler, registerPreviewBackHandler, registerParentSessionBack } = useMobileBackHandlers();
 
   // Top-most layer first: a plan or fullscreen surface can sit ABOVE a drawer
   // (opened from the drawer footer / workspace tabs), so they close before the
@@ -585,9 +577,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, openReceivedPage, sessionsSheetOpen, workspaceOpen, workspaceTab]);
+  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, openReceivedPage, previewBackRef, sessionsSheetOpen, settingsBackRef, workspaceOpen, workspaceTab]);
 
-  useNativeAndroidBackButton(handleNativeBack);
+  useAndroidParentSessionBack(handleNativeBack, parentSessionBackRef);
 
   // Mobile web has no back button event: the same ladder runs from the
   // browser's Back, off a history guard held while a layer is open.
@@ -729,7 +721,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
             <div className="h-full w-full">
               <ErrorBoundary>
-                <ChatView />
+                <ChatView registerParentSessionBack={registerParentSessionBack} />
               </ErrorBoundary>
             </div>
             <ErrorBoundary><RunOverview /></ErrorBoundary>

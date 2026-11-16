@@ -2,13 +2,14 @@ import React from 'react';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import { DraftProjectName } from '@/components/chat/DraftProjectName';
 import { createPortal } from 'react-dom';
-import type { Message, Part, Session } from '@/lib/opencode/model';
+import type { Message, Part } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
 import { dropReplyCommandRows } from '@/lib/opencode/reply-command';
 import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 
 import { ChatInput } from './ChatInput';
+import { useParentSessionBack } from '@/hooks/useParentSessionBack';
 import { CHAT_INPUT_EDITOR_SELECTOR } from './composer/editor/dom';
 import {
     ChatColumnActionsContext,
@@ -827,6 +828,7 @@ type ChatContainerProps = {
      * panels.
      */
     pinnedSession?: { sessionId: string; directory: string | null };
+    registerParentSessionBack?: (handler: (() => void) | null) => void;
 };
 
 type PinnedSelection = { sessionId: string; directory: string | null };
@@ -836,6 +838,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     autoOpenDraft: autoOpenDraftProp = true,
     readOnly = false,
     pinnedSession,
+    registerParentSessionBack,
 }) => {
     const pinned = pinnedSession !== undefined;
     const autoOpenDraft = autoOpenDraftProp && !pinned;
@@ -1241,12 +1244,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // the pinned session.
     const hideReturnToParent = pinned && currentSessionId === pinnedOrigin?.sessionId;
 
-    const openColumnSession = columnActions.openSession;
-    const handleReturnToParentSession = React.useCallback(() => {
-        if (!parentSession) return;
-        const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
-        openColumnSession(parentSession.id, parentDirectory);
-    }, [openColumnSession, parentSession]);
+    const handleReturnToParentSession = useParentSessionBack(parentSession, hideReturnToParent, columnActions.openSession, registerParentSessionBack);
 
     const returnToParentButton = parentSession && !hideReturnToParent ? (
         <Tooltip>
