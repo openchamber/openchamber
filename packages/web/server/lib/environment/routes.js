@@ -1,22 +1,5 @@
 import { EnvironmentPatchError, isProjectId } from './store.js';
 
-/**
- * Environment variables for what OpenChamber starts. Every answer names the
- * variables and never carries a value: anyone signed in to the UI, over a
- * tunnel or from a paired phone too, can manage them but not read them back.
- *
- * GET  /api/environment                          -> { names }
- * PUT  /api/environment                          { variables: { NAME: "value" | null } } -> { names }
- * GET  /api/environment/projects/:id             -> { names, command, status }
- * PUT  /api/environment/projects/:id             { variables?, command? } -> { names, command, status }
- * POST /api/environment/projects/:id/reload      -> { names, command, status }
- *
- * `status` is the last outcome of the project's environment command:
- * null before it ran, `{ state: "applied", count }`, or
- * `{ state: "failed", reason, exitCode? }`.
- *
- * `/api/environment` is on the JSON-body allowlist in `opencode/core-routes.js`.
- */
 export const registerEnvironmentRoutes = (app, { store, runtime, listProjects }) => {
   const respondWithError = (res, error, fallback) => {
     if (error instanceof EnvironmentPatchError) return res.status(400).json({ error: error.message });
