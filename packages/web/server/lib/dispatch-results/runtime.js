@@ -10,8 +10,8 @@
 // Event-driven like the message queue: the shared upstream hub delivers
 // `session.status`, and an idle transition of a watched session arms a short
 // timer. The tick confirms the turn is over against OpenCode itself (not
-// running, no running subagent, and the `idle` record OpenCode appends when a
-// run ends) before anything is delivered. Pending deliveries are persisted,
+// running, and the `idle` record OpenCode appends when a run ends) before
+// anything is delivered. Pending deliveries are persisted,
 // so a restart in between still delivers.
 
 import fs from 'fs';
@@ -25,8 +25,6 @@ const FILE_VERSION = 1;
 const MAX_ENTRIES = 200;
 // Idle events arrive in bursts around a turn boundary.
 const QUIET_MS = 500;
-// While a subagent of the dispatched session runs, the turn is not over yet.
-const SUBAGENT_RECHECK_MS = 5_000;
 // An idle session without the run's `idle` record yet: the record lands with
 // the event, so a few short rechecks cover a projection that trails it.
 const SETTLE_RECHECK_MS = 2_000;
@@ -214,7 +212,6 @@ export function createDispatchResultsRuntime({
   now = Date.now,
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
-  subagentRecheckMs = SUBAGENT_RECHECK_MS,
   settleRecheckMs = SETTLE_RECHECK_MS,
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
@@ -322,11 +319,6 @@ export function createDispatchResultsRuntime({
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
     if (statuses[sessionId]) return { kind: 'running' };
-    // A turn is over only when its subagents are done too: the session idles
-    // while a background subagent works and runs again on its result.
-    const subagentsWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
-    if (subagentsWorking === null) return null;
-    if (subagentsWorking) return { kind: 'subagents' };
     const encoded = encodeURIComponent(sessionId);
     try {
       const session = parse(sessionRecordSchema, await openCodeRequest(`/api/session/${encoded}`));
@@ -409,7 +401,6 @@ export function createDispatchResultsRuntime({
       if (watched === null) return retryLater(sessionId);
       // Running: its next idle event re-arms the tick.
       if (watched.kind === 'running') return;
-      if (watched.kind === 'subagents') return arm(sessionId, subagentRecheckMs);
 
       let waiting = false;
       const ready = [];
