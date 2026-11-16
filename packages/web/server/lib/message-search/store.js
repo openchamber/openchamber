@@ -1,20 +1,5 @@
-/**
- * The message search index: one SQLite file in the OpenChamber data dir.
- *
- * `messages` holds the searchable text of settled user messages and agent
- * replies; `messages_fts` is an external-content FTS5 index over it, kept by
- * triggers. The trigram tokenizer matches any three or more characters inside
- * a word, in any script, so "світ" finds "світу" and CJK text needs no word
- * segmentation. `sessions` remembers where each session's reading stopped.
- *
- * The file is derived data. Schema 4 preserves the indexed text and cursors
- * while adding archive lifecycle state.
- */
-
 const MESSAGE_SEARCH_SCHEMA_VERSION = '4';
 
-// Private-use characters around each match in a snippet. They cannot occur in
-// ordinary text and are not markup, so a snippet is never rendered as HTML.
 export const MATCH_START = '';
 export const MATCH_END = '';
 
@@ -75,11 +60,6 @@ const DROP = `
 
 const characterLength = (value) => Array.from(value).length;
 
-/**
- * A query as FTS5 understands it: every word must occur, each matched
- * literally. Words shorter than the trigram window cannot be looked up and are
- * left out; a query made only of them has no answer rather than every answer.
- */
 export const toSearchTerms = (query) => String(query ?? '')
   .trim()
   .split(/\s+/)
@@ -93,14 +73,6 @@ export const toMatchExpression = (query) => {
 
 const SNIPPET_RADIUS = 90;
 
-/**
- * The part of a message around a match, every match in it marked.
- * FTS5's own snippet() counts trigrams, not words, and cuts a hit to a few
- * characters, so the window is taken here, on the text of the hits only.
- * Matching is case-insensitive the same way the trigram index is; where
- * lowercasing changes a string's length (rare scripts), offsets would drift,
- * so that text is returned unmarked.
- */
 export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
   const lower = text.toLowerCase();
   if (lower.length !== text.length) return text.slice(0, radius * 2);
@@ -119,14 +91,11 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
     if (previous && range[0] <= previous[1]) previous[1] = Math.max(previous[1], range[1]);
     else merged.push([...range]);
   }
-  // Centre on the longest word: in "git rebase" the rare one says more than
-  // the short one that also matches inside "github".
   const longest = terms.reduce((best, term) => (term.length > best.length ? term : best), '').toLowerCase();
   const anchorAt = lower.indexOf(longest);
   const anchor = merged.find(([from, to]) => from <= anchorAt && anchorAt < to) ?? merged[0];
   let start = Math.max(0, anchor[0] - radius);
   let end = Math.min(text.length, anchor[1] + radius);
-  // Whole words at the edges read better than a cut one.
   if (start > 0) {
     const space = text.lastIndexOf(' ', anchor[0]);
     if (space > start) start = space + 1;
@@ -203,7 +172,6 @@ export const openMessageSearchStore = (connection) => {
       connection.run('UPDATE sessions SET directory = ? WHERE id = ?', [directory, sessionId]);
     },
 
-    /** Forgets what was read, for a session whose history changed under the cursors. */
     resetSession: (sessionId, revertId) => {
       connection.transaction(() => {
         connection.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
@@ -221,7 +189,6 @@ export const openMessageSearchStore = (connection) => {
       });
     },
 
-    /** Messages are immutable once settled; a re-read replaces nothing it does not change. */
     putMessages: (rows) => {
       if (rows.length === 0) return;
       connection.transaction(() => {
@@ -235,7 +202,6 @@ export const openMessageSearchStore = (connection) => {
       });
     },
 
-    /** `anchorId` is the message the cursor points after, so a sync can check it still exists. */
     setCursor: (sessionId, role, cursor, anchorId) => {
       const prefix = role === 'user' ? 'user' : 'assistant';
       connection.run(`UPDATE sessions SET ${prefix}_cursor = ?, ${prefix}_anchor = ? WHERE id = ?`, [cursor, anchorId, sessionId]);
@@ -251,15 +217,10 @@ export const openMessageSearchStore = (connection) => {
       connection.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [key, value]);
     },
 
-    /** Drops every row of one kind, e.g. reasoning once it is no longer indexed. */
     deleteRole: (role) => {
       connection.run('DELETE FROM messages WHERE role = ?', [role]);
     },
 
-    /**
-     * Makes the next walk read every session's agent records again from the
-     * start (user messages keep their cursor): what is indexed from them changed.
-     */
     rereadAssistantRecords: () => {
       connection.run('UPDATE sessions SET assistant_cursor = NULL, assistant_anchor = NULL, synced_updated_at = NULL');
     },
@@ -274,10 +235,6 @@ export const openMessageSearchStore = (connection) => {
 
     markLifecycleComplete: () => connection.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('lifecycle_complete', '1')"),
 
-    /**
-     * Newest matches first. `before` pages by creation time (with the message
-     * id breaking ties), so a page boundary never repeats or skips a hit.
-     */
     search: ({ match, sessionId = null, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, order = 'desc' }) => {
       const where = ['messages_fts MATCH ?'];
       const params = [match];
