@@ -1,21 +1,7 @@
-/**
- * The Jev questions asked when a turn ends: whether the work looks done,
- * whether there are changes worth a look, and the session-assist gate; and
- * the decisions taken from their answers.
- *
- * Looks done and the next-step gate read plain signs of the agent's message
- * (is it a report, does the agent say it goes on, does it wait for the user,
- * does it offer more); the code combines them. A small model recognises such
- * signs reliably, while a question that weighs the whole conversation
- * ("does this turn close out the work") asks it to reason. Keep the criteria
- * general common sense about coding-agent work; never phrase them after one
- * user's habits. Change them only with a new measurement (DOCUMENTATION.md).
- */
 import { z } from 'zod';
 
 const TURN_END_CONTEXT = 'This is a turn in a chat between a user and an AI coding agent. `request` is the latest user message, `answer` is the agent\'s reply to it, and `history` holds earlier turns, oldest first, only to explain what a short `request` refers to.';
 
-/** The signs are about `answer` alone; the conversation stays in the state for the other questions. */
 const MESSAGE_CONTEXT = '`answer` is a message an AI coding agent wrote to its user. `request` and `history` are the conversation before it.';
 
 const SIGNS = {
@@ -28,16 +14,6 @@ const LOOKS_DONE_SIGNS = ['report', 'agent_continues', 'waits_reader', 'offers_a
 const NEXT_STEP_SIGNS = ['agent_continues', 'waits_reader'];
 const SIGN_THRESHOLD = 0.5;
 
-/**
- * Asked in the same call: the turn handed over changes the user could look over
- * (the composer then offers an AI review or a walkthrough). Measured against
- * whether the turn ran an edit tool, which Jev never sees: on 190 held-out
- * sessions at 0.7, with a looks-done hint taking precedence, it hinted after
- * 271 of 362 edit turns and after 14 of 823 turns without edits. Two other
- * wordings (handed over as done; no criteria) hinted 4-7x more on turns
- * without edits. Most false hints are cleanups outside the code (deleted
- * builds); most misses say "did not change the app" after scratch edits.
- */
 const REVIEW_READY = {
   question: 'Did the agent change the project in this turn, so there are new changes the user could look over now?',
   criteria: {
@@ -55,7 +31,6 @@ const RECAP = {
 };
 
 const REVIEW_READY_THRESHOLD = 0.7;
-/** The recap is skipped only when Jev is nearly sure there is nothing to remind. */
 const RECAP_SKIP_BELOW = 0.3;
 
 const noul = (context, { question, criteria }) => {
@@ -64,12 +39,6 @@ const noul = (context, { question, criteria }) => {
   return asked;
 };
 
-/**
- * The request Jev reads when a turn ended, or null when nothing is asked.
- * `ask` names the groups: `wrapUp` (the session is in work), `reviewReady`
- * (the review offer is on), `recap` and `nextStep` (the assist fields the
- * user has on). A sign both groups need is asked once.
- */
 export const buildTurnEndRequest = ({ history, request, answer, ask }) => {
   const questions = {};
   const signs = new Set([...(ask.wrapUp ? LOOKS_DONE_SIGNS : []), ...(ask.nextStep ? NEXT_STEP_SIGNS : [])]);
@@ -82,13 +51,11 @@ export const buildTurnEndRequest = ({ history, request, answer, ask }) => {
 
 const noulAnswer = z.object({ noul: z.number() });
 const answerOf = (answers, id) => noulAnswer.safeParse(answers?.[id]).data?.noul ?? null;
-/** True or false for an answered sign, null for one Jev did not answer. */
 const signOf = (answers, id) => {
   const score = answerOf(answers, id);
   return score === null ? null : score >= SIGN_THRESHOLD;
 };
 
-/** A report of finished work, with the agent neither going on, waiting for the user, nor offering more. */
 export const decideWrapUp = (answers) => signOf(answers, 'report') === true
   && signOf(answers, 'agent_continues') === false
   && signOf(answers, 'waits_reader') === false
@@ -99,12 +66,6 @@ export const decideReviewReady = (answers) => {
   return score !== null && score >= REVIEW_READY_THRESHOLD;
 };
 
-/**
- * Which assist fields are worth the Small Model. A field Jev did not answer
- * stays allowed: an unanswered question must not silence the assist. A next
- * step is worth suggesting when the agent says it goes on and is not waiting
- * for the user.
- */
 export const decideAssist = (answers) => {
   const recap = answerOf(answers, 'recap');
   const continues = signOf(answers, 'agent_continues');
