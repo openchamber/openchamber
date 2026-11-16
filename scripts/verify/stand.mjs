@@ -155,9 +155,10 @@ const opencodeConfig = (fixturePort, deadPort) => {
     autoupdate: false,
     share: "disabled",
     compaction: { auto: false },
-    // Everything else runs without asking; a read of a `.secret` file asks,
-    // so a scenario can show a permission request.
-    permission: { read: { "*.secret": "ask" } },
+    // Everything else runs without asking. A read of a `.secret` file and a
+    // fetch ask, so a scenario can show a permission request or hold a
+    // session on one; nothing else in the fixture fetches.
+    permission: { read: { "*.secret": "ask" }, webfetch: "ask" },
     // Released builds keep `todowrite` behind a flag; the chat's Tasks row needs it.
     experimental: { todo: true },
   }
@@ -336,6 +337,9 @@ const attachStand = (info) => {
     }
     gitIn(info.project, ["reset", "-q", "--hard", "HEAD"])
     gitIn(info.project, ["clean", "-fdq"])
+    // Sidebar folders, which the server keeps for every window. The Detailed
+    // rows switch a scenario may leave on is a profile setting, dropped below.
+    rmSync(join(info.data, "sessions-directories.json"), { force: true })
     await resetProfile(info.data, info.apiUrl)
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }

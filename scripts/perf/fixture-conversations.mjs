@@ -715,6 +715,26 @@ const VERIFY_TURNS = [
     steps: [{ text: "Saving it.", calls: [{ name: "execute", arguments: { code: "return await tools.openchamber_knowledge({ action: 'knowledge.save', parameters: { kind: 'note', body: 'The verify runner answers from a fixture model.' } })" } }] }],
     answer: "Saved.\n",
   },
+  // A fetch waits on the user's permission (the verify stand asks before
+  // every fetch); a question waits on their answer.
+  {
+    id: "verify_permission",
+    prompt: "Fetch the release checklist from the wiki and follow it.",
+    steps: [{ text: "Fetching the checklist.", calls: [{ name: "webfetch", arguments: { url: "https://wiki.example.com/release-checklist", format: "text" } }] }],
+    answer: "Followed the checklist.\n",
+  },
+  {
+    id: "verify_branch_question",
+    prompt: "Ask me which branch to base the release on before you start.",
+    steps: [{
+      text: "Asking which branch to use.",
+      calls: [{
+        name: "question",
+        arguments: { questions: [{ question: "Which branch should the release start from?", header: "Branch", options: [{ label: "main", description: "The default branch" }, { label: "next", description: "The upcoming release" }] }] },
+      }],
+    }],
+    answer: "Starting the release from the branch you picked.\n",
+  },
 ]
 
 const TURNS = [

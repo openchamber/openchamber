@@ -15,8 +15,10 @@ const KEYS = {
   ArrowDown: { code: "ArrowDown", keyCode: 40 },
   ArrowUp: { code: "ArrowUp", keyCode: 38 },
   End: { code: "End", keyCode: 35 },
+  F10: { code: "F10", keyCode: 121 },
 }
 export const MOD = process.platform === "darwin" ? "meta" : "ctrl"
+const modifierMask = (modifiers) => modifiers.map((name) => (name === "mod" ? MOD : name)).reduce((sum, name) => sum | MODIFIERS[name], 0)
 
 export const DEEP_QUERY = `((selector) => {
   const roots = [document]
@@ -162,10 +164,10 @@ export class Page {
 
   // A point another element still covers when the wait ends comes back
   // unused: pressing there would act on whatever lies on top.
-  async hover(target, timeoutMs) {
+  async hover(target, timeoutMs, modifiers = []) {
     const point = await this.point(target, timeoutMs)
     if (!point?.hits) return point
-    await this.mouse("mouseMoved", point)
+    await this.mouse("mouseMoved", point, { modifiers: modifierMask(modifiers) })
     return point
   }
 
@@ -184,18 +186,20 @@ export class Page {
 
   // `count` 2 is a double-click: two press-release pairs, the second counted
   // as the second click, which is what fires dblclick.
-  async click(target, timeoutMs, { button = "left", count = 1 } = {}) {
+  // `modifiers` (as on `press`) are held during the move and the click.
+  async click(target, timeoutMs, { button = "left", count = 1, modifiers = [] } = {}) {
     if (this.phone || button === "long") {
       const point = await this.point(target, timeoutMs)
       if (point?.hits) await this.touch(point, button === "long" ? 800 : 40)
       return point
     }
-    const point = await this.hover(target, timeoutMs)
+    const point = await this.hover(target, timeoutMs, modifiers)
     if (!point?.hits) return point
     const buttons = button === "right" ? 2 : 1
+    const mask = modifierMask(modifiers)
     for (let clickCount = 1; clickCount <= count; clickCount += 1) {
-      await this.mouse("mousePressed", point, { button, buttons, clickCount })
-      await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount })
+      await this.mouse("mousePressed", point, { button, buttons, clickCount, modifiers: mask })
+      await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount, modifiers: mask })
     }
     return point
   }
@@ -272,7 +276,7 @@ export class Page {
   }
 
   async press(key, modifiers = []) {
-    const mask = modifiers.map((name) => (name === "mod" ? MOD : name)).reduce((sum, name) => sum | MODIFIERS[name], 0)
+    const mask = modifierMask(modifiers)
     const known = KEYS[key]
     const isChar = !known && key.length === 1
     const code = known?.code ?? (isChar ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : `Digit${key}`) : key)

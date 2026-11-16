@@ -72,13 +72,13 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | Step | Does |
 |---|---|
 | `session.create` `as`, `title` | Creates a session in the project; `as` names the variable holding its id |
-| `session.send` `session`, `prompt`, `model`, `wait` | Sends a prompt as another client would; waits for the answer unless `wait` is false |
+| `session.send` `session`, `prompt`, `model`, `wait`, `goal` | Sends a prompt as another client would; waits for the answer unless `wait` is false; `goal` sends it as a goal the agent keeps working toward |
 | `session.idle`, `session.busy` `session` | Waits for the session's status |
 | `file.write` `path`, `content`, `times`; `file.delete` `path` | Changes the project on disk; `content` may be an array of lines; with `times` it writes that many files, `{n}` in the path numbered 01, 02, ... |
 | `file.expect` `path`, `contains`, `equals` or `exists` | Waits for the file's content, or for the path to exist (`true`) or be gone (`false`) |
 | `open` `session`, `phone` | Loads the app, at that session when given; `"phone": true` loads the phone layout (`/mobile.html`) at a phone's size with touch, and every later click is a tap |
 | `reload` `ready` | Reloads the page and waits for the composer; `"ready": false` does not wait, for a reload while the server is stopped |
-| `click`, `hover` `on`; `button`, `clicks` on a click | Moves the real mouse to the element's centre, once it stands still and nothing covers it; `"button": "right"` opens a context menu, `"button": "long"` presses a finger for 0.8 s (a phone row's menu), `"clicks": 2` double-clicks; fails when something still covers it at the timeout |
+| `click`, `hover` `on`, `mods`; `button`, `clicks` on a click | Moves the real mouse to the element's centre, once it stands still and nothing covers it; `"button": "right"` opens a context menu, `"button": "long"` presses a finger for 0.8 s (a phone row's menu), `"clicks": 2` double-clicks; `mods` (as on `press`) are held during the move and the click; fails when something still covers it at the timeout |
 | `drag` `on`, `to` | Presses on the element, moves to the centre of `to` (an object with its own `on`, `text`, `index`) with the button held, and releases there; both ends must be on screen together |
 | `wheel` `on`, `dy`, `dx`, `times` | Scrolls with the wheel over the element, down by `dy` and sideways by `dx` |
 | `dragStart` `on` or `files` | Starts a native HTML drag from the element, or holds `files` (`name`, `content`) as if dragged in from the desktop |
@@ -107,9 +107,9 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell, so no provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
-- Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back.
+- Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
-- Tools run without asking, except a read of a `*.secret` file: that one asks, so a scenario can raise a permission request by having the agent read such a file.
+- Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
 - A stopped run leaves nothing: the dev server's process group, the fixture, Chrome and its profile, the stand folder and the Vite cache of its port are removed on exit, on failure, and on Ctrl-C or SIGTERM, startup included.
 - A scenario during which the page reloaded or hot-updated on its own fails, whatever its steps saw: a source file changed under it (another session editing the checkout, or your own edit mid-run), so its result proves nothing. The failure says so; rerun with the source still.
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.

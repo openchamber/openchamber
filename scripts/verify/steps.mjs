@@ -120,6 +120,7 @@ const ACTIONS = {
   },
   async "session.send"(step, ctx) {
     const args = ["send", "--session", sessionId(step, ctx), "--prompt", step.prompt, "--model", step.model ?? ctx.defaultModel, "--wait", "--timeout", String(step.timeout ?? 90)]
+    if (step.goal) args.push("--goal")
     if (step.wait === false) ctx.background.push(ctx.stand.cliInBackground(args))
     else ctx.stand.cli(args, ((step.timeout ?? 90) + 30) * 1000)
   },
@@ -202,7 +203,7 @@ const ACTIONS = {
     if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
-    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), { button: ["right", "long"].includes(step.button) ? step.button : "left", count: step.clicks ?? 1 })
+    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), { button: ["right", "long"].includes(step.button) ? step.button : "left", count: step.clicks ?? 1, modifiers: step.mods ?? [] })
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
     if (!point.hits) fail(`nothing to click: ${describe(step)} stays covered by another element`)
   },
@@ -265,7 +266,7 @@ const ACTIONS = {
     }
   },
   async hover(step, ctx) {
-    const point = await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step))
+    const point = await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step), step.mods ?? [])
     if (!point) fail(`nothing to hover: ${describe(step)} is not visible`)
     if (!point.hits) fail(`nothing to hover: ${describe(step)} stays covered by another element`)
   },
