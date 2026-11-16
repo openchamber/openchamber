@@ -45,7 +45,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this._view !== undefined;
   }
 
-  // Cache latest status/URL for when webview is resolved after connection is ready
   private _cachedStatus: ConnectionStatus = 'connecting';
   private _cachedError?: string;
   private _sseCounter = 0;
@@ -55,16 +54,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
   private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
 
-  // Message delivery confirmation and retry
   private readonly _pendingMessages = new Set<string>();
   private readonly _messageTimeouts = new Map<string, NodeJS.Timeout>();
-  private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
+  private readonly _MESSAGE_TIMEOUT = 5000;
   private readonly _MAX_RETRIES = 3;
 
-  /**
-   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
-   * before the webview bridge is ready, leaving the loading screen stuck.
-   */
   private _scheduleCachedStateRetries(targetView: vscode.WebviewView | undefined): void {
     scheduleCachedStateRetries({
       target: targetView ?? this._view,
@@ -115,16 +109,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
-    // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
 
-    // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
-    // The webview bridge may not be ready yet; keep re-sending so a dropped
-    // `connectionStatus` can never leave the webview stuck on its loading screen.
     this._scheduleCachedStateRetries(webviewView);
 
-    // Send current active editor file state to the new webview
     this._lastActiveEditorFilePayload = null;
     void this._broadcastActiveEditorFile();
 
@@ -175,12 +164,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      // Editor comment threads mirror the composer's drafts, so the webview
-      // reports every change. Handled before the id check because this is a
-      // one-way notification, not a bridge request awaiting a response.
       if (message.type === 'inlineComments:sync') {
-        // Tagged with the sidebar's identity: a snapshot only speaks for the
-        // store that produced it, and each session panel has its own.
         void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
           snapshot: message.payload,
           surfaceId: SIDEBAR_SURFACE_ID,
@@ -234,16 +218,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   public updateConnectionStatus(status: ConnectionStatus, error?: string) {
-    // Cache the latest state
     this._cachedStatus = status;
     this._cachedError = error;
     
-    // Send to webview if it exists
     this._sendCachedState();
 
-    // When we become connected, keep re-sending at staggered delays so the
-    // webview cannot miss the transition (postMessage is dropped if the
-    // webview bridge is not ready yet).
     if (status === 'connected') {
       this._scheduleCachedStateRetries(this._view);
     }
@@ -251,7 +230,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   public addTextToInput(text: string) {
     if (this._view) {
-      // Reveal the webview panel
       this._view.show(true);
       
       this._view.webview.postMessage({
@@ -289,8 +267,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string }) {
     if (!this._view) return;
-    // Bring the chat into view like the other capture flows do, so the chip the
-    // comment becomes is visible rather than waiting behind a collapsed panel.
     this._view.show(true);
     this._view.webview.postMessage({
       type: 'command',
@@ -299,7 +275,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /** Drops a draft the user removed from its editor thread. */
   public removeLineComment(draftId: string) {
     if (!this._view) return;
     this._view.webview.postMessage({
@@ -350,7 +325,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   public createNewSessionWithPrompt(prompt: string) {
     if (this._view) {
-      // Reveal the webview panel
       this._view.show(true);
       
       this._view.webview.postMessage({
@@ -363,7 +337,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   public createNewSession(options?: { directory?: string; workspaceFolders?: WorkspaceFolderCandidate[] }) {
     if (this._view) {
-      // Reveal the webview panel
       this._view.show(true);
 
       this._view.webview.postMessage({
@@ -418,11 +391,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /**
-   * Ask the webview to run the full OpenCode reload flow (overlay + managed
-   * restart via the bridge + config/data refresh) — the same flow used after an
-   * OpenCode update. Returns false if no webview is resolved to drive it.
-   */
   public reloadOpenCode(): boolean {
     if (!this._view) {
       return false;
@@ -435,7 +403,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return true;
   }
 
-  /** Tells the webview whether the user can see it: VS Code focused and the view shown. */
   public notifyViewerStateChanged(): void {
     if (!this._view) {
       return;
@@ -448,7 +415,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  // Message delivery confirmation
   private _confirmMessage(messageId: string) {
     this._pendingMessages.delete(messageId);
 
@@ -459,7 +425,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // Send message with retry mechanism
   private async _sendMessageWithRetry(response: BridgeResponse, retryCount: number = 0, messageId?: string): Promise<boolean> {
     if (!this._view) {
       return false;
@@ -712,7 +677,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
-    // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 

@@ -6,18 +6,10 @@ import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, parseOpenChamberVersion, r
 
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
 
-/**
- * What extensions add to agents: the text and block components a session is
- * told about, and the skill and plugin folders OpenCode loads. Only an active
- * extension counts, read from the catalog at each use, so a pause takes it
- * all away.
- */
 
 const AUTHORING_SKILL_NAME = 'openchamber-extensions';
-// Not `.md`: the desktop build strips Markdown from `node_modules`, and OpenCode would start without its config.
 const AUTHORING_SKILL_SOURCE = fileURLToPath(new URL('./authoring/skill.txt', import.meta.url));
 
-/** The command that starts extension work; the skill itself stays out of the agent's own reach. */
 export const EXTENSION_AUTHORING_COMMAND = 'new-extension';
 
 const isActive = (guest) => guest.enabled !== false
@@ -30,7 +22,6 @@ const blockSignature = (block) => `${block.name}(${block.args.map((arg) => `${ar
  * @param {object[]} guests active catalog rows
  */
 export const describeExtensionBlocks = (guests) => {
-  // What the chat draws: the catalog keeps its names and the first extension keeps a shared one.
   const blocks = new Map();
   for (const block of guests.flatMap((guest) => guest.blocks ?? [])) {
     if (!GUEST_BLOCK_RESERVED_NAMES.includes(block.name) && !blocks.has(block.name)) blocks.set(block.name, block);
@@ -55,7 +46,6 @@ export const describeExtensionBlocks = (guests) => {
  * }} deps
  */
 export const createGuestAgentContext = ({ listGuests, instructions, fsPromises = fs }) => {
-  /** The session's extension entry, or `null` when the catalog cannot be read, which keeps what it holds. */
   const instructionText = async (directory) => {
     let guests;
     try {
@@ -73,7 +63,6 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
     ].filter(Boolean).join('\n\n');
   };
 
-  /** Package folders of the skills active extensions ship. A catalog that cannot be read gives none. */
   const skillDirectories = async () => {
     const guests = await listGuests().catch(() => []);
     return guests
@@ -81,12 +70,6 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
       .map((guest) => path.resolve(guest.packageRoot, guest.skills));
   };
 
-  /**
-   * Plugin folders of active extensions holding the `opencodePlugin` grant,
-   * as real paths inside their package. A folder that no longer resolves is
-   * left out, so OpenCode is never told to load what is not there. A catalog
-   * that cannot be read gives none.
-   */
   const pluginDirectories = async () => {
     const guests = await listGuests().catch(() => []);
     const directories = [];
@@ -101,11 +84,6 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
   return { instructionText, skillDirectories, pluginDirectories };
 };
 
-/**
- * The skill pinned to the running app, so an agent never has to work out which
- * SDK fits it. Canary and Stable publish the SDK at the app's exact version.
- * An engine floor takes `X.Y.Z` only, so a Canary build gives its core version.
- */
 const pinAuthoringSkill = (template, openchamberVersion) => {
   const core = parseOpenChamberVersion(openchamberVersion);
   return template

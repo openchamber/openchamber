@@ -215,13 +215,13 @@ Every pull request must explain:
   a line.
 - **Affected surfaces:** packages, persisted/external contracts, and
   user-visible states affected by the change, plus one line per runtime (web,
-  desktop, VS Code, hosted mobile, Capacitor mobile) saying what the change
-  does there. "Not applicable" is an answer; a blank row is not. Write that
-  list while deciding what to build, not after: it is the same list the pull
-  request template asks for.
-- **Validation:** exact automated and manual checks performed, their result,
-  and anything that was not verified. A command name without a result is not
-  evidence.
+  desktop, VS Code, hosted mobile, Capacitor mobile) with one of two answers:
+  what you did there in the running app and what you saw, or that the change
+  has no code of its own in that runtime ("same code as web, run there",
+  "does not run here"). Write that list while deciding what to build, not
+  after: it is the same list the pull request template asks for.
+- **Validation:** exact automated and manual checks performed and their
+  result. A command name without a result is not evidence.
 - **Live run:** if your change touches behavior a user can reach at run time,
   say that you ran the built or running app and exercised the changed path.
   This is in addition to any screenshot, recording, or measurement the change
@@ -229,9 +229,23 @@ Every pull request must explain:
   a live run says a person reached it in a running build.
   Name the runtime you used (web, desktop, VS Code, hosted mobile, or Capacitor
   mobile), the operating system, and what you saw. Reading the diff, passing
-  types, and green CI are not a live run. If you genuinely cannot run it, say
-  so and explain why; an honest gap is reviewable, a claim we later find hollow
-  is not.
+  types, and green CI are not a live run.
+- **Run it where it lives:** a change to a runtime's own code is run in that
+  runtime before the pull request opens: `packages/electron` and the mini chat
+  on desktop, `packages/vscode` in VS Code, `packages/mobile` and the mobile UI
+  on a phone or the iOS Simulator. A change to the relay (`lib/relay` in the
+  UI and the server) is run through the relay from both a desktop client and
+  a phone, because each has its own transport code; the `relay-transport`
+  skill says how to start a test host and pair with it. Shared UI that renders the
+  same everywhere is proven once, on web. State that has to survive a server
+  switch, a reload or eviction from cache (drafts, persisted UI state) is run
+  through those, in every runtime that keeps it. Touch gestures can be run in
+  a desktop browser's device mode; the iOS keyboard, safe areas and the native
+  shell need the Simulator or a device. With no way to run a runtime your
+  change touches, the change is not yours to send: open a bug report or a
+  feature request, and someone who can run it picks it up. A pull request that
+  touches such code without saying it was run there gets `needs-live-run` and
+  is not reviewed until it does.
 - **Everything you claim, run for real:** every runtime, platform, and
   external service the pull request says it supports is exercised live before
   the pull request opens, not only the one you happen to use. Tests, mocks, and
@@ -240,16 +254,21 @@ Every pull request must explain:
   account, a Docker container, a simulator, and an agent that drives the app.
   Say per target what you did, what you saw, and how you checked the result
   outside the app, including the refusals and error cases.
-- **Risks:** meaningful failure, rollback, cleanup, compatibility, security,
-  performance, or cross-runtime considerations.
+- **Known problems:** none. A pull request is ready when its author knows of
+  no problem in it. A case you noticed while building, such as a runtime that
+  might behave differently or state that might come back after a reload, is
+  checked and fixed in the same pull request, and reported under Validation
+  as something you ran. Choosing between several ways to fix a bug is your
+  job too: pick the one that works, passes the checks and follows the
+  project skills, and show that it does. Product questions go into a feature
+  request before the code, never into a pull request.
 
 You still have to read the project skills and module docs that match your
 change (step 1 above); the reviewer checks the code against them. You don't
 have to list them in the PR.
 
 Do not claim a runtime, platform, relay path, performance characteristic, or
-interaction is correct based only on type-checking or linting. If required
-validation could not be performed, state that explicitly and explain why.
+interaction is correct based only on type-checking or linting.
 
 ### Visual Evidence
 

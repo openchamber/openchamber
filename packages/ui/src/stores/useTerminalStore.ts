@@ -14,20 +14,9 @@ export interface TerminalChunk {
   data: string;
   replayData?: string;
   byteLength: number;
-  /**
-   * PTY size this chunk was drawn for. Only snapshot history carries it: the
-   * viewport replays such a chunk at this size and then re-fits, because
-   * shell output laid out for one width turns into stray fragments when it is
-   * written into an emulator of another width.
-   */
   size?: TerminalChunkSize;
 }
 
-/**
- * Scrollback lives outside `sessions` because PTY output arrives at streaming
- * frequency. Keeping it here leaves tab metadata referentially stable, so
- * output cannot rerender the tab strip or rewrite the persisted snapshot.
- */
 type TerminalBuffer = {
   chunks: TerminalChunk[];
   byteLength: number;
@@ -100,7 +89,6 @@ interface TerminalStore {
   reconcileServerSessions: (directory: string, serverSessions: TerminalServerSession[], options?: ReconcileServerSessionsOptions) => void;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
-  /** Moves `tabId` to the position `overTabId` holds, shifting the tabs between. */
   moveTab: (directory: string, tabId: string, overTabId: string) => void;
   setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
   closeTab: (directory: string, tabId: string) => void;
@@ -122,7 +110,6 @@ interface TerminalStore {
 const TERMINAL_BUFFER_LIMIT = 512 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-/** One encode per chunk: the trimmed text and its UTF-8 size are needed together. */
 const trimToBufferLimit = (value: string): { text: string; byteLength: number } => {
   const bytes = textEncoder.encode(value);
   if (bytes.byteLength <= TERMINAL_BUFFER_LIMIT) return { text: value, byteLength: bytes.byteLength };
@@ -131,7 +118,6 @@ const trimToBufferLimit = (value: string): { text: string; byteLength: number } 
   const retained = bytes.subarray(start);
   return { text: textDecoder.decode(retained), byteLength: retained.byteLength };
 };
-// NUL cannot appear in a directory path or a tab id, so the composite key is unambiguous.
 const bufferKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
 const dropBufferKeys = (
   buffers: Map<string, TerminalBuffer>,
@@ -270,14 +256,6 @@ const hasActionMutatedSinceRequestStarted = (
 
 const DEFAULT_TAB_LABEL_PATTERN = /^Terminal(?: (\d+))?$/;
 
-/**
- * Default labels must stay unique among the directory's open tabs even after
- * closes (#2718), so number from the highest existing "Terminal N" suffix
- * instead of the live tab count. Labels are persisted with the tabs, so the
- * derivation also survives reloads without a dedicated counter. User-renamed
- * labels only participate when they match the default pattern; they are never
- * rewritten.
- */
 const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
   let highest = 0;
   for (const tab of tabs) {
@@ -289,7 +267,6 @@ const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
   return highest === 0 ? 'Terminal' : `Terminal ${highest + 1}`;
 };
 
-/** A project action the user would expect to see marked as running. */
 export const isActiveProjectActionTab = (tab: TerminalTab): boolean =>
   tab.purpose.type === 'project-action'
   && tab.purpose.executionId !== null
@@ -303,11 +280,6 @@ const originOf = (url: string): string | null => {
   }
 };
 
-/**
- * Whether a project action that opened a page at this address's origin is still running,
- * in any directory. The browser panel waits for such a server for as long as
- * its action runs. An action being stopped no longer counts.
- */
 export const isProjectActionRunningAtOrigin = (
   sessions: ReadonlyMap<string, DirectoryTerminalState>,
   url: string,
@@ -348,12 +320,6 @@ const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalStat
 const findTabIndex = (state: DirectoryTerminalState, tabId: string): number =>
   state.tabs.findIndex((t) => t.id === tabId);
 
-/**
- * Zustand persist runs `partialize` and writes storage after every `set`, and
- * terminal output calls `set` at streaming frequency. Only `sessions` and
- * `nextTabId` are persisted, so reuse the previous projection whenever both are
- * referentially unchanged and skip the write for an unchanged projection.
- */
 let lastPartializeInput: { sessions: unknown; nextTabId: number } | null = null;
 let lastPartializeResult: PersistedTerminalStoreState | null = null;
 
@@ -546,10 +512,6 @@ export const useTerminalStore = create<TerminalStore>()(
                 if (matchIndex < 0) {
                   matchIndex = actionMatchIndex;
                 }
-                // A listing taken after a new run was allocated, but before the
-                // server holds its session, still shows the action's last,
-                // finished run. That run says nothing about the one starting;
-                // adopting it would cancel the start without a word.
                 const target = matchIndex >= 0 ? tabs[matchIndex]! : null;
                 if (
                   target
@@ -681,10 +643,6 @@ export const useTerminalStore = create<TerminalStore>()(
               ? activationCandidate.tabId
               : resolvedActiveTabId;
 
-            // Activation transitions always rewrite the adopted tab, so today
-            // `changed` is true whenever `activeTabId` moved; the explicit
-            // activeTabId comparison keeps this guard honest if a future
-            // activation path stops touching the tabs array.
             if (
               !changed
               && existing
@@ -1330,7 +1288,6 @@ export const useTerminalStore = create<TerminalStore>()(
   )
 );
 
-// Ensure hydration completes even when no persisted state exists.
 if (typeof window !== 'undefined' && !hydrationListenerAttached) {
   hydrationListenerAttached = true;
   const persistApi = (

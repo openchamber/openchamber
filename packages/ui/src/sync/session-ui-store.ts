@@ -53,7 +53,7 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
-import { admitSession, isSessionAdmitted } from "./session-admission"
+import { admitSession, isSessionAdmitted, withAdmittedLineage } from "./session-admission"
 import { isSessionDirectoryAdmitted } from "./session-admission-rule"
 import {
   getSyncSessions,
@@ -103,7 +103,9 @@ import {
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
-import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
+import { trackPreparedChatFolder } from "@/lib/unconfirmedSends"
+import type { SendMessageOptions } from "./send-message-options"
+export type { SendMessageOptions, SentMessage } from "./send-message-options"
 import { sessionGoalIntro, setSessionGoal } from "@/lib/sessionGoalActions"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
@@ -118,7 +120,6 @@ import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 import {
   createInputHistoryIdentity,
   useInputHistoryStore,
-  type InputHistorySubmission,
 } from '@/stores/useInputHistoryStore'
 
 type GoalCommand = { name: string; template?: string }
@@ -191,6 +192,7 @@ export async function routeMessage(params: {
   ready?: Promise<void>
   /** Runs right before the request that starts the turn leaves (the gate on a session's first send). */
   beforeSend?: () => void
+  onMessageMinted?: (messageId: string) => void
   /**
    * Whether the optimistic insert marks the session busy. A session created
    * from a draft is marked once it exists, by its creator.
@@ -347,6 +349,7 @@ export async function routeMessage(params: {
     ready: params.ready,
     markBusy: params.markBusy,
     appendSubmissions: params.appendSubmissions,
+    onOptimisticInsert: params.onMessageMinted,
     send: async (messageID, context, commitRevert) => {
       assertRuntimeCurrent()
       const selection = await sendSelection()
@@ -371,46 +374,6 @@ export async function routeMessage(params: {
     },
   })
   return 'prompt'
-}
-
-/** The route a send to an existing session took, for callers that act on what reached it (#5391). */
-export type SentMessage = { route: 'command' | 'prompt' | 'shell'; sessionId: string }
-
-type CapturedSendTarget = {
-  runtimeKey: string
-  sessionId: string
-  directory: string
-}
-
-type SendMessageOptions = {
-  /** Explicit composer intent; automated continuations must not restore archives. */
-  userInitiated?: boolean
-  target?: CapturedSendTarget
-  sessionId?: string
-  directory?: string
-  historySubmissions?: InputHistorySubmission[]
-  /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
-  draftSnapshot?: NewSessionDraftState
-  delivery?: 'steer'
-  /** Skills named inline, attached to the prompt once the session exists. */
-  skills?: SkillMentions
-  /** Stored on the user message of a prompt to an existing session (a deferred question's answer marker). */
-  metadata?: Metadata
-  /** Told the route a send to an existing session took, once it went out. */
-  onSent?: (sent: SentMessage) => void
-  /**
-   * A queued message carries its own goal intent. Set (a goal or `null`), it
-   * replaces the composer's armed goal, which belongs to the composer text.
-   */
-  queuedGoal?: QueuedMessageGoal | null
-  /**
-   * A person sent this from a composer: after a successful prompt, remember
-   * the level it actually carried for that model. Background, BTW and queued
-   * delivery leave this unset and never overwrite the remembered level.
-   */
-  recordEffort?: boolean
-  /** Revision captured with the composer's selection, before async preparation. */
-  effortRevision?: number
 }
 
 type AssistantMessageSessionExecution = {
@@ -1555,9 +1518,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const navigationRevision = ++admissionNavigationRevision
     if (id) {
       const record = useGlobalSessionsStore.getState().entityById.get(id)
-      const directory = (record ? resolveGlobalSessionDirectory(record) : null)
+      const directory = withAdmittedLineage(id, (record ? resolveGlobalSessionDirectory(record) : null)
         ?? resolveSessionDirectory(id, (sid) => get().worktreeMetadata.get(sid))
-        ?? normalizePath(directoryHint)
+        ?? normalizePath(directoryHint))
       if (!directory || !isSessionAdmitted(directory)) {
         const runtimeKey = getRuntimeKey()
         const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
@@ -1977,6 +1940,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         return null
       }
       set({ newSessionDraft: { ...current, preparedChatDirectory: directory } })
+      trackPreparedChatFolder(runtimeKey, directory)
       return directory
     })().finally(() => {
       pendingChatDirectoryByDraft.delete(key)
@@ -2306,6 +2270,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         // the chat can switch to it and show the message at once; the server
         // creates the session under this id while the message is on screen.
         const sessionId = descendingId("ses")
+        options?.progress?.sessionMinted?.(sessionId, draft.target === "chat" ? sessionDirectory : null)
         const draftAgent = saveDraftSessionSelection(sessionId, selection)
         openPendingSessionTranscript(sessionId, sessionDirectory)
         get().setCurrentSession(sessionId, sessionDirectory, { transition: "submitted-draft" })
@@ -2405,7 +2370,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             delivery: options?.delivery,
             skills: options?.skills,
             ready: creation,
-            beforeSend: releaseGate,
+            beforeSend: () => { releaseGate(); options?.progress?.requestLeaving?.() },
+            onMessageMinted: options?.progress?.messageMinted,
             markBusy: false,
             additionalParts: draftParts?.map((p) => ({
               text: p.text,
@@ -2558,6 +2524,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         skills: options?.skills,
         metadata: options?.metadata,
         ready: knowledgeSync,
+        beforeSend: options?.progress?.requestLeaving,
+        onMessageMinted: options?.progress?.messageMinted,
         additionalParts: additionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,

@@ -23,7 +23,6 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
   const [confirmDeleteSnippet, setConfirmDeleteSnippet] = React.useState<Snippet | null>(null);
   const [openMenuName, setOpenMenuName] = React.useState<string | null>(null);
   const [rightClickMenuName, setRightClickMenuName] = React.useState<string | null>(null);
-  // A switch that would drop unsaved edits waits here for the user's answer.
   const [pendingSwitch, setPendingSwitch] = React.useState<(() => void) | null>(null);
   const { selectedSnippetName, snippets, hasUnsavedChanges, setSelectedSnippet, setSnippetDraft, deleteSnippet, loadSnippets } = useSnippetsStore(useShallow((s) => ({
     selectedSnippetName: s.selectedSnippetName,
@@ -100,7 +99,6 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-3 px-3 py-2">
         {groups.map((group) => (
           <div key={group.scope} className="space-y-1">
-            {/* A lone group keeps its label too: it says where its snippets live. */}
             <div className="oc-group-label px-1.5 pt-1 typography-micro">
               {group.scope === 'project' ? t('settings.common.scope.project') : t('settings.common.scope.global')}
             </div>

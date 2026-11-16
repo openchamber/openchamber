@@ -1,18 +1,3 @@
-// Session goal: a persisted, self-continuing objective attached to a session
-// (metadata.openchamber.goal). While the goal is active, the server keeps the
-// session working toward it: after each busy→idle transition it accounts token
-// usage, checks progress (continue / complete / blocked) with the
-// classification model or the small model, and either re-prompts the session's
-// own model with a continuation prompt or settles the goal. Fully
-// backend-driven — the UI can disconnect and the loop keeps running.
-//
-// The progress check is the sole termination authority besides the hard stops
-// (turn error, token budget, auto-continuation cap) — the working agent has no
-// channel to settle its own goal. When no check can run the loop stops after
-// one unchecked continuation rather than driving blind to the cap.
-//
-// Event-driven like session-assist. The one scan is `recoverActiveGoals` after
-// (re)connecting to OpenCode, over the newest root sessions only.
 
 import fs from 'fs';
 import os from 'os';
@@ -32,7 +17,7 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { sessionParentId } from '../session-lineage.js';
+import { isOperatorChildSession, sessionParentId } from '../session-lineage.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -45,9 +30,6 @@ const readGoalSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionGoalEnabled !== false,
-    // Who checks progress: the small model unless the user picked Jev here.
-    // A classification provider set up for another feature is not that pick.
-    // Without a usable classification provider the small model checks anyway.
     checker: settings.sessionGoalChecker === 'classifier' ? 'classifier' : 'small-model',
     maxAutoTurns: normalizeMaxAutoTurns(settings.sessionGoalMaxAutoTurns),
   };
@@ -55,41 +37,22 @@ const readGoalSettings = () => {
 
 const isSessionGoalEnabled = () => readGoalSettings().enabled;
 
-// The checks after the window read live state, so the window only lets a
-// burst of status events settle; it is not a guard against races.
 const IDLE_QUIET_MS = 3_000;
-// How long to wait before looking again while work goes on without the
-// parent (a subagent, a background command) or OpenCode could not be read.
 const ACTIVITY_RECHECK_MS = 15_000;
-// A background command the agent started this round is waited for this long;
-// past it the turn is audited as it stands.
 const BACKGROUND_SHELL_WAIT_MS = 30 * 60 * 1000;
-// Recovery after (re)connecting to OpenCode looks at the most recently updated
-// root sessions: a goal that was mid-round when the server stopped is among them.
 const RECOVERY_SESSION_LIMIT = 50;
-// A goal set while the session is already idle should kick off promptly.
 const KICKOFF_QUIET_MS = 3_000;
-// An explicit Resume should nudge immediately — the tick's quiescence check
-// already bails if the session turns out to be busy. The tiny delay only
-// coalesces duplicate session.updated events.
 const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
 const SESSION_READ_RETRIES = 3;
 const MESSAGE_FETCH_LIMIT = 40;
 const REASON_CHAR_LIMIT = 200;
-// Hard safety cap on auto-continuations per goal id. The audit and markers are
-// the intended stop conditions; this only prevents a runaway loop. The user
-// sets it in Settings within these bounds.
 const DEFAULT_MAX_AUTO_TURNS = 20;
 const MAX_AUTO_TURNS_LIMIT = 200;
 
-/** The saved cap, or the default when it is missing or out of bounds. */
 export const normalizeMaxAutoTurns = (value) => (
   Number.isInteger(value) && value >= 1 && value <= MAX_AUTO_TURNS_LIMIT ? value : DEFAULT_MAX_AUTO_TURNS
 );
-// Consecutive check failures tolerated before the goal stops: one transient
-// hiccup allows a single unchecked continuation; a dead checker must not drive
-// the loop blind all the way to the turn cap.
 const AUDIT_FAIL_LIMIT = 2;
 
 const GOAL_STATUSES = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
@@ -149,11 +112,7 @@ const extractSessionStatus = (payload) => {
   return { sessionId, type, directory };
 };
 
-/**
- * A user abort no longer lands as an assistant message carrying
- * `MessageAbortedError`: v2 reports `session.execution.interrupted`, which the
- * translator turns into `session.idle` with `aborted: true`.
- */
+// external: https://github.com/anomalyco/opencode OpenCode v2 emits session.execution.interrupted, translated to session.idle with aborted: true.
 const extractAbortedAssistant = (payload) => {
   if (!payload || payload.type !== 'session.idle') return null;
   const properties = payload.properties;
@@ -166,9 +125,6 @@ const extractSessionUpdate = (payload) => {
   if (!payload || payload.type !== 'session.updated') return null;
   const info = payload.properties?.info;
   if (!info || typeof info !== 'object' || typeof info.id !== 'string' || !info.id) return null;
-  // No goal here any more: the record OpenCode publishes carries only what
-  // OpenCode owns, and the goal lives in OpenChamber's own metadata store. A
-  // new or resumed goal reaches this runtime through `notifyGoalChanged`.
   return {
     sessionId: info.id,
     directory: typeof info.directory === 'string' ? info.directory : '',
@@ -187,8 +143,6 @@ const parseGoalMetadata = (session) => {
   const objectiveFile = goal.objectiveFile === true;
   const id = typeof goal.id === 'string' ? goal.id : '';
   const status = GOAL_STATUSES.includes(goal.status) ? goal.status : '';
-  // File-backed goals carry only the flag (the file is keyed by session id);
-  // inline goals carry the objective text directly.
   if (!id || !status || (!objective && !objectiveFile)) return null;
   return {
     id,
@@ -210,17 +164,7 @@ const parseGoalMetadata = (session) => {
   };
 };
 
-/**
- * The loop reads the v1 view of a message — `{ info, parts }` with
- * `info.role`, `info.summary`, `info.time`, `info.tokens`, `info.error`,
- * `info.finish`, `info.providerID` / `modelID` / `agent` / `variant` — and v2
- * records are flat: `type` instead of `role`, `content[]` instead of `parts`,
- * `model.{providerID,id}`, and a compaction turn is its own `compaction` type
- * rather than an assistant message flagged `summary`. This is the only place
- * that knows both shapes. Roles the loop does not reason about (system,
- * skill, shell, switches, idle) are dropped; a `synthetic` message folds into
- * the user role so a trailing context item still reads as "user just sent".
- */
+// external: https://github.com/anomalyco/opencode OpenCode v2 uses flat message records and a separate compaction type.
 const toLoopMessage = (message) => {
   const id = String(message?.id ?? '');
   if (!id) return null;
@@ -235,7 +179,7 @@ const toLoopMessage = (message) => {
       };
     case 'assistant': {
       const model = message.model ?? {};
-      // v1 errors carried `name`; v2's structured error calls it `type`.
+      // external: https://github.com/anomalyco/opencode OpenCode v2 names structured errors with type.
       const error = message.error ? { name: message.error.type, ...message.error } : undefined;
       return {
         info: {
@@ -256,14 +200,8 @@ const toLoopMessage = (message) => {
       };
     }
     case 'compaction': {
-      // A finished compaction plays the part of v1's `summary: true` assistant
-      // turn: it closes a token segment and is never audited or continued
-      // from. Its model must not be inherited either (v1: "the compaction
-      // summary carries the summarize model").
       if (message.status !== 'completed') return null;
-      // v2 records only `time.created` on a compaction; `status` is what says
-      // it finished. The loop reads "finished" from `time.completed`, so a
-      // completed compaction gets one, or it would count as still running.
+      // external: https://github.com/anomalyco/opencode Completed v2 compactions have time.created only; project it to time.completed for the loop.
       return {
         info: {
           ...base,
@@ -281,11 +219,6 @@ const toLoopMessage = (message) => {
   }
 };
 
-/**
- * When the current round began: the newest message the user (or this loop's
- * continuation) sent. Synthetic notices, such as a command's completion, do
- * not start a round. Without one in the window, the goal's own start.
- */
 const lastUserMessageCreatedAt = (messages, fallback) => {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const info = messages[i]?.info;
@@ -302,11 +235,7 @@ const messagePartsToText = (message) => {
     .join('\n');
 };
 
-// OpenCode reports tokens per message, and each turn's cache.read carries
-// everything that was already paid for in earlier turns (past inputs and
-// outputs fold into the cache of the next turn). So the accumulated cost of
-// a whole run is simply the LATEST message's input + cache.read + output —
-// a snapshot, not a sum across messages.
+// external: https://github.com/anomalyco/opencode Earlier inputs and outputs fold into later cache.read counts, so accounting uses the latest snapshot.
 const messageTokenTotal = (info) => {
   const tokens = info?.tokens;
   if (!tokens || typeof tokens !== 'object') return 0;
@@ -324,11 +253,6 @@ const isLengthTruncated = (info, errorName = getErrorName(info?.error)) => {
   return errorName === 'MessageOutputLengthError' || (!hasError && info?.finish === 'length');
 };
 
-// Summary messages are assistant-shaped, but they are compaction turns rather
-// than agent turns. They must not break or satisfy the consecutive truncation
-// check; only completed, non-summary assistant turns participate. Chronology
-// comes from `time.created`, never from message IDs; array position is only a
-// tie-breaker for equal timestamps.
 const hasRepeatedLengthTail = (messages, latestAssistant, goalCreatedAt) => {
   const latestInfo = latestAssistant?.info;
   if (latestInfo?.summary === true) return false;
@@ -346,8 +270,6 @@ const hasRepeatedLengthTail = (messages, latestAssistant, goalCreatedAt) => {
     const info = messages[i]?.info;
     if (info?.role !== 'assistant' || info.summary === true || !(info.time?.completed > 0)) continue;
     const created = info.time?.created;
-    // An unknown timestamp cannot safely participate in chronology. Ignore it
-    // rather than letting an unrelated older message hide known chronology.
     if (!(Number.isFinite(created) && created > 0)) continue;
     if (i === latestIndex) continue;
     if (created > latestCreated || (created === latestCreated && i > latestIndex)) continue;
@@ -371,7 +293,6 @@ export const createSessionGoalRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService,
-  /** Resolves to the Jev endpoint the classification provider answers on, or null. */
   classifierEndpoint = async () => null,
   jev = null,
   getChecker = () => readGoalSettings().checker,
@@ -422,7 +343,7 @@ export const createSessionGoalRuntime = ({
   };
 
   const fetchRecentMessages = async (sessionId, directory) => {
-    // v2 pages messages as `{ data, cursor }`, newest first.
+    // external: https://github.com/anomalyco/opencode OpenCode v2 pages messages as { data, cursor }, newest first.
     const page = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
@@ -438,7 +359,7 @@ export const createSessionGoalRuntime = ({
     timeoutMs: FETCH_TIMEOUT_MS,
   });
 
-  /** Before OpenCode 2.2.6: the session's own running commands, read from its folder. */
+  // external: https://github.com/anomalyco/opencode Before OpenCode 2.2.6, running commands are read from the session's folder.
   const fetchOwnRunningShells = async (session, sessionId, directory) => {
     const shellDirectory = typeof session.location?.directory === 'string' && session.location.directory
       ? session.location.directory
@@ -447,18 +368,9 @@ export const createSessionGoalRuntime = ({
     return shells && shells.filter((shell) => shell.sessionID === sessionId);
   };
 
-  // v2 reports only that a session is running.
+  // external: https://github.com/anomalyco/opencode OpenCode v2 reports only that a session is running.
   const isWorkingStatus = (status) => Boolean(status);
 
-  // Merge-write the goal payload from a FRESH session read so concurrent
-  // metadata writes (assist payloads, dismissals, UI goal edits) survive.
-  // Returns the written goal, or null when the stored goal no longer matches
-  // the expected id (user replaced/cleared it while we worked).
-  /**
-   * The goal lives in OpenChamber's own metadata store: OpenCode 2.x accepts
-   * session metadata only at create time. Re-read before every write so a
-   * concurrent edit (the user pausing from the UI) is not overwritten.
-   */
   const readGoal = async (sessionId) => parseGoalMetadata({ metadata: await readSessionMetadata(sessionId) });
 
   const writeGoal = async (sessionId, directory, expectedGoalId, mutate, isCurrent = null) => {
@@ -487,8 +399,6 @@ export const createSessionGoalRuntime = ({
         ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
         ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
         ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
-        // Written as a pair: Jev has no provider, and a leftover one from an
-        // earlier small-model check must not be shown next to Jev's model.
         ...(evaluationModelID !== undefined ? { evaluationProviderID: evaluationProviderID ?? '', evaluationModelID } : {}),
       };
     }, isCurrent);
@@ -529,9 +439,6 @@ export const createSessionGoalRuntime = ({
     }
     try {
       const generated = await service.generateSmallModelText({
-        // Background feature: conversation content stays on the session's own
-        // provider unless the user explicitly picked a small model (settings
-        // override / opencode config); naming the provider is what keeps it.
         prompt: buildSmallModelAuditPrompt({ objective, answer }),
         directory,
         sessionID: typeof lastAssistantInfo?.sessionID === 'string' ? lastAssistantInfo.sessionID : undefined,
@@ -550,7 +457,6 @@ export const createSessionGoalRuntime = ({
       }
       return { scores, evaluationProviderID: generated.providerID, evaluationModelID: generated.modelID };
     } catch (error) {
-      // No authenticated small model (404) or a transient failure.
       if (Number(error?.statusCode) !== 404) {
         console.warn('[session-goal] progress check: small model failed:', error?.message || error);
       }
@@ -558,12 +464,6 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  /**
-   * One progress check of the latest turn. The classification model answers
-   * when the user left it on and a provider can run it; the small model
-   * answers otherwise, and also when Jev fails this time. Null means no check
-   * could run.
-   */
   const runAudit = async ({ goal, assistantText, directory, lastAssistantInfo }) => {
     const input = { objective: goal.objective, answer: assistantText };
     const sessionId = lastAssistantInfo?.sessionID ?? null;
@@ -580,9 +480,7 @@ export const createSessionGoalRuntime = ({
     return { verdict, evaluationProviderID: checked.evaluationProviderID, evaluationModelID: checked.evaluationModelID };
   };
 
-  // v2 keeps the model and agent on the session itself, so a plain prompt
-  // runs on whatever the session was already using. v1 had to repeat the
-  // selection on every request; there is nothing to repeat here.
+  // external: https://github.com/anomalyco/opencode OpenCode v2 keeps the model and agent on the session; plain prompts preserve that selection.
   const sendContinuation = async ({ sessionId, directory, goal }) => {
     await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
       directory,
@@ -622,7 +520,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
     attempt.failures = 0;
-    if (sessionParentId(session)) return;
+    if (sessionParentId(session) && !isOperatorChildSession(session)) return;
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
@@ -641,11 +539,6 @@ export const createSessionGoalRuntime = ({
       });
     };
 
-    // File-backed objectives: the metadata carries only a flag; the objective
-    // TEXT lives under the OpenChamber data dir keyed by session id and is
-    // read fresh on every tick (live-editable). A missing file falls back to
-    // whatever inline objective the metadata still has — the goal must never
-    // die just because a file went away.
     let effectiveObjective = goal.objective;
     if (goal.objectiveFile) {
       const fileObjective = await readObjective(sessionId);
@@ -659,13 +552,6 @@ export const createSessionGoalRuntime = ({
       }
     }
 
-    // Parent idle does not imply the whole task is quiescent: a background
-    // subagent runs in a child session while its parent stays idle. Re-read
-    // authoritative live status after the quiet window. If the parent resumed,
-    // its next idle event will arm a fresh tick. If a child is still working,
-    // recheck after another quiet window: OpenCode normally runs the parent
-    // again when the child finishes, but a missed parent idle event must not
-    // strand the goal.
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!isCurrent()) return;
     if (!statuses) {
@@ -677,9 +563,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // OpenCode 2.2.6+ lists the background subagents and images of the whole
-    // subagent tree. Child sessions OpenChamber starts itself (workflow agents)
-    // are no OpenCode jobs, so running direct children are asked for as well.
+    // external: https://github.com/anomalyco/opencode OpenCode 2.2.6+ jobs cover the subagent tree but exclude OpenChamber-started workflow children.
     const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
     if (!isCurrent()) return;
     if (backgroundJobs === null) {
@@ -712,10 +596,6 @@ export const createSessionGoalRuntime = ({
     const lastAssistantInfo = lastAssistant?.info;
     const lastMessageInfo = messages.length > 0 ? messages[messages.length - 1]?.info : null;
 
-    // Execution source for audits and continuations: the newest NON-summary
-    // assistant turn. The compaction summary message carries agent/mode
-    // "compaction" and the summarize model — inheriting those would continue
-    // the session with the wrong agent/model.
     let executionInfo = null;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const info = messages[i]?.info;
@@ -725,31 +605,11 @@ export const createSessionGoalRuntime = ({
       }
     }
 
-    // Quiescence check: the idle event may have raced a follow-up prompt, and
-    // the kickoff path arms without knowing the live status at all. A trailing
-    // user message or an unfinished assistant reply means the session is (or
-    // is about to be) busy — the next idle transition re-arms us.
     if (lastMessageInfo?.role === 'user') return;
     if (lastAssistantInfo && !(lastAssistantInfo.time?.completed > 0) && !lastAssistantInfo.error) return;
 
-    // A goal on a session with no assistant reply yet: there is no message to
-    // take provider/model from, so the loop starts after the user's first
-    // exchange completes (the idle transition re-arms us).
     if (!lastAssistantInfo?.id) return;
 
-    // --- Token accounting: snapshot of the latest completed assistant turn
-    // (input + cache.read + output), goal-relative via a baseline captured on
-    // the first tick. For a mid-session goal the baseline is the same
-    // snapshot of the newest turn that completed BEFORE the goal was created,
-    // so pre-goal history is not charged to the goal.
-    //
-    // Compaction breaks the snapshot chain: it inserts an assistant message
-    // with `summary: true` and rebuilds the context, so the next snapshots
-    // start small again. Accounting is therefore segmented — a summary
-    // message closes the current segment (its value moves into
-    // tokensCommitted; the summary turn itself read the whole context, so
-    // its own snapshot prices the compaction), and the next segment starts
-    // with a zero baseline.
     let tokensBaseline = goal.tokensBaseline;
     if (!goal.lastAccountedMessageID && !(tokensBaseline > 0)) {
       tokensBaseline = 0;
@@ -773,13 +633,7 @@ export const createSessionGoalRuntime = ({
       sawNewMessages = true;
       const total = messageTokenTotal(info);
       if (info.summary === true) {
-        // The summary message's own tokens are ZEROED by opencode — never
-        // feed them into the closing value. Close the segment from what is
-        // already known, with the previously displayed total as a continuity
-        // floor (the latest pre-summary snapshot was already folded into
-        // tokensUsed on earlier ticks); otherwise the counter freezes at the
-        // pre-compaction value until the new context outgrows it. Known
-        // undercount: the summarization call itself is reported as 0 tokens.
+        // external: https://github.com/anomalyco/opencode Compaction summary tokens are zeroed; close from known usage, which excludes the summarization call.
         tokensCommitted = Math.max(
           goal.tokensUsed,
           tokensCommitted + Math.max(0, (segmentSnapshot ?? 0) - tokensBaseline),
@@ -795,22 +649,12 @@ export const createSessionGoalRuntime = ({
     }
     if (sawNewMessages) {
       const segmentCurrent = segmentSnapshot !== null ? Math.max(0, segmentSnapshot - tokensBaseline) : 0;
-      // Monotonic: unflagged context shrinks (reverts, provider quirks) must
-      // never move the budget backwards.
       tokensUsed = Math.max(goal.tokensUsed, tokensCommitted + segmentCurrent);
     }
 
     const assistantText = messagePartsToText(lastAssistant);
 
-    // A command the agent left running in the background this round (tests,
-    // a build) is part of the turn: OpenCode wakes the session with its result.
-    // Auditing now reads "waiting for the tests" as unfinished and nudges the
-    // agent over a running command. Commands from earlier rounds, such as a dev
-    // server, are not waited for. After an explicit Resume nothing is waited
-    // for, and a failed or aborted turn settles below without waiting.
     if (goal.statusReason !== 'resumed' && !lastAssistantInfo.error) {
-      // Read after the messages, so a command of the turn just read is listed.
-      // The job list also holds the shells the session's subagents started.
       const jobs = backgroundJobs && await activityProbe.fetchRunningBackgroundJobs(sessionId);
       const shells = backgroundJobs
         ? jobs && jobs.filter((job) => job.kind === 'shell')
@@ -821,15 +665,12 @@ export const createSessionGoalRuntime = ({
         return;
       }
       attempt.activityFailures = 0;
-      // A subagent or image the turn just read started holds the audit as well.
       if (jobs?.some((job) => job.kind !== 'shell')) {
         armTimer(sessionId, directory, recheckMs);
         return;
       }
       const roundStartedAt = lastUserMessageCreatedAt(messages, goal.createdAt);
       const waitingOn = shells.filter((shell) => shell.startedAt >= roundStartedAt);
-      // Past the wait the command is most likely a server left running: the
-      // turn is audited as it stands instead of stopping the goal over it.
       const stillWaiting = waitingOn.some((shell) => Date.now() - shell.startedAt < BACKGROUND_SHELL_WAIT_MS);
       if (stillWaiting) {
         armTimer(sessionId, directory, recheckMs);
@@ -837,14 +678,7 @@ export const createSessionGoalRuntime = ({
       }
     }
 
-    // --- Terminal conditions, cheapest first ---
 
-    // A user abort means "stop working" — pause the goal instead of blocking
-    // it (this is the tick-side safety net; the event path in processPayload
-    // usually pauses immediately). The exception is a goal the user just
-    // resumed over an aborted tail: that is an explicit "keep going", so it
-    // falls through to the continuation below (skipping the audit — an
-    // aborted reply is not evidence of anything).
     const error = lastAssistantInfo.error;
     const errorName = getErrorName(error);
     const hasError = error !== null && error !== undefined;
@@ -863,9 +697,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // Non-length turn error → blocked (prevents runaway auto-continuation into
-    // failures). Recognized length cutoffs are in-progress continuations, not
-    // hard failures.
     if (!abortedTail && !lengthTail && hasError) {
       await settleGoal({
         sessionId, directory, goal, status: 'blocked', statusReason: errorName || 'assistant turn failed', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
@@ -873,7 +704,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // Token budget crossed → budgetLimited.
     if (typeof goal.tokenBudget === 'number' && tokensUsed >= goal.tokenBudget) {
       await settleGoal({
         sessionId, directory, goal, status: 'budgetLimited', statusReason: 'token budget reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
@@ -881,7 +711,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // Auto-continuation safety cap → blocked.
     if (goal.turnsUsed >= maxAutoTurns) {
       await settleGoal({
         sessionId, directory, goal, status: 'blocked', statusReason: 'auto-continuation limit reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
@@ -889,9 +718,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // A second consecutive completed, non-summary length-truncated turn is a
-    // bounded recovery failure. Derive this from the loaded transcript rather
-    // than persisting another goal counter.
     if (lengthTail && goal.statusReason !== 'resumed' && hasRepeatedLengthTail(messages, lastAssistant, goal.createdAt)) {
       await settleGoal({
         sessionId, directory, goal, status: 'blocked', statusReason: 'repeated output truncation', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
@@ -899,22 +725,11 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // --- Progress check: the sole termination authority besides the hard
-    // stops above (turn error, budget, continuation cap). The working agent
-    // has no channel to settle its own goal.
-    //
-    // Exception: when the latest message is a compaction summary or was cut off
-    // by the output token limit (length stop), the agent by definition ran into
-    // the context/output limit mid-work — that IS "in progress, not finished".
-    // No check; continue unconditionally.
     let audit = null;
     let auditFailStreak = goal.auditFailStreak;
     if (!(lastAssistantInfo.summary === true || abortedTail || lengthTail)) {
       audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
 
-      // No check could run: tolerate one consecutive failure (transient
-      // hiccup), then stop the goal instead of continuing blind. Blocked is
-      // resumable — Resume retries the check on the next tick.
       if (!audit) {
         auditFailStreak += 1;
         if (auditFailStreak >= AUDIT_FAIL_LIMIT) {
@@ -936,8 +751,6 @@ export const createSessionGoalRuntime = ({
         return;
       }
 
-      // The agent is waiting on the user: another nudge would only spend a
-      // turn repeating the question, so the first such check settles.
       if (audit?.verdict === 'blocked') {
         await settleGoal({
           sessionId, directory, goal, status: 'blocked', statusReason: 'waiting for user input', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
@@ -947,9 +760,6 @@ export const createSessionGoalRuntime = ({
       }
     }
 
-    // --- Continue: persist accounting first, then re-prompt ---
-    // Order matters: if the write lands and the prompt fails, the goal just
-    // waits for the next idle tick; the reverse could double-charge a turn.
     const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
       tokensUsed,
       tokensBaseline,
@@ -965,8 +775,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // The tail may have moved while auditing (user sent a message) — a
-    // continuation now would collide with the user's own turn.
     const latest = await fetchRecentMessages(sessionId, directory);
     const latestLastInfo = latest && latest.length > 0 ? latest[latest.length - 1]?.info : null;
     if (!latestLastInfo || latestLastInfo.id !== lastMessageInfo?.id) {
@@ -990,7 +798,6 @@ export const createSessionGoalRuntime = ({
     const timer = setTimeout(() => {
       if (stopped) return;
       if (inflight.has(sessionId)) {
-        // Keep a wakeup that arrived during a read; run it after this tick ends.
         timers.set(sessionId, { timer: null, directory, quietMs });
         return;
       }
@@ -1008,10 +815,6 @@ export const createSessionGoalRuntime = ({
     timers.set(sessionId, { timer, armedAt: Date.now() });
   };
 
-  // Immediate event path for a user abort: pause the active goal right away,
-  // BEFORE any idle tick could send a continuation over the user's explicit
-  // "stop". Messages the user sends afterwards leave the paused goal alone;
-  // Resume re-arms the loop (and kicks off immediately on an idle session).
   const pauseAfterAbort = async (sessionId, directory) => {
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;
@@ -1024,11 +827,6 @@ export const createSessionGoalRuntime = ({
 
   const isWired = () => typeof persistSessionGoal === 'function' && typeof readSessionMetadata === 'function';
 
-  /**
-   * A goal is created, edited or resumed through OpenChamber's own metadata
-   * route, not through an OpenCode event, so the write tells this runtime
-   * directly. That is also the authoritative moment: the store already holds it.
-   */
   const notifyGoalChanged = async (sessionId, directory, metadata) => {
     if (stopped || !isWired()) return;
     const goal = parseGoalMetadata({ metadata });
@@ -1037,15 +835,10 @@ export const createSessionGoalRuntime = ({
       clearTimer(sessionId);
       return;
     }
-    // A mid-goal edit leaves a tick that is reading the session alone: that
-    // tick holds the only pending work, and cancelling it would leave the
-    // goal active without a timer.
     if (goal.turnsUsed !== 0 && goal.statusReason !== 'resumed') return;
     readAttempts.delete(sessionId);
     clearTimer(sessionId);
 
-    // A patch from the UI names no directory, and the loop needs one to scope
-    // its own OpenCode calls. The session record is authoritative for it.
     let resolved = directory;
     if (!resolved) {
       const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`).catch(() => null);
@@ -1055,14 +848,6 @@ export const createSessionGoalRuntime = ({
     armTimer(sessionId, resolved, goal.statusReason === 'resumed' ? RESUME_KICKOFF_MS : kickoffQuietMs);
   };
 
-  /**
-   * After (re)connecting to OpenCode: a goal whose idle event fell in a gap
-   * (the server was down or the event stream dropped) has no timer and would
-   * wait for the user's next message. Arm a kickoff for every active goal
-   * among the most recently updated root sessions; the tick re-reads the goal
-   * from the store and checks the session is really idle. `GET /api/session`
-   * is global and starts no location.
-   */
   const recoverActiveGoals = async () => {
     if (stopped || !isWired() || !isEnabled()) return;
     const page = await openCodeFetch('/api/session', {
@@ -1095,8 +880,6 @@ export const createSessionGoalRuntime = ({
 
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {
-      // A tick already in flight reaches its own abort check and pauses the
-      // goal there; ending its read attempt now would drop it before that.
       if (!inflight.has(aborted.sessionId)) readAttempts.delete(aborted.sessionId);
       clearTimer(aborted.sessionId);
       if (!inflight.has(aborted.sessionId)) {
@@ -1123,10 +906,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    // Kickoff path: a goal set (or resumed — the UI stamps statusReason
-    // 'resumed') while the session is already idle emits no status
-    // transition, only session.updated. Arm a short timer; the tick's
-    // quiescence check keeps this safe if the session is actually busy.
     const update = extractSessionUpdate(payload);
     if (update && !update.parentID && !timers.has(update.sessionId) && !inflight.has(update.sessionId)) {
       void readGoal(update.sessionId)

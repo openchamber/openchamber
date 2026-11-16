@@ -1,49 +1,3 @@
-// Managed OpenCode process registry + orphan reaper.
-//
-// OpenChamber spawns the OpenCode server as an EXTERNAL child binary (on Unix
-// with `detached: true`, so it leads its own process group). That binary can
-// therefore outlive its parent if the parent is hard-killed/crashes/`Ctrl+C`ed
-// before graceful teardown runs — leaving an orphaned `opencode serve` that
-// then contends on the shared SQLite DB and slows everything down.
-//
-// We cannot tie an arbitrary external binary to the parent's death portably
-// (Electron's `utilityProcess` would, but it only runs JS entrypoints, not a
-// standalone binary). So we use the same pattern OpenCode's own CLI daemon uses
-// for its detached server: an on-disk record of the pids WE spawned, plus a
-// startup reaper that kills ONLY our own, verified, genuinely-orphaned
-// processes — never a process a live instance (another desktop window, a VS
-// Code host, the user's standalone `opencode`) is actively using.
-//
-// Storage: ONE FILE PER SPAWNED PROCESS in a registry directory, named
-// `<childPid>.json`. Multiple runtimes (web/desktop/VS Code) and multiple
-// windows all run concurrently; a single shared JSON file would be corrupted by
-// the read-modify-write race (last writer wins, clobbering another instance's
-// entry). Per-process files mean every instance only ever writes/deletes its
-// OWN file, so there is no write contention at all.
-//
-// Safety model (why this never kills the wrong thing):
-//   1. The reaper only ever considers pids THIS product recorded. The user's
-//      standalone CLI server, the official desktop app, and the TUI are never
-//      recorded, so they are never even candidates.
-//   2. Before killing, it re-verifies the live pid is still an `opencode serve`
-//      matching the recorded port (guards against the OS recycling a dead pid
-//      onto an unrelated process).
-//   3. It kills only when the spawning owner is provably gone — the child has
-//      been reparented to init/pid 1, or the recorded owner pid is dead. A
-//      child still owned by a live instance is left untouched.
-//
-// All filesystem and child-process operations here are ASYNCHRONOUS. The web
-// server runs in-process inside the Electron main event loop (and other hosts),
-// so any `spawnSync`/`*Sync` FS call blocks the single event loop — which also
-// serves UI asset requests and realtime SSE traffic. The startup reaper can
-// iterate several registry entries and, on Windows, each one spawns `tasklist`
-// (100-500ms) and possibly `taskkill`; doing that synchronously stalls the
-// whole process and is what caused the 1.13.3 `openchamber-ui://` lag
-// regression (#1841). `execFile`/`fsp.*` keep the event loop responsive while
-// the reaper waits on the kernel.
-//
-// The VS Code extension cannot import this module (it does not bundle the web
-// package); it carries a parity implementation that reads/writes the SAME dir.
 
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -67,7 +21,6 @@ const isPidAlive = (pid) => {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM = process exists but we lack permission to signal it → still alive.
     return error?.code === 'EPERM';
   }
 };
@@ -78,17 +31,10 @@ const commandIdentifiesOurServer = (command, entry) => {
   if (typeof command !== 'string') return false;
   const lower = command.toLowerCase();
   if (!lower.includes('opencode') || !lower.includes('serve')) return false;
-  // Tie to the exact server we registered when we know its port, so a recycled
-  // pid running a *different* opencode server is never mistaken for ours.
   if (Number.isInteger(entry.port) && !command.includes(String(entry.port))) return false;
   return true;
 };
 
-/**
- * Build the registry API over injectable filesystem and child-process
- * dependencies. Production callers use the default instance exported below;
- * tests pass their own `fs`/`execFileAsync` instead of mocking node builtins.
- */
 export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = defaultExecFileAsync } = {}) => {
   const writeEntryFile = async (entry) => {
     const dir = resolveRegistryDir();
@@ -122,7 +68,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
           await fs.rm(filePath, { force: true });
         }
       } catch {
-        // Corrupt/partial file — drop it.
         try {
           await fs.rm(filePath, { force: true });
         } catch {
@@ -133,7 +78,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     return out;
   };
 
-  /** Record an OpenCode process WE spawned so a future run can reap it if orphaned. */
   const registerManagedProcess = async ({ pid, ownerPid, port, binary, runtime } = {}) => {
     if (!Number.isInteger(pid)) return;
     await writeEntryFile({
@@ -146,7 +90,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     });
   };
 
-  /** Drop a pid from the registry (after we have killed/closed it ourselves). */
   const unregisterManagedProcess = async (pid) => {
     if (!Number.isInteger(pid)) return;
     try {
@@ -156,7 +99,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  // Returns { ppid, command } for a live pid on Unix, or null if it can't be read.
   const readUnixProcInfo = async (pid) => {
     try {
       const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'ppid=,command='], {
@@ -174,7 +116,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  // Windows image name for a pid (e.g. "opencode.exe"), or null.
   const readWindowsImageName = async (pid) => {
     try {
       const { stdout } = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
@@ -225,9 +166,7 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
   };
 
-  // Decide+act on a single registry entry. Returns true if it was reaped.
   const processEntry = async (entry, { log }) => {
-    // Dead pid → nothing to do (caller drops the file).
     if (!isPidAlive(entry.pid)) return false;
 
     const ownerGone = Number.isInteger(entry.ownerPid) && !isPidAlive(entry.ownerPid);
@@ -235,9 +174,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     if (process.platform === 'win32') {
       const image = await readWindowsImageName(entry.pid);
       const looksLikeOpencode = typeof image === 'string' && image.toLowerCase().includes('opencode');
-      // Windows lacks reliable reparent-to-1 semantics (job objects usually kill
-      // children with the parent), so we reap only when the owner is provably dead
-      // AND the image still looks like opencode.
       if (looksLikeOpencode && ownerGone) {
         await killOrphan(entry.pid);
         log?.(`[lifecycle] reaped orphaned OpenCode pid ${entry.pid} (owner ${entry.ownerPid} gone)`);
@@ -247,22 +183,16 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
     }
 
     const info = await readUnixProcInfo(entry.pid);
-    // Can't verify identity (or it's not our server) → leave it alone.
     if (!info || !commandIdentifiesOurServer(info.command, entry)) return false;
 
     const orphaned = info.ppid === 1 || ownerGone;
-    if (!orphaned) return false; // still owned by a live instance
+    if (!orphaned) return false;
 
     await killOrphan(entry.pid);
     log?.(`[lifecycle] reaped orphaned OpenCode pid ${entry.pid} (reparented/owner gone)`);
     return true;
   };
 
-  /**
-   * Kill any genuinely-orphaned OpenCode processes WE previously spawned, and
-   * prune their registry files. Safe to call at startup before spawning a new
-   * server. Returns { inspected, reaped }.
-   */
   const reapOrphanedProcesses = async ({ log } = {}) => {
     const records = await readAllEntries();
     if (records.length === 0) return { inspected: 0, reaped: 0 };
@@ -273,8 +203,6 @@ export const createManagedProcessRegistry = ({ fs = fsp, execFileAsync = default
       try {
         const wasReaped = await processEntry(entry, { log });
         if (wasReaped) reaped += 1;
-        // Drop the file when the process is gone (reaped now, or already dead);
-        // keep it only while the process is still alive and owned by a live owner.
         drop = wasReaped || !isPidAlive(entry.pid);
       } catch (error) {
         log?.(`[lifecycle] reap check failed for pid ${entry.pid}: ${error?.message ?? error}`);

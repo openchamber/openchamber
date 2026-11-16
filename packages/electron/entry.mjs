@@ -1,12 +1,3 @@
-/**
- * Desktop entry module. Electron holds the `ready` event until this module's
- * whole import graph has evaluated, so it stays small on purpose: the
- * configuration that must precede `ready`, the single-instance lock, and the
- * first window. The rest of the main process (`main.mjs`, the server, the
- * updater, IPC) is imported only after `ready`, so the window is on screen
- * while that loads. Starting the import earlier would delay `ready` itself:
- * module evaluation runs on the thread Chromium needs to finish initialising.
- */
 
 import { app, protocol } from 'electron';
 import fs from 'node:fs';
@@ -31,74 +22,41 @@ import {
 
 recordEarlyStartupMark('electron.entry');
 
-// Set the product name early so electron-log derives its log directory as
-// ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 const versionBeforeRename = app.getVersion();
 app.setName('OpenChamber');
-// An unpackaged run on Linux reports version "0.0" after the rename, and
-// electron-updater refuses a version that is not semver, so the dev app quit
-// before its first window. Restoring the version from before the rename gives
-// it Electron's own version, as on macOS. `setVersion` is undocumented;
-// Electron's default app uses it to apply a package.json version.
+// external: https://github.com/electron/electron/blob/main/default_app/main.ts Preserve the version before renaming an unpackaged app; Electron default_app uses setVersion for package versions.
 if (app.getVersion() !== versionBeforeRename) {
   app.setVersion(versionBeforeRename);
 }
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
-  // Chromium's Linux speech synthesis backend is opt-in and uses libspeechd.
+  // external: https://www.electronjs.org/docs/latest/api/command-line-switches#enable-speech-dispatcher-linux Linux speech synthesis requires the opt-in speech-dispatcher backend.
   app.commandLine.appendSwitch('enable-speech-dispatcher');
 }
-// Shared and service workers ignore the browser panel's session user agent and
-// use this fallback. Left at Electron's default, a page saw plain Chrome in its
-// window and Electron plus the app name in those workers, and Cloudflare
-// Turnstile rejected it (error 600010). Set before the first window: once one
-// has loaded, the default session keeps Electron's agent for its own requests.
+// external: https://www.electronjs.org/docs/latest/api/app#appuseragentfallback Set the worker user agent before any window loads so workers and panel pages present the same browser identity.
 app.userAgentFallback = plainChromeUserAgent(app.userAgentFallback);
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
 }
-// Test hook for scripts/profile-startup.mjs: a packaged launch that must not
-// share the single-instance lock or the Chromium profile with the installed
-// app. macOS resolves the home directory from the user record, not $HOME, so
-// an environment-only isolation cannot move these.
 const userDataOverride = String(process.env.OPENCHAMBER_DESKTOP_USER_DATA_DIR || '').trim();
 if (userDataOverride) {
   app.setPath('userData', userDataOverride);
 }
-// After the userData path is final, before main.mjs and the server load.
 enableMainProcessCompileCache({ packaged: app.isPackaged, userDataDir: app.getPath('userData') });
 app.setAppUserModelId(APP_USER_MODEL_ID);
-// Resolve preview names in Chromium, not through the configured proxy.
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>;openchamber-preview.localhost');
-// Lift Chromium's per-host cap only for bundled UI. Applying this to Vite HMR
-// lets the renderer request most of the module graph at once, overwhelming the
-// dev server's transform pipeline and leaving the HTML splash visible for up
-// to a minute before React mounts.
-// Keep localhost out: Electron also matches its subdomains, including the
-// browser panel's forwarded previews.
+// external: https://www.electronjs.org/docs/latest/api/command-line-switches#ignore-connections-limitdomains Lift connection limits only for bundled UI; uncapped Vite requests overwhelm transforms, and localhost also matches preview subdomains.
 if (shouldIgnoreLoopbackConnectionLimit({
   development: isDev,
   packagedUi: process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1',
 })) {
   app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1');
 }
-// A browser panel tab the agent works runs unthrottled (BrowserPane), but a
-// hidden page's renderer is still lowered in priority on its own; without this
-// that tab ran its timers at an eighth of the speed while out of sight. The
-// user's hidden tabs keep their timer throttling, so they stay cheap.
+// external: https://www.electronjs.org/docs/latest/api/command-line-switches#disable-renderer-backgrounding Keep agent tabs at foreground renderer priority while user tabs retain timer throttling.
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
-// Caps the young generation of every renderer's JS heap at 4 MB per half
-// (V8 grows it to several times that on a desktop). A streaming reply fills
-// whatever it is given with short-lived objects, and what the heap gives back
-// afterwards still counts against the process once macOS has compressed it,
-// so the window's footprint followed its peak: after an agent turn it read
-// about 300 MB with the cap and about 370 MB without, at no more CPU. A
-// `--js-flags` given on the command line wins, for measuring other values.
 if (!app.commandLine.hasSwitch('js-flags')) {
   app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=4');
 }
-// Development only: lets a debugger or an agent attach to the dev window over
-// CDP. Chromium binds the port to loopback.
 const devRemoteDebuggingPort = String(process.env.OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT || '').trim();
 if (isDev && /^\d+$/.test(devRemoteDebuggingPort)) {
   app.commandLine.appendSwitch('remote-debugging-port', devRemoteDebuggingPort);
@@ -111,7 +69,6 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       corsEnabled: true,
-      // Keep V8 bytecode for the packaged renderer bundle between launches.
       codeCache: true,
     },
   },
@@ -122,16 +79,11 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-// Deep links and second launches can arrive before main.mjs has its handlers.
 deferAppEventsUntilMainLoads();
 
 app.whenReady().then(async () => {
   recordEarlyStartupMark('electron.app.ready');
-  // The login shell runs in its own process; only its spawn touches this thread.
   if (!shellEnvironmentProbeBlocksMainThread) void startShellEnvironmentProbe().catch(() => {});
-  // A login-item or --background launch has no window to show. Otherwise the
-  // splash gets the main thread to itself until it is on screen: loading the
-  // main module and the server behind it would starve its first paint.
   if (!shouldStartInBackground()) {
     await createEarlyWindow().whenShown;
   }

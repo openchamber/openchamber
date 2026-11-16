@@ -123,13 +123,24 @@ Use `localhost`, never `127.0.0.1`, for the web server: the desktop app lifts Ch
 
 The panel's browser actions run in the app the agent itself works from, so they cannot reach a change to the panel's own code until that app is rebuilt; the `electron:dev` route above covers it before.
 
+## Refactoring under the behavior net
+
+A split, move or rewrite of a large file keeps behavior identical. `bun run verify` proves it for the features its map covers: it starts its own isolated instance, plays the user scenarios and exits non-zero on a red one. For a normal change the command is `bun run verify -- --changed`: it runs only the scenarios whose sources the change's files are, or import, and prints which file led to which feature and which changed files no scenario covers. The full run (about 25 minutes) is for merging a large batch and before a release.
+
+1. See what your files select: `bun run verify -- --changed --list` once the first edit is in, or the zones by name before it (`bun run verify -- --list composer`). A file reported as covered by no scenario has no net yet.
+2. Before the first edit, run the selection on the unchanged code (`bun run verify -- composer.send chat.footer`). All green. A red scenario on untouched code is a finding: report it before refactoring.
+3. Give each behavior your change touches and no scenario plays a scenario now, green on the old code (format in `scripts/verify/DOCUMENTATION.md`).
+4. After the change, run `bun run verify -- --changed`. Done means the selected scenarios green, and the files it lists as uncovered named in your report. A red one is a behavior change, so fix the code. Edit a scenario only when the markup it points at moved, and then the selector in `vocabulary.json`, with the step's meaning unchanged. A split or a rename of a listed source updates the feature's `sources` in the same change; the run refuses a source that does not exist.
+
+While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other; how many fit at once depends on the machine.
+
 ## Test Design
 
 - Prefer observable contracts, state transitions, failure handling, rollback, and operation counts.
 - Test private helpers through public/module behavior when that captures the risk clearly.
 - Assert internal map shape, helper calls, or call order only when that structure/order is itself a contract.
 - Keep refactor tests resilient to equivalent internal implementations.
-- For behavior-preserving refactors, establish the current behavior before changing structure.
+- For behavior-preserving refactors, establish the current behavior before changing structure (*Refactoring under the behavior net*).
 
 ## Module Documentation
 
@@ -146,7 +157,8 @@ The document describes the module as it is now. When a decision changes, rewrite
 ## Completion Standard
 
 - Implement the behavior end to end, including rollback and cleanup.
-- Prove the changed behavior (*Proof*): the reproduction passes, and the report says what the proof did not cover.
+- Prove the changed behavior (*Proof*): the reproduction passes in every runtime the change has code of its own in.
+- No known problem is handed over. A case noticed on the way (a runtime that may differ, state that may not survive a reload, a server switch or eviction from cache) is run, and fixed when it breaks. Between several ways to fix something, pick the one that works and passes the checks, and show it; only a product decision goes to the maintainer. The report names what could not be run at all and the reason, which is a missing device or account and never a missing step.
 - Preserve unrelated changes encountered in shared files.
 - The owning `DOCUMENTATION.md` is true of the new code and has a decision entry for every non-obvious choice the change made; a new module that meets the bar in *Module Documentation* has its own document.
 - Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent.

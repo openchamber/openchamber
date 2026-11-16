@@ -27,6 +27,14 @@ Target: Gerrit 3.8 or newer, verified against live 3.8.9 and 3.10.9 (see *Verifi
 - Reviewer candidates are the owners and reviewers of the project's 25 most recent changes: Gerrit has no project-member list a user can read.
 - A worktree from a change uses the branch `change-<number>`, the current patchset ref as `headRef`, classification `same-repository`, and `<origin>/a/<project>` as the endpoint.
 - List filters: `open` = `status:open`, `closed` = `status:closed` (merged and abandoned), `merged` = `status:merged`; `created` = `owner:self`, `reviewRequested` = `reviewer:self -owner:self`, `assigned` = `attention:self`; a search is the change number when it is one, else a quoted `message:` term. Pages are 20 changes, `S` offset, more while the last one says `_more_changes`.
+- Upstream lookup accepts only a branch name that Git reads as one argument. `rev-parse` needs the short `<branch>@{upstream}` form after its options, so option, range and revision syntax must be rejected before the call.
+- Tracking refs strip the full configured remote name. A remote name can contain slashes, so splitting the tracking ref on its first slash can select the wrong target branch.
+- Branch collections must be complete. Branch lists have no continuation marker, so a full page requires another read; reaching the collection bound fails the read because a capped list cannot claim completeness.
+- Live summaries omit changes that cannot be read, leaving their state unknown. A 401 fails the whole read so the account is reconciled.
+- A linked read may select a project outside the binding's primary project. Ordinary bound reads must reject that selector.
+- A change represents one commit, so its timeline always describes the current patchset, even when the diff shows an older revision.
+- Published messages and inline comments retain their ids but cannot be edited or deleted through this provider. Only the viewer's own drafts may change; Gerrit exposes no other viewer's drafts.
+- Discarding a review deletes draft comments individually because Gerrit has no whole-draft deletion call. A failure leaves the remaining comments available for another discard.
 
 ## Enterprise mode
 
@@ -63,6 +71,22 @@ Still unverified:
 Gerrit is the last built-in in `BUILT_IN_DESCRIPTORS` (`source-control/provider-descriptors.js`) and `BUILT_IN_LOADERS` (`source-control/provider-registry.js`), so the web adapter's older-server fallback keeps the leading entries. Its submit and votes digests are frozen in `source-control/mutation-digest-freeze.test.js` as well as `provider.test.js`; `source-control/provider-routes.gerrit.test.js` drives every route through the shell.
 
 ## Decisions
+
+### Why writes are sent once and not retried
+
+A write answered with 502 may already be applied. The durable executor handles that uncertainty; a client retry can duplicate the write.
+
+### Why reconciliation requires evidence and not a matching value alone
+
+A matching vote can predate the call, and a comment provides no evidence that distinguishes a lost write from an unsent one, so their outcomes stay unknown. Reviewer reconciliation requires an exact set match because a later edit can change the set in either direction.
+
+### Why one resource service per session and not per operation
+
+A session's reads, mutation target resolution and provider calls share one client. Errors retain the acting account identity so the route shell applies 401 handling to that account.
+
+### Why the icon uses fewer lines than the original logo
+
+The icon uses one removed line and one added line in a 24x24 box with the other provider icons' line weight. This keeps it legible at 16 pixels.
 
 ### Why a fetch client and not a Gerrit SDK
 

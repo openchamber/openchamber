@@ -1,14 +1,5 @@
-/**
- * GitHub's static description: synchronous and SDK-free, so the Git layer,
- * bindings and the client can read it without loading Octokit.
- */
 const INSTANCE_ERROR = 'GitHub instance must be an HTTPS origin';
 
-/**
- * A GitHub instance is a bare hostname: github.com, or any other host for
- * GitHub Enterprise. This checks the form only; whether a non-github.com host
- * may receive a token is the trust gate's call (host-trust.js), never this one.
- */
 function normalizeGitHubInstance(raw) {
   let host = String(raw).trim().toLowerCase().replace(/\.$/, '');
   if (host.includes('://')) {
@@ -22,9 +13,6 @@ function normalizeGitHubInstance(raw) {
       || (url.pathname && url.pathname !== '/')) throw new Error(INSTANCE_ERROR);
     host = url.hostname.toLowerCase().replace(/\.$/, '');
   } else if (host) {
-    // A scheme-less value must form a valid origin callers can build an
-    // https://<instance> URL from; one that cannot fails here with the same
-    // readable error the https:// branch uses.
     let url;
     try {
       url = new URL(`https://${host}`);
@@ -65,7 +53,6 @@ export const githubDescriptor = Object.freeze({
     state: true,
     labels: true,
     reviewers: true,
-    // GitHub opens a review thread only on a diff line, which the board does not offer.
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: false,
@@ -74,14 +61,11 @@ export const githubDescriptor = Object.freeze({
     liveSummaries: true,
     referencePicker: true,
     multipleAccounts: true,
-    // A repository's discussions: listed, previewed, attached and answered beside issues.
     discussions: true,
   }),
   authMethods: Object.freeze({ device: true, pat: true, cli: Object.freeze({ tool: 'gh' }) }),
   transport: Object.freeze({
     httpsUsername: Object.freeze({ kind: 'fixed', value: 'x-access-token' }),
-    // Managed Git transport reaches github.com only; an enterprise host's
-    // tokens serve API reads and writes but never a clone or push.
     managedHttpsInstances: 'default-only',
     appendDotGitToHttpsClone: false,
   }),
@@ -94,13 +78,11 @@ export const githubDescriptor = Object.freeze({
   trackedItems: Object.freeze({ nestedOwners: false, defaultInstance: 'github.com', batchLimit: 100 }),
   limits: Object.freeze({
     commentMaxLength: 65536,
-    // GitHub names a reviewer by login; the routes bound only its length.
     reviewerId: /^[^\0\r\n]{1,256}$/,
     labelsMax: 100,
     reviewersMax: 50,
   }),
   identity: Object.freeze({
-    // GitHub attributes commits to this address without exposing the real one.
     noReplyEmail: (user) => (user?.login && Number.isInteger(user?.id)
       ? `${user.id}+${user.login}@users.noreply.github.com`
       : null),
@@ -110,14 +92,8 @@ export const githubDescriptor = Object.freeze({
     Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }),
   ]),
   instances: Object.freeze({
-    // github.com signs in through OpenChamber's own device flow and keeps
-    // its accounts in github-auth.json; enterprise hosts use the shared store.
     legacyFlow: Object.freeze({ instance: 'github.com', kind: 'github-com-device' }),
   }),
-  // What only the client draws: literal words, icon, URL shapes, settings
-  // hints and the board features it offers. Published by
-  // `GET /api/source-control/providers`; the web adapter's fallback for an
-  // older server mirrors it.
   presentation: Object.freeze({
     sharedNumberSpace: true,
     abbreviation: 'PR',
@@ -143,7 +119,6 @@ export const githubDescriptor = Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
       issueEdit: true, changeRequestEdit: true, commentEdit: true,
-      // GitHub search reads `is:`, `label:`, `author:` and the rest from the box.
       advancedSearch: true,
       reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),

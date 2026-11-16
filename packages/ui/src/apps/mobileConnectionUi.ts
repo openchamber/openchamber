@@ -1,5 +1,3 @@
-/** Kills autocorrect/autocomplete on URL/token/password fields — mobile keyboards
-    mangle those values otherwise. */
 export const mobileInputKeyboardProps = {
   autoComplete: 'off',
   autoCorrect: 'off',

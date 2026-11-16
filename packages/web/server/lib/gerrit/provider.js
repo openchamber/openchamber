@@ -6,19 +6,7 @@ import { gerritDescriptor } from './descriptor.js';
 import { createGerritResourceService } from './resources.js';
 import { probeGerritVersion, verifyGerritCredentials } from './verify.js';
 
-/**
- * Gerrit as a source-control provider implementation behind the shared route
- * shell (`source-control/provider-routes.js`): a username and HTTP password
- * per account, one account store section (`section('gerrit')`) keyed by
- * instance origin (`source-control/pat-account-auth.js`), REST through
- * `client.js`, the standard mutation kinds and digests
- * (`source-control/standard-mutations.js`) with its votes branch. A change is
- * created by pushing to `refs/for/<branch>`, not through this provider, so
- * `/pr/create` is not among its routes and the shell answers 501.
- */
 
-// A comment or a vote leaves nothing that tells a lost write from one never
-// sent (a matching vote may predate the call), so the outcome stays unknown.
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
 const invalidMutationContext = (message) => Object.assign(new Error(message), {
@@ -26,7 +14,6 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
   status: 400,
 });
 
-/** Each route's Gerrit call and restart reconciliation; `normalized` is the standard table's output. */
 function mutationOperations() {
   const call = (resolved, extra = {}) => ({ providerTarget: resolved.providerTarget, expectedTarget: resolved.target, ...extra });
   return {
@@ -77,10 +64,6 @@ function mutationOperations() {
   };
 }
 
-/**
- * `store` is Gerrit's origin-keyed section of the source-control auth store;
- * `events` receives account lifecycle reports. The rest are test seams.
- */
 export function createProvider({
   descriptor = gerritDescriptor,
   authStore,
@@ -102,9 +85,6 @@ export function createProvider({
   const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
   const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure: classifyGerritFailure });
 
-  // One resource service per session, so a request's reads, mutation target
-  // and provider call share one client. Errors carry the acting account for
-  // the shell's 401 handling.
   const services = new WeakMap();
   const serviceFor = (session) => {
     const cached = services.get(session);
@@ -161,7 +141,6 @@ export function createProvider({
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, revision, binary, linked }) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, revision, binary, linked }),
       liveSummaries: ({ session, refs, issueRefs }) => serviceFor(session).liveSummaries({ refs, issueRefs }),
-      /** A change's current patchset, for a worktree made from it: the branch is named after the change. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {
         const { project, raw } = await serviceFor(session).findChangeRequest(directory, number, null, remote);
         const headSha = String(raw.current_revision || '').toLowerCase();
@@ -175,7 +154,6 @@ export function createProvider({
           headOwner: project.owner,
         };
       },
-      /** A change is fetched from its patchset ref in the same project: there are no forks. */
       resolveChangeRequestSource: async ({ session, context, project, number, expectedHeadSha, requestedRemoteName }) => {
         const { project: current, request } = await serviceFor(session)
           .findChangeRequest(context.directory, number, { owner: project.owner, name: project.name }, context.primaryRemote);
@@ -201,7 +179,6 @@ export function createProvider({
         if (!routes.includes(request.route)) throw invalidMutationContext('Source control mutation is unsupported');
         return standardMutations.prepare(request);
       },
-      /** The provider coordinates and durable target; a replay rebuilds them from the stored target. */
       resolveTarget: ({ session, context, replayOf }) => {
         if (replayOf) {
           const { project, number } = replayOf.target;

@@ -40,24 +40,6 @@ import {
   type PermissionModel,
 } from './agentPermissionModel';
 
-/**
- * Tool permissions for one agent.
- *
- * One row per tool: the tool's name, an arrow with what OpenCode will actually
- * do for it right now, and inherit / allow / ask / deny. "Inherit" means the
- * agent says nothing about the tool, so OpenCode's defaults and the global
- * config decide (that is what the arrow shows). A row expands to resource
- * patterns for that tool (`git push *` → deny).
- *
- * Under the hood v2 keeps an ordered rule list where the last match wins;
- * `agentPermissionModel.ts` translates this view to and from that list and
- * applies edits to the stored list in place, so what the user did not touch
- * keeps deciding exactly as before. Saving PATCHes only
- * `{ permissions }`. There is no Save button: a chip writes straight away, a
- * pattern writes when it loses focus. The write is its own request but the
- * page owns the autosave: `AgentsPage` registers this section's save routine
- * through `registerSave` and runs it as part of its own.
- */
 
 const formatKeyLabel = (key: string): string =>
   key
@@ -66,7 +48,6 @@ const formatKeyLabel = (key: string): string =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
-/** Tools whose rules commonly need resource patterns; others can still add them. */
 const PATTERN_HINT_ACTIONS: ReadonlySet<string> = new Set([
   'shell',
   'edit',
@@ -84,12 +65,7 @@ const EMPTY_KEY: KeyState = { effect: null, patterns: [] };
 
 interface AgentPermissionsEditorProps {
   agent: AgentWithExtras;
-  /**
-   * Hand the page this section's save routine. It is called on mount and
-   * whenever the routine changes, and with `null` on unmount.
-   */
   registerSave: (save: (() => Promise<AutosaveResult>) | null) => void;
-  /** The page's autosave request; this section never runs its own. */
   requestSave: () => void;
 }
 
@@ -112,14 +88,8 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
   const [reloadToken, setReloadToken] = React.useState(0);
 
   const agentName = agent.name;
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
 
-  // MCP servers from the config (not only the connected ones): a permission on
-  // a server is worth setting even while it is disabled or failing. Each server
-  // gets one row keyed `<server>_*`, which OpenCode matches against every tool
-  // the server exposes (`<server>_<tool>`).
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
   const mcpServers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore(
@@ -168,8 +138,6 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
     return () => registerSave(null);
   }, [registerSave, save]);
 
-  // --- Rows: built-in and OpenChamber tools, then one row per MCP server, then
-  // whatever else the agent already names (custom keys, single MCP tools). ---
   const mcpKeys = React.useMemo(
     () => mcpServers.map((server) => ({ key: `${server.name}_*`, server: server.name })),
     [mcpServers],
@@ -206,7 +174,6 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
     [globalRules, model.global],
   );
 
-  // --- Mutators. Chips save at once; patterns save on blur through the page. ---
   const setGlobal = (effect: PermissionEffect | null) => {
     setModel((current) => ({ ...current, global: effect }));
     requestSave();
@@ -414,7 +381,6 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
       info={t('settings.agents.page.permissionsEditor.sectionInfo')}
       contentClassName="space-y-4"
     >
-      {/* The agent's own fallback for every tool (its `*` rule). */}
       <div className="flex flex-col gap-2 pb-2 @xl:flex-row @xl:items-center @xl:justify-between">
         <div className="flex items-center gap-1.5">
           <span className={SETTINGS_FIELD_LABEL_CLASS}>
@@ -443,7 +409,6 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
           {mcpKeys.map((entry) => renderRow(entry.key, entry.server, mcpStatusLabel(entry.server)))}
         </div>
       )}
-      {/* A tool the list does not know yet (an MCP or plugin tool). */}
       <div className="flex flex-wrap items-center gap-2 border-t border-edge-muted pt-3">
         <Input
           value={customKeyDraft}

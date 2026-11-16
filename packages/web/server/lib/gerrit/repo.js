@@ -5,11 +5,6 @@ import { normalizeGerritInstance } from './instance.js';
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 
-/**
- * The project a remote path names, or null. Gerrit project names nest
- * (`platform/build/soong`: owner `platform/build`) or stand alone (`demo`:
- * owner ''); the selector is split on the last slash.
- */
 function gerritProjectOfPath(value) {
   const segments = value.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '').split('/').filter(Boolean);
   if (segments.length === 0 || segments.some((segment) => segment === '.' || segment === '..' || !SEGMENT.test(segment))) return null;
@@ -19,15 +14,6 @@ function gerritProjectOfPath(value) {
 
 const matchScpRemote = (value) => (value.includes('://') ? null : value.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/));
 
-/**
- * The project a remote URL names on one known instance, or null.
- *
- * - HTTPS remotes match the instance's exact authority (host and port); HTTP
- *   only when the instance itself is a loopback HTTP origin. A leading `a/`
- *   is Gerrit's authenticated path, not part of the project name.
- * - SSH remotes (`ssh://user@host:29418/project`, or scp-like) match its
- *   hostname on any port: Gerrit's own SSH daemon listens on 29418.
- */
 export function parseGerritRemoteUrl(raw, instance) {
   if (!isString(raw) || !raw.trim()) return null;
   const origin = normalizeGerritInstance(instance);
@@ -67,12 +53,6 @@ const trackingRemoteName = (tracking) => {
   return separator > 0 ? tracking.slice(0, separator) : '';
 };
 
-/**
- * The projects a working directory's remotes name on the instance. With an
- * explicit remote (every bound read names the binding's primary remote)
- * only that remote counts; otherwise remotes are ranked: tracking, origin,
- * upstream, then the rest.
- */
 export async function resolveGerritProjectsFromDirectory(directory, instance, explicitRemote, dependencies = {}) {
   const loadRemotes = dependencies.getRemotes ?? getRemotes;
   const loadStatus = dependencies.getStatus ?? getStatus;

@@ -1,44 +1,16 @@
-/**
- * The annotation overlay that runs *inside* the previewed page.
- *
- * This module produces a self-contained script string. It is injected through
- * `webview.executeJavaScript`, so it cannot import anything, cannot reference
- * our theme variables (the page has its own `:root`), and must not disturb the
- * document it lands in. Consequences that drive the implementation:
- *
- * - All chrome lives in a **closed** shadow root on a single host element, so
- *   page CSS cannot restyle it and page scripts cannot walk into it.
- * - Every color and every label is passed in from the host, already resolved
- *   and already translated. Nothing user-facing is hardcoded here.
- *
- * The chrome is two small pieces rather than one bar: the tools sit at the top
- * of the page, and the comment box follows whatever was just marked. A single
- * bar pinned to one edge covers the part of the page people most often want to
- * point at, and accumulates into something that feels like an application.
- *
- * Lifecycle: the script resolves with a payload (or null when cancelled) and
- * tears down its own chrome *before* resolving, waiting for a repaint, so a
- * screenshot taken by the host contains the page and none of our UI.
- */
-
 export type BrowserAnnotationOverlayTheme = {
   readonly colorScheme: 'light' | 'dark';
   readonly primary: string;
-  /** Translucent primary, already resolved to a concrete color by the host. */
   readonly primarySoft: string;
-  /** Faint primary used for hover backgrounds. */
   readonly primaryFaint: string;
   readonly primaryContrast: string;
   readonly surface: string;
   readonly surfaceElevated: string;
-  /** Translucent elevated surface, matching the app's floating panels. */
   readonly glassSurface: string;
-  /** A ready `backdrop-filter` value; '' when the theme has no glass. */
   readonly glassFilter: string;
   readonly border: string;
   readonly text: string;
   readonly mutedText: string;
-  /** The recording dot of dictation. */
   readonly danger: string;
 };
 
@@ -50,15 +22,7 @@ export type BrowserAnnotationOverlayLabels = {
   readonly submit: string;
 };
 
-/**
- * Dictation into the comment. The microphone is the app's: the overlay asks
- * for it through `ANNOTATION_BINDING`, a function the desktop shell exposes
- * only to the isolated world the overlay runs in, so the page itself can
- * neither start a recording nor answer in the app's place. Without that
- * function (the overlay running in the page's own world) there is no mic.
- */
 export type BrowserAnnotationVoice = {
-  /** The app's dictation shortcut as this platform's keys; null when it has none the overlay can match. */
   readonly shortcut: { key: string; meta: boolean; ctrl: boolean; alt: boolean; shift: boolean } | null;
   readonly labels: {
     readonly start: string;
@@ -67,30 +31,21 @@ export type BrowserAnnotationVoice = {
     readonly listening: string;
     readonly processing: string;
   };
-  /** SVG path markup from the app's icon sprite. */
   readonly icons: { readonly mic: string; readonly close: string; readonly check: string; readonly loader: string };
 };
 
-/** What the overlay sends the app, as JSON through the binding. */
 export type AnnotationOverlayMessage = { type: 'voice'; action: 'start' | 'finish' | 'cancel' };
 
-/**
- * What the app sends the overlay. `failed` keeps a submit that waited on the
- * recording from going out; `level` is the microphone's, 0 to 1.
- */
 export type AnnotationAppMessage =
   | { type: 'voice'; phase: 'idle' | 'recording' | 'processing'; note?: string; failed?: boolean }
   | { type: 'insert'; text: string }
   | { type: 'level'; level: number };
 
-/** The shell's binding into the overlay's world; `browser-panel-driver.mjs` names it the same. */
 const ANNOTATION_BINDING = '__openchamberAnnotationSend';
-/** Where the overlay takes the app's messages, in its own world. */
 const ANNOTATION_RECEIVER = '__openchamberAnnotationReceive';
 
 const ANNOTATION_ACTIVE_FLAG = '__openchamberBrowserAnnotationActive';
 
-/** Cancels an overlay left behind by an earlier session. Safe when none is active. */
 export const ANNOTATION_TEARDOWN_SCRIPT = `(() => {
   try {
     var host = document.querySelector('[data-openchamber-annotation]');

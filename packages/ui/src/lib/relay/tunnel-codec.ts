@@ -1,8 +1,3 @@
-// Tunnel mux frame codec (Layer 3 of the protocol spec). Pure functions, no I/O.
-// Frame layout: [1 byte frameType (high bit = fragment-continues)][4 byte BE streamId][payload].
-// Client-initiated streams use odd streamIds starting at 1; even ids are reserved.
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
-
 import {
   BATCH_CONTAINER_TAG_BATCH,
   BATCH_CONTAINER_TAG_SINGLE,
@@ -18,7 +13,6 @@ import {
 
 const MAX_STREAM_ID = 0xffffffff;
 
-/** Cumulative raw tunnel-frame bytes, excluding stream zero and batch/crypto overhead. */
 export const encodeDeliveryAck = (receivedBytes: number): Uint8Array => {
   if (!Number.isSafeInteger(receivedBytes) || receivedBytes < 0) throw new Error('invalid delivery acknowledgement');
   const payload = new Uint8Array(8);
@@ -37,7 +31,6 @@ export interface TunnelFrame {
   frameType: TunnelFrameTypeValue;
   streamId: number;
   payload: Uint8Array;
-  /** True when this frame is a fragment and more fragments of the same message follow. */
   hasMoreFragments: boolean;
 }
 
@@ -100,7 +93,6 @@ export const decodeJsonPayload = <T>(payload: Uint8Array, validate: (parsed: unk
   return parsed;
 };
 
-/** Split a body/message into payload-sized chunks. Empty input yields one empty chunk. */
 export const chunkPayload = (bytes: Uint8Array, chunkSize = MAX_TUNNEL_PAYLOAD_BYTES): Uint8Array[] => {
   if (chunkSize <= 0 || chunkSize > MAX_TUNNEL_PAYLOAD_BYTES) {
     throw new TunnelCodecError('invalid chunk size');
@@ -113,10 +105,6 @@ export const chunkPayload = (bytes: Uint8Array, chunkSize = MAX_TUNNEL_PAYLOAD_B
   return chunks;
 };
 
-/**
- * Encode one logical message as one or more frames, setting the fragment flag
- * on all but the last. Used for WS messages that exceed the frame budget.
- */
 export const encodeFragmentedMessage = (
   frameType: TunnelFrameTypeValue,
   streamId: number,
@@ -128,14 +116,9 @@ export const encodeFragmentedMessage = (
   );
 };
 
-/** Reassembles fragmented messages per (streamId, frameType). Bounded to protect memory. */
 export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
   const pending = new Map<string, { chunks: Uint8Array[]; totalBytes: number }>();
   return {
-    /**
-     * Returns the complete message payload once all fragments arrived, or null
-     * while more fragments are expected.
-     */
     push(frame: TunnelFrame): Uint8Array | null {
       const key = `${frame.streamId}:${frame.frameType}`;
       const entry = pending.get(key);
@@ -170,17 +153,6 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
   };
 };
 
-/**
- * Batch envelope encoder (Layer 2 plaintext container). Only used when both
- * peers negotiated `batch`. One encrypted WS message still equals one
- * encrypt() call — this only changes how many tunnel frames it carries.
- *
- * - 1 frame  -> [0x00][frame bytes]                (single, 1-byte overhead)
- * - N frames -> [0x01]([4B BE length][frame])×N    (batch)
- *
- * Callers must keep the encoded size within MAX_PLAINTEXT_FRAME_BYTES; the
- * outbound batcher flushes before an add would exceed the budget.
- */
 export const encodeFrameBatch = (frames: Uint8Array[]): Uint8Array => {
   if (frames.length === 0) {
     throw new TunnelCodecError('cannot encode an empty frame batch');
@@ -215,7 +187,6 @@ export const encodeFrameBatch = (frames: Uint8Array[]): Uint8Array => {
   return out;
 };
 
-/** Decodes a batch-envelope plaintext into its ordered tunnel frames. */
 export const decodeFrameBatch = (plaintext: Uint8Array): Uint8Array[] => {
   if (plaintext.length < 1) {
     throw new TunnelCodecError('empty batch plaintext');
@@ -252,56 +223,32 @@ export const decodeFrameBatch = (plaintext: Uint8Array): Uint8Array[] => {
   return frames;
 };
 
-// Only high-volume body/stream data is buffered; setup/teardown/keepalive
-// frames flush immediately so TTFT, terminal echo, and liveness stay snappy.
 const BUFFERED_FRAME_TYPES = new Set<number>([
   TunnelFrameType.HttpBody,
   TunnelFrameType.WsText,
   TunnelFrameType.WsBinary,
 ]);
 
-// 150ms: the chat render pipeline already gates visible streaming updates well below this — a
-// 100ms input throttle (useStreamingTextThrottle) feeding a ~64ms paced-reveal (usePacedText) that
-// buffers-and-smooths arrival bursts, and the app already tolerates 200ms under backpressure. So a
-// 150ms batch window is invisible to users while cutting DO messages ~33% more than 100ms.
-// Leading-edge flush keeps time-to-first-token and terminal echo instant regardless of this value.
 export const DEFAULT_BATCH_WINDOW_MS = 150;
 const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
 const DEFAULT_BATCH_MAX_FRAMES = 32;
 
 interface OutboundFrameBatcherOptions {
-  /** Trailing flush window in ms. Buffered frames flush no later than this. */
   windowMs?: number;
   maxBatchBytes?: number;
   maxBatchFrames?: number;
-  /** Encrypt + write one batched plaintext to the wire. Called in enqueue order. */
   sendBatch: (plaintext: Uint8Array) => void;
-  // Injectable clock/timer so tests can drive timing deterministically.
   now?: () => number;
   setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
 }
 
 export interface OutboundFrameBatcher {
-  /** Buffer or immediately flush a tunnel frame per the batching policy. */
   enqueue(frame: Uint8Array): void;
-  /** Force-flush any buffered frames now. */
   flush(): void;
-  /** Stop the batcher; drops any un-flushed frames (channel is being torn down). */
   dispose(): void;
 }
 
-/**
- * Outbound batching buffer shared by the client and (mirrored in JS) the host
- * send paths. Policy:
- *  - Leading edge: if nothing flushed within windowMs, the frame ships now
- *    (batch of 1) — keeps time-to-first-token and keystroke echo instant.
- *  - Trailing window: subsequent body frames buffer and flush when the timer
- *    fires, buffered bytes >= maxBatchBytes, buffered frames >= maxBatchFrames,
- *    or the plaintext budget would be exceeded.
- *  - Non-buffered frame types (setup/teardown/keepalive) flush immediately, and
- *    flush any pending buffer first so per-stream ordering is preserved.
- */
 export const createOutboundFrameBatcher = (
   options: OutboundFrameBatcherOptions,
 ): OutboundFrameBatcher => {
@@ -313,9 +260,9 @@ export const createOutboundFrameBatcher = (
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
 
   let buffer: Uint8Array[] = [];
-  let bufferedBytes = 0; // conservative multi-envelope size estimate
+  let bufferedBytes = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let lastFlushAt = 0; // 0 => idle, so the first frame takes the leading edge
+  let lastFlushAt = 0;
   let disposed = false;
 
   const clearPendingTimer = (): void => {
@@ -339,14 +286,12 @@ export const createOutboundFrameBatcher = (
     if (disposed) return;
     const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
     if (!BUFFERED_FRAME_TYPES.has(frameType)) {
-      // Immediate frame: append then flush so it never overtakes buffered body.
       buffer.push(frame);
       flush();
       return;
     }
     const at = now();
     if (buffer.length === 0 && at - lastFlushAt >= windowMs) {
-      // Leading edge: nothing flushed recently, ship this one right away.
       buffer.push(frame);
       flush();
       return;
@@ -376,7 +321,6 @@ export const createOutboundFrameBatcher = (
   };
 };
 
-/** Allocates client-initiated stream ids: odd, starting at 1. */
 export const createStreamIdAllocator = () => {
   let next = 1;
   return {

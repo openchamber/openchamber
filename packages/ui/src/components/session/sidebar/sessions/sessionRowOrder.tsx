@@ -5,7 +5,6 @@ import type { SessionGroup } from '../types';
 
 export type SessionRowOrderEntry = {
   id: string;
-  /** Null for a session of a folded work: Ctrl/Cmd+A takes it, a Shift range does not. */
   rowKey: string | null;
   scopeKey: string | null;
   archived: boolean;
@@ -24,12 +23,10 @@ type SessionRowOrderRegistry = {
   getEntries: () => readonly SessionRowOrderEntry[];
   getDescendantIds: () => readonly string[];
   getSessionsById: () => ReadonlyMap<string, Session>;
-  /** Every selectable id's lifecycle: listed sessions, plus search results the tree does not hold. */
   getLifecycleById: () => ReadonlyMap<string, SessionRowLifecycle>;
   getWorks: () => readonly SessionRowOrderWork[];
 };
 
-/** A worktree or space work the sidebar lists, folded or not. */
 export type SessionRowOrderWork = { group: SessionGroup; projectId: string };
 
 const EMPTY_WORKS: readonly SessionRowOrderWork[] = [];

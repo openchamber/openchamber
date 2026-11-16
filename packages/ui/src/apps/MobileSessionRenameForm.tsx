@@ -6,19 +6,10 @@ import type { useSessionAiRenameAction } from '@/components/session/useSessionAi
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-/** Inline title editor shown in place of a mobile session row's content while
-    renaming. Mirrors the desktop sidebar rename: a bare transparent input at
-    the row's own typography (no bordered field — the row keeps its exact
-    height) with explicit icon buttons: generate with AI, save, cancel. */
 export const MobileSessionRenameForm: React.FC<{
   initialTitle: string;
-  /** Left padding, so the input starts where the row's title did. */
   indent: number;
-  /** Extra classes for the form; multi-line rows pin their own height. */
   className?: string;
-  /** The row's AI rename; passed in so the row shows its pending spinner
-      without running the hook twice. Absent for what has no transcript to
-      name it from: a worktree, a run. */
   aiRename?: ReturnType<typeof useSessionAiRenameAction>;
   placeholder?: string;
   onSubmit: (title: string) => void;
@@ -27,9 +18,6 @@ export const MobileSessionRenameForm: React.FC<{
   const { t } = useI18n();
   const [value, setValue] = React.useState(initialTitle);
 
-  // Opens with the whole title selected, so the first keystroke replaces it.
-  // Stable ref callback: an inline one would re-run on every render and
-  // re-select the text mid-edit.
   const focusRenameInput = React.useCallback((node: HTMLInputElement | null) => {
     if (!node) return;
     node.focus();
@@ -38,7 +26,6 @@ export const MobileSessionRenameForm: React.FC<{
 
   const commit = () => {
     const next = value.trim();
-    // A worktree's name may be cleared: its row then shows the branch again.
     if ((!next && aiRename) || next === initialTitle.trim()) {
       onCancel();
       return;
@@ -48,10 +35,6 @@ export const MobileSessionRenameForm: React.FC<{
 
   return (
     <form
-      // Fixed 36px: the session row's real height is NOT Tailwind's min-h-10 —
-      // mobile.css's global button touch-target rule (min-height: 36px) wins
-      // that specificity fight, so single-line rows resolve to 36px. Pin the
-      // rename state to the same 36px.
       className={cn('flex h-9 min-w-0 flex-1 items-center gap-2 pe-2', className)}
       style={{ paddingInlineStart: indent }}
       onSubmit={(event) => {
@@ -66,16 +49,10 @@ export const MobileSessionRenameForm: React.FC<{
         onKeyDown={(event) => handleSessionRenameKeyDown(event, onCancel)}
         aria-label={t('sessions.sidebar.session.rename.save')}
         placeholder={placeholder ?? t('sessions.sidebar.session.menu.rename')}
-        // 16px prevents the iOS focus zoom; the bare input keeps the row height.
-        // The inline min-height overrides mobile.css's global 36px input
-        // floor, which otherwise makes the rename row taller than the 40px
-        // session row.
         className="min-w-0 flex-1 bg-transparent text-[16px] typography-ui-label text-foreground outline-none placeholder:text-muted-foreground"
         style={{ minHeight: 0 }}
         enterKeyHint="done"
       />
-      {/* Generating closes the editor: the row's own spinner shows the
-          pending rename, and the new title lands in the row. */}
       {aiRename ? <button
         type="button"
         disabled={aiRename.disabled}
@@ -92,8 +69,6 @@ export const MobileSessionRenameForm: React.FC<{
         type="submit"
         aria-label={t('sessions.sidebar.session.rename.save')}
         className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        // Inline mins beat mobile.css's global 36px button touch-target floor
-        // so the controls fit the 40px row.
         style={{ touchAction: 'manipulation', minHeight: 0, minWidth: 0 }}
       >
         <Icon name="check" className="size-4" />

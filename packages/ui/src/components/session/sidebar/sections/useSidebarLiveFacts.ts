@@ -22,7 +22,6 @@ const EMPTY_PR_WATCHES: PrWatchMap = new Map();
 type ExtensionWaitMap = ReturnType<typeof useExtensionWaitsStore.getState>['bySession'];
 const EMPTY_EXTENSION_WAITS: ExtensionWaitMap = new Map();
 
-/** The ids of top-level sessions whose last turn is unread and of those whose last turn failed, as one comparable key. */
 const selectTurnOutcomeKey = (state: ReturnType<typeof useGlobalSessionsStore.getState>): string => {
   const unread: string[] = [];
   const failed: string[] = [];
@@ -34,17 +33,7 @@ const selectTurnOutcomeKey = (state: ReturnType<typeof useGlobalSessionsStore.ge
   return `${unread.sort().join(',')}|${failed.sort().join(',')}`;
 };
 
-/**
- * The live state the user's sections filter on, subscribed only while a shown
- * section asks for it: membership in those sections changes on every turn,
- * and nothing else in the list needs to rebuild for it.
- *
- * OpenCode stamps a turn's end on the record even when the session only idles
- * on background work, so a session whose turn is still open counts as running
- * and not as unread, as its row reads.
- */
 export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
-  // Membership of these sets changes only when a turn or its background work starts or ends.
   const activeIds = useGlobalSessionStatusStore((state) => (enabled ? state.activeSessionIds : EMPTY_IDS));
   const workflowIds = useWorkflowActivityStore((state) => (enabled ? state.runningSessionIds : EMPTY_IDS));
   const shellIds = useBackgroundShellsStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
@@ -68,19 +57,12 @@ export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
   }, [activeIds, blocking, enabled, extensionWaits, imageIds, outcomeKey, prWatches, shellIds, workflowIds]);
 };
 
-/** The start of the local hour: a local midnight is always one, whatever the time zone's offset. */
 const localHourStart = (): number => {
   const date = new Date();
   date.setMinutes(0, 0, 0);
   return date.getTime();
 };
 
-/**
- * The time the user's sections compare activity against, moved on by the
- * hour while a shown section filters by activity: "Today" turns over at
- * midnight and "Idle 3+ days" ages without any other change to the list.
- * The list rebuilds once an hour, never on every minute.
- */
 export const useSidebarSectionsNow = (active: boolean): number => {
   const [hourStart, setHourStart] = React.useState(localHourStart);
   React.useEffect(() => {
@@ -98,12 +80,6 @@ export const useSidebarSectionsNow = (active: boolean): number => {
 
 const EMPTY_PLAN_SESSIONS: ReadonlySet<string> = new Set();
 
-/**
- * The sessions a project plan was sent to. Plans live with each project's
- * knowledge, so `projects` are only those a shown section asks plans of:
- * each is read once through the background gate, and again when the server
- * says its knowledge changed. A project whose knowledge failed to load lists none.
- */
 export const useSidebarPlanSessions = (projects: readonly ProjectRef[]): ReadonlySet<string> => {
   const enabled = projects.length > 0;
   const entries = useProjectContextStore((state) => (enabled ? state.entries : null));

@@ -1,0 +1,742 @@
+{
+  "zone": "operator",
+  "name": "Sessions an agent runs for its own work",
+  "sources": [
+    "packages/web/server/lib/openchamber-sessions/create-session.js",
+    "packages/web/server/lib/session-lineage.js",
+    "packages/ui/src/lib/sessionOperatorChild.ts",
+    "packages/ui/src/sync/operator-children-done.ts",
+    "packages/ui/src/sync/session-take-over.ts",
+    "packages/ui/src/components/session/sidebar/sessions/OperatorChildrenCount.tsx",
+    "packages/ui/src/components/session/OperatorChildrenDoneDialog.tsx",
+    "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx",
+    "packages/ui/src/apps/mobileSidebar/MobileWorkRows.tsx",
+    "packages/ui/src/apps/mobileSidebar/mobileSessionActions.ts"
+  ],
+  "features": [
+    {
+      "id": "nest",
+      "name": "An agent's worker sessions nest under it",
+      "what": "A session an agent starts as part of its own work sits under that agent's session, and the agent's row says how many of them run and how many finished.",
+      "reach": "Ask an agent for work it hands to a worker session of its own; look at the sidebar.",
+      "proof": "The worker has no row of its own in In work or at the top of the project; the agent's row counts it as running.",
+      "scenarios": [
+        {
+          "id": "count",
+          "kind": "path",
+          "title": "The worker nests under its agent and counts as running there",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyRow",
+              "text": "Parser worker",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "see",
+              "on": "sidebar.rowInScope",
+              "session": "s",
+              "scope": "activity:work"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.expandChildren",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyRowInScope",
+              "scope": "activity:work",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "expanded"
+            },
+            {
+              "do": "reload"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "0",
+              "finished": "1",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "id": "worktree",
+          "kind": "path",
+          "title": "A worker in its own worktree nests under its agent, not in the worktree",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker of your own in a new worktree for the lexer fix.",
+              "timeout": 120
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyRow",
+              "text": "Lexer worker",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "screenshot",
+              "name": "worktree"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "name": "Done on an agent whose workers still run",
+      "what": "Marking the agent's session done while its workers run asks once whether to stop them or let them finish.",
+      "reach": "Mark done on the agent's row while a worker it started still runs.",
+      "proof": "A dialog names the running worker; Stop ends it at once, Let it finish leaves it running; either way the agent's work leaves In work.",
+      "scenarios": [
+        {
+          "id": "stop",
+          "kind": "path",
+          "title": "Stop it ends the worker and the work leaves In work",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "hover",
+              "on": "sidebar.row",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.rowMarkDone",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "operator.doneQuestion",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "question"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Stop it"
+            },
+            {
+              "do": "gone",
+              "on": "operator.doneQuestion"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.rowInScope",
+              "session": "s",
+              "scope": "activity:work"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "0",
+              "finished": "1",
+              "timeout": 10
+            }
+          ]
+        },
+        {
+          "id": "finish",
+          "kind": "path",
+          "title": "Let it finish keeps the worker running after the work left In work",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "hover",
+              "on": "sidebar.row",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.rowMarkDone",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Let it finish"
+            },
+            {
+              "do": "gone",
+              "on": "operator.doneQuestion"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.rowInScope",
+              "session": "s",
+              "scope": "activity:work"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "0",
+              "finished": "1",
+              "timeout": 45
+            }
+          ]
+        },
+        {
+          "id": "dismiss",
+          "kind": "break",
+          "title": "Closing the question leaves the work in work and the worker running",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "hover",
+              "on": "sidebar.row",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.rowMarkDone",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "operator.doneQuestion",
+              "text": "Parser worker"
+            },
+            {
+              "do": "press",
+              "key": "Escape"
+            },
+            {
+              "do": "gone",
+              "on": "operator.doneQuestion"
+            },
+            {
+              "do": "hover",
+              "on": "composer.editor"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.rowInScope",
+              "session": "s",
+              "scope": "activity:work"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "take-over",
+      "name": "Taking a worker over",
+      "what": "The user makes a worker their own session from its menu; until then opening it changes nothing.",
+      "reach": "Open the worker under its agent, then Take over in the session menu.",
+      "proof": "The worker leaves the agent's row, stands as its own row in In work, and the agent no longer counts it.",
+      "scenarios": [
+        {
+          "id": "menu",
+          "kind": "path",
+          "title": "Take over in the session menu turns the worker into the user's session",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.expandChildren",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fix the parser."
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyRowInScope",
+              "scope": "activity:work",
+              "text": "Parser worker"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "header.actions"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "remember",
+              "on": "sidebar.anyActiveRow",
+              "attr": "data-session-row",
+              "as": "worker"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.rowInScope",
+              "session": "worker",
+              "scope": "activity:work"
+            },
+            {
+              "do": "screenshot",
+              "name": "taken-over"
+            },
+            {
+              "do": "reload"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.rowInScope",
+              "session": "worker",
+              "scope": "activity:work"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            }
+          ]
+        },
+        {
+          "id": "worktree-menu",
+          "kind": "path",
+          "title": "Take over in a worktree's menu hands the agent's worker there to the user, and the worktree becomes a work of its own",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker of your own in a new worktree that I may take over.",
+              "timeout": 120
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "screenshot",
+              "name": "before"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.workRow",
+              "label": "openchamber/takeover-fix",
+              "button": "right"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over the agent's session"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "sidebar.workRow",
+              "label": "openchamber/takeover-fix"
+            },
+            {
+              "do": "reload"
+            },
+            {
+              "do": "gone",
+              "on": "sidebar.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "screenshot",
+              "name": "after"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "phone",
+      "name": "The same on the phone",
+      "what": "On the phone layout the worker nests under its agent with the count, a long press takes it over from the session's or the worktree's menu, and Done on the agent asks about running workers.",
+      "reach": "Open /mobile.html, the list button at the top left, then long-press a row.",
+      "proof": "The drawer shows the agent's row with the count and no row for the worker until it is expanded; Take over moves it out; Mark done asks first.",
+      "scenarios": [
+        {
+          "id": "take-over",
+          "kind": "path",
+          "title": "On the phone the worker nests with its count, and a long press takes it over",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "phone.expandChildren",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "nested"
+            },
+            {
+              "do": "click",
+              "on": "phone.anyRow",
+              "text": "Parser worker",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over"
+            },
+            {
+              "do": "gone",
+              "on": "phone.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyRow",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "taken-over"
+            }
+          ]
+        },
+        {
+          "id": "done",
+          "kind": "path",
+          "title": "On the phone Mark done on the agent asks about its running worker, and Stop it ends it",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker session of your own for the parser fix."
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "1",
+              "finished": "0"
+            },
+            {
+              "do": "click",
+              "on": "phone.row",
+              "session": "s",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Mark done"
+            },
+            {
+              "do": "see",
+              "on": "operator.doneQuestion",
+              "text": "Parser worker"
+            },
+            {
+              "do": "screenshot",
+              "name": "question"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Stop it"
+            },
+            {
+              "do": "gone",
+              "on": "operator.doneQuestion"
+            },
+            {
+              "do": "see",
+              "on": "phone.childCount",
+              "session": "s",
+              "running": "0",
+              "finished": "1",
+              "timeout": 10
+            }
+          ]
+        },
+        {
+          "id": "worktree-menu",
+          "kind": "path",
+          "title": "On the phone a long press on the worker's worktree takes the worker over",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Operator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Start a worker of your own in a new worktree that I may take over on my phone.",
+              "timeout": 120
+            },
+            {
+              "do": "open",
+              "session": "s",
+              "phone": true
+            },
+            {
+              "do": "click",
+              "on": "phone.sessions"
+            },
+            {
+              "do": "see",
+              "on": "phone.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "phone.workRow",
+              "label": "openchamber/phone-fix",
+              "button": "long"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Take over the agent's session"
+            },
+            {
+              "do": "gone",
+              "on": "phone.anyChildCount",
+              "session": "s"
+            },
+            {
+              "do": "screenshot",
+              "name": "after"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -5,11 +5,6 @@ import { cn } from '@/lib/utils';
 
 const MIN_COLUMN_PX = 40;
 
-/**
- * The grip on a table heading's end edge. Dragging reports the width while it
- * moves and once at the end; a double click hands the column back to its
- * automatic width.
- */
 export const ColumnResizeHandle: React.FC<{
   label: string;
   onResize: (width: number) => void;

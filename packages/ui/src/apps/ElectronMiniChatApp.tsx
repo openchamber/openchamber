@@ -8,7 +8,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -48,8 +48,6 @@ type ElectronMiniChatAppProps = {
   apis: RuntimeAPIs;
 };
 
-// `openchamber:open-session` from the desktop shell: a tray pick, a deep link
-// or a notification click. A malformed optional field is dropped on its own.
 const optionalTrimmedString = z.string().trim().optional().catch(undefined);
 const openSessionDetailSchema = z.object({
   sessionId: z.string().trim().min(1),
@@ -139,7 +137,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       return;
     }
     if (currentSessionId) {
-      // User already has a different session selected (e.g. from a prior switch); don't override.
       sessionBootstrappedRef.current = true;
       return;
     }
@@ -153,10 +150,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     sessionBootstrappedRef.current = true;
   }, [config, currentSessionId, sessions, setCurrentSession, sync]);
 
-  // Switch this mini-chat to another session in place (e.g. picked from the
-  // tray while this window was focused) instead of spawning a new window.
-  // With the main window closed, a link or a notification click for another
-  // instance lands here too; that session opens in its instance's window.
   React.useEffect(() => {
     const onOpenSession = (event: Event) => {
       const parsed = openSessionDetailSchema.safeParse(event instanceof CustomEvent ? event.detail : null);
@@ -166,8 +159,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
       const directory = sessionDirectory || parsed.data.directory || null;
       void sync.ensureSessionRenderable(sessionId);
-      // Same resolver as the main window: a `/btw` fork opens as its parent,
-      // with that parent's panel showing.
       void openSession(sessionId, { directory, messageId: messageId || null });
       sessionBootstrappedRef.current = true;
     };
@@ -212,7 +203,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
       const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projects, worktreesByProject);
 
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
       const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
       if (!worktreeMapsEqual(partitionedWorktreesByProject, currentByProject)) {
         useSessionUIStore.setState({
@@ -229,9 +219,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     };
   }, [projects]);
 
-  // The main window (or an agent, or a terminal) may add or remove a worktree
-  // while this window is open; the server's control event names the affected
-  // repository so only its projects are re-listed.
   React.useEffect(() => {
     if (projects.length === 0) return;
     let cancelled = false;
@@ -303,12 +290,6 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
   return timedOut;
 };
 
-/**
- * The header switcher lists the newest sessions, so this window reads that
- * page and not the complete list, which the main window owns. The switcher
- * reads it again each time it opens; live session events arrive meanwhile.
- * The host status then marks the turns already running in other directories.
- */
 const useRecentSessions = (): void => {
   React.useEffect(() => {
     const load = () => {
@@ -348,7 +329,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
               <ElectronMiniChatContent config={config} />
               <AppLinkConfirmDialog />
               <SnippetQuickCreateDialog />
-              <SharedTrustConfirmDialog />
+              <GlobalQuestionDialogs />
               <OpenCodeTrustDialog />
               <Toaster />
             </div>
@@ -359,9 +340,6 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   );
 }
 
-// Under SyncProvider: the shortcuts read the session's activity (double Escape
-// stops a running turn), which needs the sync runtime. Called in the app root
-// above the provider, opening Mini Chat threw.
 const MiniChatKeyboardShortcuts: React.FC = () => {
   useMiniChatKeyboardShortcuts();
   return null;

@@ -1,9 +1,3 @@
-/**
- * The model, thinking level and agent a new session starts with, as Settings
- * and the project define them: the project's own default first, then the
- * global one. A thinking level travels with the model it was set next to.
- * Anything unset is null, and OpenCode then applies its own default.
- */
 const splitModel = (value) => {
   const text = typeof value === 'string' ? value.trim() : '';
   const slash = text.indexOf('/');

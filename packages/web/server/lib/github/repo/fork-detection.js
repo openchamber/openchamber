@@ -24,9 +24,6 @@ const setRepoMetadataCache = (repoKey, data) => {
   repoMetadataCache.set(repoKey, { data, fetchedAt: Date.now() });
 };
 
-// The same owner/repo can exist on github.com and on an enterprise instance.
-// Keys are scoped by host too so one host's metadata is never served for the
-// other; the cache identity (a credential digest) still scopes credentials.
 const normalizeRepoKey = (owner, repo, host) => {
   const o = typeof owner === 'string' ? owner.trim().toLowerCase() : '';
   const r = typeof repo === 'string' ? repo.trim().toLowerCase() : '';
@@ -128,7 +125,6 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
     }
   }
 
-  // If no parent/source found, repo is not a fork
   if (result.length === 1) return null;
 
   return result;

@@ -140,7 +140,7 @@ export const SubagentsPanel: React.FC<{ directory: string | null }> = ({ directo
               directory={directory}
               open={open}
               onToggle={() => flip(child.id)}
-              onOpenSession={directory ? () => openChildSession(child.id, label) : null}
+              onOpenSession={directory ? () => openChildSession(child.id, label, child.directory) : null}
             />
           );
         })}

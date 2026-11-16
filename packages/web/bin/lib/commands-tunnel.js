@@ -123,9 +123,7 @@ function isValidTunnelDoctorResponse(body) {
   }
   return body.modes.every((entry) => {
     if (!entry || typeof entry.mode !== 'string') return false;
-    // Accept new shape: { ready: boolean, blockers: [] }
     if (typeof entry.ready === 'boolean' && Array.isArray(entry.blockers)) return true;
-    // Accept server shape: { checks: [], summary: { ready: boolean } }
     if (Array.isArray(entry.checks) && entry.summary && typeof entry.summary.ready === 'boolean') return true;
     return false;
   });
@@ -779,10 +777,8 @@ async function tunnelCommand(options, subcommand, action, deps) {
         const doctorSpin = createSpinner(options);
         doctorSpin?.start('Running tunnel diagnostics...');
 
-        // Phase 1: Port discovery
         const { statuses: portStatuses, availableEntries } = await resolveDoctorPortStatuses(options);
 
-        // Phase 2: Provider diagnostics via the doctor endpoint
         doctorSpin?.message('Checking provider...');
         let providerOption = typeof options.provider === 'string' && options.provider.trim().length > 0
           ? options.provider.trim().toLowerCase()
@@ -895,7 +891,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         doctorSpin?.clear();
 
-        // JSON output
         if (isJsonMode(options)) {
           const cliPorts = portStatuses
             .filter((s) => s.available)
@@ -952,7 +947,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           return;
         }
 
-        // ── Section 1: Ports ──────────────────────────────────────
         const cliPorts = portStatuses.filter((s) => s.available);
         const unavailablePorts = portStatuses.filter((s) => !s.available);
 
@@ -992,7 +986,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           console.log('');
         }
 
-        // ── Section 2: Provider ─────────────────────────────────
         if (doctorError) {
           clackIntro(boldText('Provider'));
           logStatus('error', 'Provider diagnostics failed', doctorError);
@@ -1030,7 +1023,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
         clackOutro(`${providerPassCount} ${providerPassCount === 1 ? 'check' : 'checks'} passed`);
         console.log('');
 
-        // ── Section 3: Modes ────────────────────────────────────
         const DOCTOR_NOISE_CHECK_IDS = new Set(['startup_readiness', 'quick_mode_prerequisites']);
         const modes = doctorResult.modes || [];
         if (modes.length === 0) {
@@ -1153,7 +1145,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           hostname = typeof options.hostname === 'string' && options.hostname.trim().length > 0 ? options.hostname : selectedProfile.hostname;
         }
 
-        // Interactive profile selection when no profile/mode specified in TTY
         if (!selectedProfile && !mode && canPrompt(options)) {
           const store = ensureTunnelProfilesMigrated();
           if (store.profiles.length > 0) {
@@ -1189,7 +1180,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           (cap) => cap.provider === provider
         );
 
-        // Interactive mode selection when mode not yet resolved in TTY
         if (!mode && canPrompt(options)) {
           const modes = providerCaps?.modes || [];
           if (modes.length > 1) {
@@ -1475,8 +1465,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        // A public tunnel refuses an instance without a UI password, so an
-        // instance started for it gets one; a generated one is shown once below.
         let generatedUiPassword = null;
         const serveProtected = (serveOptions) => {
           if (hasUiPasswordConfigured(serveOptions.uiPassword)) return serveCommand(serveOptions);
@@ -1597,8 +1585,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
         if (!response.ok || !body?.ok) {
           spin?.error('Tunnel start failed');
           if (body?.code === 'ui_password_required') {
-            // Only an instance this command did not start can lack a password;
-            // `--ui-password` here cannot change a server that is already running.
             throw new Error(
               `OpenChamber on port ${instance.port} runs without a UI password, which a public tunnel requires. `
               + `Stop it with \`openchamber stop -p ${instance.port}\`, then run tunnel start again: `
@@ -1613,8 +1599,6 @@ async function tunnelCommand(options, subcommand, action, deps) {
           throw new Error(`${userError} Run \`openchamber logs -p ${instance.port}\` for details.`);
         }
 
-        // Avoid duplicate "Tunnel started" lines: spinner completion is implied by
-        // the subsequent structured success section.
         spin?.clear();
 
         const replayCommand = buildTunnelStartReplayCommand({

@@ -25,33 +25,15 @@ export interface InlineCommentDraft {
   endLine: number;
   side?: 'original' | 'modified';
   code: string;
-  /**
-   * The lines just before and after a line comment when it was written. With
-   * `code` they find the comment's lines again after the file changed
-   * (`lib/commentAnchor.ts`); absent at a file's edge and on other sources.
-   */
   contextBefore?: string;
   contextAfter?: string;
-  /**
-   * Set while the file no longer holds `code`: the text now at the comment's
-   * lines. The card marks it and the agent receives both.
-   */
   changedCode?: string;
   language: string;
   text: string;
-  /** Owning terminal session; set only for `source: 'terminal'`. */
   terminalId?: string;
-  /** Where the quote sits in its message; set only for `source: 'chat-quote'`. */
   anchor?: ChatQuoteAnchor;
-  /** Whose change request it came from; set only for `pr-comment` and `pr-check`, absent means GitHub. */
   provider?: SourceControlProvider;
-  /** The diff a `diff` comment was written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
-  /**
-   * A browser annotation's screenshot: the name of its file among the
-   * composer's attachments. It is sent with the annotation and leaves with it;
-   * the file itself stays in memory, like every attachment.
-   */
   screenshot?: string;
   createdAt: number;
 }
@@ -63,15 +45,7 @@ interface InlineCommentDraftState {
 }
 
 interface InlineCommentDraftActions {
-  // Returns the draft id, or null when the draft is rejected (unresolved target,
-  // no room left, or an empty terminal-context selection). A terminal selection
-  // that is already attached returns the id of the draft holding it.
-  // `id` lets an external owner (the VS Code editor comment thread) choose the
-  // draft id up front. Omitted by every in-app caller, which gets a generated one.
-  // `written` stores text with no editor left to hold it, such as context put back
-  // after a failed send or a closed annotation overlay. The bounds never refuse it.
   addDraft: (target: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> & { id?: string }, options?: { written?: boolean }) => string | null;
-  // Returns false when the draft is gone or the bounds reject the update.
   updateDraft: (target: InlineCommentDraftTarget, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => boolean;
   removeDraft: (target: InlineCommentDraftTarget, draftId: string) => void;
   clearDrafts: (target: InlineCommentDraftTarget) => void;
@@ -135,8 +109,6 @@ const serializedSizeAfter = (
   return { entries, total: indexedTotal(entries) };
 };
 
-// Text with no editor left to hold it is stored whatever the bounds say: a failed
-// send, a reverted message or a closed annotation overlay has nowhere else to keep it.
 const keepWritten = (
   previous: InlineCommentDraftState,
   drafts: Record<string, InlineCommentDraft[]>,
@@ -146,9 +118,6 @@ const keepWritten = (
   return { drafts };
 };
 
-// Refuses the change instead of making room: every stored comment is something
-// the person wrote and has not sent, and nothing can bring it back. An edit
-// that does not grow the store passes, so shrinking works past the bound.
 const boundState = (
   previous: InlineCommentDraftState,
   drafts: Record<string, InlineCommentDraft[]>,
@@ -191,12 +160,6 @@ export const persistedDraftEnvelopeSchema = z.object({
 
 type PersistedDraftEnvelopeResult = z.ZodSafeParseResult<z.infer<typeof persistedDraftEnvelopeSchema>>;
 
-/**
- * v2 → v3: terminal drafts carried their terminal id in `language`; move it to
- * the dedicated `terminalId` field. Drafts from the removed 'preview-console'
- * source are dropped, as are malformed entries. Pre-v2 or unreadable payloads
- * reset entirely (the pre-v3 behavior).
- */
 export const migratePersistedDrafts = (envelope: PersistedDraftEnvelopeResult, version: number): InlineCommentDraftState => {
   if (version < 2) return EMPTY_PERSISTED_STATE;
   if (!envelope.success) return EMPTY_PERSISTED_STATE;
@@ -236,10 +199,6 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         addDraft: (target, draft, options) => {
           const key = getCurrentKey(target);
           if (!key || (draft.source === 'terminal' && !draft.code.trim())) return null;
-          // A caller that owns its own view of the draft (the VS Code editor
-          // thread) supplies the id so it can correlate without a round trip.
-          // A colliding id would silently retarget edits and removals at an
-          // unrelated draft, so it is refused rather than reused.
           const requestedId = draft.id?.trim();
           const idIsTaken = Boolean(requestedId) && (get().drafts[key] ?? []).some((item) => item.id === requestedId);
           const id = requestedId && !idIsTaken

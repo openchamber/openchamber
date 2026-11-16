@@ -270,24 +270,15 @@ export const createScheduledTasksRuntime = (deps) => {
     emitTaskRunEvent,
     setSessionAutoAccept,
     sessionKnowledgeRuntime = null,
-    // The goal record lives in OpenChamber's metadata store (OpenCode 2.x takes
-    // session metadata only at create time); without it goal mode cannot run.
+    // external: https://github.com/anomalyco/opencode OpenCode 2.x accepts session metadata only at creation; goals require the OpenChamber metadata store.
     persistSessionGoal = null,
-    // Chats scope (see chats-scope.js): scheduled like a project, but each run
-    // opens a new chat directory and loop files are not discovered for it.
     chatsScope = null,
-    // The session defaults a task with `useDefaults` runs on:
-    // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
-    // Jev routing for a run whose model is the Auto sentinel (see
-    // ../routing/DOCUMENTATION.md); unset, such a run fails before it starts.
     resolveAutoSelection = null,
     readSessionMetadata,
     readProcessInstance = readProcessInstanceDefault,
     readWorktreeIdentity = readDirectoryIdentity,
     cleanupPause = (signal) => delay(5_000, undefined, { signal, ref: false }),
-    // Isolated runs (#1959). Unset means a task set to run in a worktree
-    // reports the failure instead of dirtying the checkout silently.
     createTaskWorktree = null,
     removeTaskWorktree = null,
     isGitRepository = null,
@@ -300,8 +291,7 @@ export const createScheduledTasksRuntime = (deps) => {
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
   } = deps;
 
-  // Every OpenCode route lives under /api in v2 and the client appends it, so
-  // the client only wants the origin. Directory scoping is a request header.
+  // external: https://github.com/anomalyco/opencode/tree/dev/packages/client The v2 client appends /api to the origin and scopes directories through request headers.
   const openCodeOrigin = () => new URL(buildOpenCodeUrl('/api/info', '')).origin;
   const createScopedClient = (directory) => OpenCode.make({
     baseUrl: openCodeOrigin(),
@@ -321,8 +311,6 @@ export const createScheduledTasksRuntime = (deps) => {
     listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent,
   }) : null;
 
-  // A pinned task runs on what it stores; one that follows the session
-  // defaults reads them now, so changing a default reaches it on its next run.
   const resolveRunSelection = async (projectID, task) => {
     const execution = task.execution;
     if (!execution.useDefaults) {
@@ -484,12 +472,7 @@ export const createScheduledTasksRuntime = (deps) => {
     const projectPath = projectPathByID.get(projectID) || null;
 
     let tasks;
-    // The chats root is not a repository: user-scope loops already run once
-    // per project, and discovering them here would add one more run each.
     if (projectPath && !isChatsScope(projectID)) {
-      // Reconcile `.agents/loops` definitions with the persisted task list:
-      // loop files are authoritative while present, removed files unschedule
-      // their task, and runtime state is preserved (see loops.js).
       const loops = await discoverLoops(projectPath);
       tasks = await projectConfigRuntime.reconcileLoopTasks(projectID, loops);
     } else {
@@ -528,8 +511,6 @@ export const createScheduledTasksRuntime = (deps) => {
       try {
         await syncProject(projectID);
       } catch (error) {
-        // One project's config being unusable (a broken file, a lock timeout)
-        // must not keep every other project's tasks from being scheduled.
         logger.warn?.('[ScheduledTasks] failed to sync project', {
           projectID,
           error: error?.message ?? String(error),
@@ -560,8 +541,6 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  // Never fails the run (`sync` does not throw): a task that executes without
-  // its background is a lesser loss than a task that does not execute.
   const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
     ? sessionKnowledgeRuntime.sync(sessionID, projectPath, '')
     : Promise.resolve(false));
@@ -569,11 +548,7 @@ export const createScheduledTasksRuntime = (deps) => {
   const runPrompt = async ({ client, sessionID, projectPath, task }) => {
     await syncKnowledge(sessionID, projectPath);
 
-    // A v2 prompt carries a single authored text. The goal briefing therefore
-    // travels as a synthetic message sent first, so the model still reads the
-    // prompt against it exactly as before. A synthetic message schedules
-    // execution unless `resume: false`: without it the model would start on
-    // the briefing alone, before the task arrived.
+    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client A synthetic goal briefing uses resume: false so execution waits for the authored task prompt.
     if (task.execution.goalEnabled) {
       await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget), resume: false });
     }
@@ -598,20 +573,16 @@ export const createScheduledTasksRuntime = (deps) => {
       return null;
     }
 
-    // v2 CommandInfo carries no template, so a goal objective distilled from
-    // the command body is no longer available; the goal falls back to the
-    // prompt text, which expandCommandGoalObjective already handles.
+    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client v2 CommandInfo omits templates, so command goals fall back to the prompt text.
     const command = commands.find((candidate) => candidate?.name === parsed.command);
     return command ? { ...parsed, template: command.template } : null;
   };
 
   const runScheduledCommand = async ({ client, sessionID, projectPath, command }) => {
     await syncKnowledge(sessionID, projectPath);
-    // Agent, model and variant are session properties in v2 and were already
-    // set when the run created the session; the command body only carries text.
     await client.session.command({
       sessionID,
-      // OpenCode 2.0.8 renamed the command body field `command` to `name`.
+      // external: https://github.com/anomalyco/opencode/tree/dev/packages/client OpenCode 2.0.8 names the command body field name.
       name: command.command,
       text: command.arguments,
     });
@@ -631,7 +602,6 @@ export const createScheduledTasksRuntime = (deps) => {
       const statuses = await activityProbe.fetchActiveSessionStatuses();
       if (!statuses) throw new Error('Cannot confirm session execution has settled');
       if (!statuses[sessionID]) {
-        // A parent can settle while a background subagent still uses its files.
         const descendantsWorking = await activityProbe.hasWorkingDescendants(sessionID, statuses);
         if (descendantsWorking === null) throw new Error('Cannot confirm subagent execution has settled');
         if (!descendantsWorking) {
@@ -654,7 +624,6 @@ export const createScheduledTasksRuntime = (deps) => {
           }
         }
       }
-      // Recheck only this outstanding cleanup while execution continues.
       await cleanupPause(signal);
     }
   };
@@ -721,7 +690,6 @@ export const createScheduledTasksRuntime = (deps) => {
       await waitForOpenCodeReady(10_000, 250);
     }
 
-    // Chats get a new directory; project tasks may opt into a fresh worktree.
     const chatsRun = isChatsScope(projectID);
     const directory = chatsRun
       ? await chatsScope.createChatDirectory(new Date(startedAt))
@@ -733,7 +701,6 @@ export const createScheduledTasksRuntime = (deps) => {
         throw new Error('Durable worktree cleanup is unavailable');
       }
       const create = createTaskWorktree;
-      // An operational probe failure must not dispatch into the checkout.
       let gitLike = null;
       if (isGitRepository) {
         try {
@@ -756,8 +723,6 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       }
       if (!isolation) {
-        // The only way to get here is a project that is not a git repository,
-        // or a creation call that answered with nothing at all.
         logger.warn?.('[ScheduledTasks] isolated run fell back to the project directory', {
           projectID,
           taskID: task.id,
@@ -774,12 +739,9 @@ export const createScheduledTasksRuntime = (deps) => {
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createScopedClient(runDirectory);
     let selection = await resolveRunSelection(projectID, task);
-    // The Auto sentinel never reaches OpenCode: the session starts on its
-    // default and is switched to the model Jev picks for the prompt.
     const autoRun = isAutoModel(selection);
 
-    // Agent, model and variant belong to the session in v2: a scheduled run
-    // fixes them here instead of repeating them on every prompt.
+    // external: https://github.com/anomalyco/opencode/tree/dev/packages/client v2 agent, model and variant are session properties set when the run creates its session.
     let sessionID;
     let cleanupRecord;
     try {
@@ -789,9 +751,7 @@ export const createScheduledTasksRuntime = (deps) => {
       const session = await client.session.create({
         title,
         location: { directory: runDirectory },
-        // Marks a run of a task, so it stays out of In work: nobody sent it.
         metadata: { openchamber: { kind: 'scheduled' } },
-        // No model or agent at all: OpenCode picks its own default.
         ...(selection.providerID && selection.modelID && !autoRun ? {
           model: {
             providerID: selection.providerID,
@@ -821,7 +781,6 @@ export const createScheduledTasksRuntime = (deps) => {
         await chatsScope.discardChatDirectory(directory);
       }
       if (isolation) {
-        // A failed session leaves no usable run, even when cleanup is off.
         await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory, branch: isolation.branch, deleteLocalBranch: true })
           .catch((removeError) => {
             logger.warn?.("[ScheduledTasks] failed to clean up the failed run's worktree", {
@@ -836,8 +795,6 @@ export const createScheduledTasksRuntime = (deps) => {
     }
 
     try {
-      // Before the event, so a UI refreshing on it already sees the session.
-      // Record isolation before dispatch so a timeout retains it.
       await onSessionCreated?.(sessionID, isolation ?? null);
 
       try {
@@ -852,9 +809,6 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
-        // Enroll before the prompt goes out so the very first permission request
-        // is already auto-approved. Enrollment failure must not kill the run —
-        // the task still executes, permissions just wait for the user.
         try {
           await setSessionAutoAccept(sessionID, true, runDirectory);
         } catch (error) {
@@ -863,7 +817,6 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       if (autoRun) {
-        // Routed with the session id, so the decision shows on this session.
         const routed = await resolveAutoSelection({
           sessionId: sessionID,
           directory: runDirectory,
@@ -875,7 +828,6 @@ export const createScheduledTasksRuntime = (deps) => {
         if (routed.agent && routed.agent !== selection.agent) {
           await client.session.switchAgent({ sessionID, agent: routed.agent });
         }
-        // The goal record names the model the run actually uses.
         selection = { ...selection, providerID: routed.model.providerID, modelID: routed.model.id };
       }
 
@@ -917,8 +869,6 @@ export const createScheduledTasksRuntime = (deps) => {
       if (isolation) result.isolation = { directory: isolation.directory, branch: isolation.branch ?? null };
       return result;
     } finally {
-      // Dispatch accepts the prompt before execution ends. Cleanup follows
-      // settlement independently so Run now can return its sent result.
       if (cleanupRecord && started) launchCleanup(cleanupRecord);
     }
   };
@@ -934,11 +884,6 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  /**
-   * Arm a timer only for a future occurrence. Scheduling a past nextRunAt
-   * (delay 0 + jitter) re-enters the claim path immediately and can spin —
-   * especially for once tasks where the claim cannot advance nextRunAt.
-   */
   const scheduleFutureRun = (projectID, taskID, nextRunAt, fromMs = Date.now()) => {
     if (!Number.isFinite(nextRunAt)) {
       return false;
@@ -958,8 +903,6 @@ export const createScheduledTasksRuntime = (deps) => {
     }
     const base = Number.isFinite(fromMs) ? fromMs : Date.now();
     const persistedNext = latest.state?.nextRunAt;
-    // Prefer a still-future persisted slot; never re-arm a past occurrence
-    // (that created silent once-task loser loops and claim-failed retry spam).
     if (scheduleFutureRun(projectID, taskID, persistedNext, base)) {
       return;
     }
@@ -970,7 +913,6 @@ export const createScheduledTasksRuntime = (deps) => {
   const runTask = async (projectID, taskID, reason, scheduledFor) => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    // Manual runNow runs paused tasks too; only scheduled dispatches skip them.
     if (!task || (reason !== 'manual' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
@@ -1005,15 +947,9 @@ export const createScheduledTasksRuntime = (deps) => {
     runningGlobalCount += 1;
     runningCountByProject.set(projectID, (runningCountByProject.get(projectID) || 0) + 1);
 
-    // Every path that holds the running slot must exit through this finally so
-    // lock timeouts / fs errors on claim, manual-start, or completion writes
-    // cannot permanently stuck-run the task in this process.
     try {
       const runStartedAt = Date.now();
 
-      // Scheduled dispatches must claim the occurrence in shared project config
-      // before creating a session. Two server instances (e.g. CLI serve + desktop)
-      // each arm their own timer; without this claim both would run (#2710).
       if (reason === 'scheduled') {
         if (!Number.isFinite(scheduledFor)) {
           return { ok: false, skipped: true, reason: 'missing-scheduled-for' };
@@ -1025,18 +961,11 @@ export const createScheduledTasksRuntime = (deps) => {
           lastRunAt: runStartedAt,
           lastStatus: 'running',
           lastError: undefined,
-          // Set again once this run creates its session.
           lastSessionId: undefined,
           updatedAt: runStartedAt,
-          // Always set nextRunAt so a past once-slot is cleared when there is
-          // no following occurrence (omitting the key would leave the past value).
           nextRunAt: Number.isFinite(nextAfterClaim) ? nextAfterClaim : undefined,
         };
 
-        // Duplicate protection is solely lastScheduledFor within slack of this
-        // occurrence. Do not reject on advanced disk nextRunAt: lastScheduledFor
-        // persists across days, so a second-instance sync inside TASK_DUE_SLACK_MS
-        // would otherwise suppress every armed occurrence after the first.
         const canClaimOccurrence = (candidate) => {
           if (!candidate?.enabled) {
             return false;
@@ -1061,7 +990,6 @@ export const createScheduledTasksRuntime = (deps) => {
               claimPatch,
             );
           } else {
-            // Fallback for older test doubles: unconditional update (single-instance only).
             claimResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, claimPatch);
             claimResult = { ...claimResult, updated: Boolean(claimResult?.task) };
           }
@@ -1074,8 +1002,6 @@ export const createScheduledTasksRuntime = (deps) => {
           });
           rearmFromTaskOrCompute(projectID, taskID, task, Math.max(runStartedAt, scheduledFor + 1));
 
-          // Best-effort record so once tasks are not left enabled-but-inert with
-          // no UI signal. Do not clobber a winner that claimed this occurrence.
           const claimFailurePatch = {
             lastStatus: 'error',
             lastError: `Scheduled claim failed: ${message}`,
@@ -1127,7 +1053,6 @@ export const createScheduledTasksRuntime = (deps) => {
         if (!claimResult?.updated) {
           if (claimResult?.task) {
             updateInMemoryTask(projectID, claimResult.task);
-            // Loser must not schedule a past nextRunAt (once-task spin).
             rearmFromTaskOrCompute(
               projectID,
               taskID,
@@ -1169,12 +1094,7 @@ export const createScheduledTasksRuntime = (deps) => {
       let sessionDirectory;
       let durationMs = 0;
       let errorMessage;
-      // Set when the run executed in a worktree it got for itself (#1959).
-      // Known from session creation on, so a run that fails or times out
-      // afterwards still records how it ran.
       let runIsolation = null;
-      // Known as soon as the run creates its session, so a run that fails or
-      // times out afterwards still points at the session it left behind.
       let createdSessionID;
       const recordCreatedSession = async (id, isolation = null) => {
         createdSessionID = id;
@@ -1183,9 +1103,6 @@ export const createScheduledTasksRuntime = (deps) => {
           const recorded = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
             lastSessionId: id,
             lastRunIsolated: isolation ? true : undefined,
-            // Same rule as the completion write: only a task that keeps its
-            // worktree records the branch, because only then is the branch
-            // still there for the card to name.
             lastRunBranch: isolation && task.cleanupWorktree === false && isolation.branch
               ? String(isolation.branch)
               : undefined,
@@ -1267,9 +1184,6 @@ export const createScheduledTasksRuntime = (deps) => {
         lastError: status === 'error' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
         lastRunIsolated: runIsolation ? true : undefined,
-        // Only a run that kept its worktree has a branch worth naming: a
-        // cleaned-up run's branch is gone, and the card says just "own
-        // worktree" for it.
         lastRunBranch: runIsolation && task.cleanupWorktree === false && runIsolation.branch
           ? String(runIsolation.branch)
           : undefined,
@@ -1300,8 +1214,6 @@ export const createScheduledTasksRuntime = (deps) => {
           error: message,
         });
 
-        // Keep in-memory status terminal so this process does not advertise
-        // a stuck "running" task after the session already finished.
         const recoveredTask = {
           ...latestTask,
           state: {
@@ -1316,7 +1228,6 @@ export const createScheduledTasksRuntime = (deps) => {
         };
         updateInMemoryTask(projectID, recoveredTask);
 
-        // Best-effort single retry so persisted lastStatus does not stay 'running'.
         try {
           const retry = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
           if (retry.task) {
@@ -1337,8 +1248,6 @@ export const createScheduledTasksRuntime = (deps) => {
           rearmFromTaskOrCompute(projectID, taskID, recoveredTask, finishedAt);
         }
 
-        // The session already ran — surface persist failure without treating a
-        // successful dispatch as a hard run failure (manual runNow would 500).
         return {
           ok: status === 'sent',
           status,
@@ -1451,7 +1360,6 @@ export const createScheduledTasksRuntime = (deps) => {
     } catch (error) {
       logger.warn?.('[ScheduledTasks] failed to resume worktree cleanup', error?.message ?? error);
     }
-    // Snapshot recovery before sync can start any newly due task.
     await syncAllProjects();
     const owners = new Map();
     for (const record of cleanups) {

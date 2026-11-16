@@ -1,12 +1,3 @@
-// The two settings files and how a merged document is split between them.
-//
-// `settings.json` holds instance facts (and, untouched, whatever legacy keys
-// older builds left there). `preferences.json` holds the user's profile: the
-// keys the settings registry marks `profile`, each with the time the store
-// last accepted a new value for it. Device keys never reach either file.
-//
-// The VS Code extension host writes the same two files with the same shape
-// (`packages/vscode/src/settings-files.ts`); keep the format changes in sync.
 import { createRequire } from 'node:module';
 
 const registry = createRequire(import.meta.url)('./settings-registry.json');
@@ -14,13 +5,11 @@ const registry = createRequire(import.meta.url)('./settings-registry.json');
 const PREFERENCES_FILE_NAME = 'preferences.json';
 const PREFERENCES_DOCUMENT_VERSION = 1;
 
-/** The registry scope for a key, or `null` when the registry does not know it. */
 const getSettingsScope = (key) => registry.fields[key]?.scope ?? null;
 
 export const isProfileSettingsKey = (key) => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key) => getSettingsScope(key) === 'device';
 
-/** Profile keys the owner chose to store per surface kind (a change on a phone stays on phones). */
 const isPerSurfaceSettingsKey = (key) => registry.fields[key]?.perSurface === true;
 
 const SETTINGS_SURFACES = Object.freeze(['web', 'desktop', 'vscode', 'mobile']);
@@ -29,12 +18,6 @@ export const normalizeSettingsSurface = (value) => (
   typeof value === 'string' && SETTINGS_SURFACES.includes(value.trim()) ? value.trim() : null
 );
 
-/**
- * Which surface kind a settings request comes from; `null` means "base".
- * Clients send `?surface=<kind>` (a query parameter keeps the request
- * CORS-simple for cross-origin shells and older instances); the
- * `x-openchamber-surface` header is still honoured for clients that sent it.
- */
 export const settingsSurfaceOf = (req) => (
   normalizeSettingsSurface(req.query?.surface) ?? normalizeSettingsSurface(req.get?.('x-openchamber-surface'))
 );
@@ -51,15 +34,6 @@ const sameValue = (left, right) => {
 
 const parseStamp = (value) => (Number.isFinite(value) ? value : 0);
 
-/**
- * Parse the text of a preferences file. A missing file is the caller's case
- * (ENOENT); anything that is not a version-1 document with a `fields` object
- * is a failure, never an empty profile.
- *
- * An entry is `{ value, updatedAt }` for the base value, optionally with
- * `surfaces: { [surface]: { value, updatedAt } }` for per-surface keys; a
- * per-surface key that was only ever set from one surface kind has no base.
- */
 export const parsePreferencesDocument = (raw) => {
   let parsed;
   try {
@@ -93,11 +67,6 @@ export const parsePreferencesDocument = (raw) => {
 
 export const serializePreferencesDocument = (fields) => JSON.stringify({ version: PREFERENCES_DOCUMENT_VERSION, fields }, null, 2);
 
-/**
- * The plain key → value view of preference fields as one surface kind sees it:
- * that surface's own value first, the base value otherwise; a key with neither
- * is absent (the client keeps what it holds, or its default).
- */
 export const flattenPreferences = (fields, surface = null) => {
   const values = {};
   for (const [key, entry] of Object.entries(fields)) {
@@ -111,20 +80,6 @@ export const flattenPreferences = (fields, surface = null) => {
   return values;
 };
 
-/**
- * The next preference fields for a merged document: every profile key it
- * carries, stamped `now` when its value differs from what the file held and
- * keeping the earlier stamp otherwise. Profile keys the document no longer
- * carries are dropped (that is how a cleared key leaves the file), except a
- * per-surface key the writer's view never held: it stays as it was.
- *
- * Per-surface keys: when the write comes from a surface kind (`surface`) and
- * the key is among the keys that write changed (`changedKeys`), the value goes
- * under `surfaces[surface]` and the base is left as it was; a per-surface key
- * the write did not change keeps its whole entry (the document only carries
- * that surface's resolved view of it). Without a surface (migrations, the
- * one-time seed) the base is written.
- */
 export const buildPreferencesFields = (previousFields, document, now, { surface = null, changedKeys = null } = {}) => {
   const fields = {};
   const changed = changedKeys ? new Set(changedKeys) : null;
@@ -150,9 +105,6 @@ export const buildPreferencesFields = (previousFields, document, now, { surface 
       fields[key] = { ...(previous ?? {}), value, updatedAt: now };
     }
   }
-  // A per-surface key the writer's view never held (no base value and no
-  // entry of its own surface) is absent from its document without being
-  // cleared: it keeps the other surfaces' values.
   for (const [key, previous] of Object.entries(previousFields)) {
     if (key in fields || !isPerSurfaceSettingsKey(key)) continue;
     const visibleToWriter = 'value' in previous || Boolean(surface && previous.surfaces?.[surface]);
@@ -161,11 +113,6 @@ export const buildPreferencesFields = (previousFields, document, now, { surface 
   return fields;
 };
 
-/**
- * The part of a merged document that belongs in `settings.json`: everything
- * that is not a profile key. Device keys older builds persisted stay in place
- * as a read-once seed for clients; the write path never adds new ones.
- */
 export const instancePartOf = (document) => {
   const instance = {};
   for (const [key, value] of Object.entries(document)) {
@@ -175,7 +122,6 @@ export const instancePartOf = (document) => {
   return instance;
 };
 
-/** The profile keys of a document (the part `instancePartOf` leaves out). */
 export const profilePartOf = (document) => {
   const profile = {};
   for (const [key, value] of Object.entries(document)) {
@@ -184,26 +130,13 @@ export const profilePartOf = (document) => {
   return profile;
 };
 
-/**
- * What `settings.json` holds after a write: the instance part plus a copy of
- * the profile's base values. The copy is for builds that predate the split —
- * they read only this file, so a rollback still finds the user's preferences.
- * Current builds ignore it: `preferences.json` wins in the merged read.
- */
 export const legacySettingsDocumentOf = (document, preferenceFields) => ({
   ...instancePartOf(document),
   ...flattenPreferences(preferenceFields),
 });
 
-/** The profile keys of a document, as they would seed a fresh preferences file. */
 export const seedPreferencesFrom = (document, now) => buildPreferencesFields({}, document, now);
 
-/**
- * Synchronous merged read for server modules that consult one or two profile
- * keys on a hot path (small-model resolution, goal/assist toggles). A missing
- * or unreadable preferences file contributes nothing, and the caller's own
- * default applies — the same "missing is not default" rule the clients use.
- */
 export const readMergedSettingsSync = ({ fs, path, settingsFilePath }) => {
   let settings = {};
   try {

@@ -36,6 +36,23 @@ describe('sourceOwnedLinksPatch', () => {
   });
 });
 
+describe('a fork of an agent\'s worker session', () => {
+  it('drops the link to the agent and gives the question and secret tools back', async () => {
+    const writes = [];
+    const permissions = [];
+    await applyForkInheritance({
+      sourceSessionID: 'ses_worker',
+      fork: { id: 'ses_fork', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } }, permissions: [{ action: 'bash', resource: '*', effect: 'ask' }, { action: 'question', resource: '*', effect: 'deny' }, { action: 'openchamber_secret', resource: '*', effect: 'deny' }] },
+      readObjective: async () => null,
+      writeObjective: async () => {},
+      writeMetadata: async (id, patch) => { writes.push([id, patch]); },
+      writePermissions: async (id, rules) => { permissions.push([id, rules]); },
+    });
+    expect(writes).toEqual([['ses_fork', { openchamber: { kind: null, parentID: null } }]]);
+    expect(permissions).toEqual([['ses_fork', [{ action: 'bash', resource: '*', effect: 'ask' }]]]);
+  });
+});
+
 describe('applyForkInheritance', () => {
   it('does nothing for an inline goal without source links', async () => {
     const h = harness({ openchamber: { goal: goal(false) } });

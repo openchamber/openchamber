@@ -12,6 +12,7 @@ import React from 'react';
 
 import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ExtensionWaitNotice, PageAnswerNotice, PullRequestNotice, SessionNotice } from '@/lib/opencode/session-notices';
@@ -100,8 +101,22 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
 
 // The wait's name, with the extension's report as the preview; it opens to the
 // whole report, which the agent read inside an envelope of OpenChamber's own text.
+const PlainNoticeLine: React.FC<{ icon: IconName; title: string }> = ({ icon, title }) => (
+    <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 ps-px pe-2">
+        <span className="flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+            <Icon name={icon} className="h-3.5 w-3.5" />
+        </span>
+        <span className={cn(ROW_TEXT_CLASS, 'min-w-0 truncate')} style={{ color: 'var(--tools-description)' }} title={title} dir="auto">
+            {title}
+        </span>
+    </div>
+);
+
 const ExtensionWaitNoticeRow: React.FC<{ notice: ExtensionWaitNotice; blockId: string }> = ({ notice, blockId }) => {
     const { t } = useI18n();
+    if (notice.timerMinutes !== undefined && notice.outcome === 'fired') {
+        return <PlainNoticeLine icon="timer" title={t('chat.waits.timerFired', { minutes: notice.timerMinutes })} />;
+    }
     return (
         <ReasoningTimelineBlock
             text={notice.summary}
@@ -130,18 +145,7 @@ const PageAnswerNoticeRow: React.FC<{ notice: PageAnswerNotice; blockId: string 
             ? t('chat.sessionNotice.pageAnswer.declined', { title: notice.title })
             : t('chat.sessionNotice.pageAnswer.notDrawn', { title: notice.title });
     const failed = notice.outcome === 'ui-not-drawn';
-    if (!notice.details) {
-        return (
-            <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 ps-px pe-2">
-                <span className="flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
-                    <Icon name="survey" className="h-3.5 w-3.5" />
-                </span>
-                <span className={cn(ROW_TEXT_CLASS, 'min-w-0 truncate')} style={{ color: 'var(--tools-description)' }} title={title} dir="auto">
-                    {title}
-                </span>
-            </div>
-        );
-    }
+    if (!notice.details) return <PlainNoticeLine icon="survey" title={title} />;
     return (
         <ReasoningTimelineBlock
             text={notice.details}

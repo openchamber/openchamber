@@ -8,16 +8,9 @@ import { useI18n } from '@/lib/i18n';
 import { formatMobileConnectDebugEntry, getMobileConnectDebugEntries, getMobileConnectDebugText } from './mobileConnectionDebug';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-// Hidden diagnostics surface for device-only connection bugs: renders the
-// in-memory connection event trail with one-tap copy, so a user on a release
-// build (no tethered debugger, no Web Inspector) can paste the exact probe
-// sequence into a bug report. Opened via long-press easter eggs on the connect
-// screen logo and the instances list — invisible unless you know it's there.
 export const MobileConnectionDebugPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
-  // Snapshot on open; a live-updating log under the user's finger would fight
-  // the copy button. Reopen to refresh.
   const entries = React.useMemo(() => getMobileConnectDebugEntries(), []);
 
   const handleCopy = React.useCallback(() => {

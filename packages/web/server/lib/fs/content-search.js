@@ -1,12 +1,3 @@
-// Text and regex search through the files of a workspace, run by ripgrep.
-//
-// ripgrep decides what is searched the way the file tree decides what is
-// shown: `.gitignore` rules apply unless the caller turns them off, hidden
-// entries stay out unless asked for, binary files are skipped, and `.git` and
-// `node_modules` never take part. Its `--json` stream names each matching line
-// with byte offsets of the matches; this module turns that into one record per
-// line with character offsets, trimmed to what a result card can show, and
-// stops the process as soon as the caller's limit or the deadline is reached.
 
 import { StringDecoder } from 'node:string_decoder';
 
@@ -17,16 +8,12 @@ export const CONTENT_SEARCH_MAX_LIMIT = 500;
 export const CONTENT_SEARCH_MAX_QUERY_LENGTH = 1024;
 const CONTENT_SEARCH_DEADLINE_MS = 30_000;
 
-// A result card shows one line. A match deep inside a long line is shown with
-// a little context before it so it sits near the start of the card, and a
-// minified file's line is never sent whole.
 const PREVIEW_UNCUT_MATCH_START = 48;
 const PREVIEW_LEAD_CHARS = 24;
 const PREVIEW_MAX_CHARS = 200;
 const MAX_RANGES_PER_LINE = 32;
 const STDERR_MAX_BYTES = 64 * 1024;
 
-// ripgrep's `--json` text fields: UTF-8 as `text`, anything else as base64 `bytes`.
 const decodeRipgrepText = (value) => {
   if (!isRecord(value)) return null;
   if (isString(value.text)) return Buffer.from(String(value.text), 'utf8');
@@ -34,9 +21,6 @@ const decodeRipgrepText = (value) => {
   return null;
 };
 
-// One `match` event, or null for any other event or a malformed one. This
-// module loads with Node built-ins only (see the packaged-desktop module-load
-// test), so the event is read with the shared guards.
 const readRipgrepMatch = (event) => {
   if (!isRecord(event) || event.type !== 'match' || !isRecord(event.data)) return null;
   const { data } = event;
@@ -49,8 +33,6 @@ const readRipgrepMatch = (event) => {
   return { pathBytes, lineBytes, line: data.line_number, submatches };
 };
 
-// ripgrep offsets count UTF-8 bytes; the UI needs UTF-16 code units. Matches
-// arrive sorted, so each conversion decodes only the bytes since the last one.
 const toCharRanges = (lineBytes, submatches) => {
   const ranges = [];
   let byteCursor = 0;
@@ -96,9 +78,6 @@ const buildPreview = (lineBytes, submatches) => {
 
 const INVALID_PATTERN_PATTERN = /regex parse error|error parsing|unrecognized escape/i;
 
-// ripgrep explains a bad pattern over several lines ("rg: regex parse error:",
-// the pattern, a caret, "error: unclosed group"); the last of those is the one
-// worth showing. Other failures put their reason on the first line.
 const failureMessage = (stderr, fallback) => {
   const lines = stderr.split(/\r?\n/).map((part) => part.trim()).filter(Boolean);
   const line = lines.find((candidate) => /^error:/i.test(candidate)) ?? lines[0];
@@ -139,9 +118,6 @@ export const createContentSearchRuntime = ({
    *   `{ status: 'failed', message }` for any other failure,
    *   `{ status: 'aborted' }` when the caller's signal fired first.
    */
-  // ripgrep runs in `rootPath`; result paths are built under
-  // `options.resultRoot` when given, the root as the client addresses it,
-  // which differs from the canonical one when the project sits behind a symlink.
   const searchFileContents = async (rootPath, options) => {
     const resultRoot = options.resultRoot || rootPath;
     const binary = await resolveRipgrepBinary();
@@ -203,8 +179,6 @@ export const createContentSearchRuntime = ({
         if (matches.length >= limit) stop('limit');
       };
 
-      // Other event types (begin, end, summary) and anything unparseable are
-      // skipped; only matches carry results.
       const consume = (line) => {
         if (!line || stopped || aborted) return;
         let event;
@@ -217,9 +191,6 @@ export const createContentSearchRuntime = ({
         if (match) takeMatch(match);
       };
 
-      // A single line can be tens of megabytes (a minified file). The pieces
-      // of an unfinished line wait in a list and only the new chunk is
-      // scanned, so a long line costs one join instead of a rescan per chunk.
       child.stdout.on('data', (chunk) => {
         const text = stdoutDecoder.write(chunk);
         let lineStart = 0;
@@ -233,7 +204,6 @@ export const createContentSearchRuntime = ({
         }
         if (lineStart < text.length) pending.push(text.slice(lineStart));
       });
-      // Read stderr to the end: an unread pipe can block ripgrep forever.
       child.stderr.on('data', (chunk) => {
         if (stderr.length < STDERR_MAX_BYTES) stderr += chunk.toString('utf8', 0, STDERR_MAX_BYTES - stderr.length);
       });
@@ -246,8 +216,6 @@ export const createContentSearchRuntime = ({
         pending.push(stdoutDecoder.end());
         consume(pending.join(''));
         matches.sort((a, b) => (a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : a.line - b.line));
-        // 0: matches, 1: none, 2: an error. ripgrep also exits 2 after a
-        // search that produced matches but could not read every file.
         if (stopped || code === 0 || code === 1 || matches.length > 0) {
           finish({ status: 'ok', matches, stopped });
           return;

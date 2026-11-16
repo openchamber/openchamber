@@ -191,7 +191,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     void loadCatalog();
   }, [loadCatalog]);
 
-  // Load every source in the background so global search covers all of them.
   React.useEffect(() => {
     const unloaded = sources.filter((src) => !loadedSourceIds[src.id]);
     if (unloaded.length === 0) {
@@ -337,8 +336,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     setIsRemovingCatalog(true);
     try {
       const settings = await loadDesktopSettings();
-      // A failed load is not an empty list: writing [] here would drop every
-      // other catalog along with the selected one.
       if (!settings) {
         toast.error(t('settings.skills.catalog.add.toast.saveFailed'));
         return;
@@ -366,8 +363,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     ? t('settings.skills.catalog.page.list.searchTitle')
     : (selectedSource?.label ?? '');
 
-  // The selected source has no items yet and a load is in flight — show the
-  // loading state instead of a stale list from the previously selected source.
   const isSelectedSourceLoading = !isSearching
     && selectedSourceId !== null
     && !loadedSourceIds[selectedSourceId]
@@ -705,7 +700,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         </SettingsSection>
       </SettingsPageLayout>
 
-        {/* Dialogs */}
         <AddCatalogDialog open={catalogDialogOpen} onOpenChange={setCatalogDialogOpen} catalogId={editingCatalogId} />
         <InstallSkillDialog open={installDialogOpen} onOpenChange={setInstallDialogOpen} items={installItems} />
 

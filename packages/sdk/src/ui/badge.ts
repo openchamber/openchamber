@@ -10,7 +10,6 @@ export type BadgeProps = {
 
 export type BadgeHandle = Handle<BadgeProps>;
 
-/** Writes `data-tone` for toned colours; neutral removes it. */
 export const applyTone = (node: Element, tone: Tone | undefined): void => {
   setAttr(node, 'data-tone', tone && tone !== 'neutral' ? tone : null);
 };

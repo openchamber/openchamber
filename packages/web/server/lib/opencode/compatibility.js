@@ -7,17 +7,6 @@ const versionSchema = z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/)
 const infoSchema = z.object({ version: versionSchema });
 const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean() });
 
-/**
- * Oldest OpenCode OpenChamber runs against. 2.2.4 accepts a share such as
- * `"20%"` in `compaction.buffer`, the form Settings writes; an older OpenCode
- * rejects the whole config file holding it. (2.2.0 before it moved text
- * generation to `POST /api/experimental/generate/text`, 2.1.0 added
- * `archived` to `PATCH /api/session/{id}`, 2.0.20 `GET /api/credential`,
- * 2.0.15 `PATCH /api/session` metadata.)
- *
- * `engines.opencode` in packages/web/package.json repeats it, so the release
- * published to npm says what it needs before a server installs it.
- */
 const MINIMUM_OPENCODE_VERSION = '2.2.4';
 
 const releaseParts = (version) => version.split(/[-+]/, 1)[0].split('.').map(Number);
@@ -31,13 +20,11 @@ const compareRelease = (left, right) => {
   return 0;
 };
 
-/** Whether OpenCode `version` is older than `minimum`, by release numbers. */
 export const isOpenCodeOlderThan = (version, minimum) => versionSchema.safeParse(version).success
   && compareRelease(version, minimum) < 0;
 
 const isOlderThanMinimum = (version) => isOpenCodeOlderThan(version, MINIMUM_OPENCODE_VERSION);
 
-/** 2.x at or above the minimum. A future major is a contract OpenChamber has not met yet. */
 export const isSupportedOpenCodeVersion = (version) => versionSchema.safeParse(version).success
   && releaseParts(version)[0] === 2
   && !isOlderThanMinimum(version);
@@ -71,11 +58,6 @@ export const requireOpenCodeV2 = async (launch, options) => {
   return version;
 };
 
-// External URLs have no local executable. A legacy probe identifies v1 only
-// from its JSON contract; neither HTML fallbacks nor auth failures imply v1.
-// v1 has no `/api/info`: its catch-all serves the web UI, and a v1 build
-// without the embedded UI proxies that path to app.opencode.ai, which can hang
-// or fail. A failed v2 probe therefore still falls through to the v1 probe.
 export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = fetch) => {
   const request = (pathname) => fetchImpl(new URL(pathname, baseUrl), {
     headers: { ...headers, Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -90,15 +72,11 @@ export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = 
   return parsed.success && parsed.data.version.startsWith('1.') ? parsed.data.version : null;
 };
 
-// `binary` is the local CLI that was checked, so a user with several installs
-// can see which one OpenChamber runs; external servers have none.
 export const describeOpenCodeCompatibility = (version, installation, canInstall, binary = null) => ({
   state: version === null ? 'unavailable' : isSupportedOpenCodeVersion(version) ? 'compatible' : 'incompatible',
   version,
   installation,
   binary,
   minimumVersion: MINIMUM_OPENCODE_VERSION,
-  // The installer fetches the latest release, which clears both a 1.x CLI and
-  // a 2.x one older than the minimum.
   canInstall: version !== null && isOlderThanMinimum(version) && installation === 'managed' && canInstall,
 });

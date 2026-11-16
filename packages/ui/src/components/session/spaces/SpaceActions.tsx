@@ -1,17 +1,3 @@
-/**
- * The actions of an isolated space: apply its work (user journey step 6) and its access dialog
- * (step 4) above the repair actions (step 8), from soft to hard: restart OpenCode, restart the
- * container, stop or start, and delete after a confirmation, which offers to apply first. The
- * desktop has them in the menu and the right-click menu of the space's work row, and in the menu
- * of its row on the spaces page; the phone opens the same list as a sheet from the row's swipe
- * actions. Delete never runs from the list itself: it opens the confirmation,
- * which says what goes with the space. The space's chats go to the Archive page first (decision 9);
- * when they cannot all be saved the space stays and the confirmation opens again with "Delete
- * anyway", and once they went, a notice says where they are, with "Open".
- *
- * The sheet and the confirmation are mounted once by the main layout and the mobile app, behind
- * the switch; never in VS Code (decision 16).
- */
 
 import React from 'react';
 
@@ -48,16 +34,13 @@ const ACTION_ICON = {
 
 const openAccess = (spaceId: string) => useSpacesStore.getState().openAccessDialog(spaceId);
 
-/** The menu parts the items render with: a dropdown's or a right-click menu's. */
 type SpaceMenuSlots = {
   Item: React.ComponentType<{ className?: string; disabled?: boolean; onClick?: (event: React.MouseEvent) => void; children?: React.ReactNode }>;
   Separator: React.ComponentType;
 };
 
-/** An item a list shows as its own button, so its menu leaves it out. */
 type SpaceMenuItem = 'apply' | SpaceAction;
 
-/** The space's actions as menu items: apply and access, then the repairs, delete last. */
 export const SpaceMenuItems: React.FC<{ spaceId: string; slots: SpaceMenuSlots; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, slots: { Item, Separator }, omit = [] }) => {
   const { t } = useI18n();
   const { actions: all, applicable, busy, unavailable } = useSpaceActions(spaceId);
@@ -93,7 +76,6 @@ export const SpaceMenuItems: React.FC<{ spaceId: string; slots: SpaceMenuSlots; 
 
 const DROPDOWN_SLOTS: SpaceMenuSlots = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator };
 
-/** The "⋯" menu of a space's row in the lists of spaces, without what the row shows as buttons. */
 export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; className: string; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, label, className, omit }) => {
   const { t } = useI18n();
   return (
@@ -116,7 +98,6 @@ export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; classN
   );
 };
 
-/** The same actions on the phone, as a sheet opened from the row's swipe actions. */
 export const SpaceActionsSheet: React.FC = () => {
   const { t } = useI18n();
   const spaceId = useSpacesStore((state) => state.actionsSheet);
@@ -125,7 +106,6 @@ export const SpaceActionsSheet: React.FC = () => {
   const close = () => useSpacesStore.getState().closeActionsSheet();
   return (
     <MobileOverlayPanel open={spaceId !== null} title={name ?? t('spaces.actions.menu')} onClose={close}>
-      {/* What the row's mark stands for: the phone has no tooltip to say it. */}
       {spaceId ? <SpaceStatusLines spaceId={spaceId} className="px-2 pb-2" onAction={close} /> : null}
       {spaceId && applicable ? (
         <MobileSheetRow
@@ -168,10 +148,6 @@ export const SpaceActionsSheet: React.FC = () => {
   );
 };
 
-/**
- * Says once that a deleted space's chats are on the Archive page, with the way there. The phone's
- * layout has no Archive page, so there the notice has no "Open" that would lead nowhere.
- */
 const useArchivedNotice = () => {
   const { t } = useI18n();
   const name = useSpacesStore((state) => state.archivedNotice);
@@ -185,7 +161,6 @@ const useArchivedNotice = () => {
       return;
     }
     toast.success(text, {
-      // A space deleted from Settings: the Archive page would open behind its window.
       action: {
         label: t('spaces.archive.noticeOpen'),
         onClick: () => {
@@ -197,7 +172,6 @@ const useArchivedNotice = () => {
   }, [isMobile, name, t]);
 };
 
-/** The confirmation before a space is deleted; the deletion's progress and failure show on the group. */
 export const SpaceDeleteDialog: React.FC = () => {
   const { t } = useI18n();
   useArchivedNotice();
@@ -206,8 +180,6 @@ export const SpaceDeleteDialog: React.FC = () => {
   const unsaved = useSpacesStore((state) => state.deleteUnsaved);
   const name = useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId)?.name ?? '' : ''));
   const applicable = useSpacesStore((state) => isSpaceApplicable(spaceId ? state.journey?.get(spaceId) : undefined));
-  // Closing clears the store at once while the desktop dialog still fades out; it keeps showing what it
-  // showed, so the title never reads Delete "" and the buttons do not change under the pointer.
   const [lastShown, setLastShown] = React.useState({ name, unsaved, applicable });
   if (spaceId !== null && (lastShown.name !== name || lastShown.unsaved !== unsaved || lastShown.applicable !== applicable)) {
     setLastShown({ name, unsaved, applicable });
@@ -232,8 +204,6 @@ export const SpaceDeleteDialog: React.FC = () => {
       <Button variant="destructive" size="sm" onClick={confirm}>{shown.unsaved ? t('spaces.delete.deleteAnyway') : t('spaces.delete.confirm')}</Button>
     </div>
   );
-  // After chats could not be saved: a line for the whole when anything but size failed, and one
-  // per chat too large to save, named by its title from the space, shown as text.
   const lines = shown.unsaved
     ? [
       ...(shown.unsaved.failed > 0 || shown.unsaved.tooLarge.length === 0 ? [t('spaces.delete.chatsNotSaved', { name: shown.name })] : []),

@@ -11,12 +11,6 @@ export type GuestCommandEntry = {
 
 const warned = new Set<string>();
 
-/**
- * The slash commands active guests contribute, in catalog order. A name the
- * composer already knows (a local command, an OpenCode command, or a skill)
- * or one an earlier guest already took is dropped with a console warning,
- * once per name, so an extension can never shadow what the user has.
- */
 export const guestCommandEntries = (
   guests: readonly InstalledGuest[],
   reservedNames: ReadonlySet<string>,
@@ -43,7 +37,6 @@ export const guestCommandEntries = (
   return entries;
 };
 
-/** A composer submission that matched one of the guest commands. */
 export type GuestCommandRoute = {
   entry: GuestCommandEntry;
   args: string;

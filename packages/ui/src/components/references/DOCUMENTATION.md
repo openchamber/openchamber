@@ -11,6 +11,36 @@ them; see *Board* below. Extensions are not inside it: they draw their
 own search in an iframe and attach through `host.attach`, so the + menu lists
 every source, the repository's provider, each tracker and each extension, as its own row.
 
+## Invariants
+
+- A close, reopen or merge through the app ends the item's label hold immediately, so the changed state can remove it from the list. A label hold restores a dropped item only in a label-filtered list; a drop from an unfiltered list is authoritative.
+- Repository cache keys include the binding revision and resolved read context. An in-flight answer for an earlier binding fills only its earlier key.
+- A forced value read waits for any read already running before asking again, so an answer from before a write cannot replace its follow-up.
+- A batch read supplies an outcome for every requested key. An omitted key becomes an error, so it cannot remain pending indefinitely.
+- The label panel reads once per opening even when the binding changes its reader's identity. Treating each new reader as another opening can loop reads.
+- Comment edits preserve leading whitespace because Markdown uses it for indented code blocks.
+- A thread write stays guarded until the preview reads the thread again. The pre-write thread still shown would otherwise let a second click act on stale state.
+- An absent stack means the relation chain is unreadable or unknown; it does not assert that the item belongs to no stack.
+- List-backed change-request size is available only with changed-file diffs, and pipeline totals only with CI jobs. A detail read without those inputs leaves the totals unknown.
+- A followed tracker state can retain its existing id when its name changes. A transition to another state does not supply that state's id here.
+- Unsaved comment drafts include the writing account's provider, instance and account id in their scope, with an empty account marker while unknown. Switching that scope closes the current editor. Comment and item draft stores each retain at most 20 drafts, dropping the oldest.
+- Closing or unmounting the image viewer restores application shortcuts, including when its preview disappears while the viewer is open.
+- A replacement scroll element owns a separate saved offset. Crossing the phone layout threshold or retrying a boundary must not restore an earlier element's offset into it.
+
+## Decisions
+
+### Why the picker remounts on open and not resets in effects
+
+Each opening starts with the remembered tab and an empty search. Remounting establishes both before the first paint; effect-based resets would first show the previous opening's state.
+
+### Why host text uses the composer editor without prompt tokens
+
+Host text is Markdown source, where mentions name host users and file paths remain text. Prompt token resolution changes that meaning, and pasted-image uploads have no destination in a source-control text write.
+
+### Why PR statuses subscribe through the store and not an effect
+
+React checks the store version again after subscribing. This catches an answer that arrives between rendering a cached list and subscribing, which an effect subscription can miss and leave its row and preview loading.
+
 ## Files
 
 | File | Owns |

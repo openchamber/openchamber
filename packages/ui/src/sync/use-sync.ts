@@ -5,6 +5,7 @@ import { Binary } from "./binary"
 import { upsertSessionRecord } from "./session-records"
 import { adoptSessionMove } from "./session-actions"
 import { resolveSessionReadDirectory, type SessionReadDirectorySources } from "./session-read-directory"
+import { withAdmittedLineage } from "./session-admission"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { retry } from "./retry"
 import {
@@ -24,7 +25,7 @@ import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 const sessionReadDirectorySources: SessionReadDirectorySources = {
   knownDirectory: (sessionID) => {
     const record = useGlobalSessionsStore.getState().entityById.get(sessionID)
-    return record ? resolveGlobalSessionDirectory(record) : null
+    return record ? withAdmittedLineage(sessionID, resolveGlobalSessionDirectory(record)) : null
   },
   readUnscoped: (sessionID) => opencodeClient.getSessionUnscoped(sessionID),
   adopt: adoptSessionMove,

@@ -1,23 +1,14 @@
-// E2EE primitives + responder handshake for the private relay (Layer 2).
-// JS mirror of the normative TS implementation in
-// packages/ui/src/lib/relay/{protocol,crypto,handshake}.ts — the web server is
-// plain JS and cannot import from packages/ui, so the logic is copied verbatim
-// (converted to JSDoc'd JS) and MUST stay byte-compatible with those modules.
-// WebCrypto only: `globalThis.crypto.subtle` (Node >= 22).
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 2).
 
 const subtle = globalThis.crypto.subtle;
 
 export const RELAY_PROTOCOL_VERSION = 1;
 const RELAY_HKDF_INFO = 'openchamber-relay-v1';
 
-// Encrypted frame layout: [1 byte version][12 byte IV][ciphertext + 16 byte GCM tag].
 const ENCRYPTED_FRAME_VERSION = 1;
 const ENCRYPTED_FRAME_IV_BYTES = 12;
 const ENCRYPTED_FRAME_HEADER_BYTES = 1 + ENCRYPTED_FRAME_IV_BYTES;
 export const MAX_PLAINTEXT_FRAME_BYTES = 64 * 1024;
 
-// Relay-assigned WebSocket close codes (subset the host needs).
 export const RelayCloseCode = {
   ControlReplaced: 4001,
   RekeyMismatch: 1008,
@@ -28,7 +19,6 @@ const ECDH_PARAMS = { name: 'ECDH', namedCurve: 'P-256' };
 const HANDSHAKE_NONCE_BYTES = 16;
 const SESSION_KEY_BYTES = 32;
 const GCM_TAG_BYTES = 16;
-// IV = 4-byte random per-direction prefix || 8-byte big-endian frame counter.
 const IV_PREFIX_BYTES = 4;
 const IV_COUNTER_BYTES = 8;
 
@@ -78,7 +68,6 @@ export const importEcdhPrivateKey = async (jwk) => {
   }
 };
 
-// Stable fingerprint of a public key, used to detect rekey attempts on re-hello.
 /** @param {JsonWebKey} jwk */
 const publicKeyJwkFingerprint = (jwk) =>
   JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });
@@ -162,9 +151,6 @@ export const createFrameEncryptor = (key) => {
   };
 };
 
-// Enforces consecutive per-direction counters: the relay WS preserves ordering
-// and loses nothing while open, so a regression or replay means tampering and
-// a gap means a lost or dropped message; both must fail closed.
 /** @param {CryptoKey} key AES-256-GCM key for this direction */
 export const createFrameDecryptor = (key) => {
   let lastCounter = 0n;
@@ -235,16 +221,6 @@ export const base64UrlToBytes = (value) => {
   return out;
 };
 
-// ---------------------------------------------------------------------------
-// Responder handshake state machine (host side). Mirror of createHostHandshake
-// in packages/ui/src/lib/relay/handshake.ts.
-//
-// Fail-closed rules (from the spec):
-// - a repeated identical `hello` re-sends `ready` (client retry race);
-// - a `hello` with a DIFFERENT key on an established channel is a rekey
-//   attack -> close 1008, never rekey in place;
-// - plaintext after `ready`, or any decrypt failure -> close 1011.
-// ---------------------------------------------------------------------------
 
 const parseHandshakeMessage = (raw) => {
   let parsed;
@@ -255,7 +231,6 @@ const parseHandshakeMessage = (raw) => {
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
   if (parsed.v !== RELAY_PROTOCOL_VERSION) return null;
-  // Unknown/missing capability flag = false = legacy behavior.
   const batch = parsed.batch === true;
   const flowControl = parsed.flowControl === true;
   if (parsed.t === 'ready') {
@@ -305,7 +280,6 @@ export const createHostHandshake = (hostEncPrivateKey, options = {}) => {
       const fingerprint = publicKeyJwkFingerprint(message.clientPubJwk);
       if (acceptedClientKeyFingerprint !== null) {
         if (fingerprint === acceptedClientKeyFingerprint && readyText !== null) {
-          // Client retried `hello` before our `ready` arrived — answer again.
           return { type: 'send-text', text: readyText };
         }
         return { type: 'fail', closeCode: RelayCloseCode.RekeyMismatch, reason: 'rekey mismatch' };
@@ -325,7 +299,6 @@ export const createHostHandshake = (hostEncPrivateKey, options = {}) => {
         return failClosed('key derivation failed');
       }
       acceptedClientKeyFingerprint = fingerprint;
-      // Batching runs only if both peers advertised it.
       negotiatedBatch = localBatch && message.batch === true;
       const flowControl = options.flowControl !== false && message.flowControl === true;
       const ready = { t: 'ready', v: RELAY_PROTOCOL_VERSION };

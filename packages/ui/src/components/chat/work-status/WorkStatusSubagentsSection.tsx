@@ -85,7 +85,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
               key={row.child.id}
               row={row}
               directory={directory}
-              onClick={directory ? () => openChildSession(row.child.id, label) : undefined}
+              onClick={directory ? () => openChildSession(row.child.id, label, row.child.directory) : undefined}
               ariaLabel={t('chat.workStatus.action.openSubagent', { name: label })}
             />
           );

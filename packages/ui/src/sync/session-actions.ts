@@ -34,6 +34,7 @@ import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { withUserWorkTitle } from "@/lib/sessionWorkTitle"
 import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
@@ -1393,15 +1394,14 @@ export async function patchSessionMetadata(
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const currentMetadata = getSessionMetadata(current)
   const nextMetadata = updater(currentMetadata)
-  // OpenCode 2.x only accepts metadata at session creation, so OpenChamber
-  // keeps it (see session-archive-batch). The store applies a merge patch, so
+  // The OpenChamber server's metadata store applies a merge patch, so
   // only the difference travels and a key the updater dropped is deleted
   // explicitly. A runtime without that route cannot persist the change, and
   // reporting success would strand a review or btw link that the next load
   // silently drops.
   const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata), targetDirectory)
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
-  const updated: Session = { ...current, metadata: result.metadata }
+  const updated = withSessionMetadata(current, result.metadata)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = updated.directory || targetDirectory
@@ -1765,7 +1765,7 @@ function planChatDirectoryCleanup(sessionId: string, snapshot: Session | null, d
  * global cache cannot prove that, so it keeps the directory: a leaked scratch
  * directory is recoverable, a stranded session is not.
  */
-function isChatDirectoryStillReferenced(directory: string, excludedIds: ReadonlySet<string>): boolean {
+export function isChatDirectoryStillReferenced(directory: string, excludedIds: ReadonlySet<string>): boolean {
   const global = useGlobalSessionsStore.getState()
   if (!global.hasLoaded) return true
   const normalized = normalizePath(directory)
@@ -2322,7 +2322,7 @@ export async function optimisticSend(input: {
    */
   ready?: Promise<void>
   appendSubmissions?: () => void
-  onOptimisticInsert?: () => void
+  onOptimisticInsert?: (messageID: string) => void
   /**
    * Whether the insert marks the session busy (the default). A session that
    * does not exist yet is marked by its creator once the server has it.
@@ -2452,7 +2452,7 @@ export async function optimisticSend(input: {
     message: optimisticMessage,
     parts: optimisticParts,
   })
-  input.onOptimisticInsert?.()
+  input.onOptimisticInsert?.(messageID)
 
   if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
@@ -3483,9 +3483,8 @@ async function inheritForkState(sourceSessionId: string, forkedSession: Session,
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
     writeObjective: writeGoalObjectiveFile,
-    patchMetadata: async (sessionId, updater) => {
-      await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey)
-    },
+    patchMetadata: async (sessionId, updater) => { await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey) },
+    setPermissions: (sessionId, permissions) => opencodeClient.setSessionPermissions(sessionId, permissions, directory),
   })
 }
 

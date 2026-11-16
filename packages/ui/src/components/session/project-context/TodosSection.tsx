@@ -40,7 +40,6 @@ const createTodoId = (): string => {
   return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-/** A todo is one line: pasted line breaks become spaces. */
 const normalizeTodoText = (value: string): string => value.replace(/\r?\n/g, ' ').slice(0, PROJECT_TODO_TEXT_MAX_LENGTH);
 
 type SortableTodoHandleProps = {
@@ -78,11 +77,6 @@ const SortableTodoItem: React.FC<{
   );
 };
 
-/**
- * A todo's text being edited in its row. The whole text shows while editing,
- * however long; Enter or leaving the field saves, Escape puts the old text
- * back. An emptied field is a cancel: deleting is the menu's job.
- */
 const TodoTextEditor: React.FC<{
   initial: string;
   label: string;
@@ -97,7 +91,6 @@ const TodoTextEditor: React.FC<{
     field.focus({ preventScroll: true });
     field.setSelectionRange(field.value.length, field.value.length);
   }, []);
-  // Escape and Enter end the edit before the blur that follows them.
   const doneRef = React.useRef(false);
   const finish = (commit: boolean) => {
     if (doneRef.current) return;
@@ -133,21 +126,14 @@ const TodoTextEditor: React.FC<{
 };
 
 export const TodosSection: React.FC<{
-  /** The project whose todos these are; the add field keeps its draft there. */
   projectPath: string;
   todos: ProjectTodoItem[];
-  /** The project's plans, to name the plan a todo belongs to. */
   plans: ProjectPlanLink[];
   onOpenPlan: (planId: string) => void;
-  /** Panel-wide filter. Mutations still act on the full list. */
   query: string;
   disabled: boolean;
   canCreateWorktree: boolean;
   sendingTodoId: string | null;
-  /**
-   * Shows `next` and persists it through the container's store write: one
-   * todo when `change` names it, otherwise the whole list.
-   */
   onPersistTodos: (next: ProjectTodoItem[], change?: ProjectTodoChange) => void;
   onSendToCurrentSession: (todoText: string) => void;
   onSendToNewSession: (todoId: string, todoText: string) => void;
@@ -170,7 +156,6 @@ export const TodosSection: React.FC<{
   const [editingTodoId, setEditingTodoId] = React.useState<string | null>(null);
   const reveal = useKnowledgeRevealClass();
 
-  // Shown at once and persisted by the container, which reports a failure.
   const handleAddTodo = React.useCallback((trimmed: string) => {
     const id = createTodoId();
     const text = trimmed.slice(0, PROJECT_TODO_TEXT_MAX_LENGTH);
@@ -234,8 +219,6 @@ export const TodosSection: React.FC<{
 
   const planTitles = React.useMemo(() => new Map(plans.map((plan) => [plan.id, plan.title])), [plans]);
   const todosById = React.useMemo(() => new Map(todos.map((todo) => [todo.id, todo])), [todos]);
-  // Filtering is display-only: every handler above still edits the full list,
-  // so reordering or clearing while a filter is active cannot drop hidden items.
   const visibleTodos = React.useMemo(
     () => todos.filter((todo) => matchesRankQuery([todo.text], query)),
     [query, todos],
@@ -299,10 +282,7 @@ export const TodosSection: React.FC<{
                     {(dragHandleProps) => (
                       <KnowledgeRowContextMenu
                         items={menuItems}
-                        // The field's own menu (spelling, paste) while editing.
                         disabled={editing}
-                        // Centred on one line; a field being edited can grow, so it
-                        // aligns the row to its first line instead.
                         render={<div className={cn('group/knowledge flex gap-1.5 rounded-md px-1 py-1', editing ? 'items-start' : 'items-center')} />}
                       >
                         <button
@@ -341,7 +321,6 @@ export const TodosSection: React.FC<{
                           </div>
                         ) : (
                           <div className="flex min-h-6 min-w-0 flex-1 items-center gap-2">
-                            {/* A click edits: the text is what the user came to change. */}
                             <button
                               type="button"
                               onClick={() => setEditingTodoId(todo.id)}
@@ -370,7 +349,6 @@ export const TodosSection: React.FC<{
                               <button
                                 type="button"
                                 onClick={() => onOpenPlan(planId)}
-                                // Gives way to the todo's own text first.
                                 className="ms-auto min-w-12 max-w-[40%] shrink-[4] truncate typography-micro text-muted-foreground hover:text-foreground focus-visible:outline-none"
                                 data-row-tooltip={t('rightSidebar.contextNotesTodo.todo.openPlan')}
                                 dir="auto"

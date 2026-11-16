@@ -35,8 +35,6 @@ const hasBoundedJsonTree = (value: JsonValue, depth = 0, budget = { remaining: G
   return true;
 };
 
-// Used only after the depth bound above, including for JavaScript consumers
-// whose values need not satisfy the public JsonValue type.
 const isFiniteJson = (value: JsonValue): boolean => {
   if (value === null || value === true || value === false) return true;
   if (Array.isArray(value)) return Object.keys(value).every((key) => /^(0|[1-9]\d*)$/.test(key) && Number(key) < value.length)
@@ -48,7 +46,6 @@ const isFiniteJson = (value: JsonValue): boolean => {
   return String(value) === value || Number.isFinite(value);
 };
 
-/** Guest-side fast-fail guard. The host schema remains authoritative for untyped callers. */
 export const isGuestPopoverRequest = (request: GuestPopoverRequest): boolean => {
   try {
     if (String(request.id) !== request.id || !GUEST_POPOVER_ID.test(request.id)

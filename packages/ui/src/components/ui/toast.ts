@@ -44,27 +44,20 @@ const getToastCopyText = (message: string | React.ReactNode, data?: ExternalToas
   return reactNodeToText(message)
 }
 
-// Sonner's own default lifetime; the Toaster sets none of its own.
 const DEFAULT_TOAST_DURATION_MS = 4000
 
-// A toast that closes by itself says how long it has left: the ring around its
-// close button runs down over this time (`.oc-toast-timed` in design-system.css).
 const withCountdown = (data?: ExternalToast): ExternalToast => {
   const duration = data?.duration ?? DEFAULT_TOAST_DURATION_MS
   if (!Number.isFinite(duration)) return { ...data }
   return {
     ...data,
     className: [data?.className, "oc-toast-timed"].filter(Boolean).join(" "),
-    // A custom property, which React's style type does not list.
     style: Object.assign({}, data?.style, { "--oc-toast-duration": `${duration}ms` }),
   }
 }
 
-// Every toast closes with the cross in its corner; errors and warnings also get Copy.
 type ToastWithAction = (message: string | React.ReactNode, data?: ExternalToast) => string | number
 
-// Spelled out so emitted declarations name sonner's own types instead of
-// expanding ones sonner does not export.
 type AppToast = Omit<typeof sonnerToast, 'success' | 'info' | 'error' | 'warning'> & {
   success: ToastWithAction
   info: ToastWithAction

@@ -1,14 +1,3 @@
-// Tells development copies of the desktop app apart in the macOS Dock.
-//
-// An unpackaged run is Electron's own app bundle, so the Dock shows the stock
-// Electron icon for every copy. This swaps in the dev icon, the app icon behind
-// construction tape, and puts the issue or PR number from the checked-out
-// branch on the badge, so copies started from several worktrees can be told
-// apart.
-//
-// The Dock has one badge, and the unread-chats count uses it too. In a dev copy
-// whose branch has a number, the number keeps the badge; on a branch without
-// one, the unread count works as in the packaged app.
 
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -18,15 +7,11 @@ const execFileAsync = promisify(execFile);
 
 let devBadge = '';
 
-// `fix/4515-browser-scroll-timeout` -> `4515`. Branches without a number get
-// no badge.
 export const devDockBadgeFromBranch = (branch) => {
   const match = /(?:^|\D)(\d{3,6})(?:\D|$)/.exec(String(branch || ''));
   return match ? match[1] : '';
 };
 
-// What the Dock badge shows: the dev number when there is one, otherwise the
-// unread-chats count (0 clears the badge).
 export const selectDockBadge = ({ devNumber, unreadCount }) => (
   devNumber ? { text: devNumber } : { count: unreadCount }
 );

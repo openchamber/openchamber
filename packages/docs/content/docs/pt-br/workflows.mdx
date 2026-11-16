@@ -19,13 +19,19 @@ Workflows precisam do servidor OpenCode do próprio OpenChamber. Eles não ficam
 
 1. Peça um em linguagem natural, por exemplo "Rode um workflow que revise cada arquivo alterado neste branch e liste os bugs que encontrar."
 2. O agente propõe um plano e um modelo para cada fase. Combine os modelos antes de a execução começar: veja [Modelos e custo](#modelos-e-custo).
-3. Um card com o plano aparece no chat. Selecione **Executar workflow** para iniciá-lo ou **Não executar** para descartá-lo. Nada roda até você escolher.
+3. Um card com o plano aparece no chat. Selecione **Executar workflow** para iniciá-lo ou **Não executar** para descartá-lo. Nada roda até você escolher, a menos que você deixe as execuções começarem sem aprovação (veja abaixo).
 4. Durante a execução, o card mostra cada fase e cada agente. A linha da sessão na barra lateral mostra **Workflow em execução**, e a seção **Workflows** do painel de status de trabalho lista a execução. Selecione **Parar** para encerrá-la antes.
 5. Quando a execução termina, o relatório chega à sessão como uma mensagem. Uma execução concluída ou que falhou acorda o agente para que ele aja sobre o resultado; uma execução que você parou ou recusou não acorda.
 
 Uma execução parada ou que falhou pode continuar com **Retomar**. Os agentes que já responderam mantêm suas respostas, e só os demais rodam de novo.
 
 Agentes de um workflow em execução não podem iniciar um workflow próprio.
+
+## Iniciar execuções sem aprovação
+
+Em **Ferramenta de workflows**, ative **Iniciar execuções sem minha aprovação** para que uma execução iniciada pelo agente comece na hora. O card dela a mostra em execução, sem o botão **Executar workflow**, e você ainda pode encerrá-la com **Parar**. Isso serve para trabalho que você combinou e depois deixou andando: por exemplo, você pede ao agente que teste alguns modelos em um piloto pequeno e rode o trabalho todo no melhor, e ele pode iniciar essa execução enquanto você está fora.
+
+O agente continua propondo o plano e os modelos no chat antes de iniciar uma execução. A configuração pula só o clique. O servidor a lê em cada execução, então com a caixa desmarcada toda execução volta a esperar por você. Os limites abaixo continuam os mesmos.
 
 ## Modelos e custo
 

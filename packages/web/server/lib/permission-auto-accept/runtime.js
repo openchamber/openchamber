@@ -447,6 +447,7 @@ export function createPermissionAutoAcceptRuntime({
     isPermissionAutoAnswered,
     processPermission,
     reconcilePending,
+    forgetSession: (sessionId) => sessions.delete(sessionId),
     start,
   };
 }

@@ -2,14 +2,6 @@ import { create } from 'zustand';
 import { normalizePath } from '@/lib/pathNormalization';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
-/**
- * Which worktrees this client is removing right now, so their sidebar rows can
- * show it from the user's confirmation until git answers. The row leaves the
- * list when the topology drops it; a failed removal clears the entry and the
- * row returns to normal. The state is local to this client: another window
- * removing the same worktree shows nothing until the topology refresh drops
- * the row.
- */
 type WorktreeRemovalState = {
   removingPaths: ReadonlySet<string>;
 };
@@ -44,10 +36,8 @@ export const isWorktreeRemoving = (path: string): boolean =>
 export const useWorktreeRemoving = (path: string | null | undefined): boolean =>
   useWorktreeRemovalStore((state) => selectRemoving(state, path));
 
-/** Every worktree this client is removing right now, by normalized path. */
 export const useRemovingWorktreePaths = (): ReadonlySet<string> => useWorktreeRemovalStore((state) => state.removingPaths);
 
-// Paths from the previous instance can collide with the next one's.
 subscribeRuntimeEndpointChanged(() => {
   if (useWorktreeRemovalStore.getState().removingPaths.size === 0) return;
   useWorktreeRemovalStore.setState({ removingPaths: new Set() });

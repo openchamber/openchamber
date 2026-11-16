@@ -21,7 +21,5 @@ export const scoreCommandPaletteFiles = <T extends { name: string; relativePath:
     return [];
   }
 
-  // Matches in the file name rank first, but the whole relative path counts:
-  // "solo-is-a" must still find solo-is-a-team-size/index.md.
   return rankBySubsequence(fileResults, trimmedQuery, (file) => file.relativePath || file.name, { limit: 10, paths: true });
 };

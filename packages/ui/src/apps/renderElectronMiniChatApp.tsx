@@ -19,13 +19,7 @@ import { initializeSharedPreferences } from './initializeSharedPreferences';
 export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
   initializeSharedPreferences({ logLabel: '[mini-chat-main]' });
   leaveLastActiveSessionToMainWindow();
-  // A window opened on a session renders its transcript as soon as the
-  // messages arrive. Without the lazy markdown chunk the timeline is revealed
-  // with empty messages and jumps when the text fills in, so the chunk is
-  // fetched while the window boots, as the main window does.
   preloadMarkdownRenderer();
-  // The window URL names the session, so its transcript is asked for now and
-  // not after the first render: the request runs while React mounts.
   const { mode, sessionId, directory } = readMiniChatConfig();
   if (mode === 'session' && sessionId && directory) {
     prefetchSessionBeforeMount({ sessionID: sessionId, directory });

@@ -4,9 +4,6 @@ import { openSearchPanel, searchKeymap } from '@codemirror/search';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 
-// The find key follows Settings, so the default Mod-f entry gives way to a
-// binding read from the store on each press. It runs ahead of the editing
-// commands, because the key may be rebound onto one of them.
 const findShortcut: KeyBinding = {
   scope: 'editor search-panel',
   any: (view, event) => {

@@ -20,11 +20,9 @@ type Props = {
   onMoveToFolder: (folderId: string) => void;
   onCreateFolderAndMove: () => void;
   onRemoveFromFolder: () => void;
-  /** Something selected files in the project's folders: a worktree's sessions do not. */
   canFileSelection: boolean;
   canRemoveFromFolder: boolean;
   onRestore: () => void;
-  /** Mark done is offered while work tracking is on, and enabled once a selected session is in work. */
   showMarkDone: boolean;
   canMarkDone: boolean;
   onMarkDone: () => void;

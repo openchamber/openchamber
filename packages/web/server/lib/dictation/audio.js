@@ -1,10 +1,3 @@
-/**
- * PCM16 audio helpers for the dictation streaming pipeline.
- *
- * All dictation audio travels as 16-bit little-endian mono PCM. The client
- * captures at 16 kHz; providers may require a different rate, so chunks are
- * resampled with Pcm16MonoResampler before being appended to an STT session.
- */
 
 /**
  * Parse the sample rate out of a format string like "audio/pcm;rate=16000;bits=16".
@@ -142,11 +135,6 @@ export function pcm16ToWav(pcmBuffer, sampleRate) {
   return wavBuffer;
 }
 
-/**
- * Streaming linear-interpolation resampler for PCM16LE mono audio.
- * Carries one sample across chunk boundaries so consecutive chunks resample
- * without seams.
- */
 export class Pcm16MonoResampler {
   /**
    * @param {{ inputRate: number, outputRate: number }} params

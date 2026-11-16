@@ -12,28 +12,12 @@ interface KeepAwakePlugin {
   setEnabled(options: { enabled: boolean }): Promise<void>;
 }
 
-// iOS only (KeepAwake.swift): WKWebView grants navigator.wakeLock only inside a tap.
 const KeepAwake = registerPlugin<KeepAwakePlugin>('KeepAwake');
 
 const setIdleTimerDisabled = (enabled: boolean): void => {
   void KeepAwake.setEnabled({ enabled }).catch(() => undefined);
 };
 
-/**
- * Keeps the display on in the native app as the Keep screen awake setting says:
- * always, or while the open session or a subagent below it runs. On Android the
- * system drops the wake lock whenever the app leaves the screen, so it is
- * requested again each time the page becomes visible. iOS turns off its idle
- * timer through the app's own plugin.
- *
- * While disconnected the status store keeps the last busy state, so "working"
- * also needs `connected`; a WS → SSE fallback marks the app connected only once
- * the next transport delivers (sync-context `onTransportSwitch`). A session in an
- * isolated space has its own server: a space that died mid-turn keeps the busy
- * state with the host still connected, so its stale mark or stopped entry
- * releases the hold until the space answers again. Android keeps
- * the screen on for one timeout after a release, so a short drop does not blank it.
- */
 export const useKeepScreenAwake = (connected: boolean): void => {
   const mode = useUIStore((state) => state.mobileKeepScreenAwake);
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -49,7 +33,6 @@ export const useKeepScreenAwake = (connected: boolean): void => {
   React.useEffect(() => {
     if (!canKeepScreenAwake()) return;
     if (getClientPlatform() === 'ios') {
-      // Written when unwanted too: a reloaded page must clear what the previous one set.
       setIdleTimerDisabled(wanted);
       return wanted ? () => setIdleTimerDisabled(false) : undefined;
     }

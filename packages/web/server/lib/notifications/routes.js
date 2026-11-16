@@ -141,9 +141,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
     return res.json({ ok: true });
   });
 
-  // Native iOS APNs device token registration (mirrors /api/push/subscribe). The token
-  // is a hex APNs device token from @capacitor/push-notifications, scoped to the UI
-  // session like web-push subscriptions.
   app.post('/api/push/apns-token', async (req, res) => {
     await ensureSessionWatcher();
 
@@ -160,12 +157,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     }
 
     const platform = req.body?.platform === 'android' ? 'android' : 'ios';
-    // APNs environment the token belongs to: Xcode/dev-signed installs report 'sandbox',
-    // TestFlight/App Store report 'production'. Absent (older clients, Android) → production.
     const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
     if (typeof addOrUpdateApnsToken === 'function') {
-      // Optional: newer apps send a key so the server can seal push text for this device
-      // alone (push-seal.js). Malformed keys are ignored and the device gets plain text.
       await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, req.body?.pushKey);
     }
     return res.json({ ok: true });
@@ -294,10 +287,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  // Cross-project seed for clients that do not initialize every directory:
-  // live status per session, the permission requests and forms still waiting
-  // for an answer, and each session's latest context reading. All come from
-  // the server's single upstream stream.
   app.get('/api/sessions/status', async (_req, res) => {
     await ensureSessionWatcher();
     const snapshot = getSessionStateSnapshot();
@@ -327,10 +316,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  // Whether a session is unread is OpenCode's own state (`time.viewed`, set by
-  // `POST /api/session/:id/view`). These two routes tell the native push badge
-  // that the user is engaging with the app, and remove the session's pushed
-  // notifications from every device: the user saw it or answered it.
   app.post('/api/sessions/:id/view', (req, res) => {
     const sessionId = req.params.id;
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
@@ -345,8 +330,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/sessions/:id/message-sent', (req, res) => {
     const sessionId = req.params.id;
-    // Sending a message means the user is active in the app; reset the native
-    // push badge so it counts only notifications since this engagement.
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
     void clearSessionPushNotifications?.(sessionId);
 
@@ -357,9 +340,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  // Mirror client-side Permission Auto-Accept state to the server so it can
-  // suppress permission notifications at the source (the 500ms debounce race
-  // otherwise leaks notifications for auto-accepted permissions).
   app.post('/api/notifications/auto-accept', (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';

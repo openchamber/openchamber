@@ -2,11 +2,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-/**
- * Whether `directory` is a worktree checked out from a contributor's fork.
- * Such a worktree tracks nothing and pushes only to a destination the user
- * picks, so its push control names that choice.
- */
 export const useIsContributorWorktree = (directory: string | null | undefined): boolean =>
   useSessionUIStore((state) => {
     const target = normalizePath(directory ?? null);

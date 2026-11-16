@@ -1,16 +1,3 @@
-/**
- * Scrollbars in extension documents behave like the app's own overlay
- * scrollbars: invisible at rest, shown while the pointer is over the
- * scrolling element or while it scrolls, then hidden again after
- * one second (the app's `OverlayScrollbar` default).
- *
- * Hover works from CSS alone. "While it scrolls" needs the attribute set by
- * `installGuestScrollbarActivity`; without it (an authored CSP that blocks the
- * inline script), scrollbars still appear on hover.
- *
- * Shared by served extension documents and the UI kit, including older guest bundles.
- */
-/** Attribute present on an element for a moment after it scrolled. */
 const GUEST_SCROLLING_ATTRIBUTE = 'data-oc-scrolling';
 
 export const GUEST_SCROLLBAR_CSS = `
@@ -49,12 +36,6 @@ export const GUEST_SCROLLBAR_CSS = `
 }
 `;
 
-/**
- * Marks whichever element scrolls (the root for document scrolling) with
- * `GUEST_SCROLLING_ATTRIBUTE` and clears it once scrolling has been quiet for
- * the hide delay. One capturing, passive listener per document; installing
- * twice is a no-op. Self-contained on purpose: the server inlines its source.
- */
 export function installGuestScrollbarActivity(doc: Document): void {
   const root = doc.documentElement;
   if (root.hasAttribute('data-oc-scrollbar-activity')) return;
@@ -73,5 +54,4 @@ export function installGuestScrollbarActivity(doc: Document): void {
   }, { capture: true, passive: true });
 }
 
-/** Inline script form of `installGuestScrollbarActivity`, appended by the host to served guest HTML. */
 export const GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;

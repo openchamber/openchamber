@@ -19,13 +19,19 @@ Workflows brauchen den eigenen OpenCode-Server von OpenChamber. Sie sind nicht v
 
 1. Bitte in natürlicher Sprache um einen, zum Beispiel: "Führe einen Workflow aus, der jede auf diesem Branch geänderte Datei prüft und die gefundenen Bugs auflistet."
 2. Der Agent schlägt einen Plan und für jede Phase ein Modell vor. Einigt euch auf die Modelle, bevor der Lauf startet: siehe [Modelle und Kosten](#modelle-und-kosten).
-3. Im Chat erscheint eine Karte mit dem Plan. Wähle **Workflow ausführen**, um ihn zu starten, oder **Nicht ausführen**, um ihn zu verwerfen. Nichts läuft, bevor du dich entscheidest.
+3. Im Chat erscheint eine Karte mit dem Plan. Wähle **Workflow ausführen**, um ihn zu starten, oder **Nicht ausführen**, um ihn zu verwerfen. Nichts läuft, bevor du dich entscheidest, es sei denn, du lässt Läufe ohne Freigabe starten (siehe unten).
 4. Während er läuft, zeigt die Karte jede Phase und jeden Agenten. Die Zeile der Sitzung in der Seitenleiste zeigt **Workflow läuft**, und der Abschnitt **Workflows** im Arbeitsstatus-Panel listet den Lauf auf. Wähle **Stoppen**, um ihn vorzeitig zu beenden.
 5. Wenn der Lauf endet, kommt sein Bericht als Nachricht in die Sitzung. Ein fertiger oder fehlgeschlagener Lauf weckt den Agenten, damit er auf das Ergebnis reagieren kann. Ein Lauf, den du gestoppt oder abgelehnt hast, tut das nicht.
 
 Ein gestoppter oder fehlgeschlagener Lauf lässt sich mit **Fortsetzen** weiterführen. Agenten, die bereits geantwortet haben, behalten ihre Antworten, und nur die übrigen laufen erneut.
 
 Agenten eines laufenden Workflows können keinen eigenen Workflow starten.
+
+## Läufe ohne Freigabe starten
+
+Schalte unter **Workflow-Werkzeug** die Option **Läufe ohne meine Freigabe starten** ein, damit ein Lauf, den der Agent startet, sofort beginnt. Seine Karte zeigt ihn als laufend, ohne die Schaltfläche **Workflow ausführen**, und du kannst ihn weiterhin mit **Stoppen** beenden. Das ist für Arbeit gedacht, die ihr abgesprochen habt und die du dann allein lässt: Du bittest den Agenten zum Beispiel, in einem kleinen Pilotlauf einige Modelle auszuprobieren und die ganze Aufgabe mit dem besten auszuführen, und er kann diesen Lauf starten, während du weg bist.
+
+Der Agent schlägt den Plan und die Modelle weiterhin im Chat vor, bevor er einen Lauf startet. Die Einstellung erspart nur den Klick. Der Server liest sie bei jedem Lauf, also wartet bei deaktiviertem Kästchen jeder Lauf wieder auf dich. Die Grenzen unten bleiben gleich.
 
 ## Modelle und Kosten
 

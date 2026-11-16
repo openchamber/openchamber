@@ -1,15 +1,3 @@
-// Private relay service: config persistence, lifecycle of the relay host
-// client, and the /api/openchamber/relay/* management routes.
-//
-// Config lives in the server settings file as `settings.privateRelay =
-// { enabled, relayUrl }` (same storage precedent as tunnels/notifications).
-// Routes are registered with the other OpenChamber feature routes, before the
-// generic OpenCode proxy, and are covered by the same global UI auth gate.
-//
-// Cross-runtime parity note: relay host mode intentionally targets the web
-// server runtime only in v1 (Electron shares this server in-process). The VS
-// Code runtime does not host a relay; shared UI must treat these routes as
-// web-runtime capabilities.
 
 import express from 'express';
 
@@ -36,21 +24,11 @@ export const normalizeRelayUrl = (value) => {
   return trimmed;
 };
 
-// A deployment can pin the relay endpoint (e.g. a self-hosted relay on your
-// own Cloudflare account/domain): `relayUrl` in the machine policy file, else
-// OPENCHAMBER_RELAY_URL (see ../enterprise-mode.js). When set and valid it
-// overrides the stored setting entirely, so the host connection, the pairing
-// offer, and the status all point at it — clients then inherit it from the
-// offer automatically. An invalid pinned value pins nothing.
 export const pinnedRelayUrl = () => {
   const raw = readEnterprisePolicy().relayUrl;
   return raw && isValidRelayUrl(raw) ? raw.trim() : null;
 };
 
-// Enterprise mode keeps remote access inside the company: the relay runs only
-// on a pinned self-hosted endpoint, never on ours.
-// Traffic is end-to-end encrypted either way; what stays in-house is the
-// metadata and the path into this machine.
 const RELAY_BLOCKED_ERROR = 'In enterprise mode the relay runs on your own endpoint: set relayUrl in the policy file or OPENCHAMBER_RELAY_URL to a self-hosted relay.';
 export const relayBlockedByEnterprise = () => isEnterpriseMode() && pinnedRelayUrl() === null;
 
@@ -68,23 +46,11 @@ export const createRelayService = ({
   crypto,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
-  // Host relay identity keys, shared with the push relay (key-store.js).
   relayKeyStore,
   getLocalPort,
-  // Returns true when any paired device or pending pairing session uses the
-  // relay transport. The relay lifecycle is driven purely by this demand.
   hasRelayDemand = async () => false,
-  // Per-machine claim (host-lock.js): all local instances share the same
-  // serverId, so only ONE process may run the relay host at a time or they
-  // evict each other at the relay worker ("Control replaced") and devices land
-  // on a random instance. Optional: without it, behavior is pre-lock.
   hostLock = null,
-  // When false, this instance never starts the relay host on its own (boot,
-  // demand reconcile, or claim-watch takeover) — only an explicit user action
-  // (enable, pairing) force-claims. Dev/debug instances set this so they do not
-  // capture paired devices from the production instance sharing the data dir.
   allowPassiveHost = true,
-  // Hears the relay's `share-state` nudge for a share this server made.
   onShareState = () => {},
   logger = console,
 }) => {
@@ -92,15 +58,8 @@ export const createRelayService = ({
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };
-  // Re-checks the claim while enabled: a standby instance takes over when the
-  // claimant dies; a running host stands down when another process claims.
   let claimWatchTimer = null;
   const CLAIM_WATCH_INTERVAL_MS = 30_000;
-  // A standby instance does not grab a freed claim immediately: a clean restart
-  // of the previous host (app update, relaunch) releases the claim for a short
-  // while, and taking it during that window strands the devices on this —
-  // possibly older — instance. The restarting host reclaims at boot without any
-  // wait, so it always wins the window.
   const CLAIM_TAKEOVER_GRACE_MS = 120_000;
   let claimFreeSinceMs = null;
 
@@ -111,8 +70,6 @@ export const createRelayService = ({
     return {
       enabled: stored?.enabled === true,
       relayUrl: override ?? normalizeRelayUrl(stored?.relayUrl),
-      // True when an administrator pinned the endpoint (a self-hosted relay);
-      // the stored setting is ignored while it is set.
       relayUrlLocked: override !== null,
     };
   };
@@ -139,13 +96,6 @@ export const createRelayService = ({
     connectedClients: 0,
   });
 
-  // Claim watcher, active while the relay is enabled:
-  //   - standby → claimant died → take over (start our host);
-  //   - running → another live process claimed → stand down (stop, standby);
-  //     otherwise refresh the claim, which keeps it live for instances on
-  //     other hosts or containers that cannot probe our pid.
-  // This back-off is what actually ends the mutual-eviction fight: the loser
-  // must STOP reconnecting, otherwise both keep replacing each other forever.
   const ensureClaimWatch = (relayUrl) => {
     if (!hostLock || claimWatchTimer) return;
     claimWatchTimer = setInterval(() => {
@@ -191,7 +141,6 @@ export const createRelayService = ({
 
   const start = async (relayUrl, { claim = 'try' } = {}) => {
     if (hostClient) return;
-    // Every path into the relay host passes here: boot, demand, enable, pairing.
     if (relayBlockedByEnterprise()) {
       status = { state: 'disabled', lastError: RELAY_BLOCKED_ERROR, connectedClients: 0 };
       return;
@@ -245,9 +194,6 @@ export const createRelayService = ({
     }
   };
 
-  // Drive the relay lifecycle from demand: run it when a device or pending
-  // session uses the relay, stop it when none remain. Called on startup and after
-  // pairing/device changes, so the operator never toggles it manually.
   const reconcile = async () => {
     try {
       const demand = await hasRelayDemand();
@@ -267,10 +213,6 @@ export const createRelayService = ({
     }
   };
 
-  // Stable server identity (base64url SHA-256 of the canonical public signing
-  // JWK). Derived from a public key, so it is not a secret; clients use it to
-  // verify that a learned/probed address belongs to this server before trusting
-  // it. Independent of whether the relay host is currently enabled.
   const getServerId = async () => {
     const identity = await identityRuntime.getRelayIdentity();
     return identity.serverId;
@@ -282,27 +224,17 @@ export const createRelayService = ({
     const live = hostClient ? hostClient.getStatus() : status;
     return {
       enabled: config.enabled,
-      // Without a host client the service is either off or standing by while
-      // another local process owns the machine's relay host claim.
       state: hostClient ? live.state : (status.state === 'standby' ? 'standby' : 'disabled'),
       serverId: identity.serverId,
       connectedClients: live.connectedClients,
       relayUrl: config.relayUrl,
       relayUrlLocked: config.relayUrlLocked,
       blockedByEnterprise: relayBlockedByEnterprise(),
-      // Another host with this identity keeps taking the relay slot: usually
-      // the data dir was copied to a second machine (host-client.js).
       identityConflict: hostClient ? live.identityConflict : false,
       ...(live.lastError ? { lastError: live.lastError } : {}),
     };
   };
 
-  // Pairing candidate for the unified connection payload (pairing v2). Relay is
-  // just another transport: it carries the relay route + E2EE trust anchor, no
-  // embedded token — the client redeems the one-time pairing secret over the
-  // tunnel like any other candidate. Returns null when the host relay is off, so
-  // callers only advertise relay when it is actually reachable. Priority is high
-  // (tried after LAN/tunnel) since the relay path is the last-resort transport.
   const buildPairingCandidate = async () => {
     const config = await readConfig();
     const identity = await identityRuntime.getRelayIdentity();
@@ -321,12 +253,7 @@ export const createRelayService = ({
     return buildPairingCandidate();
   };
 
-  // Enable the relay host on demand and return its pairing candidate. Creating a
-  // relay pairing link IS the demand signal, so the relay turns itself on here
-  // rather than requiring a separate manual toggle. Idempotent: a no-op when the
-  // relay is already enabled and running.
   const ensureEnabledForPairing = async () => {
-    // Direct pairing still works: the pairing route drops a failed relay candidate.
     if (relayBlockedByEnterprise()) throw Object.assign(new Error(RELAY_BLOCKED_ERROR), { statusCode: 403 });
     const config = await readConfig();
     if (!config.enabled) {
@@ -334,18 +261,11 @@ export const createRelayService = ({
     }
     if (!hostClient) {
       const next = await readConfig();
-      // Force-claim: creating a pairing link is explicit user intent — the
-      // instance the user is pairing against MUST be the one devices reach,
-      // even if another local process currently holds the machine's claim
-      // (its claim watcher sees the takeover and stands down).
       await start(next.relayUrl, { claim: 'force' });
     }
     return buildPairingCandidate();
   };
 
-  // Gives this copy its own identity. Both copies of a copied data dir hold the
-  // same keys and evict each other at the relay; after the reset, devices that
-  // know the old identity keep reaching the other copy until they pair here again.
   const resetIdentity = async () => {
     const wasHosting = hostClient !== null;
     stopHostClient();
@@ -371,7 +291,6 @@ export const createRelayService = ({
         const relayUrl = typeof req.body?.relayUrl === 'string' ? normalizeRelayUrl(req.body.relayUrl) : current.relayUrl;
         await writeConfig({ enabled: true, relayUrl });
         if (hostClient) stop();
-        // Explicit user action: take the machine's host claim like pairing does.
         await start(relayUrl, { claim: 'force' });
         res.json(await getStatus());
       } catch (error) {

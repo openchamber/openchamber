@@ -60,8 +60,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
         const key = folderName.toLowerCase();
         let folder = folderByName.get(key);
         if (!folder) {
-          // Every client of the server files the archive the same way; a
-          // fixed id makes two clients doing it at once create one folder.
           folder = createFolder(scopeKey, folderName, null, `archived:${scopeKey}:${key}`);
           folderByName.set(key, folder);
         }

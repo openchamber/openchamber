@@ -1475,7 +1475,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Hız: {rate}',
   'settings.usage.pace.waitSeparator': ' · Bekle ',
   'settings.usage.pace.predictionLabel': 'Tahmin: ',
-  'settings.usage.card.showInHeaderAria': 'Başlık menüsünde göster',
   'settings.usage.card.resetsAt': '{time} sıfırlanır',
   'settings.usage.card.bar.used': 'kullanılan',
   'settings.usage.card.bar.remaining': 'kalan',

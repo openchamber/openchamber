@@ -3,7 +3,6 @@ import { UI_CSS } from './style.ts';
 
 export type SpinnerProps = {
   size?: 'sm' | 'default';
-  /** Text next to the ring. Also the accessible name. */
   label?: string;
 };
 

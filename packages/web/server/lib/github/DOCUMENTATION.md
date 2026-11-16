@@ -81,7 +81,7 @@ GitHub Enterprise authenticates per instance, the same model GitLab uses: each i
 - Gates and `selectTokenForHost` apply to both kinds of instance with one rule: the stored token is the credential unless the instance is explicitly active. A bound read whose account does not resolve answers `401` (`GitHub account is unavailable`), whichever instance it names; no token is ever minted for a host the trust gate refuses.
 - Every auth answer is the neutral `SourceControlAuthStatus` (`{ provider, instance, status, connected, user, scope, accounts, cli }`), for github.com and an enterprise host alike: github.com's gh login appears as `cli` and as its `github.com#cli:<id>` account row. Activating an account answers that instance's status; an enterprise PAT account activates on its own host.
 - A host can hold several gh logins (a personal and a work account, for instance). Once that instance's gh switch is on, every login gh holds for the host is a row of its own (`<host>#cli:<id>`, `source: 'cli'`, `usable: true`), not only the active one, so a repository can bind any of them without changing gh's own active account. `current` stays one row per instance: the login the instance is on — the one named when the user activated it (`cliLogin`), else gh's active login. Activating another row switches the instance to that login (`setGhCliActiveForHost(host, true, selector)`) and remembers it, so an unbound use keeps resolving to it; activating gh's active login (or the `GH_TOKEN` account) clears the pin, so the instance follows gh's active account the way earlier releases did. `usable` is what a binding may pick now; `current` is what an unbound use falls back to. While the instance's switch is off no gh row is usable: github.com lists only gh's active login, as the offer row that turns the switch on, and an enterprise host only its hosts.yml placeholder. One gh switch serves every login, so each row's Use switches the instance to that login and the switch-off disconnects gh for the whole instance, whichever login's row it is pressed on - the same row actions a host with one gh login always had.
-- github.com's own gh switch is unchanged: its switch lives in Settings (`setGhCliActive` / `isGhCliActive`, stored in `settings.json`), and its `ghCliDisabled` kill switch turns github.com's CLI off. Each enterprise host's own switch and `cliDisabled` live with that instance, so turning one host off never takes another with it.
+- github.com's own gh switch is unchanged: its switch lives in Settings (`setGhCliActive` / `isGhCliActive`, stored in `settings.json`), and its `ghCliDisabled` kill switch turns github.com's CLI off. While `ghCliDisabled` is on, the github.com status read never runs gh: `cli.available` then comes from a github.com login in `hosts.yml` or a `GH_TOKEN`/`GITHUB_TOKEN` in the server's environment (the token gh itself would read), so the row that turns gh back on stays without a gh process every few minutes. Each enterprise host's own switch and `cliDisabled` live with that instance, so turning one host off never takes another with it.
 ## Auth storage and config
 
 - Auth storage: `~/.config/openchamber/github-auth.json` - github.com's device-flow accounts, in the same versions as before: `cliLogin` is written into a version 3 instance only while a login is pinned, so a file this release touches without pinning one stays readable by an older release's strict parser, and a pinned login upgrades the file to version 3. A GitHub Enterprise host's personal access tokens and its gh switch live in `source-control-auth.json`, the server token store GitLab uses, one entry per host; each instance keeps its own `activeCredentialId`, credentials, `cliDisabled`, `cliActive`, and `cliLogin` (the gh login its switch is on for; null or absent means gh's own active login, so older files read unchanged and a switch with no pinned login still writes nothing extra). github.com's gh switch keeps living in `settings.json` (as `ghCliActive`/`ghCliDisabled`, with a pinned login as `ghCliLogin`); a non-github.com host's switch lives with its instance there. Versions 1 and 2 flat files migrate into the `github.com` instance on first write.
@@ -274,7 +274,61 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Device flow handles GitHub `authorization_pending` at caller level.
 - Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.
 
+## Invariants
+
+- Mutation digest input keeps the same fields and insertion order, and stored operation kinds stay byte-identical. Changing either makes retained running records conflict on replay.
+- Host configuration validates each `hosts.yml` entry independently. A malformed entry cannot revoke another host's valid login.
+- A transient failure to identify the selected gh account preserves its activation. Only a missing, disabled or refused login clears the choice, so a network failure cannot silently select another account.
+- The gh token cache stamp includes the selected config directory. Switching `GH_CONFIG_DIR` cannot reuse another directory's answers, and file identity cannot rely on Windows inode values. Cache keys fold login case, while `--user` receives the stored spelling because gh owns token selection.
+- Enterprise auth storage resolves `OPENCHAMBER_DATA_DIR` at call time and shares `source-control-auth.json.lock` with the other server token-store users. The github.com file and Settings paths retain their module-load scope.
+- A detail-inclusive cached pull context can serve a detail-free request. Both use the same invalidation boundary.
+- Repository cache invalidation compares normalized, whole `::`-delimited repository segments across hosts within the requested credential scope. Mixed-case names must invalidate, and `foo/bar` must not match `xfoo/bar`.
+- Independent remote and metadata lookups may run concurrently, but deduplication and priority fold results in candidate order so completion timing cannot change PR selection. Already-fetched metadata serves default-branch checks to avoid another serial request per repository.
+- A shared repository pull list proves absence only when its first page contains fewer than 100 entries. Complete lists suppress per-head and search fallback calls; incomplete lists cannot prove a branch has no PR.
+- Partial GraphQL lookup data survives per-alias errors. One inaccessible item cannot discard resolved siblings, while an error without data remains a failed read.
+- Across-search with an explicit user `sort:` returns the items it reads even when they do not satisfy the newest-first merge frontier. Waiting for that frontier can otherwise stall such a query.
+- Review draft text belongs to the pending review, but its diff side comes from the containing thread. An outdated thread remains available on the board.
+- A new stack layer never treats the repository's default branch as another PR layer. A release PR out of the default branch must not capture unrelated PRs targeting that branch.
+- After an asynchronous merge is accepted, a failed follow-up read leaves the merge pending for live state to resolve. It cannot establish that the accepted write failed.
+- Cancellation re-reads waiting state after dequeue because dequeue can also clear auto-merge. The local cancel remains marked in flight until successful follow removal is queued, so an intervening live read cannot emit a removal notification for the user's own action.
+
 ## Decisions
+
+### Why Octokit bounds requests and rejects enterprise redirects
+
+An 8 s fetch deadline prevents one stalled request from consuming the status resolver's full budget and lets the caller use cached state. Named enterprise hosts reject redirects so their credentials stay scoped to that instance; github.com retains its default redirect behavior.
+
+### Why ETag responses are cached by credential digest and URL
+
+Conditional reads reduce REST quota use for unchanged data. The credential digest keeps raw tokens out of cache keys, and the URL separates hosts so a 304 response can only replay that credential's response from that instance.
+
+### Why branch discovery shares repository lists and remembers search misses
+
+Worktrees of one repository share an in-flight pull list and its 45 s answer, avoiding one list call per branch. The separate Search API quota is spent on live status; ten-minute per-branch misses and five-minute refusal backoff suppress repeated searches, while history uses per-head repository queries.
+
+### Why PR file context uses the merge base and provider objects
+
+The comparison view expands the same three-dot diff as the pull request, so its original side uses the merge base; using the base tip introduces unrelated base-branch work. Provider reads also cover unfetched commits and fork heads through the base repository, while the 5 MB full-text limit avoids an unreadable full-context view and its transfer cost.
+
+### Why patch reads resolve the checkout before choosing a client
+
+`sourceRepo` carries only owner and repository, so the local checkout supplies the host first. github.com uses the exact read-context account, while enterprise patch reads use that host's pinned credential; selectors stay inside the bound network unless an explicit linked read names the item.
+
+### Why static descriptors stay independent of Octokit
+
+Git transport, bindings and clients read the descriptor synchronously without loading the GitHub SDK. Hostname normalization checks URL form only; the separate trust gate decides whether a credential may be used.
+
+### Why authentication writes omit an unpinned login
+
+Older releases reject unknown storage keys. A write adds `cliLogin` only while a login is pinned and keeps the flat version 2 shape whenever the state fits it, preserving readability for those releases.
+
+### Why pending review submission reuses its original commit
+
+Approval and change requests must refer to the commit the user read, including the commit a pending review began on. A comment verdict can submit the existing draft on its original commit without asserting approval of a newer head.
+
+### Why reviewer pickers list people only
+
+The board's reviewer control selects individual users. Requested teams stay out of its list so submitting the control's set does not present teams as selectable people.
 
 ### Why a refused merge can enable auto-merge
 

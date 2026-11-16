@@ -15,17 +15,11 @@ const guestAuthEntrySchema = z.object({
   account: z.string().max(200).optional(),
   settings: z.record(z.string().regex(SETTING_KEY), z.string().max(2000)).optional(),
   authorizedAt: z.number().int().positive().optional(),
-  // Where the tokens were minted for. Checked before every use, so a
-  // package that moved its API origin or OAuth endpoints cannot receive
-  // credentials the user connected for the old ones.
   target: z.object({
     apiOrigin: z.string().min(1),
     authorizeUrl: z.string().min(1).optional(),
     tokenUrl: z.string().min(1).optional(),
   }).optional(),
-  // Where the client id and secret were entered for. A package that moved
-  // its endpoints gets no client credentials until the user enters them
-  // again; they are never carried over.
   clientTarget: z.object({
     apiOrigin: z.string().min(1),
     authorizeUrl: z.string().min(1).optional(),
@@ -80,10 +74,6 @@ export const readGuestAuthStore = async (persistPath) => {
 const writeChains = new Map();
 let writeSequence = 0;
 
-// Two writers at once (a token refresh while a settings field saves) used to
-// share one temp file and a stale read: one of them lost. Every change to one
-// store file now runs read → change → write as a single step, one after
-// another, each on its own temp file.
 const withAuthStoreLock = (persistPath, run) => {
   const previous = writeChains.get(persistPath) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(run);
@@ -112,15 +102,6 @@ export const getGuestAuth = async (guestId, persistPath) => {
   return store.guests[guestId] ?? null;
 };
 
-/**
- * Apply `patch` to one guest's entry, read and written under the store lock.
- * With `expect`, the patch only lands when the entry read under the lock
- * satisfies it; a caller that spent a network round trip on the old entry
- * (a token refresh) uses this to drop its result when the entry moved on.
- * `patch` may be a function of the entry read under the lock, for a change
- * that depends on what is there (a client id replacing another one).
- * Returns the entry as stored afterwards, or `null` when it is gone.
- */
 export const patchGuestAuth = (guestId, patch, persistPath, expect = null) => withAuthStoreLock(persistPath, async () => {
   const store = await readGuestAuthStore(persistPath);
   const current = store.guests[guestId] ?? null;
@@ -151,11 +132,6 @@ export const patchGuestAuth = (guestId, patch, persistPath, expect = null) => wi
   return guests[guestId] ?? null;
 });
 
-/**
- * Forget the tokens. With `expect`, only when the entry read under the lock
- * still holds the tokens the caller is reacting to; a caller that saw a 401
- * on one access token must not erase a newer connection made meanwhile.
- */
 export const dropGuestTokens = async (guestId, persistPath, expect = null) => {
   const current = await getGuestAuth(guestId, persistPath);
   if (!current) {
@@ -172,7 +148,6 @@ export const dropGuestTokens = async (guestId, persistPath, expect = null) => {
   }, persistPath, expect);
 };
 
-/** Drop everything stored for a guest: tokens, client credentials, and settings. Used when the package is removed. */
 export const forgetGuestAuth = (guestId, persistPath) => withAuthStoreLock(persistPath, async () => {
   const store = await readGuestAuthStore(persistPath);
   if (!(guestId in store.guests)) {

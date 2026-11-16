@@ -794,3 +794,145 @@ A user who closed the toast already said no to it, so About is a quiet place
 to find the update instead of a toast that comes back. A second update item
 in the sessions footer was rejected: that item belongs to server updates in
 the browser, and a second meaning there confuses both.
+
+## Invariants
+
+### Drafts, selection and policies
+
+- Settings project selection leaves the chat, session list and file tree in place. Provider detail selection is page-local because the chat's provider selection records a manual model choice.
+- An agent override without a stored mode keeps its resolved mode, so an unrelated edit cannot turn a built-in agent into a subagent. Duplicating carries the stored permission rules into creation.
+- The last agent available to a chat cannot be switched off. Disabled custom agents remain manageable while OpenCode removes them from its runtime list.
+- Policy re-reads keep the last successful rules for the same directory. Changing directories clears them before reading, so failure cannot apply another project's rules. Policy-changing controls wait for a successful read.
+- A selected skill is discarded as missing only after its list loads, since VS Code can select it before that read. Renaming moves the directory in place to preserve supporting files.
+- Snippet editors reset for a different snippet or draft, including a new draft reusing a discarded draft's name. Refreshing the same file preserves edits; an async create selects its result only while that draft remains selected.
+- Routing saves serialize against the runtime where the edit starts. Runtime switches drop pending saves; responses replace only idle drafts, and a response that merely trims the current draft leaves typed whitespace intact.
+- Routing prefills its initial fallback only from a concrete session-default model. Auto cannot prefill the fallback that resolves Auto.
+- Existing `AGENTS.md` content, including an empty file, is authoritative. The stored behavior prompt is a fallback only for a missing file or failed read. Window focus re-reads the file, preserves dirty drafts and carries the exact read content into writes so external edits can be rejected.
+
+### Provider configuration and authentication
+
+- Custom-provider edits start from stored config. Resolved environment variables, headers, generated reasoning levels and certificate PEM text cannot become explicit configuration through an unrelated edit.
+- Provider creation writes the user layer; editing writes the winning existing layer in custom, project, user precedence. Catalog-only providers cannot acquire config editing from matching package or URL metadata alone.
+- Custom-provider config precedes key storage. OpenCode's watcher registers the integration asynchronously, so key storage briefly retries only "Integration not found".
+- Clearing saved reasoning levels sends an empty list; new rows without levels omit the key. Protocol changes rebuild levels because request overlays use protocol-specific spellings.
+- Unchecking an image model writes `chat` explicitly because the server merges over the saved `image` type.
+- Certificate and private key are submitted together. Passphrases retain exact bytes, and an unknown stored certificate stays untouched until the user edits its fields.
+- The custom-provider form hydrates once per provider ID, so parent refreshes preserve in-progress edits.
+- OAuth status, completion and cancellation keep the location client that starts the attempt, even when the app changes project.
+- OAuth runs one method at a time and cancels abandoned attempts, including starts that complete after unmount. Auto-start runs once per mount so renders cannot restart a cancelled sign-in.
+- A pasted redirect URL settles an auto attempt through its existing status poll. A rejected URL leaves the attempt waiting for another paste.
+- Claude Code's CLI opens its own sign-in browser. Its integration URL is informational, so opening it again adds an unrelated documentation tab.
+- Integration forms evaluate conditions in declaration order against active preceding answers. Hidden answers cannot reveal later fields, and hidden fields and blank optional fields stay out of the payload. Methods without a form receive no answer object.
+- Integration defaults fill fields the user has not edited after catalog refreshes. The custom-value sentinel uses a NUL prefix to stay distinct from integration options.
+- Successful credential writes may temporarily mark a provider connected until authoritative integrations arrive. Account switching waits for the server because it owns the active credential.
+- A provider routes through one integration. Credentials under another integration stay removable but cannot be selected for that provider; environment-backed credentials cannot be removed here.
+- A single usable account has no Use action. Its Active mark still distinguishes it from other unusable stored accounts.
+- Automatic account switching is opt-in per provider because another account can intentionally belong to work. Updates start from the latest stored list to preserve other providers' choices.
+- Provider-policy warnings require known config and Console status. Console workspace policies are absent from config reads, so a connected Console prevents a definite claim that policy is missing.
+- Disabled providers remain reachable because OpenCode omits them from its live list. Source-read failure removes only the Project chip, and uncertain credentials never hide a configured custom provider's model editor.
+
+### MCP and source control
+
+- MCP saves carry OAuth fields without editors unchanged because the store rebuilds the entire block. Snippet import accepts v1 and v2 and emits v2; a v1 timeout becomes execution timeout, while startup applies only to local servers.
+- Command import uses paste events because direct clipboard reads can be denied. Only a whole-field single-command paste is split into arguments; partial pastes remain ordinary editing.
+- MCP integration matching uses source and server name because OpenCode owns its registration hash. Lookup retries cover registration completing after the first list read.
+- Runtime MCP status outranks store diagnostics. Policy-blocked servers use the page's blocked state because earlier runtime status is stale.
+- Web-search choice is locked when project configuration overrides the file Settings writes, since a write would immediately appear to revert. Configured providers no longer offered remain named so a missing plugin or typo stays visible.
+- Failed account-list reads preserve an identity's stored account. Only explicit selection changes it; public author writes leave private migration fields to the server.
+- Managed SSH references stay opaque and display only safe labels. Mounting preserves the saved key; a runtime switch clears a reference belonging to another machine.
+- SSH key fields are omitted for other transports. Transport authentication and commit signing remain independent.
+- Re-authentication adds a credential because existing bindings must keep their original credential. Short handles appear only when otherwise identical rows need distinguishing.
+- Stale-address and questionable-account grants remain unresolved in the endpoint editor. The System identity uses effective bindings and reaches every remote through machine Git.
+- Submodule and LFS grants require an identity with an account and transport, excluding legacy identities without them. The repository identity is proposed only for its own instance, including a separate SSH host; another host requires an explicit choice.
+- Instance capabilities reload when descriptor identity changes. Account summaries prefer the acting account because the first account is arbitrary across instances.
+- CLI accounts apply only after an explicit switch. A saved CLI switch with no available account row remains reachable separately.
+- Tracker mappings reload on account change because containers belong to the account. Browser sign-in waits end on leaving the card, so a first successful status read cannot cancel a running wait.
+- Tracker session comments start off because they publish to other people. The server applies the switch to completion and failure comments too.
+- Extension-channel read failure preserves the last list. Approval and pause changes re-read it because they change which channels exist.
+
+### Desktop, models and status
+
+- Either desktop Save + restart action writes every pending restart draft together. Invalid network drafts block restart so another section's restart cannot discard them.
+- The network password is write-only and omitted when unchanged. LAN access requires a valid password draft, and enterprise restrictions remain server-enforced.
+- Global Mini Chat and Quake combos participate in in-app conflict checks. Replacement releases an in-app binding only after the global combo is stored, preserving the working action on failure.
+- Releasing a global combo stores it as unassigned because clearing the setting restores its default and takes the combo back.
+- Shortcut recording suspends the registry and cancels armed sequences because window capture dispatches before field handlers. Recorded Escape stays in the recorder rather than closing Settings.
+- Global shortcuts allow one chord with all 4 modifiers and a key. In-app shortcuts allow sequences with a smaller simultaneous-key limit. macOS Control and Command remain distinct; `mod` means Command there and Control elsewhere, while non-macOS Meta is `super`.
+- The reset dialog stays mounted when its trigger disappears after reset so it can finish closing.
+- Binary selection owns OpenCode restart because other configuration is watched live. Process environment changes reach OpenCode on restart and Git, terminals and project actions on their next run.
+- Project environment never reaches shared managed OpenCode because it serves every project. A changed environment command runs immediately to expose its result.
+- Passkeys are web-only because the other shells do not display the login screen. Capacitor uses native notification permission, suppresses focused notifications and uses generic notification text.
+- Classification, goal automation and per-session warming require an OpenChamber server. VS Code offers OpenCode's global warming and renders existing goal state.
+- Unavailable classification shows the server's effective safety-mode and goal-checker fallback without erasing the saved choice. Administrator-pinned endpoints remain read-only; empty custom-endpoint keys keep the saved key, including draft tests.
+- Server-persisted language survives lost browser storage and reaches other clients. Enterprise font previews show the effective system font where a stored font needs a CDN.
+- Session defaults preserve a chat's manual model and an explicitly selected agent's pinned model. Offered choices require verified credentials and the live catalog.
+- Thinking levels belong to their model and reset on model change. Clearing the goal-model picker explicitly returns to the small model.
+- Walkthrough models exclude only an explicit lack of structured output; missing metadata keeps a model eligible because the catalog omits capabilities for working models.
+- A memory-organizing model missing from the catalog stays named. A removed browser-provider extension shows the built-in provider because the server already falls back to it.
+- Memory refresh follows the persisted setting write; refreshing on the optimistic toggle can read the earlier disabled state and leave the tab hidden.
+- Compaction rollback restores only fields untouched by newer writes. Hand-written values outside the offered steps stay selectable so the saved choice remains visible.
+- Retention fields remain editable with automatic cleanup off because manual cleanup uses them too. The In work block never includes archived sessions.
+- Message-search status reads continue beyond an initially settled answer after a switch because the debounced save can start indexing later.
+- Voice keys stay on the server. Dictation cleanup starts off because it sends text to the small-model provider, and without that model the server retains the transcription. Voice pickers share install state and list installed models plus the default; dictation displays the server's choice when no saved model is available.
+- Usage panels show only their provider's error, so Console budgets survive a failed Go usage read. Balance-only windows omit percentage bars and used captions because they report no usage share.
+- About separates app, connected-server and OpenCode updates. A latest-version toast waits for every relevant check; failed checks keep prior status, and authoritative running versions replace temporary installed-but-not-running state.
+- About offers upgrade commands only for package-manager installations. Update notes cover the offered release range; a stable release offered to Canary has only that release's notes.
+
+### Extensions, plugins and catalogs
+
+- Only local desktop extension installation hands the server a path. Web and remote desktop upload archives; file drops suppress browser navigation.
+- Extension updates serialize so failures leave completed updates intact. A runtime switch ends the batch, and increased capability requests wait for review.
+- Declining a new extension removes it; existing extensions may stay pending. Changed credential grants require approval again, and approval cannot override enterprise refusal.
+- Plugin pending state is per row so one response cannot enable another writing row. Control entries cannot acquire package options or file actions; discovered package directories remain OpenCode-owned.
+- Exact plugin pins update through npm; reinstallable names, ranges, tags and Git targets update through OpenCode. Runtime matching keeps package strings verbatim and resolves relative local paths against their declaring config file.
+- A failed plugin revision outranks a still-active older revision so its failed update remains visible.
+- Failed catalog-list reads disable mutations because an assumed empty list would overwrite other sources. Only identities with their own credential change cloning; System transport uses ordinary Git setup.
+- Catalog skill paths already include their source subpath; prepending it again breaks repository links.
+
+### Isolated spaces and remote connections
+
+- The host owns the isolated-space switch and idle timeout. Timeout fields commit whole edits because each digit would otherwise broadcast an intermediate value to running spaces.
+- Switching isolated spaces off retains files and asks first when spaces run or their count is unknown. Unregistered-project spaces stay reachable; failed reads cannot claim there are none.
+- Unreachable places retain last-seen spaces without reporting zero. Changing the configured machine re-reads places because routing changes with it.
+- Place disk polling runs around observed image downloads and stops on read failure. Bounded settling reads after completion let Docker's disk inventory learn the image size.
+- Place cleanup is unavailable during image download because the host refuses it. Failed download-status reads stop polling and expose the failure rather than leaving a spinner running.
+- Opening SSH switches the runtime to the forwarded URL. Navigating to the remote UI changes the trusted origin and prevents the desktop shell from reconnecting a dropped tunnel.
+- SSH confirmation stays in the page's dialog focus tree because native confirmation can leave Electron on Windows unable to accept text. Leaving the form abandons the operation, including unresolved password persistence.
+- Pairing uses identical device metadata across transports and deduplicates re-pairing by install ID. Direct candidates precede relay in payload order to avoid relay cost where direct access works.
+- Relay redemption uses a temporary tunnel and never persists its admission grant. Saved hosts keep every offered transport and the shared token so home-network access can fall back to relay elsewhere.
+- Re-importing pairing updates the matching server record. Renaming preserves relay credentials and learned addresses; relay-only transport changes require fresh pairing.
+- Pairing auto-close requires successful reads that first see the session and later see it disappear. Failure retains the list; only a matching redeemed client produces a success notification.
+- Device labels name this server's device-list entry; exported connection labels name the issuing server. Dense pairing payloads use high-resolution QR output with low error correction.
+- LAN availability comes from the server bind address, with browser-origin guessing only after read failure. Publishing a remote server to its network requires its UI password.
+- Only reconnecting SSH status runs the stuck-state clock. Saved-host probes run per list identity, hidden pages pause polling and relay-conflict failures retain the last state.
+- A running tunnel's port belongs to its identity, so changing the configured port requires a different tunnel even if its mode is unchanged.
+
+### Shared controls and project editing
+
+- Card menus and switches are siblings of the navigation button to avoid nested interactive controls. Checkbox descriptions with links remain outside the clickable row.
+- Header actions wrap before starving the title. The first rendered section has no leading gap or rule even when earlier platform-specific sections render nothing.
+- Select caps use the scaled control font in `ch` because typography scaling leaves root `rem` unchanged. Number steppers also reserve button space and keep intrinsic width so increment buttons cannot stretch unevenly.
+- Full-width field rows stay in full-width sections; half-width columns use stacked labels because a fixed label column overflows them.
+- Disabled-row explanations stay readable because they say how to enable the option. Required warnings stay visible because touch users cannot be expected to long-press.
+- Info hints and disabled-option tooltips own trigger click handling so Base UI's trigger-press close cannot undo a touch opening. Disabled buttons use wrapper triggers, and popup links retain their clicks.
+- Dragging closes row tooltips because they can consume Escape needed to cancel keyboard dragging. Mobile project selection uses the bottom sheet because select popups cannot scroll long lists within the viewport.
+- Theme preview controls use divs because the app's button SVG rule clears shape fills. Light-theme selected options use canvas color because elevated colors are darker there.
+- Theme list padding and scroll padding match edge fades so focused edge rows remain readable. Keyboard navigation has one tab stop and transfers focus after deletion; a missing stored theme uses the app's first-theme fallback.
+- Theme search ranks substring matches by prefix and word prefix because fuzzy matching returns unrelated names. Theme import reserves a partial-result line to keep its footer in place.
+- Project icon popups portal into Settings dialogs to remain inside their focus trap and stacking context. System file pickers sit outside popups because opening them closes the popup.
+- Project identity refresh follows the store only while clean. Selecting a symbol removes an image because the sidebar gives images precedence.
+- Custom worktree creation commands stay personal because they name machine-local tools. Worktree mutation lists are invalidation signals; the panel re-reads its authoritative list from the server.
+- New-setting badges use the Settings device context and stay hidden outside it so navigation cannot announce unavailable controls.
+- Disabled subcontrols retain layout space so toggling them cannot resize dialogs or move neighboring rows.
+- Project setup's personal-only mode omits team setup commands but retains team teardown commands. Moving notes and todos between local and repository storage delegates entry migration to the server.
+- Model-picker Auto appears only for selections processed by routing. Routing categories and fallback selections require concrete models, and compact model triggers retain an accessible name when their visible name is hidden.
+- The phone's workspace tabs are device-local and keep at least one visible tab. A Settings page's plain title remains a screen-reader and focus target when the phone header already names it.
+- The floating Settings close button reserves clearance in the content scrollbar so scrollbar interaction remains reachable.
+
+### Why Jev has a dedicated page and not an OpenCode provider editor
+
+Jev answers OpenChamber classification requests and the server owns its selection and keys. A dedicated Gemini key enables Jev without enabling Gemini chat models.
+
+### Why settings links use text color and not the accent
+
+Underlining identifies links while the accent remains reserved for primary actions. Hover and focus strengthen the underline.

@@ -1,12 +1,3 @@
-// Extension-host side of the project setup routes
-// (`GET/PUT /api/projects/:projectId/config`): the webview cannot reach the
-// filesystem, so it bridges here and this module reads and writes
-// `~/.config/openchamber/projects/<projectId>.json` with the same rules the
-// OpenChamber server applies (`project-setup.ts`). Server-owned keys in the
-// file (`version`, `scheduledTasks`) and keys from newer builds survive a
-// write untouched. The store also owns the checkout's shared file
-// `.openchamber/project.json`: the setup writer and the single-key writer
-// Magic Prompts use (`updateSharedEntry`) run one at a time per checkout.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -35,13 +26,11 @@ import {
 export type ProjectSetupBridgeMessage = { id: string; type: string; payload?: unknown };
 export type ProjectSetupBridgeResponse = { id: string; type: string; success: boolean; data?: unknown; error?: string };
 
-/** A read of the checkout's shared file as a whole document. */
 export type SharedProjectFileRead =
   | { status: 'missing' }
   | { status: 'ok'; document: JsonObject }
   | { status: 'invalid'; reason: string };
 
-/** Thrown by `updateSharedEntry` for a file it refuses to change. */
 class SharedProjectFileError extends Error {
   readonly code: 'shared_config_invalid' | 'project_checkout_missing';
 
@@ -65,11 +54,6 @@ export type ProjectSetupStore = {
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 
-// Mirror of `projectConfigFileStemOf` in the server's
-// `packages/web/server/lib/projects/project-id.js`; keep the two in sync. The
-// file is named by the id while that fits a file name; a `path_<base64url>`
-// id grows with the checkout path, so a long one maps to a fixed-length
-// digest instead of a name the filesystem rejects (ENAMETOOLONG).
 const MAX_PROJECT_CONFIG_FILE_STEM_LENGTH = 200;
 const HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX = 'path_sha256_';
 
@@ -79,7 +63,6 @@ export const projectConfigFileStemOf = (projectId: string): string => {
   return `${HASHED_PROJECT_CONFIG_FILE_STEM_PREFIX}${digest}`;
 };
 
-/** The checkout a `path_<base64url>` id names, or `''` for ids of another form. */
 export const projectPathFromId = (projectId: string): string => {
   if (!projectId.startsWith('path_')) return '';
   const encoded = projectId.slice('path_'.length);
@@ -97,8 +80,6 @@ const sanitizeProjectId = (value: unknown): string => {
   return projectId;
 };
 
-// The parsed document, or null when there is no file (one of `missingCodes`).
-// Malformed JSON still throws; it is a broken file, not an empty one.
 const readJsonDocumentIfPresent = async (filePath: string, missingCodes: string[]): Promise<Record<string, unknown> | null> => {
   let raw: string;
   try {
@@ -123,15 +104,10 @@ const writeJsonAtomic = async (filePath: string, text: string): Promise<void> =>
   }
 };
 
-/** A store over one projects directory; the default is the shared OpenChamber one. */
 export const createProjectSetupStore = (
   projectsDir: string = path.join(os.homedir(), '.config', 'openchamber', 'projects'),
 ): ProjectSetupStore => {
   const filePathFor = (projectId: string): string => path.join(projectsDir, `${projectConfigFileStemOf(sanitizeProjectId(projectId))}.json`);
-  // Where a build before the bounded name stored a long id's file, or null
-  // when the id's own name is the current one. Read as a fallback and removed
-  // once a write has moved its content to the bounded file, the same way the
-  // server does it.
   const legacyFilePathFor = (projectId: string): string | null => {
     const safeProjectId = sanitizeProjectId(projectId);
     if (projectConfigFileStemOf(safeProjectId) === safeProjectId) return null;
@@ -149,11 +125,6 @@ export const createProjectSetupStore = (
     const legacyPath = legacyFilePathFor(projectId);
     if (legacyPath) await fs.promises.rm(legacyPath, { force: true }).catch(() => {});
   };
-  // Writes to one file are chained so two quick saves from the webview cannot
-  // interleave their read-modify-write. Personal files are keyed by their
-  // path, shared files by `shared:<checkout>`; the setup writer takes the
-  // personal key and then the shared one, the prompt writer only the shared
-  // one, so the order never inverts.
   const writeChains = new Map<string, Promise<unknown>>();
   const serialized = <T,>(key: string, task: () => Promise<T>): Promise<T> => {
     const previous = writeChains.get(key) ?? Promise.resolve();
@@ -165,15 +136,11 @@ export const createProjectSetupStore = (
     });
     return next;
   };
-  // A checkout reached through a symlink or another spelling is one file.
   const sharedChainKeyOf = async (projectPath: string): Promise<string> => {
     const resolved = path.resolve(projectPath);
     return `shared:${await fs.promises.realpath(resolved).catch(() => resolved)}`;
   };
 
-  // The shared file lives in the checkout the id names (the personal file's
-  // `projectPath` is the fallback). A missing file is the normal case; an
-  // unreadable or unparsable one is reported, never treated as empty.
   const projectPathOf = (projectId: string, personalRaw: Record<string, unknown>): string => {
     const storedPath = personalRaw.projectPath;
     return projectPathFromId(projectId) || (typeof storedPath === 'string' ? storedPath.trim() : '');
@@ -203,8 +170,6 @@ export const createProjectSetupStore = (
   const isDirectory = (projectPath: string): Promise<boolean> =>
     fs.promises.stat(projectPath).then((stat) => stat.isDirectory()).catch(() => false);
 
-  // Replace the shared file through a unique temporary sibling; `null`
-  // removes it, and the `.openchamber` folder when that leaves it empty.
   const writeSharedFile = async (projectPath: string, text: string | null): Promise<void> => {
     const sharedPath = sharedConfigPathOf(projectPath);
     if (text === null) {
@@ -215,8 +180,6 @@ export const createProjectSetupStore = (
     await writeJsonAtomic(sharedPath, text);
   };
 
-  // A missing file is `missing`; an unreadable, unparsable, other-version or
-  // wrongly shaped setup file is `invalid` with a reason.
   const readSharedFile = async (projectPath: string): Promise<SharedProjectFileRead> => {
     const read = await readSharedAt(projectPath);
     if (read.status === 'ok') return { status: 'ok', document: read.document };
@@ -224,16 +187,6 @@ export const createProjectSetupStore = (
     return read;
   };
 
-  /**
-   * Change one key of the shared file the setup writer does not own (Magic
-   * Prompts use `magicPrompts`), in the same chain as the setup writer of
-   * that checkout. `mutate(current)` receives the stored value (`undefined`
-   * when absent) and returns the next one; `undefined` removes the key and
-   * the same value skips the write. The rest of the document goes back out
-   * exactly as read, and no trust record changes. A file that does not
-   * parse as valid version-1 setup is refused and left byte for byte; this
-   * writer never repairs. Removing the last key removes the file.
-   */
   const updateSharedEntry: ProjectSetupStore['updateSharedEntry'] = async (projectPath, key, mutate) => {
     if (SHARED_SETUP_KEYS.includes(key)) throw new Error(`${key} belongs to the shared setup writer`);
     return serialized(await sharedChainKeyOf(projectPath), async () => {
@@ -249,7 +202,6 @@ export const createProjectSetupStore = (
       const next = mutate(current);
       if (next === current) return current;
 
-      // fromEntries keeps a `__proto__` key an own property.
       const entries = Object.entries(document).filter(([entryKey]) => entryKey !== key);
       if (next !== undefined) entries.push([key, next]);
       const nextDocument = Object.fromEntries(entries);
@@ -278,11 +230,6 @@ export const createProjectSetupStore = (
     });
   };
 
-  // The team's shared file in the checkout; same rules as the server: a
-  // broken file counts as empty, an empty result removes the file, and the
-  // writer's own trust record is set to the new hash. Keys this writer does
-  // not own survive, a repair of a wrongly shaped setup key too; only an
-  // unreadable, unparsable or other-version file is replaced whole.
   const updateShared = async (projectId: string, patch: unknown): Promise<ProjectSetupView> => {
     const filePath = filePathFor(projectId);
     return serialized(filePath, async () => {

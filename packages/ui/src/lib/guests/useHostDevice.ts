@@ -9,11 +9,6 @@ type DeviceMetrics = Omit<HostDevice, 'formFactor'>;
 
 const NO_INSETS: HostDevice['insets'] = { top: 0, right: 0, bottom: 0, left: 0 };
 
-/**
- * The safe area the mobile shell pads itself by. The `--oc-safe-area-*`
- * variables carry the platform fixes (Android's injected insets, the status
- * bar the WebView already sits below), so they win over raw `env()`.
- */
 const readSafeArea = (): HostDevice['insets'] => {
   const probe = document.createElement('div');
   probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;'
@@ -27,12 +22,6 @@ const readSafeArea = (): HostDevice['insets'] => {
   return insets;
 };
 
-/**
- * What the on-screen keyboard covers. The iOS shell overlays the keyboard and
- * publishes its height (`--oc-keyboard-inset`); a mobile browser shrinks the
- * visual viewport over an unchanged layout; Android resizes the window, so
- * nothing is covered there.
- */
 const readKeyboard = (): number => {
   const viewport = window.visualViewport;
   const overlap = viewport ? window.innerHeight - viewport.height - viewport.offsetTop : 0;
@@ -55,13 +44,6 @@ const sameMetrics = (a: DeviceMetrics, b: DeviceMetrics): boolean => (
   && a.insets.bottom === b.insets.bottom && a.insets.left === b.insets.left
 );
 
-/**
- * The device a guest frame is drawn on, for `ready.device`. Form factor
- * follows the shell: the mobile surface is a phone until its own tablet
- * layout turns on; every other surface is a desktop. The value changes only
- * when something in it does, so a frame hears a new `ready` on rotation or a
- * keyboard opening, never on an unrelated resize.
- */
 export function useHostDevice(): HostDevice {
   const tablet = useTabletLayout().enabled;
   const [metrics, setMetrics] = React.useState(readMetrics);
@@ -80,7 +62,6 @@ export function useHostDevice(): HostDevice {
     const pointer = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: coarse)') : null;
     window.addEventListener('resize', schedule);
     window.visualViewport?.addEventListener('resize', schedule);
-    // The iOS shell's keyboard moves without a viewport resize; it announces where it settled.
     window.addEventListener('oc:keyboard-settled', schedule);
     pointer?.addEventListener('change', schedule);
     return () => {

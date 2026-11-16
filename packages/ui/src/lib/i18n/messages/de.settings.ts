@@ -1526,7 +1526,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Tempo: {rate}',
   'settings.usage.pace.waitSeparator': ' · Warten ',
   'settings.usage.pace.predictionLabel': 'Vorh.: ',
-  'settings.usage.card.showInHeaderAria': 'Im Kopfmenü anzeigen',
   'settings.usage.card.resetsAt': 'Zurücksetzung {time}',
   'settings.usage.card.bar.used': 'Verwendet',
   'settings.usage.card.bar.remaining': 'Verbleibend',

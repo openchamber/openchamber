@@ -4,21 +4,10 @@ import type { Message, Part } from './model';
 export type MessagePageItem = { info: Message; parts: Part[] };
 
 export type FindMessagePageItemOptions = {
-  /** Page size, when the caller needs a specific window. */
   limit?: number;
-  /** Page order, when the caller needs oldest-first. */
   order?: 'asc' | 'desc';
 };
 
-/**
- * Finds the first record matching `matches` by walking the session's message
- * cursor pages until it appears or the history runs out.
- *
- * A single page is never the whole history: OpenCode interleaves plumbing
- * roles with conversation records, and a busy session pushes an older target
- * past any fixed window. A repeated cursor ends the walk so a server that
- * echoes the same `next` cannot loop forever.
- */
 export async function findMessagePageItem(
   sessionId: string,
   matches: (item: MessagePageItem) => boolean,

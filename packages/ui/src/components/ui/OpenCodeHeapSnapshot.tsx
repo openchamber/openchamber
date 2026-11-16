@@ -13,11 +13,6 @@ type SnapshotState =
   | { kind: 'written'; path: string }
   | { kind: 'failed' };
 
-/**
- * Writes a heap snapshot of the OpenCode server for a memory report. The file
- * stays where OpenCode wrote it, on the OpenCode machine; nothing uploads it,
- * because it can hold API keys, prompts and file contents.
- */
 export const OpenCodeHeapSnapshot: React.FC = () => {
   const { t } = useI18n();
   const [state, setState] = React.useState<SnapshotState>({ kind: 'idle' });

@@ -4,7 +4,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
 
-/** Back to the list, at the start of an opened entry's own toolbar. */
 export const KnowledgeBackButton: React.FC<{ label: string; onClick: () => void }> = ({ label, onClick }) => (
   <Tooltip>
     <TooltipTrigger asChild>
@@ -21,31 +20,15 @@ export const KnowledgeBackButton: React.FC<{ label: string; onClick: () => void 
   </Tooltip>
 );
 
-/**
- * An entry opened from a list, shown in place of that list.
- *
- * Notes and memories used to expand inside the list, which pushed every card
- * below them down and back up on each open and close. Opening one now swaps
- * the list for this view, the way a plan opens: the list never moves, and the
- * entry gets the whole panel. The back control starts the entry's own toolbar,
- * so the section tabs above never shift when an entry opens.
- *
- * Escape goes back to the list unless something inside (a menu, an IME)
- * already used it.
- */
 export const KnowledgeEntryView: React.FC<{
   backLabel: string;
-  /** False beside the list (split layout), where there is nothing to go back to. */
   showBack?: boolean;
-  /** Details after the back control: source, date, scope. */
   meta: React.ReactNode;
-  /** Controls at the end of the toolbar. */
   actions?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
 }> = ({ backLabel, showBack = true, meta, actions, onClose, children }) => (
   <div
-    // A readable line length in a wide panel; a narrow one never reaches it.
     className="flex h-full min-h-0 w-full max-w-3xl flex-col"
     onKeyDown={(event) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return;

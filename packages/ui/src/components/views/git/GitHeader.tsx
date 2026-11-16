@@ -44,6 +44,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { GIT_PANEL_HEADER_FIT } from './gitPanelHeaderFit';
 import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -527,7 +528,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     </Tooltip>
   ) : null;
 
-  const syncButtons = (
+  const syncButtons = isSpaceDirectory(directory) ? null : (
     <SyncActions
       syncAction={syncAction}
       remotes={remotes}

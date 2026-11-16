@@ -9,7 +9,6 @@ export type ButtonProps = {
   variant?: ButtonVariant;
   size?: ButtonSize;
   disabled?: boolean;
-  /** Shows a spinner in front of the label and blocks clicks. */
   loading?: boolean;
   onClick: () => void;
 };

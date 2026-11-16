@@ -28,13 +28,11 @@ interface UpdateDialogProps {
   info: UpdateInfo | null;
   downloading: boolean;
   downloaded: boolean;
-  /** Desktop install is being applied — the restart is already in flight */
   installing?: boolean;
   progress: UpdateProgress | null;
   error: string | null;
   onDownload: () => void;
   onRestart: () => void;
-  /** Runtime type to show different UI for desktop vs web */
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
@@ -59,8 +57,6 @@ type ParsedChangelog =
   | {
       kind: 'sections';
       title: string;
-      // A Canary night comes as groups, each folded to CANARY_GROUP_LIMIT lines.
-      // A stable release comes as data, drawn the way Settings > About draws it.
       sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null; notes: ReleaseNotesContent | null }>;
     };
 
@@ -82,7 +78,6 @@ function compareSemverDesc(a: string, b: string): number {
 }
 
 function parseChangelogSections(body: string): ChangelogSection[] {
-  // A Canary night is headed by its build's version: 2.5.4-canary.20261031.5.
   const re = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\] - (\d{4}-\d{2}-\d{2})\s*$/gm;
   const matches: Array<{ version: string; date: string; start: number }> = [];
 
@@ -106,11 +101,8 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-// A Canary night can list well over a hundred commits; each group shows this
-// many until the person asks for the rest.
 const CANARY_GROUP_LIMIT = 8;
 
-/** The `### Group` and `- bullet` lines of one night, or null for any other shape. */
 function splitNotesGroups(content: string): NotesGroup[] | null {
   const groups: NotesGroup[] = [];
   for (const line of content.split('\n')) {
@@ -165,7 +157,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
 
-  // Every Canary build is on the one `canary` pre-release.
   const releaseUrl = info?.version
     ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/${parseCanaryVersion(info.version) ? 'canary' : `v${info.version}`}`)
     : GITHUB_RELEASES_URL;
@@ -173,9 +164,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     const count = groups.reduce((total, group) => total + group.bullets.length, 0);
     return count === 1 ? t('updateDialog.changelog.changeCountSingle') : t('updateDialog.changelog.changeCountPlural', { count });
   };
-  // "2.5.4 Canary · Oct 31" for 2.5.4-canary.20261031.5. Between two Canary
-  // builds the header names the channel once: "Canary: 2.5.4 · Oct 29 → 2.5.4 · Oct 31",
-  // and two builds of one day add their build numbers: "Oct 31 #123 → Oct 31 #124".
   const bothCanary = Boolean(parseCanaryVersion(info?.currentVersion) && parseCanaryVersion(info?.version));
   const describeVersion = (version: string, beside: string | undefined) => {
     const canary = parseCanaryVersion(version);
@@ -188,13 +176,11 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const progressPercent = updateProgressPercent(progress);
 
   const isWebRuntime = runtimeType === 'web';
-  // A desktop host installed from a Linux package asks for the password on its own screen.
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
   const needsNewerOpenCode = isWebRuntime && info?.installBlocked === 'opencode-version';
   const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
 
-  // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
       setWebUpdateState('idle');
@@ -276,7 +262,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
         const stripped = stripChangelogHeading(section.raw) || body;
         const content = linkReleaseNoteMentions(stripped);
         const canary = parseCanaryVersion(section.version);
-        // Another build of the same day among the sections adds the build number.
         const sameDayBuild = canary
           ? sorted
             .filter((_, other) => other !== index)
@@ -298,7 +283,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
       <DialogContent className="max-w-4xl p-5 border-[var(--interactive-border)]" showCloseButton={true}>
         
-        {/* Header Section */}
         <div className="flex items-center mb-1">
           <DialogTitle className="flex items-center gap-2.5">
             <Icon name="download-cloud" className="h-5 w-5 text-[var(--primary-base)]" />
@@ -309,7 +293,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </span>
           </DialogTitle>
 
-          {/* Version Diff */}
           {(info?.currentVersion || info?.version) && (
             <div className="flex items-center gap-2 font-mono text-sm ms-3">
               {bothCanary && (
@@ -328,10 +311,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
         </div>
 
-        {/* Content Body */}
         <div className="space-y-2">
 
-          {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
             <div className="rounded-lg bg-surface-elevated/30 p-5 border border-border">
               <div className="flex items-center gap-3">
@@ -348,7 +329,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
               <div className="rounded-lg border border-border bg-surface-elevated/20 overflow-hidden">
               <ScrollableOverlay
@@ -408,7 +388,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Web runtime fallback command; it would not update a copy no package manager installed */}
           {isWebRuntime && info?.packageManager !== 'electron' && info?.installBlocked !== 'manual-install' && webUpdateState === 'error' && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center gap-2 typography-meta text-muted-foreground">
@@ -439,7 +418,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Desktop progress bar */}
           {!isWebRuntime && !isMobileRuntime && downloading && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center justify-between text-sm">
@@ -455,7 +433,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Error display */}
           {desktopHostInstall && (
             <p className="mt-4 typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: info?.version || '' })}
@@ -479,7 +456,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
         </div>
 
-        {/* Action Footer */}
         <div className="mt-4 flex items-center justify-between gap-4">
           <a
             href={releaseUrl}
@@ -492,7 +468,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           </a>
 
           <div className="flex-1 flex justify-end">
-            {/* Desktop Buttons */}
             {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && (
               <button
                 onClick={onDownload}
@@ -533,7 +508,6 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {/* Web Buttons */}
             {isMobileRuntime && (
               <Button
                 onClick={handleMobileUpdate}

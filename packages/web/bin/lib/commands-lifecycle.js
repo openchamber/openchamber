@@ -331,10 +331,6 @@ async function restartCommand(options, serveCommand) {
           suppressQuietOutput: true,
         });
 
-        // Foreground instances are managed by a process manager (systemd,
-        // Docker, etc.) that will restart them automatically after stop.
-        // Do not call serve() here — just record the stop as a successful
-        // restart and let the process manager handle the actual restart.
         if (isForeground) {
           restarted.push({ fromPort: instance.port, toPort: restartPort, launchMode, ok: true });
           restartSpin?.stop(`Stopped foreground instance on port ${instance.port} (process manager will restart)`);

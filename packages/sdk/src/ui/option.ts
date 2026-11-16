@@ -1,7 +1,6 @@
 import { button, el, setAttr } from './dom.ts';
 import { icon } from './icons.ts';
 
-/** One popup row shared by select (`role="option"`) and menu (`role="menuitem"`). */
 type OptionSpec = {
   id: string;
   label: string;
@@ -37,7 +36,6 @@ export const createOption = (
     node.append(hint);
   }
   if (role === 'option') {
-    // The host's styles drop the selection fill only for options that carry the mark.
     node.dataset.mark = 'check';
     const check = el('span', 'oc-sdk-option-check');
     check.append(icon('check', 14));
@@ -48,7 +46,6 @@ export const createOption = (
   return node;
 };
 
-/** Moves the `data-active` highlight and `aria-activedescendant`; scrolls the row into view. */
 export const highlightOption = (
   container: HTMLElement,
   focusOwner: HTMLElement,

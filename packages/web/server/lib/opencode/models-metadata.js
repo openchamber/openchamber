@@ -2,9 +2,6 @@ const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 8000;
 
-// Shared in-process cache of the models.dev catalog. Used by the
-// /api/openchamber/models-metadata route and the small-model resolver so the
-// server fetches the catalog once, not per consumer.
 let cachedMetadata = null;
 let cachedAt = 0;
 let inflight = null;
@@ -24,11 +21,6 @@ const fetchCatalog = async (url, timeoutMs) => {
   return metadata;
 };
 
-/**
- * Returns the models.dev catalog, serving the in-memory copy while fresh.
- * On fetch failure a stale cached copy is returned when available; otherwise
- * the error propagates.
- */
 export async function getModelsMetadata({
   url = MODELS_DEV_API_URL,
   ttlMs = DEFAULT_TTL_MS,
@@ -58,9 +50,6 @@ export async function getModelsMetadata({
   }
 }
 
-// The model fields the UI reads (packages/ui stores/useConfigStore.ts,
-// transformModelsDevResponse). The full catalog is several megabytes; the
-// browser needs only these, so the route sends nothing else.
 const CLIENT_MODEL_FIELDS = [
   'id',
   'name',
@@ -79,10 +68,8 @@ const CLIENT_MODEL_FIELDS = [
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-// The catalog object is reused until the next fetch, so its projection is too.
 const projections = new WeakMap();
 
-/** Projects the models.dev catalog to the provider ids and model fields the UI reads. */
 export function toClientModelsMetadata(metadata) {
   if (!isObject(metadata)) return {};
   const cached = projections.get(metadata);

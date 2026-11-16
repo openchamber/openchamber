@@ -1,8 +1,3 @@
-// Host relay identity: the EXISTING ECDSA P-256 signing keypair (shared with
-// the push relay via signing-key.js — same storage, same serverId) plus a NEW
-// long-lived ECDH P-256 encryption keypair for the E2EE channel (WebCrypto
-// keys are single-purpose, so signing and encryption keys must differ).
-// Both keypairs are stored by key-store.js.
 
 import {
   canonicalPublicJwkString,
@@ -25,8 +20,6 @@ export const createRelayIdentityRuntime = (deps) => {
   let cachedGeneration = -1;
 
   const getOrCreateEncryptionKeypair = () => relayKeyStore.getOrCreate('encryption', async () => {
-    // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
-    // every paired device. Expected exactly once, on first relay use.
     console.warn('[relay-identity] Generating NEW relay encryption keypair (E2EE trust anchor changes; previously paired devices must re-pair)');
     const keyPair = await generateEcdhKeyPair();
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
@@ -51,8 +44,6 @@ export const createRelayIdentityRuntime = (deps) => {
     const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);
     const pk = Buffer.from(canonicalPublicJwkString(signing.publicJwk), 'utf8').toString('base64url');
 
-    // Relay-layer auth for host-control / host-data upgrades. Signature payload
-    // string is `${ts}.${serverId}.${role}.${connectionId ?? ""}` (spec Layer 1).
     const signRelayAuth = (role, connectionId) => {
       const ts = Date.now();
       const sig = signRelayMessage({ crypto }, signing.privateKey, `${ts}.${serverId}.${role}.${connectionId ?? ''}`);

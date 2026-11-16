@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react"
 import type { SessionPatch, SyncEvent } from "@/lib/opencode/events"
 import type { Session } from "@/lib/opencode/model"
 import { compact } from "@/lib/opencode/model"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import {
   isGlobalSessionDeferrableUpdate,
   mergeSessionDirectoryMetadata,
@@ -121,7 +122,7 @@ subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
  * otherwise erase the fields it does not mention.
  */
 const applyPatch = (session: Session, patch: SessionPatch): Session => {
-  const next: Session = { ...session }
+  const next: Session = patch.metadata === undefined ? { ...session } : withSessionMetadata(session, patch.metadata)
   if (patch.title !== undefined) next.title = patch.title
   if (patch.directory !== undefined) next.directory = patch.directory
   if (patch.projectID !== undefined) next.projectID = patch.projectID
@@ -130,9 +131,6 @@ const applyPatch = (session: Session, patch: SessionPatch): Session => {
   if (patch.cost !== undefined) next.cost = patch.cost
   if (patch.tokens !== undefined) next.tokens = patch.tokens
   if (patch.permissions !== undefined) next.permissions = patch.permissions
-  // OpenChamber's metadata broadcasts (in work, recap, goal) replace the whole
-  // object; without this the sidebar saw them only on its next full reload.
-  if (patch.metadata !== undefined) next.metadata = patch.metadata
   if (patch.outcome !== undefined) next.outcome = patch.outcome
   if (patch.subpath === null) delete next.subpath
   else if (patch.subpath !== undefined) next.subpath = patch.subpath

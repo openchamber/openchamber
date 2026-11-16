@@ -5,40 +5,22 @@ export const gitIdentityProfileIdSchema = z.string().trim().min(1).max(200);
 const profileTextSchema = z.string().trim().min(1).max(512);
 const optionalProfileTextSchema = z.string().trim().max(512).nullable().optional();
 
-/** The provider account an identity acts as, addressed exactly as bindings address it. */
 const gitIdentityAccountSchema = z.object({
   provider: sourceControlProviderIdSchema,
   instance: profileTextSchema,
   accountId: profileTextSchema,
 }).strict();
 
-/**
- * How an identity's transfers authenticate.
- *
- * `account` is the connected account's own credential over HTTPS — whether that
- * credential came from OAuth or from a personal access token is a property of
- * the account, not a separate choice. `ssh` names a managed key, and can still
- * carry an account so issues and change requests know whose they are.
- */
 const gitIdentityTransportSchema = z.enum(['account', 'ssh', 'system', 'anonymous']);
 
 export type GitIdentityTransport = z.infer<typeof gitIdentityTransportSchema>;
 
-/**
- * One identity is an account, a transport and a signature.
- *
- * Repositories choose one of these instead of assembling the three separately,
- * so the same answer is given once and shown by name.
- */
 export const gitIdentityProfileSchema = z.object({
   id: gitIdentityProfileIdSchema,
   name: profileTextSchema,
   userName: profileTextSchema,
   userEmail: profileTextSchema,
   account: gitIdentityAccountSchema.nullable().optional(),
-  // Absent means an identity written before identities carried a transport:
-  // it says who commits and nothing about how transfers authenticate. Read it
-  // through `identityTransport` so that reading is stated in one place.
   transport: gitIdentityTransportSchema.optional(),
   sshCredentialId: optionalProfileTextSchema,
   signCommits: z.boolean().optional(),
@@ -59,12 +41,6 @@ export const gitIdentityProfileSchema = z.object({
 
 export type GitIdentityProfile = z.infer<typeof gitIdentityProfileSchema>;
 
-/**
- * How an identity authenticates, for identities written before they said so.
- *
- * Signature-only identities name no credential, which is exactly what System
- * Git means, so that is what they resolve to.
- */
 export const identityTransport = (
   profile: Pick<GitIdentityProfile, 'transport'> | null | undefined,
 ): GitIdentityTransport => profile?.transport ?? 'system';
@@ -81,18 +57,9 @@ export type GitIdentitySummary = z.infer<typeof gitIdentitySummarySchema>;
 
 export const gitIdentityMutationResultSchema = z.object({
   success: z.boolean(),
-  // Null when the repository now names no author of its own: the System
-  // identity on a machine that has none either.
   profile: gitIdentityProfileSchema.nullable(),
 }).strict();
 
-/**
- * Whether an identity is complete: a signature and a way to push and pull.
- * Only the account transport needs an account; the machine's own Git, a
- * managed key and anonymous reads need none. An identity from an earlier
- * release is a signature that pushes with the machine's own Git, which is
- * complete.
- */
 export const isCompleteIdentity = (
   profile: Pick<GitIdentityProfile, 'account' | 'transport' | 'sshCredentialId' | 'userName' | 'userEmail'>,
 ): boolean => Boolean(profile.userName) && Boolean(profile.userEmail)

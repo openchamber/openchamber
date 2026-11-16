@@ -1,17 +1,5 @@
-/**
- * Whether agents can use an installed skill, from OpenCode's own policy
- * config: a skill is off when the `skill.use` statement that decides it
- * (projected as `skill:<id>`) is a deny. The skills list is the installed inventory (OpenCode's
- * list merged with a disk scan), so a switched-off skill is still in it; this
- * module tells which of them agents are offered.
- */
 import { findIntegrationPolicy, type IntegrationPolicy } from '@/lib/opencode/projection';
 
-/**
- * The id OpenCode's `skill.use` policies name: the folder of a `SKILL.md`, or
- * a loose `<id>.md` file's name (`config/plugin/skill-file.ts` upstream). A
- * built-in skill's id is its name.
- */
 export const skillIdFromPath = (path: string, name: string): string => {
   if (path === '<built-in>') return name;
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -22,15 +10,8 @@ export const skillIdFromPath = (path: string, name: string): string => {
 };
 
 interface SkillSwitchState {
-  /** Agents can use the skill. */
   enabled: boolean;
-  /** The statement that decides it, or null when none matches. */
   rule: IntegrationPolicy | null;
-  /**
-   * The switch can change the outcome. A wildcard deny cannot be lifted for one
-   * skill without rewriting someone else's rule, and a deny from config with no
-   * file has nowhere to be removed from, so the page names those instead.
-   */
   switchable: boolean;
 }
 
@@ -44,10 +25,6 @@ export const getSkillSwitchState = (policies: readonly IntegrationPolicy[], id: 
   };
 };
 
-/**
- * The skills agents can use. Statements never read (`null`) hide nothing.
- * Returns `skills` itself when none is off, so a selector stays stable.
- */
 export const filterAvailableSkills = <T extends { id: string }>(
   skills: T[],
   policies: readonly IntegrationPolicy[] | null,
@@ -57,12 +34,6 @@ export const filterAvailableSkills = <T extends { id: string }>(
   return available.length === skills.length ? skills : available;
 };
 
-/**
- * OpenCode leaves a switched-off skill out of its own list, and the disk scan
- * never sees built-in skills, so such a skill would drop out of Settings with
- * no switch left to turn it back on. Every skill an exact deny switches off
- * keeps its previous entry, or gets one named after its id when none is known.
- */
 export const keepSwitchedOffSkills = <T extends { id: string }>(
   skills: T[],
   previous: readonly T[],
@@ -81,12 +52,6 @@ export const keepSwitchedOffSkills = <T extends { id: string }>(
   return [...skills, ...missing.map((id) => previous.find((skill) => skill.id === id) ?? fromId(id))];
 };
 
-/**
- * Applies a switch write OpenCode has not reloaded yet to the statements the
- * page shows, from the files the server changed: off adds the exact deny it
- * wrote, with the final say; on drops the exact denies of those files. The
- * next read from OpenCode replaces this.
- */
 export const applySkillSwitch = (
   policies: readonly IntegrationPolicy[],
   id: string,
@@ -102,7 +67,6 @@ export const applySkillSwitch = (
   ));
 };
 
-/** The skill is off because of its own exact deny, the kind a switch writes and removes. */
 export const isSwitchedOffByOwnDeny = (policies: readonly IntegrationPolicy[] | null, id: string): boolean => {
   if (!policies) return false;
   const state = getSkillSwitchState(policies, id);

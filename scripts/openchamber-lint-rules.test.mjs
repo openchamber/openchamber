@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RULES = ['no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
+const RULES = ['no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports'];
 
 const FILES = {
   'packages/ui/src/components/Panel.tsx': [
@@ -51,6 +51,15 @@ const FILES = {
     '  effect(() => {}, []);',
     '  R.useLayoutEffect(() => {}, []);',
     '}',
+  ],
+  'packages/ui/src/lib/thing.test.ts': [
+    "import { mock } from 'bun:test';",
+    "import { readFileSync } from 'node:fs';",
+    "mock.module('./thing', () => ({}));",
+    "const source = readFileSync(new URL('./thing.ts', import.meta.url), 'utf8');",
+    "const written = readFileSync('/tmp/out.json', 'utf8');",
+    'await new Promise((resolve) => setTimeout(resolve, 0));',
+    'export const seen = [source, written];',
   ],
   'packages/ui/src/lib/timing/frame.ts': ['export const nextFrame = (run: () => void) => requestAnimationFrame(run);'],
   'packages/ui/src/lib/opencode/client.ts': ["export type { Session } from '@opencode/client';"],
@@ -130,7 +139,6 @@ test('the owning modules, tests, message catalogs and code outside shared UI are
     'packages/ui/src/lib/timing/frame.ts',
     'packages/ui/src/lib/opencode/client.ts',
     'packages/ui/src/lib/runtime-fetch.ts',
-    'packages/ui/src/components/Panel.test.tsx',
     'scripts/tool.mjs',
     'packages/ui/src/lib/i18n/messages/panel.i18n.ts',
   ];
@@ -153,4 +161,13 @@ test('aliases, inline type imports and re-exports do not get around a rule', () 
 
 test('an allowed note may run over several lines, and a bang is no directive', () => {
   assert.deepEqual(linesOf('packages/ui/src/components/Evasive.tsx', 'no-comments'), [9]);
+});
+
+test('a test takes no module mock, real wait or source file read as text', () => {
+  const file = 'packages/ui/src/lib/thing.test.ts';
+  assert.deepEqual(linesOf(file, 'no-module-mocks-in-tests'), [3]);
+  assert.deepEqual(linesOf(file, 'no-source-text-in-tests'), [4]);
+  assert.deepEqual(linesOf(file, 'no-real-waits-in-tests'), [6]);
+  assert.deepEqual(linesOf('packages/ui/src/components/Panel.test.tsx', 'no-real-waits-in-tests'), [3]);
+  assert.deepEqual(linesOf('packages/ui/src/lib/thing.test.ts', 'no-timers'), []);
 });

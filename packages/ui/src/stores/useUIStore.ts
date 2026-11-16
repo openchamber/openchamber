@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { EMPTY_NOTIFICATION_TEMPLATES, isLegacyDefaultTemplates } from './utils/notificationTemplates';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -44,15 +45,10 @@ import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
 export type { ContextPanelMode };
 
-// The docked column and the tree-only panel share one pixel width.
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
 const persistedPixelsSchema = z.number().finite().optional().catch(undefined);
-// Builds before v26 kept a directory's sizes on its panel state: one per zone
-// (`sizeByZone`), before that one per surface (`widthByMode`, `heightByMode`),
-// before that a share of the chat area (`widthFractionByMode`, ignored). A
-// state without `sizeByZone` takes each zone's size from the surface it shows.
 const persistedZoneSizesSchema = z.object({
   sizeByZone: z.object({
     left: persistedPixelsSchema,
@@ -73,7 +69,6 @@ type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type MobileKeepScreenAwake = 'off' | 'working' | 'always';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
-/** Chat column width: a reading column, a wider capped column, or the whole chat for the transcript. */
 export type ChatWidth = 'default' | 'wider' | 'full';
 export type SessionGoalChecker = 'classifier' | 'small-model';
 
@@ -101,13 +96,7 @@ type ContextPanelTab = {
   readOnly: boolean;
   stagedDiff: boolean;
   diffScope: PendingDiffScope | null;
-  /** A file tab opened by a single click in the files tree. The next such
-      click replaces it; opening the file any other way, editing it, or
-      double-clicking keeps it. */
   preview: boolean;
-  /** The session whose agent opened this browser tab; null for a tab the
-      user opened. Agent actions that name no tab use their own session's tab
-      and leave another session's alone. */
   ownerSessionId: string | null;
   touchedAt: number;
 };
@@ -127,12 +116,10 @@ type ContextPanelTabDescriptor = {
 };
 
 type ContextPanelDirectoryState = {
-  // The right zone, kept top-level (see lib/workspace/zones.ts).
   isOpen: boolean;
   expanded: boolean;
   tabs: ContextPanelTab[];
   activeTabId: string | null;
-  /** The left and bottom zones. Every zone shows tabs of the surfaces placed in it. */
   zones: MovedZoneViews;
   touchedAt: number;
 };
@@ -152,58 +139,16 @@ type EventStreamStatus =
   | 'offline'
   | 'error';
 
-const LEGACY_DEFAULT_NOTIFICATION_TEMPLATES = {
-  completion: { title: '{agent_name} is ready', message: '{last_message}' },
-  error: { title: 'Tool error', message: '{last_message}' },
-  question: { title: '{agent_name} needs input', message: '{last_message}' },
-  subtask: { title: 'Subtask complete', message: '{last_message}' },
-} as const;
-
-const EMPTY_NOTIFICATION_TEMPLATES = {
-  completion: { title: '', message: '' },
-  error: { title: '', message: '' },
-  question: { title: '', message: '' },
-  subtask: { title: '', message: '' },
-} as const;
-
-const isSameTemplateValue = (
-  a: { title: string; message: string } | undefined,
-  b: { title: string; message: string }
-) => {
-  if (!a) return false;
-  return a.title === b.title && a.message === b.message;
-};
-
-const isLegacyDefaultTemplates = (value: unknown): boolean => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const candidate = value as Record<string, { title: string; message: string } | undefined>;
-  return (
-    isSameTemplateValue(candidate.completion, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.completion)
-    && isSameTemplateValue(candidate.error, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.error)
-    && isSameTemplateValue(candidate.question, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.question)
-    && isSameTemplateValue(candidate.subtask, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.subtask)
-  );
-};
-
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
 const CONTEXT_PANEL_MIN_HEIGHT = 160;
-/** Persistence sanity bound only: the real ceiling is the available area
- * minus a minimum chat width in ContextPanel, so a wide monitor may
- * legitimately store a width far beyond any fixed pixel value. */
 const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
-/** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
-// Keep the most recently changed model preferences.
 const MAX_LAST_USED_EFFORTS = 512;
 const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
-/** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
 
-// Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
 export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
 
 const normalizeDirectoryPath = (value: string): string => {
@@ -255,7 +200,6 @@ const normalizeContextTargetPath = (value: string | null | undefined): string | 
     return null;
   }
 
-  // Absolute file targets are already resolved; edge spaces belong to the name.
   const path = /^(?:[\\/]|[A-Za-z]:[\\/])/.test(value) ? value : trimmed;
   return path.replace(/\\/g, '/');
 };
@@ -269,21 +213,10 @@ const normalizeContextTargetDirectory = (value: string | null | undefined): stri
   return normalizeContextPanelDirectoryKey(normalizedPath) || null;
 };
 
-// A terminal may run in another directory than the panel it lives in, and a
-// chat tab may show a session from another project (or Chat) next to the
-// main chat. A Tracker item reads through the project it belongs to, and so
-// do the Changes and walkthrough of a pull request opened from one, without
-// the app moving to that project. Every other mode works in the panel's own
-// directory.
 const contextPanelModeKeepsTargetDirectory = (mode: ContextPanelMode): boolean => {
   return mode === 'terminal' || mode === 'chat' || mode === 'pr' || mode === 'diff' || mode === 'walkthrough';
 };
 
-/**
- * The Tracker surface's first tab: the checked-out branch's pull request, or
- * the form that creates it. It is always there and never closes; the items
- * opened beside it carry their link as `targetPath`.
- */
 export const isTrackerBranchTab = (tab: { mode: ContextPanelMode; targetPath: string | null }): boolean => (
   tab.mode === 'pr' && !tab.targetPath
 );
@@ -368,7 +301,6 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
-    // No scope means the view's default, which depends on the branch.
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : null),
     preview: descriptor.mode === 'file' && descriptor.preview === true,
     ownerSessionId: normalizeBrowserTabOwner(descriptor.mode, descriptor.ownerSessionId),
@@ -376,14 +308,6 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
   };
 };
 
-/**
- * Keeps each surface's tab count in hand.
- *
- * The limit is per mode because the strip is per mode: a user looking at diffs
- * only ever sees diff tabs, so evicting one to make room for a browser tab
- * takes away something they cannot see being taken. Modes compete for screen
- * space separately, so they get separate budgets.
- */
 const clampContextPanelTabs = (
   tabs: ContextPanelTab[],
   maxTabsPerMode: number,
@@ -400,8 +324,6 @@ const clampContextPanelTabs = (
     const removable = [...modeTabs]
       .sort((a, b) => a.touchedAt - b.touchedAt)
       .filter((tab) => tab.id !== activeTabId && !isTrackerBranchTab(tab));
-    // Never drop the tab being opened or looked at; if that leaves the mode one
-    // over its budget, one extra tab beats losing the one in use.
     for (const tab of removable.slice(0, count - maxTabsPerMode)) removeSet.add(tab.id);
   }
 
@@ -437,15 +359,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    // Legacy 'preview' tabs are converted to 'browser' by the v14 migration;
-    // anything still carrying an unknown mode here is discarded rather than
-    // resurrected into a tab the panel cannot render.
     if (typeof candidate.mode !== 'string' || !isContextPanelMode(candidate.mode)) {
       continue;
     }
 
-    // State is shared with the desktop and web surfaces, which do have a
-    // browser; inside VS Code such a tab would have no surface to belong to.
     if (dropBrowserTabs && candidate.mode === 'browser') {
       continue;
     }
@@ -526,12 +443,6 @@ const touchContextPanelState = (
   };
 };
 
-/**
- * Someone asked for this address now, so its load may wait for a dev server
- * that is still starting. A new tab is marked before it mounts; a tab that
- * already exists is asked to load the address again, since focusing it alone
- * would leave an earlier failure on screen.
- */
 const noteBrowserTabAddressRequested = (
   byDirectory: Record<string, ContextPanelDirectoryState>,
   directory: string,
@@ -554,13 +465,10 @@ const upsertContextPanelTab = (
 ): ContextPanelDirectoryState => {
   const reveal = options?.reveal !== false;
   const nextTab = createContextPanelTab(descriptor);
-  // A real file tab replaces the empty editor placeholder ('file' with no
-  // target) that the rail can open before any file is picked.
   const baseTabs = nextTab.mode === 'file' && nextTab.targetPath
     ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
-  // A new preview takes the slot of the current preview tab, if any.
   const replacedPreviewIndex = existingIndex === -1 && nextTab.preview
     ? baseTabs.findIndex((tab) => tab.preview)
     : -1;
@@ -580,17 +488,11 @@ const upsertContextPanelTab = (
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,
-          // Reopening a preview as a preview keeps it one; any other open pins it.
           preview: tab.preview && nextTab.preview,
           touchedAt: Date.now(),
         }
       : tab));
 
-  // A background upsert (an agent working a page) keeps the panel exactly as
-  // the user left it: closed stays closed, and whatever tab they were on
-  // stays active. The tab still exists — panes are kept mounted regardless of
-  // visibility — so agent control and a later manual open both find it.
-  // The tab opens in the zone its surface is placed in.
   const zone = zoneOfMode(placement, nextTab.mode);
   const view = getZoneView(current, zone);
   const activeTabId = reveal
@@ -620,27 +522,18 @@ const closeContextPanelTabs = (
     return current;
   }
 
-  // Each zone settles on its own: closing a tab never changes what another
-  // zone shows.
   const views: Partial<Record<ContextZone, Partial<ContextZoneView>>> = {};
   for (const zone of CONTEXT_ZONES) {
     const view = getZoneView(current, zone);
     const activeClosed = view.activeTabId ? closed.has(view.activeTabId) : false;
     if (!activeClosed) continue;
 
-    // Closing the active tab stays inside its surface: activate the most
-    // recent remaining tab of the same mode, and when none remain just close
-    // the zone instead of jumping to another surface.
     const activeMode = closedTabs.find((tab) => tab.id === view.activeTabId)?.mode ?? null;
     const sameModeTabs = activeMode ? nextTabs.filter((tab) => tab.mode === activeMode) : [];
     const nextSameModeTab = sameModeTabs.length > 0
       ? sameModeTabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best))
       : null;
 
-    // The file surface outlives its files: closing the last real file tab leaves
-    // the same empty editor placeholder the rail opens, so the surface falls
-    // back to its file tree instead of taking the whole zone down with it.
-    // Closing the placeholder itself still closes the surface.
     if (activeMode === 'file' && !nextSameModeTab && closedTabs.some((tab) => tab.mode === 'file' && tab.targetPath)) {
       const placeholder = createContextPanelTab({ mode: 'file' });
       nextTabs = [...nextTabs, placeholder];
@@ -702,9 +595,6 @@ const setContextPanelTabTargetPath = (
   ),
 });
 
-// A file tab's id and dedupe key are built from its path, so a moved tab is
-// rebuilt in place under the new id. A stale tab already at a destination
-// gives way to the moved one.
 const moveContextPanelFileTabs = (
   current: ContextPanelDirectoryState,
   fromPath: string,
@@ -738,11 +628,6 @@ const moveContextPanelFileTabs = (
   return next;
 };
 
-/**
- * Another project's Changes or walkthrough is saved as the panel's own: the
- * PR it was asked to show is held in memory only, so restored as it was it
- * would show whatever that project has checked out, with no way to switch.
- */
 const withoutForeignComparisons = (
   byDirectory: Record<string, ContextPanelDirectoryState>,
 ): Record<string, ContextPanelDirectoryState> => {
@@ -755,10 +640,6 @@ const withoutForeignComparisons = (
 
 type LegacyZoneSizes = { sizes: Partial<Record<ContextZone, number>>; touchedAt: number };
 
-/**
- * Builds before v26 kept zone sizes per directory; `legacySizes` collects
- * each directory's, so the migration can keep the last one the user worked in.
- */
 const sanitizeContextPanelByDirectory = (
   value: unknown,
   legacySizes?: LegacyZoneSizes[],
@@ -793,10 +674,6 @@ const sanitizeContextPanelByDirectory = (
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
-    // Legacy single-tab state can name a saved project plan, but it carries
-    // no owner and cannot be migrated into an openable saved-plan tab — that
-    // combination is dropped by sanitize above. A generic filesystem plan tab
-    // (no plan id) revives fine from the descriptor alone.
     if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'chat' || candidate.mode === 'terminal')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
@@ -812,8 +689,6 @@ const sanitizeContextPanelByDirectory = (
     const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
 
     const resolvedTabId = resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId);
-    // Placement loads after this, so zones only keep ids that still exist
-    // here; touchContextPanelState settles them against the placement.
     const zones = keepZoneViewsOnTabs(zoneViewsSchema.parse(candidate.zones), new Set(clampedTabs.map((tab) => tab.id)));
     const touchedAt = typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
       ? candidate.touchedAt
@@ -824,7 +699,6 @@ const sanitizeContextPanelByDirectory = (
       for (const zone of CONTEXT_ZONES) {
         let pixels = savedSizes.sizeByZone?.[zone];
         if (!savedSizes.sizeByZone) {
-          // Per-surface sizes: the zone keeps the size of what it showed.
           const zoneTabId = zone === 'right' ? resolvedTabId : zones[zone].activeTabId;
           const mode = clampedTabs.find((tab) => tab.id === zoneTabId)?.mode;
           pixels = mode ? (zone === 'bottom' ? savedSizes.heightByMode : savedSizes.widthByMode)[mode] : undefined;
@@ -867,93 +741,40 @@ const clampContextPanelRoots = (
 interface UIStore {
 
   theme: 'light' | 'dark' | 'system';
-  /** Key of the multi-run whose overview replaces the chat area, if open. */
   runOverviewKey: string | null;
-  /** One-shot request for the composer to enter parallel mode; the composer consumes it. */
   parallelComposerRequest: { id: number; prompt: string } | null;
   isSidebarOpen: boolean;
-  /** The session sidebar is closed because a zone was expanded
-      (`ZoneFitArbiter`), so collapsing it brings the sidebar back, after a
-      restart too. Any other sidebar toggle clears it. */
   sidebarFoldedForExpandedZone: boolean;
   sidebarWidth: number;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
-  /** Surface ids the user hid from the context rail; stored as the hidden set
-      so surfaces added later appear for everyone. */
   contextRailHiddenSurfaces: string[];
-  /** Order of the phone's workspace drawer tabs (lib/mobileWorkspaceTabs.ts). */
   mobileWorkspaceTabOrder: string[];
-  /** Workspace drawer tabs the user hid; stored as the hidden set so tabs added later appear for everyone. */
   mobileWorkspaceHiddenTabs: string[];
-  /**
-   * Work Status sections hidden on the phone's Status tab. Per device and apart
-   * from `workStatusHiddenSections`: Subagents starts hidden there.
-   */
   mobileWorkStatusHiddenSections: string[];
-  /** Surfaces the user moved off the right zone, per device (lib/workspace/zones.ts). */
   contextSurfaceZones: ContextZonePlacement;
   contextEditorTreeVisible: boolean;
-  /** Which side of the file surface its tree column docks to. */
   fileTreeSide: 'left' | 'right';
-  /** Whether the file surface shows its editor while files are open; hiding
-      it leaves only the tree, with the file tabs kept open. */
   contextEditorVisible: boolean;
   contextEditorTreeWidth: number;
-  /** The size the user resized each zone to, px: the width of a side zone,
-      the height of the bottom one. One for every project and worktree and
-      every surface the zone shows, so neither switching folders nor
-      switching surfaces moves the zone's edge; unset opens at the default. */
   contextZoneSizes: Partial<Record<ContextZone, number>>;
-  /** Expanded, a zone leaves the chat this many px (the bottom zone: of
-      height), as the user resized it there; unset leaves the default column.
-      Kept apart from `contextZoneSizes`, so the docked and the expanded zone
-      each keep the size the user gave them. */
   contextZoneExpandedChatSizes: Partial<Record<ContextZone, number>>;
-  /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
-  /**
-   * Whether the queued-messages panel above the composer shows its list. One
-   * preference for every session: the user opens or closes it once and it
-   * stays that way across session switches and reloads.
-   */
   messageQueueExpanded: boolean;
-  /** Scroll offset of that panel, so it survives being unmounted. */
   workStatusScrollTop: number;
-  /** Whether the in-chat work-status panel may render at all. */
   workStatusPanelEnabled: boolean;
-  /**
-   * Whether it is actually on screen right now — the switch can be on while
-   * layout still refuses it (narrow chat, open context panel). Transient, never
-   * persisted: it describes the current frame, not a preference. The header
-   * and the git rail read it to stop repeating what the panel already shows.
-   */
   workStatusPanelVisible: boolean;
-  /** Layout can host the panel inline. Transient, like the one above. */
   workStatusPanelFits: boolean;
-  /**
-   * Shown over the chat because it does not fit beside it. Transient and never
-   * persisted: it is a response to the current window, not a preference, and
-   * the panel returns to its place as soon as there is room.
-   */
   workStatusOverlayOpen: boolean;
-  /**
-   * Sections the user switched off. Hidden rather than visible ones are
-   * stored, so a section added later appears without touching saved settings.
-   * Persisted to server settings, not just this browser.
-   */
   workStatusHiddenSections: string[];
   workStatusSectionOrder: WorkStatusPanelSectionId[];
-  /** True once the user arranged the sections, false for a saved default. */
   workStatusSectionOrderExplicit: boolean;
-  /** Explicitly chosen hidden-section state. False keeps the default opt-in seed. */
   workStatusHiddenSectionsExplicit: boolean;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
-  /** A file a click asked to see in the session's last turn diff, until Changes answers whether it is there. */
   pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
@@ -967,48 +788,26 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
-  /** The full-screen integrations catalog page, opened from the sidebar header. */
   isIntegrationsCatalogOpen: boolean;
-  /** Grows on every open, so a page already on screen starts fresh. */
   archivePageOpenCount: number;
   isUsageStatsPageOpen: boolean;
-  /** The issues and pull requests board. */
   isSourceBoardOpen: boolean;
   isOverviewOpen: boolean;
   openGuestPageId: string | null;
   worktreesPageProjectId: string | null;
-  /** The project whose isolated spaces fill the main area, opened from its menu in the sidebar. */
   spacesPageProjectId: string | null;
   isSettingsDialogOpen: boolean;
   isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
 
-  // Settings IA (new shell)
   settingsPage: string;
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
-  /**
-   * Project the Settings pages are looking at. `null` follows the app's active
-   * project. Settings browses another project's configuration without moving
-   * the chat, the session list or the file tree, so this is its own state and
-   * not a second writer of the active project.
-   */
   settingsProjectPath: string | null;
-  /**
-   * One-shot request to open Settings → Providers on the connect form (model
-   * picker "add provider", settings search). The page consumes and clears it;
-   * which provider the page shows is otherwise its own local state.
-   */
   settingsProvidersConnectRequested: boolean;
-  /** Set by links elsewhere in Settings; the Providers page opens Classification providers once and clears it. */
   settingsProvidersClassificationRequested: boolean;
-  /** A provider another Settings page asked the Providers page to open; the page opens it once and clears it. */
   settingsProvidersOpenRequested: string | null;
-  /**
-   * A link inside Settings asking to open another page and, optionally, scroll
-   * to one of its items the way a search result does. SettingsView consumes it.
-   */
   settingsJumpRequest: { page: string; itemId: string | null } | null;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
@@ -1017,73 +816,48 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
-  /** The "In work" sidebar block, the Track / Done actions, and sessions going in on a sent message. */
   sessionWorkEnabled: boolean;
-  /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
   sessionGoalEnabled: boolean;
-  /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
-  /** Automatic continuations a goal may take before it stops for the user (1–200). */
   sessionGoalMaxAutoTurns: number;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
-  /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
   expandReasoningWhileStreaming: boolean;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
-  /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
-  /** Long lines in the Files editor and viewer wrap instead of scrolling sideways. */
   fileEditorWrapLines: boolean;
-  /** Ask before a drag in the files tree moves a file or folder. */
   confirmFileTreeMove: boolean;
-  /**
-   * The session sidebar, the context zones and the work-status card animate
-   * as they open and close. Off, they snap (`useLayoutAnimationMs`).
-   */
   layoutAnimations: boolean;
-  /** Plain clicks on links in chat open in the built-in browser panel (desktop only). */
   openLinksInBrowserPanel: boolean;
-  /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
   liveBrowserTabLimit: number;
-  /** Tabs the agent opens use the user's own browser profile, logins included, instead of the agent's (desktop only). */
   agentBrowserSharesLogins: boolean;
-  /** Plain clicks on issue, PR and tracker item links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
-  /** Retention also takes sessions in the In work block. Off by default: they stay until Done. */
   sessionRetentionIncludeInWork: boolean;
-  /** Archive a worktree's sessions and remove it once its PR is merged. Off by default. */
   mergedWorktreeCleanupEnabled: boolean;
-  /** Done on a worktree in work also archives it. Off by default: Done then only takes it out of In work. */
   worktreeArchiveOnDoneEnabled: boolean;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
-  /** Chat text size in percent of the interface size, so the chat can grow without the sidebar. */
   chatFontSize: number;
-  // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   draftStartersVisible: boolean;
   terminalFontSize: number;
   terminalShell: TerminalShell;
   terminalLoginShells: TerminalShell[];
-  /** A terminal or project action tab closes when its process exits; off keeps the exited output. */
   terminalCloseOnExit: boolean;
-  /** Starting a project action brings its terminal tab forward in the side panel. */
   terminalOpenOnProjectAction: boolean;
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
-  /** Family names used when `uiFont` / `monoFont` is `custom`. */
   customUiFont: string;
   customMonoFont: string;
-  /** Weight of regular interface text. */
   uiFontWeight: UiFontWeight;
   padding: number;
   cornerRadius: number;
@@ -1095,19 +869,12 @@ interface UIStore {
   providerOrder: string[];
   collapsedModelProviders: string[];
   customProviderIcons: Record<string, CustomProviderIcon>;
-  /** Uploaded logos by provider ID; the server writes them with the image. */
   customProviderLogos: Record<string, CustomProviderLogo>;
   recentModels: Array<{ providerID: string; modelID: string }>;
-  /** `provider/model` last picked in a chat composer; a new session starts on it when nothing is configured. */
   lastSelectedModel: string | undefined;
   recentAgents: string[];
-  /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
-  /**
-   * The last chosen thinking level per `provider/model`.
-   * `null` is an explicit Default; a missing key is no preference.
-   */
   lastUsedEfforts: Record<string, string | null>;
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
@@ -1115,9 +882,7 @@ interface UIStore {
   diffWrapLines: boolean;
   diffHideWhitespace: boolean;
   diffFileListMode: 'flat' | 'tree';
-  /** Width of the diff view's file tree column, in pixels. */
   diffFileTreeWidth: number;
-  /** Width of the walkthrough table of contents, in pixels. */
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
   toolJsonViewMode: 'summary' | 'formatted' | 'raw';
@@ -1127,22 +892,16 @@ interface UIStore {
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
-  // Desktop dock badge showing the count of sessions with unseen activity (macOS).
   dockBadgeEnabled: boolean;
   alwaysShowScrollbars: boolean;
-  // Native phone app: keep the display on while the open session works, always, or never.
   mobileKeepScreenAwake: MobileKeepScreenAwake;
-  // An agent's question shows as a card at the end of the chat instead of
-  // the dock above the composer. This device only.
   questionsInChat: boolean;
 
-  // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
   notifyOnPullRequests: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
 
-  // Per-event notification templates
   notificationTemplates: {
     completion: { title: string; message: string };
     error: { title: string; message: string };
@@ -1150,26 +909,20 @@ interface UIStore {
     subtask: { title: string; message: string };
   };
 
-  // Summarization settings
   summarizeLastMessage: boolean;
-  summaryThreshold: number;   // chars — messages longer than this get summarized
-  summaryLength: number;      // chars — target length for summary
-  maxLastMessageLength: number; // chars — truncate {last_message} when summarization is off
+  summaryThreshold: number;
+  summaryLength: number;
+  maxLastMessageLength: number;
 
   showTerminalQuickKeysOnDesktop: boolean;
-  /** Header session tabs (web/desktop), opt-in. Off keeps the plain session title. */
   sessionTabsEnabled: boolean;
-  /** Separate header tabs for each project root, worktree and space (`lib/sessionTabScope.ts`). */
   sessionTabsPerWorkspace: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentScheduleToolEnabled: boolean;
   agentWebToolEnabled: boolean;
-  /** Full-text message search (server index). Opt-in: off keeps every part of it idle. */
   messageSearchEnabled: boolean;
-  /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
   messageSearchReasoningEnabled: boolean;
-  /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
   agentKnowledgeToolEnabled: boolean;
@@ -1177,48 +930,22 @@ interface UIStore {
   agentUsageToolEnabled: boolean;
   agentTerminalToolEnabled: boolean;
   agentImageToolEnabled: boolean;
-  /** `provider/model` the image tool draws with; empty until the user picks one. */
   agentImageModel: string;
-  /** The agent memory tidies itself in the background (`agent-memory/dreaming.js`); off until turned on. */
   agentMemoryDreamingEnabled: boolean;
-  /** `provider/model` dreaming runs on; empty runs it on the default model. */
   agentMemoryDreamingModel: string;
   agentMemoryDreamingVariant: string;
   agentRenderToolEnabled: boolean;
   agentSecretToolEnabled: boolean;
   agentWorkflowToolEnabled: boolean;
-  /** The isolated-spaces switch as saved; the server applies it at its next start. */
+  agentWorkflowAutoApprove: boolean;
   isolatedSpacesEnabled: boolean;
-  /** The permission mode the server writes onto each new top-level session. */
   permissionDefaultMode: PermissionMode;
-  /**
-   * Whether an OpenChamber server backs agent memory here; false in VS Code.
-   * Server-owned and not persisted.
-   */
   agentMemoryFeatureAvailable: boolean;
-  /**
-   * Whether an OpenChamber server backs agent workflows here; false in VS Code.
-   * Server-owned and not persisted, for the same reason as the memory flag.
-   */
   agentWorkflowFeatureAvailable: boolean;
-  /**
-   * Whether this build has Jev model routing. Server-owned and not persisted,
-   * for the same reason as the memory flag.
-   */
   routingFeatureAvailable: boolean;
-  /** Whether the overview page exists at all; the server says, from `OPENCHAMBER_OVERVIEW_ENABLED`. */
   overviewFeatureAvailable: boolean;
-  /**
-   * When the user last looked at each memory scope, keyed by scope. Drives the
-   * new/changed badges; there is no stored review state.
-   */
   agentMemoryViewedAt: Record<string, number>;
-  /** Active tab of the project context panel (notes/todos/plans). */
   projectContextTab: string;
-  /**
-   * A saved plan an agent asked to show, waiting for the Project knowledge
-   * panel of its project to open it in place. Not persisted.
-   */
   projectKnowledgePlanRequest: { projectContextId: string; planId: string } | null;
   inputSpellcheckEnabled: boolean;
   largeTextPasteBehavior: LargeTextPasteBehavior;
@@ -1248,7 +975,6 @@ interface UIStore {
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
-  /** vimrc map lines applied whenever the file editor runs in Vim mode. */
   fileEditorVimMappings: string;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -1262,51 +988,28 @@ interface UIStore {
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
-  /**
-   * Opens an issue, pull or merge request or tracker item in the panel's
-   * Tracker surface, one tab per item (`key` names the item, whatever page of
-   * it the link opens). `targetDirectory` is the project it is read through.
-   * Answers the tab's id.
-   */
   openTrackerItem: (directory: string, item: { url: string; key: string; label: string; targetDirectory: string | null }) => string | null;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
-  /** `preview` opens it as the replaceable preview tab (a files-tree click). */
-  /** `expanded` also expands the file's zone beside the chat. */
   openContextFile: (directory: string, filePath: string, options?: { preview?: boolean; expanded?: boolean }) => void;
-  /** Turns a preview file tab into a regular one. */
   pinContextPanelTab: (directory: string, tabID: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, options?: { preview?: boolean }) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
   openNewContextBrowserTab: (directory: string) => void;
-  /** A new background browser tab for an agent at `url`; returns its tab id, or null where there is no browser. */
   openAgentBrowserTab: (directory: string, url: string, ownerSessionId: string | null) => string | null;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
-  /**
-   * Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or
-   * rename. `filesRoot` is the root the editor keeps them under when it is not `directory`: a draft
-   * waiting for a space shows the space's files in its own panel.
-   */
   moveContextFilePaths: (directory: string, fromPath: string, toPath: string, filesRoot?: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
-  /** Closes the file tab showing `filePath`, as its close button does. */
   closeContextFile: (directory: string, filePath: string) => void;
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
-  /** Closes the right zone. */
   closeContextPanel: (directory: string) => void;
   closeContextZone: (directory: string, zone: ContextZone) => void;
-  /** One zone is expanded at a time; expanding one collapses the others. */
   toggleContextPanelExpanded: (directory: string, zone?: ContextZone) => void;
-  /** Width for a side zone, height for the bottom one; shared by its surfaces and folders. */
   setContextZoneSize: (zone: ContextZone, size: number) => void;
   setContextZoneExpandedChatSize: (zone: ContextZone, size: number) => void;
-  /**
-   * Places a surface in a zone for every project on this device. Where it is
-   * on screen it goes along: the zone it left closes and the new one opens on it.
-   */
   moveContextSurfaceToZone: (mode: ContextPanelMode, zone: ContextZone) => void;
   setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
   setMessageQueueExpanded: (expanded: boolean) => void;
@@ -1321,7 +1024,6 @@ interface UIStore {
   setContextRailSurfaceVisible: (surfaceId: string, visible: boolean) => void;
   setContextRailHiddenSurfaces: (surfaceIds: string[]) => void;
   setMobileWorkspaceTabOrder: (order: readonly string[]) => void;
-  /** `extensions`: the extension tabs available now, so the last tab shown is counted right. */
   setMobileWorkspaceTabVisible: (tab: MobileWorkspaceTab, visible: boolean, extensions?: readonly PluginContextPanelMode[]) => void;
   setMobileWorkStatusSectionVisible: (sectionId: string, visible: boolean) => void;
   setMobileWorkStatusHiddenSections: (sectionIds: string[]) => void;
@@ -1344,7 +1046,6 @@ interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
-  /** `search` fills the page's search field, for a sidebar search that found nothing. */
   setArchivePageOpen: (open: boolean) => void;
   setIntegrationsCatalogOpen: (open: boolean) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
@@ -1353,7 +1054,6 @@ interface UIStore {
   setOpenGuestPage: (id: string | null) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
   setSpacesPageProjectId: (projectId: string | null) => void;
-  /** Close every full-page surface (Scheduled, Archive, Usage, Issues and PRs, Worktrees, Spaces, Multi-run). */
   closeMainSurfaces: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
@@ -1367,7 +1067,6 @@ interface UIStore {
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setSettingsProvidersOpenRequested: (providerId: string | null) => void;
   requestSettingsJump: (page: string, itemId?: string | null) => void;
-  /** Opens Settings on `page` and reveals `itemId` there, from anywhere in the app. */
   openSettingsAt: (page: string, itemId?: string | null) => void;
   clearSettingsJumpRequest: () => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
@@ -1450,7 +1149,6 @@ interface UIStore {
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
   rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
-  /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
   setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
@@ -1555,8 +1253,6 @@ interface UIStore {
 }
 
 
-// Opens a file tab, or reuses it. The preview this open replaces leaves the
-// editor's open files too, like any closed tab.
 const openFileTab = (state: UIStore, directory: string, filePath: string, preview: boolean) => {
   const tabs = state.contextPanelByDirectory[directory]?.tabs ?? [];
   const replacedPreviewPath = preview
@@ -1569,10 +1265,8 @@ const openFileTab = (state: UIStore, directory: string, filePath: string, previe
   }
 };
 
-/** What the selection menu's thumb-up says when the user set no text of their own. */
 export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
 export const DEFAULT_EDITOR_FONT_SIZE = 12;
-/** The Files tree beside the editor: narrow enough that the code beside it does not wrap. */
 export const DEFAULT_CONTEXT_EDITOR_TREE_WIDTH = 208;
 
 export const useUIStore = create<UIStore>()(
@@ -1733,7 +1427,6 @@ export const useUIStore = create<UIStore>()(
         mobileKeepScreenAwake: 'off',
         questionsInChat: false,
 
-        // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
         notifyOnPullRequests: true,
         notifyOnError: true,
@@ -1745,7 +1438,6 @@ export const useUIStore = create<UIStore>()(
           subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
         },
 
-        // Summarization settings
         summarizeLastMessage: false,
         summaryThreshold: 200,
         summaryLength: 100,
@@ -1758,8 +1450,6 @@ export const useUIStore = create<UIStore>()(
         agentControlToolEnabled: true,
         agentScheduleToolEnabled: true,
         agentWebToolEnabled: true,
-        // Off until the server says otherwise: it resolves the default (on) and sends it with
-        // every settings response, and a runtime with no OpenChamber server has no message search.
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
@@ -1776,6 +1466,7 @@ export const useUIStore = create<UIStore>()(
         agentRenderToolEnabled: true,
         agentSecretToolEnabled: true,
         agentWorkflowToolEnabled: false,
+        agentWorkflowAutoApprove: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
@@ -1844,8 +1535,6 @@ export const useUIStore = create<UIStore>()(
           set({ contextRailOrder: sanitized });
         },
 
-        // The editor and the tree can each be hidden, never both at once:
-        // hiding one while the other is hidden brings the other back.
         toggleContextEditorTree: () => {
           set((state) => (state.contextEditorTreeVisible && !state.contextEditorVisible
             ? { contextEditorTreeVisible: false, contextEditorVisible: true }
@@ -1865,9 +1554,6 @@ export const useUIStore = create<UIStore>()(
           set({ contextEditorTreeWidth: clampContextEditorTreeWidth(width) });
         },
 
-        // Rail entry point: activates the most recent tab of the requested
-        // mode, opens a fresh singleton tab when none exists, and toggles the
-        // panel closed when the requested mode is already active and visible.
         openContextSurface: (directory, mode) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
@@ -1902,9 +1588,6 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // A hidden tree stays hidden while a file is open, so the editor
-          // shows alone. With no file open the tree is all the surface has,
-          // and it comes back.
           if (mode === 'file' && !state.contextEditorTreeVisible
             && !tabs.some((tab) => tab.mode === 'file' && tab.targetPath)) {
             set({ contextEditorTreeVisible: true });
@@ -1913,11 +1596,7 @@ export const useUIStore = create<UIStore>()(
           const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
           if (tabsOfMode.length > 0) {
             clearTerminalTarget();
-            // `>=` so equal timestamps (same-millisecond opens) resolve to the
-            // later tab in insertion order.
             const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
-            // The rail's Changes and walkthrough are this project's: a pull
-            // request of another project opened from the Tracker gives way.
             if ((mode === 'diff' || mode === 'walkthrough') && mostRecent.targetDirectory) {
               state.openContextPanelTab(normalizedDirectory, {
                 mode,
@@ -1932,9 +1611,6 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Content-driven modes need a payload (a session to split); the rail
-          // renders them disabled until content exists. 'file' opens an empty
-          // editor whose embedded tree picks the first file.
           if (mode === 'chat') {
             return;
           }
@@ -1948,7 +1624,6 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Working in the panel's own directory is the default, stored as no target.
           const nextTab = tab.mode !== 'chat' && contextPanelModeKeepsTargetDirectory(tab.mode)
             ? {
                 ...tab,
@@ -1958,7 +1633,6 @@ export const useUIStore = create<UIStore>()(
               }
             : tab;
 
-          // Revealing a real file shows it, even if the editor was hidden.
           const showsFile = nextTab.mode === 'file' && Boolean(nextTab.targetPath) && options?.reveal !== false;
 
           set((state) => {
@@ -1988,7 +1662,6 @@ export const useUIStore = create<UIStore>()(
           set((state) => {
             const placement = state.contextSurfaceZones;
             const current = touchContextPanelState(state.contextPanelByDirectory[normalizedDirectory], placement);
-            // An item never shows without the branch's own tab beside it.
             const withBranch = current.tabs.some(isTrackerBranchTab)
               ? current
               : upsertContextPanelTab(current, { mode: 'pr' }, placement, { reveal: false });
@@ -2078,8 +1751,6 @@ export const useUIStore = create<UIStore>()(
           }
 
           noteBrowserTabAddressRequested(get().contextPanelByDirectory, normalizedDirectory, normalizedUrl, normalizedUrl);
-          // No stored label: a browser tab is named after wherever it has
-          // navigated to, which the panel derives from targetPath.
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'browser',
             targetPath: normalizedUrl,
@@ -2087,9 +1758,6 @@ export const useUIStore = create<UIStore>()(
             label: null,
           });
         },
-        // An agent's page gets its own tab in the background: never the tab
-        // the user is on, never an existing tab that happens to show the same
-        // address, and the panel stays as the user left it.
         openAgentBrowserTab: (directory, url, ownerSessionId) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return null;
@@ -2105,8 +1773,6 @@ export const useUIStore = create<UIStore>()(
           }, { reveal: false });
           return buildContextPanelTabID('browser', dedupeKey);
         },
-        // Always a new tab, never the existing one: the whole point of asking
-        // for one is to keep what is already open.
         openNewContextBrowserTab: (directory) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return;
@@ -2182,7 +1848,6 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            // Picking a file tab shows its editor, even if the editor was hidden.
             const showsFile = targetTab.mode === 'file' && Boolean(targetTab.targetPath);
             const zone = zoneOfMode(state.contextSurfaceZones, targetTab.mode);
             const view = getZoneView(current, zone);
@@ -2272,14 +1937,11 @@ export const useUIStore = create<UIStore>()(
             get().closeContextPanelTabs(normalizedDirectory, [tab.id]);
             return;
           }
-          // No tab shows it (the strip was already out of step): the editor's
-          // own open files still drop it.
           useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, normalizedFilePath);
         },
 
         closeContextPanelTabs: (directory, tabIds) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          // The Tracker's branch tab stays: closing every item leaves it.
           const branchTabIds = new Set((get().contextPanelByDirectory[normalizedDirectory]?.tabs ?? [])
             .filter(isTrackerBranchTab)
             .map((tab) => tab.id));
@@ -2317,8 +1979,6 @@ export const useUIStore = create<UIStore>()(
             };
           });
 
-          // Keep the editor's own open-file state in sync so closed files do not
-          // resurrect when the editor surface reopens.
           for (const tab of closedTabs) {
             if (tab.mode === 'file' && tab.targetPath) {
               useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, tab.targetPath);
@@ -2397,8 +2057,6 @@ export const useUIStore = create<UIStore>()(
               placement[mode] = zone;
             }
 
-            // Every project's panel follows, so the surface is where the user
-            // put it whichever project they switch to.
             const byDirectory: Record<string, ContextPanelDirectoryState> = {};
             for (const [directory, panel] of Object.entries(state.contextPanelByDirectory)) {
               byDirectory[directory] = carrySurfaceToZone(panel, mode, from, zone, placement);
@@ -2440,8 +2098,6 @@ export const useUIStore = create<UIStore>()(
         setWorkStatusPanelFits: (fits) => {
           set((state) => {
             if (state.workStatusPanelFits === fits) return state;
-            // Room again: the panel goes back to its place, so an overlay left
-            // open would duplicate it.
             return fits
               ? { workStatusPanelFits: true, workStatusOverlayOpen: false }
               : { workStatusPanelFits: false };
@@ -2515,7 +2171,6 @@ export const useUIStore = create<UIStore>()(
               return hidden.includes(tab) ? { mobileWorkspaceHiddenTabs: hidden.filter((entry) => entry !== tab) } : state;
             }
             if (hidden.includes(tab)) return state;
-            // The last tab the user keeps stays: the drawer would have nothing to show.
             const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden, extensions);
             if (shown.length <= 1) return state;
             return { mobileWorkspaceHiddenTabs: [...hidden, tab] };
@@ -2640,7 +2295,6 @@ export const useUIStore = create<UIStore>()(
         },
 
         setOverviewOpen: (open) => {
-          // Without the feature there is no page to open, whatever asks for it.
           if (open && !get().overviewFeatureAvailable) return;
           set(open
             ? { isOverviewOpen: true, isSourceBoardOpen: false, isUsageStatsPageOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
@@ -2890,7 +2544,6 @@ export const useUIStore = create<UIStore>()(
         },
 
         setFontSize: (size) => {
-          // Clamp between 50% and 200%
           const clampedSize = Math.max(50, Math.min(200, size));
           set({ fontSize: clampedSize });
           get().applyTypography();
@@ -2957,7 +2610,6 @@ export const useUIStore = create<UIStore>()(
         },
 
         setPadding: (size) => {
-          // Clamp between 50% and 200%
           const clampedSize = Math.max(50, Math.min(200, size));
           set({ padding: clampedSize });
           get().applyPadding();
@@ -2971,13 +2623,10 @@ export const useUIStore = create<UIStore>()(
           const { fontSize } = get();
           const root = document.documentElement;
 
-          // 100 = default (1.0x), 50 = half size (0.5x), 200 = double (2.0x)
           const scale = fontSize / 100;
 
           const entries = Object.entries(SEMANTIC_TYPOGRAPHY) as Array<[SemanticTypographyKey, string]>;
 
-          // Scale the root rem unit so regular utility classes, icons, spacing,
-          // and semantic typography all respond to the same interface setting.
           if (scale === 1) {
             root.style.removeProperty('font-size');
             for (const [key] of entries) {
@@ -2988,7 +2637,6 @@ export const useUIStore = create<UIStore>()(
 
           root.style.fontSize = `${scale * 100}%`;
 
-          // The variables remain authored in rem and inherit the root scale.
           for (const [key] of entries) root.style.removeProperty(getTypographyVariable(key));
         },
 
@@ -3007,14 +2655,10 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Apply padding as a percentage scale with non-linear scaling
-          // Use square root for more natural scaling at extremes
           const adjustedScale = Math.sqrt(scale);
 
-          // Set the CSS custom property that all spacing tokens reference
           root.style.setProperty('--padding-scale', adjustedScale.toString());
 
-          // Dampened line-height scaling at extremes
           const lineHeightScale = 1 + (scale - 1) * 0.15;
 
           root.style.setProperty('--line-height-tight', (1.25 * lineHeightScale).toFixed(3));
@@ -3083,14 +2727,12 @@ export const useUIStore = create<UIStore>()(
             );
             
             if (exists) {
-              // Remove from favorites
               return {
                 favoriteModels: state.favoriteModels.filter(
                   (fav) => !(fav.providerID === providerID && fav.modelID === modelID)
                 ),
               };
             } else {
-              // Add to favorites (newest first)
               return {
                 favoriteModels: [{ providerID, modelID }, ...state.favoriteModels],
               };
@@ -3250,11 +2892,9 @@ export const useUIStore = create<UIStore>()(
 
         addRecentModel: (providerID, modelID) => {
           set((state) => {
-            // Remove existing instance if any
             const filtered = state.recentModels.filter(
               (m) => !(m.providerID === providerID && m.modelID === modelID)
             );
-            // Add to front, limit to 5
             return {
               recentModels: [{ providerID, modelID }, ...filtered].slice(0, 5),
             };
@@ -3350,8 +2990,6 @@ export const useUIStore = create<UIStore>()(
           }
         },
 
-        // The run overview is one of the mutually exclusive full-page surfaces:
-        // opening it closes the other surfaces and vice versa.
         setRunOverviewKey: (runKey) => {
           set(runKey
             ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isIntegrationsCatalogOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isOverviewOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
@@ -3504,7 +3142,6 @@ export const useUIStore = create<UIStore>()(
         setAgentWorkflowToolEnabled: (value) => {
           set({ agentWorkflowToolEnabled: value });
           if (value) return;
-          // Off hides workflows (`selectWorkflowsShown`), so an open Workflows tab closes too.
           for (const [directory, panel] of Object.entries(get().contextPanelByDirectory)) {
             const workflowTabIds = panel.tabs.filter((tab) => tab.mode === 'workflows').map((tab) => tab.id);
             if (workflowTabIds.length > 0) get().closeContextPanelTabs(directory, workflowTabIds);
@@ -3519,14 +3156,11 @@ export const useUIStore = create<UIStore>()(
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
         },
-        // Losing the feature closes the page, so nothing of it stays on screen.
         setOverviewFeatureAvailable: (value) => {
           set(value ? { overviewFeatureAvailable: true } : { overviewFeatureAvailable: false, isOverviewOpen: false });
         },
         markAgentMemoryViewed: (key, viewedAt) => {
           set((state) => ({
-            // Never moves backwards: a stale unmount landing after a newer look
-            // would otherwise resurrect badges the user has already cleared.
             agentMemoryViewedAt: viewedAt > (state.agentMemoryViewedAt[key] ?? 0)
               ? { ...state.agentMemoryViewedAt, [key]: viewedAt }
               : state.agentMemoryViewedAt,
@@ -3651,7 +3285,6 @@ export const useUIStore = create<UIStore>()(
         },
 
         setFileEditorVimMappings: (value) => {
-          // Same cap as the settings registry field.
           set({ fileEditorVimMappings: value.slice(0, 10_000) });
         },
 
@@ -3673,40 +3306,27 @@ export const useUIStore = create<UIStore>()(
           }
           const state = persistedState as Record<string, unknown>;
 
-          // v22 -> v23: table cell wrap is on by default. The local copy only
-          // ever held the old default; a choice the user made is restored from
-          // the synced settings after hydration.
           if (version < 23) {
             state.tableCellWrap = true;
           }
 
-          // v26 -> v27: Context sources moved up the default order; an order
-          // the user arranged stays.
           if (version < 27 && Array.isArray(state.workStatusSectionOrder)) {
             state.workStatusSectionOrder = sanitizeWorkStatusSectionOrder(state.workStatusSectionOrder, false);
           }
 
-          // v27 -> v28: the Editor font size default went from 13 to 12. The
-          // local copy holds 13 for everyone who never changed it; a 13 the
-          // user chose is restored from the synced settings after hydration.
           if (version < 28 && state.editorFontSize === 13) {
             state.editorFontSize = DEFAULT_EDITOR_FONT_SIZE;
           }
 
-          // v28 -> v29: the Files tree's default width went from 240 to 208.
-          // The local copy holds 240 for everyone who never dragged it; a
-          // width the user set (any other) stays.
           if (version < 29 && state.contextEditorTreeWidth === 240) {
             state.contextEditorTreeWidth = DEFAULT_CONTEXT_EDITOR_TREE_WIDTH;
           }
 
-          // v29 -> v30: the Wide chat layout switch became the Full chat width.
           if (version < 30) {
             state.chatWidth = state.wideChatLayoutEnabled === true ? 'full' : 'default';
             delete state.wideChatLayoutEnabled;
           }
 
-          // v20 -> v21: enable telemetry by default; preserve explicit choices.
           if (version < 21 && state.workStatusHiddenSectionsExplicit !== true) {
             state.workStatusHiddenSections = Array.isArray(state.workStatusHiddenSections)
               ? state.workStatusHiddenSections.filter((id) => id !== 'telemetry')
@@ -3714,34 +3334,19 @@ export const useUIStore = create<UIStore>()(
             state.workStatusHiddenSectionsExplicit = false;
           }
 
-          // v15 -> v16: the main-area surface concept is gone from persistence
-          // (the chat always owns the desktop main area; panel surfaces have
-          // their own state). Drop the historic fields so a stored non-chat
-          // value cannot rehydrate into a blank main area.
           if (version < 16) {
             delete state.activeMainTab;
             delete state.activeSurface;
           }
 
-          // v16 -> v17: the editor toolbar is always docked; the preference is gone.
           if (version < 17) {
             delete state.expandedEditorToolbar;
           }
 
-          // v17 -> v18: the default shortcut layout was redesigned around the
-          // mod+k leader and the held digit prefixes. Old overrides were
-          // recorded against the previous defaults (e.g. a bare 'mod' surface
-          // prefix now collides with session tabs), so custom bindings start
-          // fresh on the new system.
           if (version < 18) {
             delete state.shortcutOverrides;
           }
 
-          // v13 -> v14: the separate 'preview' surface merged into 'browser'.
-          // Stored preview tabs keep their URL and become browser tabs; their
-          // id encodes the mode, so it is rebuilt rather than left dangling.
-          // Persisted widths recorded under 'preview' carry over only when the
-          // user has not already sized the browser surface.
           if (version < 14) {
             const byDirectory = state.contextPanelByDirectory;
             if (byDirectory && typeof byDirectory === 'object') {
@@ -3775,8 +3380,6 @@ export const useUIStore = create<UIStore>()(
                     ? tab.dedupeKey.trim()
                     : (targetPath || 'browser');
                   const id = dedupeKey === 'browser' ? 'browser' : `browser:${dedupeKey}`;
-                  // A converted tab can collide with a browser tab on the same
-                  // URL; keep the existing one rather than producing duplicates.
                   if (seenIds.has(id)) continue;
                   seenIds.add(id);
                   migrated.push({ ...tab, mode: 'browser', id, dedupeKey });
@@ -3791,7 +3394,6 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
           if (version < 13) {
             if (typeof state.autoSaveEnabled !== 'boolean') {
               let legacyEnabled = true;
@@ -3810,24 +3412,20 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // v11 -> v12: drop legacy window-controls "auto" (always meant right).
           if (version < 12) {
             if (state.desktopWindowControlsPosition === 'auto' || state.desktopWindowControlsPosition == null) {
               state.desktopWindowControlsPosition = 'right';
             }
           }
 
-          // v10 -> v11: move the previous terminal font default forward.
           if (version < 11 && state.terminalFontSize === 13) {
             state.terminalFontSize = 14;
           }
 
-          // v9 -> v10: remove obsolete single-file diff view mode setting
           if (version < 10) {
             delete state.diffViewMode;
           }
 
-          // v8 -> v9: initialize notes/todo panel height fields
           if (version < 9) {
             if (!state.workStatusExpandedSections || typeof state.workStatusExpandedSections !== 'object') {
               state.workStatusExpandedSections = {};
@@ -3843,7 +3441,6 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // v0 -> v1: reset legacy notification templates
           if (version < 1) {
             if (isLegacyDefaultTemplates(state.notificationTemplates)) {
               state.notificationTemplates = {
@@ -3855,36 +3452,26 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // v2 -> v3: collapse 3 memory-limit fields into single messageLimit.
-          // Pick the best user-customised value (prefer historical, fall back to active).
-          // Discard old defaults (90/120/180) — they become the new single default (200).
           if (version < 3) {
             const OLD_DEFAULTS = new Set([90, 120, 180, 220]);
             const hist = state.memoryLimitHistorical as number | undefined;
             const active = state.memoryLimitActiveSession as number | undefined;
 
-            // If user had a non-default custom value, keep it as the new messageLimit.
             if (typeof hist === 'number' && !OLD_DEFAULTS.has(hist)) {
               state.messageLimit = hist;
             } else if (typeof active === 'number' && !OLD_DEFAULTS.has(active)) {
               state.messageLimit = active;
             }
-            // Otherwise leave undefined → Zustand uses the initial default (200).
 
             delete state.memoryLimitHistorical;
             delete state.memoryLimitViewport;
             delete state.memoryLimitActiveSession;
           }
 
-          // Right-sidebar state was removed with the sidebar itself; drop
-          // stale persisted fields.
           delete state.isRightSidebarOpen;
           delete state.rightSidebarWidth;
           delete state.rightSidebarTab;
 
-          // Every bump reruns this. v25 -> v26: zone sizes left the directory
-          // panels for one set shared by every folder; the folder the user
-          // worked in last gives it, so the panel keeps the width they see.
           const legacySizes: LegacyZoneSizes[] = [];
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory, legacySizes);
           if (version < 26) {
@@ -3923,8 +3510,6 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          // The Linear rail panel's list filters went with the panel; Linear
-          // lists on the issues and PRs board now.
           delete state.linearIssueListStatus;
           delete state.linearIssueListAssignee;
           delete state.linearIssueListTeamId;
@@ -3955,8 +3540,6 @@ export const useUIStore = create<UIStore>()(
             state[key] = Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
           }
 
-          // v23 -> v24: workspace zones. Panels gain closed left/bottom zones
-          // (the sanitize above), and nothing is placed off the right.
           state.contextSurfaceZones = zonePlacementSchema.parse(state.contextSurfaceZones);
 
           return state;
@@ -3994,7 +3577,6 @@ export const useUIStore = create<UIStore>()(
           settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
-          // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
           streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
           sessionRecapEnabled: state.sessionRecapEnabled,

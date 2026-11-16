@@ -5,24 +5,15 @@ import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormaliza
 export type OpenCodeProject = {
   path: string;
   name: string;
-  /** The folder holding it, shown beside the name to tell equal names apart. */
   parent: string;
 };
 
 const TEMPORARY_ROOT = /^(?:\/private)?\/(?:tmp|var\/tmp|var\/folders)(?:\/|$)/;
 const MACHINE_SEGMENTS = new Set(['AppData', 'Library', 'node_modules', 'Temp']);
 
-// OpenCode records every folder it ever started in: its own config, the temp
-// folders of test runs, editor storage, disposable checkouts. Each of these
-// sits under a hidden or machine folder.
 const isMachineFolder = (path: string): boolean => TEMPORARY_ROOT.test(path)
   || path.split('/').some((segment) => segment.startsWith('.') || MACHINE_SEGMENTS.has(segment));
 
-/**
- * The repositories worth offering from OpenCode's project list, latest first.
- * A folder that is not a repository is left out: home, Documents subfolders
- * and other places OpenCode was merely started in have no project identity.
- */
 export const openCodeProjectCandidates = (
   projects: ReadonlyArray<Pick<Project, 'worktree' | 'vcs' | 'name' | 'time'>>,
   configuredPaths: ReadonlySet<string>,

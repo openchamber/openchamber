@@ -1576,7 +1576,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Tempo: {rate}',
   'settings.usage.pace.waitSeparator': ' · Wacht ',
   'settings.usage.pace.predictionLabel': 'Voorsp.: ',
-  'settings.usage.card.showInHeaderAria': 'Tonen in het headermenu',
   'settings.usage.card.resetsAt': 'Reset {time}',
   'settings.usage.card.bar.used': 'gebruikt',
   'settings.usage.card.bar.remaining': 'resterend',

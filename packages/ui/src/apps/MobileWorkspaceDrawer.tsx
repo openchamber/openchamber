@@ -32,45 +32,23 @@ import { useEdgeSwipe } from './useEdgeSwipe';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
-// Loaded with the first browser tab the user opens.
 const MobileBrowserSurface = React.lazy(() => import('./MobileBrowserSurface').then((module) => ({ default: module.MobileBrowserSurface })));
-// Loaded with the first extension tab the user opens.
 const GuestPanelContent = React.lazy(() => import('@/components/layout/GuestPanelContent').then((module) => ({ default: module.GuestPanelContent })));
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
-// Slightly long, decelerating slide — matches the sessions drawer so both
-// sides feel like the same piece of chrome.
 const ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-/** The workspace surfaces as tabs (Status / Changes / Files / Terminal / Notes,
-    then one per extension that opted its panel into the phone).
-
-    Two hosts, same content and same state:
-     - `drawer` (default) covers the app and slides in from the right edge —
-       the phone, and a tablet in portrait where a side panel would leave no
-       usable chat column;
-     - `panel` renders inline so the caller can size it as a real sidebar
-       beside the chat (tablet, landscape). The caller owns the width and the
-       open/close animation there; this component only fills it.
-
-    Closes via the header X, a left-edge swipe back toward the right (the
-    mirror of the gesture that opened it), Escape (unless the terminal tab owns
-    the keys), or the Android back button (handled by MobileShell). */
 export const MobileWorkspaceDrawer: React.FC<{
   open: boolean;
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
   registerPreviewBackHandler: (handler: (() => boolean) | null) => void;
-  /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean; scope?: 'turn' } | null;
-  /** When set, the Changes tab switches to the commit scope (`host.openCommit` selected the commit). */
   pendingChangesCommit: MobileChangesCommitRequest | null;
-  /** Notes tab: opens a plan fullscreen (layered above the drawer). */
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
-  /** Shared pages tab: opens a page fullscreen (layered above the drawer). */
   onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;
   variant?: 'drawer' | 'panel';
 }> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
@@ -78,7 +56,6 @@ export const MobileWorkspaceDrawer: React.FC<{
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
-  // Kept visible through the exit slide; flipped to hidden once it finishes.
   const [visible, setVisible] = React.useState(open);
   const onCloseRef = React.useRef(onClose);
   React.useEffect(() => {
@@ -88,34 +65,21 @@ export const MobileWorkspaceDrawer: React.FC<{
   const hiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setTabOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
   const extensionTabs = usePhoneGuestPanelModes();
-  // The shared pages tab, while the server holds any page someone shared:
-  // always right after Status (first without it), so a narrow strip that
-  // scrolls never hides it.
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
-  // The Status tab's section picker opens from the tab row, beside the close button.
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
   const tabRef = React.useRef(tab);
   React.useEffect(() => {
     tabRef.current = tab;
   }, [tab]);
 
-  // Swipe from the drawer's start edge back toward its end = close, the
-  // reverse of the end-edge swipe that opened it from the chat. Only the
-  // full-cover drawer has an edge to grab; the tablet panel is closed from the
-  // header instead.
   const closeFromEdge = () => onCloseRef.current();
   useEdgeSwipe(drawerRef, {
     enabled: variant === 'drawer' && open,
     ...(direction === 'rtl' ? { onRightEdgeSwipe: closeFromEdge } : { onLeftEdgeSwipe: closeFromEdge }),
   });
 
-  // Tabs the user has actually opened — their panes stay mounted afterwards.
-  // An extension's frame too, as on the desktop rail: its page keeps its
-  // state across a tab switch or a closed drawer. An extension that leaves the
-  // catalog (disabled, removed, another server) unmounts and starts fresh
-  // when it comes back.
   const [visitedTabs, setVisitedTabs] = React.useState<ReadonlySet<MobileWorkspaceTab>>(() => new Set());
   React.useEffect(() => {
     if (!open) return;
@@ -133,7 +97,6 @@ export const MobileWorkspaceDrawer: React.FC<{
       return new Set([...current].filter((id) => !gone.includes(id)));
     });
   }, [extensionTabs]);
-  // Opening an extension's tab is seeing what it counted, as a rail click is.
   const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
   React.useEffect(() => {
     if (open && isPluginContextPanelMode(tab)) clearGuestBadge(pluginIdFromMode(tab));
@@ -162,15 +125,9 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   React.useEffect(() => {
     if (!open) return;
-    // Only the full-cover drawer owns the page scroll; the inline panel sits
-    // inside the shell and must leave the chat beside it scrollable.
     const previousOverflow = document.body.style.overflow;
     if (variant === 'drawer') document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
-      // The terminal owns Escape (it goes to the PTY) — don't hijack it.
-      // The same goes for the file editor on the Vim keymap, where Escape
-      // leaves INSERT mode (hardware keyboards on tablets and phones), and
-      // for an IME composition, where it dismisses the candidate window.
       if (event.key !== 'Escape' || tabRef.current === 'terminal') return;
       if (isVimEditorEventTarget(event.target)) return;
       if (isIMECompositionEvent(event)) return;
@@ -206,7 +163,6 @@ export const MobileWorkspaceDrawer: React.FC<{
         ? t(count === 1 ? 'contextRail.surface.plugin.badgeAriaSingle' : 'contextRail.surface.plugin.badgeAriaPlural', { label, count })
         : label,
       icon: (
-        // The count sits on the icon: inactive tabs show only their icon.
         <span className="relative flex">
           <GuestIcon
             icon={resolveGuestIconName(guest?.icon ?? '')}
@@ -225,13 +181,10 @@ export const MobileWorkspaceDrawer: React.FC<{
       ),
     };
   };
-  // The user's tabs in their order (Settings > General), plus a hidden one
-  // while something opened it.
   const orderedTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, extensionTabs);
   const stripTabs = receivedPagesShown || tab === 'pages' ? withReceivedPagesTab(orderedTabs) : orderedTabs;
   const tabItems = stripTabs.map((id) => (isPluginContextPanelMode(id) ? extensionTabItem(id) : tabDefinitions[id]));
   const soleTab = tabItems.length === 1 ? tabItems[0] : null;
-  // A long press on a tab drags it; the new order covers hidden tabs too.
   const reorderTabs = (activeId: string, overId: string) => {
     const all = orderMobileWorkspaceTabs(tabOrder, extensionTabs);
     const from = all.findIndex((id) => id === activeId);
@@ -244,10 +197,6 @@ export const MobileWorkspaceDrawer: React.FC<{
     <>
       <div className={MOBILE_HEADER_CLASS}>
         <div className="flex h-9 min-w-0 flex-1 items-center">
-          {/* Mounted only while shown; nonCompositedIndicator keeps the active
-              pill off its own compositing layer — creating one inside the
-              drawer's slide flickers in WKWebView. */}
-          {/* One tab has nothing to switch to: it is named, not offered. */}
           {soleTab ? (
             <h2 className="flex min-w-0 items-center gap-2 px-1 typography-ui-label font-medium text-foreground">
               <span className="flex shrink-0 text-muted-foreground">{soleTab.icon}</span>
@@ -262,13 +211,9 @@ export const MobileWorkspaceDrawer: React.FC<{
                 if (next) onTabChange(next);
               }}
               onReorder={reorderTabs}
-              // Extension tabs can outgrow the row: past the built-in five
-              // the strip scrolls sideways instead of clipping the last ones.
               layoutMode={tabItems.length > 5 ? 'scrollable' : 'fit'}
               variant="active-pill"
               nonCompositedIndicator
-              // More than three tabs don't fit with labels: the active tab
-              // keeps icon + label, the rest collapse to icons.
               inactiveTabsIconOnly={tabItems.length > 3}
               className="h-full"
             />
@@ -296,9 +241,6 @@ export const MobileWorkspaceDrawer: React.FC<{
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {/* Panes stay MOUNTED once visited (hidden when inactive/closed), so
-            reopening the drawer lands exactly where the user left off — an
-            open diff, an edited file, an attached terminal. */}
         {visitedTabs.has('status') ? (
           <div className={cn('h-full', tab !== 'status' && 'hidden')}>
             <ErrorBoundary>
@@ -313,8 +255,6 @@ export const MobileWorkspaceDrawer: React.FC<{
         ) : null}
         {visitedTabs.has('changes') ? (
           <div
-            // A newly requested per-file diff remounts the pane so
-            // initialDiff applies; plain reopens keep the state.
             key={pendingChangesDiff ? `changes:${pendingChangesDiff.path}:${pendingChangesDiff.staged}` : 'changes'}
             className={cn('h-full', tab !== 'changes' && 'hidden')}
           >
@@ -389,10 +329,6 @@ export const MobileWorkspaceDrawer: React.FC<{
   );
 
   if (variant === 'panel') {
-    // The caller animates the width; the content itself is plain flow so it
-    // never gets its own compositing layer (iOS clips those to the safe-area
-    // viewport, which is exactly what the drawer's settled `transform: none`
-    // avoids on the other host).
     return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">{body}</div>;
   }
 
@@ -406,8 +342,6 @@ export const MobileWorkspaceDrawer: React.FC<{
       className="oc-keyboard-inset-surface oc-bottom-safe-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
-        // Settled state drops the transform entirely so the drawer isn't kept
-        // on a compositing layer (iOS clips those to the safe-area viewport).
         transform: entered ? 'none' : direction === 'rtl' ? 'translateX(-100%)' : 'translateX(100%)',
         transition: `transform ${ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
         visibility: visible ? 'visible' : 'hidden',

@@ -1,11 +1,3 @@
-/**
- * Optional pass over a finished dictation with the user's Small Model: the
- * speech model writes what a word sounded like ("таку з дибав"), and a
- * language model reading the whole sentence can tell which word was meant.
- *
- * The pass never costs the user their dictation: a failure, a timeout or an
- * answer that is not a plausible copy of the input returns the original text.
- */
 
 export const CORRECTION_TIMEOUT_MS = 10000;
 
@@ -30,8 +22,6 @@ export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIM
       return original;
     }
     const languageLine = language ? `The speaker's language is "${String(language)}".\n\n` : '';
-    // The deadline covers the whole pass: the small-model service starts its
-    // own generation budget only after resolving the model, which can hang.
     const deadline = AbortSignal.timeout(timeoutMs);
     const timedOut = new Promise((resolve) => {
       deadline.addEventListener('abort', () => resolve(null), { once: true });
@@ -43,7 +33,6 @@ export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIM
           prompt: `${languageLine}Dictated text:\n${original}`,
           timeoutMs,
           signal: deadline,
-          // A truncated dictation must not come back as a shorter "correction".
           onOverflow: 'error',
         }),
         timedOut,
@@ -56,10 +45,6 @@ export function createTranscriptCorrector({ generate, timeoutMs = CORRECTION_TIM
   };
 }
 
-/**
- * A correction keeps roughly the same amount of text. Anything much shorter or
- * longer is a model that answered, summarized or refused instead of fixing.
- */
 export function isPlausibleCorrection(original, corrected) {
   const fixed = String(corrected ?? '').trim();
   if (!fixed) {

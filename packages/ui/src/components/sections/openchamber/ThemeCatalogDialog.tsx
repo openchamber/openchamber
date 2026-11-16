@@ -33,7 +33,6 @@ function ExtensionIcon({ extension }: { extension: ThemeExtension }) {
     : <Icon name="palette" className="size-9 shrink-0 text-muted-foreground" />;
 }
 
-/** Rows standing in for results while the catalog answers, the same height as a result. */
 function ResultSkeleton() {
   const { t } = useI18n();
   const blink = useWaitingBlink(true);
@@ -55,12 +54,6 @@ function ResultSkeleton() {
   );
 }
 
-/**
- * Open VSX theme catalog behind "Browse themes". It opens on the most
- * downloaded themes, so nobody has to know a name first; a click on one
- * reads its package and shows each variant drawn the way the app will look,
- * all of them selected, so importing is one more click.
- */
 export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: () => void; fileBusy: boolean; onClose: () => void }) {
   const { t } = useI18n();
   const mobileLayout = useUIStore((state) => state.isMobile);
@@ -81,7 +74,6 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
     return () => { unsubscribe(); controller.abort(); };
   }, []);
 
-  // An empty query asks the server for the most downloaded themes.
   React.useEffect(() => {
     if (state.step !== 'search') return;
     const controller = new AbortController();
@@ -185,7 +177,6 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
     </Button>
   ) : null;
 
-  // The search field leads the header row at a query's width on desktop and spans the sheet on a phone.
   const searchField = state.step === 'search' ? (
     <div className={cn('relative min-w-0', isMobile ? 'w-full' : 'w-72')}>
       <Icon name="search" className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -261,7 +252,6 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
     </div>
   );
 
-  // One reserved line under the list: a partial import says so here without moving the footer.
   const statusLine = (
     <p role="alert" className="min-h-5 truncate typography-meta text-[var(--status-error-text)]">
       {result === 'partial' ? t('settings.themeImport.partialError') : null}
@@ -292,10 +282,7 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
 
   return (
     <Dialog open onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      {/* The close button sits in the header row, centred with the title and the search field. */}
       <DialogContent className="max-w-2xl gap-3" backdropProps={{ forceRender: true }} showCloseButton={false}>
-        {/* Search opens on the search field itself, the button already named the dialog;
-            a theme's page names the theme. */}
         <div className="flex min-h-7 items-center gap-1">
           {backButton}
           <DialogTitle className={cn('min-w-0 truncate', state.step === 'search' && 'sr-only')} dir="auto">{title}</DialogTitle>
@@ -314,7 +301,6 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
           </Button>
         </div>
         <DialogDescription className="sr-only">{t('settings.themeImport.catalogHint')}</DialogDescription>
-        {/* The search field lives in the header row, so search and variants share one list height. */}
         <ScrollableOverlay outerClassName="h-[31rem]" className="pe-1" aria-live="polite" disableHorizontal>
           {body}
         </ScrollableOverlay>
@@ -343,11 +329,6 @@ function VariantSkeleton({ columns }: { columns: number }) {
   );
 }
 
-/**
- * One variant of a theme package, drawn with the same schematic as the
- * Appearance cards. A card toggles its selection; an imported one is done and
- * an unreadable one says so.
- */
 function VariantCard({ variant, selected, saved, disabled, onToggle }: {
   variant: Variant;
   selected: boolean;
@@ -359,7 +340,6 @@ function VariantCard({ variant, selected, saved, disabled, onToggle }: {
   const ready = variant.status === 'ready';
   const interactive = ready && !saved && !disabled;
   return (
-    // A div, not a button: index.css clears the fill of every svg shape inside a button.
     <div
       role="checkbox"
       aria-checked={saved || selected}
@@ -374,7 +354,6 @@ function VariantCard({ variant, selected, saved, disabled, onToggle }: {
       className={cn(
         'flex min-w-0 select-none flex-col gap-1.5 rounded-xl p-1.5 focus-visible:outline-none',
         interactive && 'cursor-pointer',
-        // Selection shows in the box before the name, so no fill tints the drawing.
         'oc-tile',
         interactive && 'oc-tile-hover focus-visible:bg-interactive-hover',
         !ready && 'opacity-60',
@@ -399,7 +378,6 @@ function VariantCard({ variant, selected, saved, disabled, onToggle }: {
               {selected ? <Icon name="check" className="size-2.5 text-foreground" /> : null}
             </span>
           )}
-        {/* The drawing already shows light or dark; the caption speaks only for a done or broken variant. */}
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-baseline gap-1.5">
             <span className="min-w-0 truncate typography-ui-label" dir="auto">{variant.name}</span>

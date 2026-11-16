@@ -234,6 +234,82 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - Normalizes markdown-like formatting to plain text before truncation.
 - Always applies `maxLastMessageLength` truncation to final result.
 
+## Invariants
+
+- A failed push-store write rejects its caller while allowing later registrations to write. A failed channel-catalog read preserves the registered channels, because a read failure establishes no removal.
+- A claim released without sending restores the previous notification under its tag, because the phone still shows that push. Restored tags load before current-process tags so a delayed store read cannot replace newer state; writes begin immediately and serialize because the desktop server can stop after any push.
+- The cross-project session snapshot comes from the server's single upstream stream so clients that do not initialize every directory still receive live status, waiting requests and context readings.
+
+## Decisions
+
+### Why push keys are hashes and not stored credentials
+
+Push registrations can outlive their UI sessions. Their grouping key only needs stable equality, so hashing keeps the session credential out of persistent registration files.
+
+### Why badges count tags and not unread sessions
+
+Each tag identifies a banner, and one session can have several banners. The absolute badge counts pushed tags since user engagement; unread state arrives separately and can race the push trigger or remain viewed on a backgrounded client. A suppressed native push leaves the badge and the phone's previous tag state unchanged.
+
+### Why mobile push reads interactive-client presence and not phone visibility
+
+A suspended WKWebView cannot reliably report that it is hidden, so native and mobile-PWA push suppression uses fresh visibility from interactive clients. Native iOS suppresses its own foreground banner, and the PWA service worker checks focused clients; non-mobile web subscriptions use the any-visible gate. A heartbeat without a platform preserves the previous platform classification.
+
+### Why relay registrations repeat and not only for new tokens
+
+Every device registration rebinds its token and platform, because existing tokens need their bindings after relay or server changes. A failed registration write leaves later registration attempts usable.
+
+### Why relay signing uses the shared identity and not a separate push keypair
+
+Push and private relay requests identify the same server through the shared signing-key store. Cached keys follow its generation so resetting that identity also changes push signing; the public JWK contains only the 4 relay-schema fields that determine the server id, and the signature covers the platform to prevent routing changes in transit.
+
+### Why APNs batches separate environments and not just devices
+
+Sandbox and production endpoints know different tokens. Sending to the wrong endpoint produces `BadDeviceToken` and would incorrectly delete a live registration; registrations without an environment retain the production default used by released apps. Visible direct pushes set `mutable-content` so the notification service extension can refresh widgets even while the app is closed.
+
+### Why desktop delivery has a callback and not only stdout
+
+An in-process Electron shell receives a direct callback, which can be installed after runtime construction to fit the server's module wiring. Stdout remains the fallback protocol for other shells. A successful native delivery makes the UI event informational through `desktopNotificationDelivered`, preventing a second OS notification; `desktopStdoutActive` remains available to older clients.
+
+### Why Basic accounts retain the typed login and not a service-supplied login
+
+The typed username is the identity accepted by Basic authentication and is the one subsequent outbound handles must send. Instance input contains only an origin, because the service owns request paths; paths, queries, fragments and embedded credentials cannot become part of the stored instance.
+
+### Why partial updates preserve parentage and not clear it
+
+Only a full `session.created` record with no parent proves that a session has no parent. A partial `session.updated` record can omit `parentID` while changing usage or title, so treating that omission as parentless would bypass subagent-notification suppression.
+
+### Why readiness follows execution idle and not the final step
+
+An execution can drain steering input after a step ends with `stop`, so only its terminal idle announces readiness; an aborted idle announces nothing. The start and end of an assistant step contribute different metadata, which the runtime joins by message id and retains for the idle event's agent, model and reply text.
+
+### Why permission suppression runs before dispatch and not only on replies
+
+An auto-accepted permission's reply can take longer than the debounce, so the server mirrors the session and ancestor auto-accept state before dispatch and still lets the authoritative safety policy hold a request for the user. A reply without a request id clears the session debounce to avoid a stale alert. Permissions share custom question templates but retain permission-specific defaults when a field is empty.
+
+### Why goal and review loops announce settlement and not each turn
+
+Their intermediate turns are loop progress, so their settlement owns the completion notice; unreadable goal metadata falls through to normal notification behavior. The review check captures the turn-end time before awaiting reads so a review that settles during those reads remains distinguishable from a later turn. A user-stopped review stays quiet because the user already handled it.
+
+### Why pull-request tags use a digest and not a repository reference
+
+Tags reach every delivery channel even when enterprise mode strips the body. A digest prevents the tag itself from exposing the repository and pull-request reference.
+
+### Why default text renders locally and not through the template runtime
+
+Defaults must still render when template resolution fails. Missing, malformed or unknown locale tags use English so notifications retain text; error and question bodies preserve `{last_message}` because their purpose is to show the agent's detail.
+
+### Why plain-text emphasis matches word edges and not every marker
+
+Underscores inside identifiers and single stars in arithmetic are literal notification text. Word-edge matching preserves `user_id`, `snake_case` and `2 * 3` while removing emphasis.
+
+### Why branch lookup permits custom binaries and not the default safety refusal
+
+The git binary comes from the server's own resolver. Allowing that trusted custom binary preserves overrides whose paths contain spaces; refusing those paths would silently leave `{branch}` empty.
+
+### Why push sealing uses the combined layout and not a platform-specific envelope
+
+The `v1.` base64 payload contains a 12-byte nonce, ciphertext and a 16-byte authentication tag. That AES-256-GCM layout interoperates with CryptoKit's `AES.GCM.SealedBox.combined` and Android's `AES/GCM/NoPadding` after extracting the nonce; the phone registers its key through its own server connection, outside the push relay.
+
 ## Notes for contributors
 
 ### Why open windows follow the server's presence

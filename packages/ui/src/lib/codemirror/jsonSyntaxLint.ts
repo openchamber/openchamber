@@ -4,26 +4,18 @@ import { jsonLanguage } from '@codemirror/lang-json';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import stripJsonComments from 'strip-json-comments';
 
-// Marks where a JSON file stops parsing. Comments and trailing commas pass:
-// tsconfig, VS Code settings and opencode.json allow them under a `.json`
-// name, and flagging them would be wrong far more often than missing a stray
-// comma in a strict file. Only the first error is marked; everything after it
-// is noise from the parser's recovery.
 
 const MAX_LINTED_CHARS = 1_000_000;
 const LINTED_EXTENSIONS = new Set(['json', 'jsonc', 'geojson']);
 
-/** Whether the file gets the check: JSON and JSONC, not JSON5 or JSON Lines. */
 export const isLintedJsonPath = (filePath: string): boolean => {
   const name = filePath.split('/').pop()?.toLowerCase() ?? '';
   const dot = name.lastIndexOf('.');
   return dot >= 0 && LINTED_EXTENSIONS.has(name.slice(dot + 1));
 };
 
-/** Offset of the first syntax error, or null when the text parses. */
 export const findJsonSyntaxError = (text: string): number | null => {
   if (text.trim() === '') return null;
-  // Comments and trailing commas become spaces, so offsets stay where they were.
   const tree = jsonLanguage.parser.parse(stripJsonComments(text, { trailingCommas: true }));
   let errorAt: number | null = null;
   tree.iterate({

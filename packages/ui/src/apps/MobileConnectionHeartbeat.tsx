@@ -9,22 +9,15 @@ import { cn } from '@/lib/utils';
 
 import { HEARTBEAT_COLUMNS, HEARTBEAT_ROWS, buildHeartbeatTrace, type HeartbeatPing } from './connectionHeartbeatTrace';
 
-// A ping every 16 beats leaves three to four heartbeats across the trace.
 const PING_INTERVAL_MS = 4_000;
 const PING_TIMEOUT_MS = 5_000;
 const KEPT_PINGS = 5;
 const PITCH = 10;
 const DOT_RADIUS = 3;
-// Unlit grid rows above and below the trace, where the grid fades out.
 const MARGIN_ROWS = 3;
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-// Stands in for the number while the latency message is split around it.
 const NUMBER_SLOT = '\u0000';
 
-/**
- * Whether the app is in the foreground. On Capacitor the native app state decides:
- * the WebView's page visibility can stay "visible" while the app sits in the background.
- */
 const useAppActive = (): boolean => {
   const [active, setActive] = React.useState(() => document.visibilityState === 'visible');
 
@@ -36,7 +29,6 @@ const useAppActive = (): boolean => {
         .then(async ({ App }) => {
           const handles = await Promise.all([
             App.addListener('appStateChange', ({ isActive }) => setActive(isActive === true)),
-            // appStateChange can be missed after a long iOS suspend; resume still fires (see useNativeMobileLifecycle).
             App.addListener('resume', () => setActive(true)),
           ]);
           if (disposed) {
@@ -61,7 +53,6 @@ const useAppActive = (): boolean => {
   return active;
 };
 
-/** Asks `/health` every few seconds while the app is active; the round trip is the latency. */
 const useServerPings = (beat: number, active: boolean): readonly HeartbeatPing[] => {
   const beatRef = React.useRef(beat);
   React.useEffect(() => {
@@ -78,12 +69,11 @@ const useServerPings = (beat: number, active: boolean): readonly HeartbeatPing[]
     const ping = async () => {
       const startedAt = performance.now();
       let latencyMs: number | null = null;
-      // A controller, since the iOS 15 WebView has no AbortSignal.timeout.
+      // external: https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static iOS 15 lacks AbortSignal.timeout, so the ping uses an AbortController.
       const controller = new AbortController();
       request = controller;
       const timeout = window.setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
       try {
-        // The signal also keeps runtimeFetch from sharing an answer with another caller.
         const response = await runtimeFetch('/health', { cache: 'no-store', signal: controller.signal });
         if (response.ok) latencyMs = Math.round(performance.now() - startedAt);
         void response.body?.cancel().catch(() => undefined);
@@ -102,8 +92,6 @@ const useServerPings = (beat: number, active: boolean): readonly HeartbeatPing[]
       disposed = true;
       window.clearTimeout(timer);
       request?.abort();
-      // The shared clock restarts its count once nothing listens, so stamps kept
-      // from before would come back later as beats that never happened.
       setPings([]);
     };
   }, [active]);
@@ -111,14 +99,11 @@ const useServerPings = (beat: number, active: boolean): readonly HeartbeatPing[]
   return pings;
 };
 
-/** Each digit rolls to its new value; columns are keyed from the right so the ones digit keeps its place. */
 const RollingNumber: React.FC<{ value: number }> = ({ value }) => {
   const digits = String(value).split('');
   return (
     <span dir="ltr" className="inline-flex tabular-nums" aria-hidden>
       {digits.map((digit, index) => (
-        // Paint containment clips the other nine digits out of paint and scroll height. Not overflow-hidden:
-        // mobile.css turns that into a scroller with a scrollbar on touch devices. Not overflow-clip: missing before iOS 16.
         <span key={digits.length - index} className="inline-block h-[1.25em] leading-[1.25em] [contain:paint]">
           <span
             className="flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
@@ -132,11 +117,6 @@ const RollingNumber: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-/**
- * The live connection's heartbeat on Instances: a dot trace with a beat per answer
- * from the server, then `status` with the latency beside it. It pings only while
- * mounted and the app is in the foreground.
- */
 export const MobileConnectionHeartbeat: React.FC<{ status: React.ReactNode }> = ({ status }) => {
   const { t } = useI18n();
   const active = useAppActive();
@@ -149,7 +129,6 @@ export const MobileConnectionHeartbeat: React.FC<{ status: React.ReactNode }> = 
     ? 'var(--muted-foreground)'
     : latest.latencyMs === null ? 'var(--status-error)' : 'var(--status-success)';
   const trace = buildHeartbeatTrace(beat, pings);
-  // Each column lights one unbroken run of rows, so the dots just above and below it are its halo.
   const lit = new Set(trace.map(({ column, row }) => `${column}:${row}`));
   const halo = trace.flatMap(({ column, row }) => [row - 1, row + 1]
     .filter((haloRow) => haloRow >= 0 && haloRow < HEARTBEAT_ROWS && !lit.has(`${column}:${haloRow}`))
@@ -172,7 +151,6 @@ export const MobileConnectionHeartbeat: React.FC<{ status: React.ReactNode }> = 
             <pattern id={`${svgId}-grid`} width={PITCH} height={PITCH} patternUnits="userSpaceOnUse">
               <circle cx={PITCH / 2} cy={PITCH / 2} r={DOT_RADIUS} fill="var(--foreground)" opacity={0.09} />
             </pattern>
-            {/* Grid and beats fade at the side edges, so a beat fades in at the right and out at the left. */}
             <linearGradient id={`${svgId}-fade-x`}>
               <stop offset="0" stopColor="white" stopOpacity={0} />
               <stop offset="0.25" stopColor="white" stopOpacity={1} />
@@ -182,7 +160,6 @@ export const MobileConnectionHeartbeat: React.FC<{ status: React.ReactNode }> = 
             <mask id={`${svgId}-mask-x`}>
               <rect width={width} height={height} fill={`url(#${svgId}-fade-x)`} />
             </mask>
-            {/* The grid also fades into the margin rows above and below the trace. */}
             <linearGradient id={`${svgId}-fade-y`} x2="0" y2="1">
               <stop offset="0" stopColor="white" stopOpacity={0} />
               <stop offset="0.3" stopColor="white" stopOpacity={1} />

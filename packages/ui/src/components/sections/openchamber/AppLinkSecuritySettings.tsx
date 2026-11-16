@@ -5,11 +5,6 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { useAppLinkTrustStore } from '@/stores/appLinkTrustStore';
 
-/**
- * Security section for application deep links (obsidian://, notion://, ...)
- * that the user chose to always allow from chat. Removing a scheme restores
- * the confirmation dialog for it.
- */
 export const AppLinkSecuritySettings: React.FC = () => {
   const { t } = useI18n();
   const trustedSchemes = useAppLinkTrustStore((state) => state.trustedSchemes);

@@ -1,24 +1,6 @@
 import { z } from 'zod';
 import type { Agent, Model, Provider } from '@/lib/opencode/model';
 
-/**
- * Last known provider/model and agent catalogs, per runtime and config
- * directory, so the model and agent pickers render at once on the next start
- * while OpenCode is still starting. The stored catalog is display continuity
- * only: the live load always revalidates it, and nothing destructive ever
- * reads it.
- *
- * IndexedDB rather than localStorage: VS Code gives every OpenChamber webview
- * one origin, and a localStorage write reaches every webview in every window
- * as a StorageEvent carrying the old and new value. IndexedDB fires none.
- *
- * Only what the pickers and the composer show is stored. Provider, model and
- * variant `settings`/`headers`/`body` and an agent's request carry API keys and
- * authorization headers, and an agent's system prompt is user content; none of
- * them is ever written. Records are built field by field from an allowlist and
- * read back through strict schemas, so a record holding anything else is
- * dropped.
- */
 
 export type CachedProvider = Provider & { models: Model[] };
 
@@ -32,9 +14,7 @@ const DATABASE = 'openchamber-config-catalog';
 const DATABASE_VERSION = 1;
 const STORE = 'catalogs';
 const SAVED_AT_INDEX = 'savedAt';
-/** Bump when the stored provider, model or agent shape changes; older records are dropped. */
 export const CATALOG_CACHE_SCHEMA = 2;
-/** Directories kept across all runtimes; the least recently saved go first. */
 export const CATALOG_CACHE_MAX_RECORDS = 24;
 
 const recordKey = (runtimeKey: string, directoryKey: string): string => `${runtimeKey}\n${directoryKey}`;
@@ -60,8 +40,6 @@ const openDatabase = (): Promise<IDBDatabase | null> => {
       request.result.createObjectStore(STORE, { keyPath: 'key' }).createIndex(SAVED_AT_INDEX, 'savedAt');
     };
     request.onsuccess = () => resolve(request.result);
-    // Private modes and locked-down webviews refuse IndexedDB; the cache is
-    // then simply absent and the pickers wait for the live load as before.
     request.onerror = () => resolve(null);
     request.onblocked = () => resolve(null);
   });
@@ -103,7 +81,6 @@ const storedProviderSchema = z.strictObject({
   models: z.array(storedModelSchema),
 });
 
-/** An agent without its request and system prompt; only the sampling values the composer shows. */
 const storedAgentSchema = z.strictObject({
   id: z.string(),
   name: z.string(),
@@ -178,7 +155,6 @@ const toStoredProvider = (provider: CachedProvider): StoredProvider => ({
   models: provider.models.map(toStoredModel),
 });
 
-// The request body is free-form JSON; a sampling value is kept only when it is a number.
 const samplingValue = z.number();
 
 const toStoredAgent = (agent: Agent): StoredAgent => ({
@@ -198,7 +174,6 @@ const toStoredAgent = (agent: Agent): StoredAgent => ({
   },
 });
 
-/** The cached agent as the store holds agents: an empty request apart from its sampling values. */
 const fromStoredAgent = ({ sampling, ...agent }: StoredAgent): Agent => ({
   ...agent,
   request: { settings: {}, headers: {}, body: { ...sampling } },
@@ -212,11 +187,6 @@ const toStoredCatalog = (catalog: CachedCatalog): StoredCatalog => {
   return stored;
 };
 
-/**
- * A record is trusted only when it carries the current schema and the identity
- * it was asked for. Anything else is from another build or another place and
- * is dropped, never shown.
- */
 const isRecordFor = (record: StoredRecord, runtimeKey: string, directoryKey: string): boolean =>
   record.schema === CATALOG_CACHE_SCHEMA && record.runtimeKey === runtimeKey && record.directoryKey === directoryKey;
 
@@ -233,7 +203,6 @@ const requestResult = <T>(request: IDBRequest<T>): Promise<T> => new Promise((re
   request.onerror = () => reject(request.error ?? new Error('Catalog cache request failed.'));
 });
 
-/** Reads one record, parsed at the IndexedDB boundary. */
 const readStoredRecord = async (database: IDBDatabase, key: string): Promise<StoredRecord | 'missing' | 'corrupt'> => {
   const stored = await requestResult(database.transaction(STORE, 'readonly').objectStore(STORE).get(key));
   if (stored === undefined) return 'missing';
@@ -241,11 +210,6 @@ const readStoredRecord = async (database: IDBDatabase, key: string): Promise<Sto
   return parsed.success ? parsed.data : 'corrupt';
 };
 
-/**
- * The cached catalog for a runtime and directory; null when there is none,
- * IndexedDB is unavailable, or the record is corrupt (corrupt records are
- * deleted).
- */
 export const readCachedCatalog = async (runtimeKey: string, directoryKey: string): Promise<CachedCatalog | null> => {
   const database = await openDatabase();
   if (!database) return null;
@@ -263,14 +227,8 @@ export const readCachedCatalog = async (runtimeKey: string, directoryKey: string
   }
 };
 
-// Writes for one record are serialized, so a provider write and an agent write
-// landing together cannot drop each other's half of the record.
 let writeChain: Promise<void> = Promise.resolve();
 
-/**
- * Stores the part of a catalog a live load just produced, keeping the other
- * part of the record. Callers write only authoritative, non-empty catalogs.
- */
 export const writeCachedCatalog = (runtimeKey: string, directoryKey: string, update: CachedCatalog): Promise<void> => {
   writeChain = writeChain.then(async () => {
     const database = await openDatabase();
@@ -295,16 +253,8 @@ export const writeCachedCatalog = (runtimeKey: string, directoryKey: string, upd
   return writeChain;
 };
 
-/**
- * How long a loaded catalog must go without a newer catalog event before it is
- * stored, so a catalog a config edit or plugin reload replaced at once is not.
- */
 export const CATALOG_PERSIST_SETTLE_MS = 3_000;
 
-/**
- * Stores a loaded catalog after the settle delay, unless `isSuperseded` says a
- * newer load replaces it by then (a catalog event, a runtime switch).
- */
 export const writeCachedCatalogWhenSettled = (
   runtimeKey: string,
   directoryKey: string,
@@ -318,7 +268,6 @@ export const writeCachedCatalogWhenSettled = (
   }, CATALOG_PERSIST_SETTLE_MS);
 };
 
-/** Deletes the least recently saved records beyond the limit, reading keys only. */
 const pruneCachedCatalogs = (database: IDBDatabase): Promise<void> => new Promise((resolve, reject) => {
   const transaction = database.transaction(STORE, 'readwrite');
   transaction.oncomplete = () => resolve();

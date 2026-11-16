@@ -6,7 +6,6 @@ import { cn } from '@/lib/utils';
 
 type SwitchProps = React.ComponentPropsWithoutRef<typeof BaseSwitch.Root> & {
   loading?: boolean;
-  /** `sm` for dense panels and popovers, where the default reads too heavy. */
   size?: 'default' | 'sm';
 };
 

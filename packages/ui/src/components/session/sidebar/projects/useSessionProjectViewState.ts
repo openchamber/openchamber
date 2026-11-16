@@ -11,11 +11,6 @@ const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
 const WORK_EXPAND_STORAGE_KEY = 'oc.sessions.workExpand';
 
-/**
- * Worktree works open the other way round from groups: a work is a row of its
- * own, so it starts folded. `expandedByDefault` is what Expand all / Collapse
- * all last set; `toggled` lists the works the user flipped since.
- */
 type WorkExpansion = { expandedByDefault: boolean; toggled: ReadonlySet<string> };
 
 const workExpansionSchema = z.object({ expandedByDefault: z.boolean(), toggled: z.array(z.string()) });
@@ -30,7 +25,6 @@ const parseWorkExpansion = (raw: string | null): WorkExpansion => {
   return { expandedByDefault: false, toggled: new Set() };
 };
 
-/** Whether the worktree work under `key` is open. */
 export const isWorkExpanded = (expansion: WorkExpansion, key: string): boolean => (
   expansion.expandedByDefault !== expansion.toggled.has(key)
 );
@@ -151,8 +145,6 @@ export const useSessionProjectViewState = ({
     workExpansionDirty.current = true;
     setCollapsedGroups(new Set());
     setWorkExpansion({ expandedByDefault: false, toggled: new Set() });
-    // The user's sections fold like the zones; a group of projects keeps its
-    // caption open, as Projects does, and its projects fold one by one.
     const customZoneKeys = useSessionDisplayStore.getState().sections.flatMap((entry) => (
       entry.kind === 'custom' && entry.grouping === 'time' ? [sidebarSectionActivityKey(entry.id)] : []
     ));

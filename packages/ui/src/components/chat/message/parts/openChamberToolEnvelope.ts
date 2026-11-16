@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { ToolInput } from '@/lib/opencode/model';
 import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
+import { waitArgsSchema } from '@/sync/extension-waits';
 
 /**
  * Reading what OpenChamber's own agent tools answered, for the chat to show
@@ -257,6 +258,30 @@ export const prWatchedSchema = z.object({
   }),
 });
 
+const waitEntrySchema = z.object({
+  waitId: z.string().min(1),
+  source: z.string().min(1),
+  extension: z.string().nullable().optional().catch(undefined),
+  title: z.string().min(1),
+  label: z.string().nullable().optional().catch(undefined),
+  args: waitArgsSchema.optional().catch(undefined),
+  status: z.enum(['waiting', 'waking']).optional().catch(undefined),
+});
+export type WaitEntry = z.infer<typeof waitEntrySchema>;
+
+export const waitStartedSchema = z.union([prWatchedSchema, z.object({ waiting: waitEntrySchema })]);
+
+export const waitListedSchema = z.object({
+  waiting: z.array(waitEntrySchema),
+  sources: z.array(z.object({
+    source: z.string().min(1),
+    extension: z.string().nullable().optional().catch(undefined),
+    title: z.string().min(1),
+  })),
+});
+
+const waitStoppedSchema = z.object({ stopped: z.number() });
+
 // `watching` lists what the session still waits on; transcripts from before a session could wait on several hold `false`.
 const prUnwatchedSchema = z.object({ watching: z.union([z.literal(false), z.array(z.unknown())]), stopped: z.boolean() });
 
@@ -360,6 +385,9 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['session.messages', sessionMessagesSchema],
   ['pr.watch', prWatchedSchema],
   ['pr.unwatch', prUnwatchedSchema],
+  ['wait.start', waitStartedSchema],
+  ['wait.list', waitListedSchema],
+  ['wait.stop', waitStoppedSchema],
   ['work.name', workNamedSchema],
   ['file.open', fileOpenedSchema],
   ['schedule.run', scheduleRanSchema],

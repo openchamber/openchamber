@@ -70,6 +70,8 @@ Each view says which lines it knows. `FilesView` gives none until the file is lo
 
 With wrapping off a CodeMirror block widget is as wide as the longest line. `CodeMirrorEditor` publishes the visible width as `--oc-editor-width` beside the gutter width, the comment field and cards size to it, and `.oc-block-widget > *` is sticky past the fixed gutter. Sizing from the context panel's width overflowed by the width of the file tree.
 
+`PierreDiffViewer.tsx` is the viewer's shell: the whitespace-only gate, the options Pierre gets and the markup. The mechanics sit in `pierreDiff/`, one hook or helper module per concern (comments and selection, line gestures, annotations, the Pierre instance lifecycle, find marks, context expansion, theme variables, the shared virtualizer), and the shell calls those hooks in one fixed order. Effects run in call order, and the instance hook's effects depend on the annotation and selection refs the earlier hooks set, so a hook moves only together with its position in that sequence.
+
 ### Why Pierre owns diff line-number selection
 
 `PierreDiffViewer` receives number-column selections through Pierre's

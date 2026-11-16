@@ -1,28 +1,8 @@
-/**
- * Dispatch for the `memory.*` actions the `openchamber_memory` tool calls.
- *
- * Kept beside the store rather than inside the control service, because the
- * control service already owns sessions, schedules and the browser; memory
- * shares none of that machinery and only needs the same envelope.
- *
- * Project scope is derived from the session's directory, never from the model.
- * Letting the agent name a project id would let a memory learned in one
- * checkout be filed against another, which the user would have no way to
- * notice.
- *
- * The directory is resolved to the project first. A session running in a
- * worktree has the worktree's own path, and keying memory by that path filed it
- * under a project the panel never looks at — the memory was written, stored,
- * and invisible. Every worktree of a repository shares one project memory,
- * which is also what the user means by "this project".
- */
-
 import { asNonEmptyString } from '../shared/guards.js';
 import { MEMORY_BODY_MAX_LENGTH, MEMORY_TITLE_MAX_LENGTH } from './runtime.js';
 
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
-/** Everything the agent is told about an entry it has not opened yet. */
 const toSummary = (entry, scope) => ({
   memoryId: entry.id,
   title: entry.title,
@@ -43,14 +23,6 @@ export const createAgentMemoryActions = (dependencies) => {
     isAgentMemoryEnabled,
   } = dependencies;
 
-  /**
-   * Announce a write so an open panel shows it without being reopened. The
-   * agent writes here on its own initiative, so without this the user only
-   * learns what was stored the next time something else happens to reload.
-   *
-   * Never allowed to fail the action: the memory is already on disk, and a
-   * broken notification must not report the write as failed.
-   */
   const announce = (scope, projectId) => {
     if (typeof onMemoryChanged !== 'function') return;
     try {
@@ -87,8 +59,6 @@ export const createAgentMemoryActions = (dependencies) => {
     const projectId = directory ? await resolveProjectIdForDirectory(directory) : null;
     const result = await agentMemoryRuntime.readAll(projectId);
 
-    // A scope that failed to load is reported, never rendered as empty: an
-    // agent told it has no memories will happily store them all again.
     return {
       memories: [
         ...result.global.map((entry) => toSummary(entry, 'global')),
@@ -109,16 +79,6 @@ export const createAgentMemoryActions = (dependencies) => {
     return { memories: entries.map((entry) => toSummary(entry, target.scope)) };
   };
 
-  /**
-   * Reading by title as well as by id is deliberate: the session index lists
-   * titles only, so requiring an id would force a list call before every read
-   * just to translate what the agent can already see.
-   *
-   * Scope is optional here. It decides everything for a write — a fact filed
-   * globally reaches every project — but for a read it is only which drawer to
-   * open, and demanding it turned a legible request into an error the model had
-   * to recover from. Omitted, both stores are searched.
-   */
   const read = async (input, contextDirectory) => {
     const memoryId = asNonEmptyString(input.memoryId);
     const title = asNonEmptyString(input.title);
@@ -147,8 +107,6 @@ export const createAgentMemoryActions = (dependencies) => {
 
     const projectMatch = result.project.find(matches);
     if (projectMatch) {
-      // Project first: when both stores hold the same title, the one about this
-      // codebase is the one being asked about.
       return { memory: toFullEntry(projectMatch, 'project') };
     }
     const globalMatch = result.global.find(matches);
@@ -156,8 +114,6 @@ export const createAgentMemoryActions = (dependencies) => {
       return { memory: toFullEntry(globalMatch, 'global') };
     }
     if (result.globalFailed || result.projectFailed) {
-      // Never reported as "no such memory": a store that failed to load may well
-      // hold it, and the agent would go on to store it a second time.
       fail('Stored memory could not be read; try again before assuming it is absent', 503);
     }
     fail('No memory matches that id or title', 404);
@@ -169,9 +125,6 @@ export const createAgentMemoryActions = (dependencies) => {
     const body = asNonEmptyString(input.body);
     if (!title) fail('title is required for memory.save', 400);
     if (!body) fail('body is required for memory.save', 400);
-    // Shared limit with the runtime, which enforces it again on create; the
-    // pre-check here is what makes the agent see a 400 usage error.
-    // The store would clamp a long title silently, cutting it mid-word.
     if (title.length > MEMORY_TITLE_MAX_LENGTH) {
       fail(`title holds at most ${MEMORY_TITLE_MAX_LENGTH} characters, and this one is ${title.length}`, 400);
     }
@@ -182,9 +135,6 @@ export const createAgentMemoryActions = (dependencies) => {
       fail('type must be fact, preference, or reference', 400);
     }
 
-    // With an id the save rewrites exactly that entry. Merging and correcting
-    // need a precise target: matching by wording could land the rewrite as a
-    // new entry, or on a neighbour that happens to share its words.
     const memoryId = asNonEmptyString(input.memoryId);
     let saved;
     if (memoryId) {
@@ -203,18 +153,10 @@ export const createAgentMemoryActions = (dependencies) => {
     }
     announce(target.scope, target.projectId);
     const hasRelated = saved.related?.length > 0;
-    // Deliberately does not echo the text back. Handing the model what it just
-    // wrote invites it to find something to improve and re-save, and the store
-    // is not the place to discover that a save worked — the confirmation is.
     return {
       saved: true,
       memory: toSummary(saved.entry, target.scope),
-      // Told plainly so the agent does not report storing a second memory when
-      // it actually corrected one it had already written.
       replaced: saved.replaced,
-      // Asked at the moment of saving, when the agent still knows whether the
-      // new entry reverses an old one. Left for a later tidy-up, both entries
-      // reach every session in between and contradict each other.
       related: hasRelated ? saved.related.map((entry) => toSummary(entry, target.scope)) : undefined,
       relatedNote: hasRelated ? RELATED_NOTE : undefined,
       ...(saved.entry.flagged
@@ -237,13 +179,6 @@ export const createAgentMemoryActions = (dependencies) => {
   };
 
   const execute = async (action, input = {}, contextDirectory) => {
-    /**
-     * The tool lives in the managed OpenCode child and only disappears when
-     * that child restarts, so between switching memory off and restarting it
-     * the agent can still call this. Ungated, those writes would land on disk
-     * while the panel that shows them is hidden and the index that carries
-     * them is suppressed — memory accumulating where nobody can see it.
-     */
     if (typeof isAgentMemoryEnabled === 'function') {
       let enabled = false;
       try {

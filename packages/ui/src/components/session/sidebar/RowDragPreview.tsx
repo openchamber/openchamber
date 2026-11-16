@@ -1,10 +1,5 @@
 import React from 'react';
 
-/**
- * The row lifted under the pointer: a copy of the row as it was drawn when it
- * was picked up (`copyDragSource`), a step lighter, so it reads as the row
- * itself picked up over the rows it passes. Its place in the list stays open.
- */
 export const RowDragPreview: React.FC<{ copy: Element }> = ({ copy }) => {
   const mount = React.useCallback((node: HTMLDivElement | null) => {
     node?.replaceChildren(copy);

@@ -55,8 +55,6 @@ const guessLabelFromSource = (value: string) => {
   return trimmed;
 };
 
-// Only identities that bring their own credential change how a catalog is
-// cloned; every other one clones exactly like the default Git setup.
 const signsInOnItsOwn = (profile: GitIdentityProfile): boolean => (
   (profile.transport === 'account' && Boolean(profile.account))
   || (profile.transport === 'ssh' && Boolean(profile.sshCredentialId))
@@ -83,8 +81,6 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
   const [source, setSource] = React.useState('');
   const [subpath, setSubpath] = React.useState('');
 
-  // `null` until the current list is known: a failed load must never be
-  // treated as "no catalogs", or adding one would overwrite the others.
   const [existingCatalogs, setExistingCatalogs] = React.useState<SkillCatalogConfig[] | null>(null);
 
   const [scanCount, setScanCount] = React.useState<number | null>(null);
@@ -139,8 +135,6 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
     () => gitIdentityProfiles.filter(signsInOnItsOwn),
     [gitIdentityProfiles],
   );
-  // A catalog saved with the System identity or a System-transport identity
-  // is cloned by the default Git setup, so the picker shows it as that.
   const selectedIdentityValue = !gitIdentityId
     || gitIdentityId === GLOBAL_IDENTITY_ID
     || gitIdentityProfiles.some((profile) => profile.id === gitIdentityId && identityTransport(profile) === 'system')
@@ -194,8 +188,6 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
           return;
         }
 
-        // With no identity that signs in on its own the picker is hidden, so
-        // the toast leads to Git settings instead of asking to pick one.
         if (!showIdentityPicker) {
           toast.error(t('settings.skills.catalog.add.toast.privateRepoNoIdentity'), {
             action: {

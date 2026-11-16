@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// electron-builder writes this file into the resources of .deb and .rpm builds;
-// electron-updater reads the same file to pick its package installer.
 export const readLinuxPackageType = (resourcesPath = process.resourcesPath) => {
   try {
     return fs.readFileSync(path.join(resourcesPath, 'package-type'), 'utf8').trim();
@@ -22,7 +20,6 @@ export const assertUpdaterCapability = ({
   if (platform !== 'linux' || !packaged) return;
 
   if (!appImagePath) {
-    // Installed packages update through the system package manager.
     if (packageType === 'deb' || packageType === 'rpm') return;
     throw new Error(
       'Updates require the packaged Linux AppImage, .deb or .rpm. Start OpenChamber from its .AppImage file or install a package, not an extracted or repackaged copy.',

@@ -1,10 +1,3 @@
-/**
- * ONNX Runtime thread count for the sherpa engines in the dictation worker.
- *
- * Bounded by the CPUs the process may run on (affinity), by a Linux cgroup CPU
- * quota (a container on a many-core host), and by MAX_ENGINE_THREADS. When a
- * Linux host's quota cannot be read, the count stays at the old fixed value.
- */
 import { readFileSync } from 'fs';
 import { availableParallelism } from 'os';
 import path from 'path';
@@ -12,8 +5,6 @@ import path from 'path';
 const MAX_ENGINE_THREADS = 8;
 const UNKNOWN_QUOTA_THREADS = 2;
 const CGROUP_ROOT = '/sys/fs/cgroup';
-// Where a v1 cpu controller is mounted: its own name, or the combined mount
-// some hosts and containers use without the `cpu` symlink.
 const CGROUP_V1_CPU_ROOTS = ['/sys/fs/cgroup/cpu', '/sys/fs/cgroup/cpu,cpuacct', '/sys/fs/cgroup/cpuacct,cpu'];
 
 function readOptional(readText, file) {
@@ -25,10 +16,6 @@ function readOptional(readText, file) {
   }
 }
 
-// Walks from the process's cgroup up to the hierarchy root and returns the
-// tightest limit any level sets. A level without a limit file (readLevel gives
-// undefined) is skipped: the cgroup path may not be visible inside a container,
-// whose own limit then sits at the root of the mount. Null when no level had one.
 function tightestLimit(root, cgroupPath, readLevel) {
   let limit = null;
   let dir = path.posix.resolve(root, `.${cgroupPath}`);
@@ -46,7 +33,7 @@ function cpusFromQuota(quota, period) {
 }
 
 function readV2Limit(readText, cgroupPath) {
-  // The root cgroup has no cpu.max, so only a mounted hierarchy may read as unlimited.
+  // external: https://docs.kernel.org/admin-guide/cgroup-v2.html#cpu The root cgroup has no cpu.max; verify the hierarchy mount before treating it as unlimited.
   if (readOptional(readText, `${CGROUP_ROOT}/cgroup.controllers`) === undefined) return null;
   const limit = tightestLimit(CGROUP_ROOT, cgroupPath, (dir) => {
     const max = readOptional(readText, `${dir}/cpu.max`);
@@ -58,8 +45,7 @@ function readV2Limit(readText, cgroupPath) {
   return limit ?? Infinity;
 }
 
-// Every v1 cpu hierarchy has the quota files at its root, so a root where no
-// level has them is not the mount.
+// external: https://docs.kernel.org/scheduler/sched-bwc.html A v1 CPU hierarchy has quota files at its root; their absence means this is not the mount.
 function readV1Limit(readText, cgroupPath) {
   for (const root of CGROUP_V1_CPU_ROOTS) {
     const limit = tightestLimit(root, cgroupPath, (dir) => {
@@ -73,10 +59,6 @@ function readV1Limit(readText, cgroupPath) {
   return null;
 }
 
-/**
- * CPUs the cgroup quota allows: a number, Infinity when no quota applies, or
- * null when it cannot be determined.
- */
 function readCgroupCpuLimit(readText) {
   try {
     const entries = readText('/proc/self/cgroup')
@@ -86,7 +68,7 @@ function readCgroupCpuLimit(readText) {
         const [, controllers = '', ...rest] = line.split(':');
         return { controllers: controllers.split(','), cgroupPath: rest.join(':') || '/' };
       });
-    // A hybrid host lists both; the cpu controller then lives in v1.
+    // external: https://docs.kernel.org/admin-guide/cgroup-v2.html#mounting A controller belongs to one hierarchy; hybrid hosts can expose CPU through v1.
     const v1 = entries.find((entry) => entry.controllers.includes('cpu'));
     if (v1) return readV1Limit(readText, v1.cgroupPath);
     const v2 = entries.find((entry) => entry.controllers.length === 1 && entry.controllers[0] === '');

@@ -2,24 +2,12 @@ import React from 'react';
 
 import { Tooltip, TooltipContent } from '@/components/ui/tooltip';
 
-/** What the app's `TooltipProvider` waits, so these open like every other tooltip. */
 const OPEN_DELAY_MS = 300;
 
 const anchorOf = (target: EventTarget | null): HTMLElement | null => (
   target instanceof Element ? target.closest<HTMLElement>('[data-row-tooltip]') : null
 );
 
-/**
- * One tooltip for every control under `containerRef` carrying its text in
- * `data-row-tooltip`, for a list that keeps its rows mounted: a `Tooltip` per
- * button would keep a root for each of them, for a label that shows at most
- * once. The listeners sit on the container and the state here, so hovering a
- * control renders nothing but the tooltip.
- *
- * It answers a mouse and the keyboard. A press, a key, a click (which can remove
- * the row) or a scroll closes it, and it stays closed until the pointer leaves
- * that control, so it never sits over the menu the press opened.
- */
 export function DelegatedTooltip({ containerRef, sideOffset = 6, className }: {
   containerRef: React.RefObject<HTMLElement | null>;
   sideOffset?: number;
@@ -51,7 +39,6 @@ export function DelegatedTooltip({ containerRef, sideOffset = 6, className }: {
       if (!target) {
         close();
       } else if (open) {
-        // Already reading tooltips: the next one needs no second wait.
         show(target);
       } else {
         timer = window.setTimeout(() => show(target), OPEN_DELAY_MS);
@@ -59,7 +46,6 @@ export function DelegatedTooltip({ containerRef, sideOffset = 6, className }: {
     };
 
     const handlePointerOver = (event: PointerEvent) => {
-      // A held button is a drag, and a touch has no hover to end it.
       if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
       moveTo(anchorOf(event.target));
     };
@@ -107,17 +93,6 @@ type HoverTargetProps = {
   onBlur?: React.FocusEventHandler<HTMLElement>;
 };
 
-/**
- * A tooltip for a button that repeats in a list that comes and goes: tool rows,
- * code block actions, message chips, comment actions. A `Tooltip` per button
- * keeps a root mounted for every one of them, and the transcript mounts and
- * unmounts these rows while scrolling, so this mounts the tooltip only while its
- * one button is hovered or focused. It adds no DOM around the button and needs
- * no provider, so a block rendered for export takes it as it is. The state lives
- * here, so opening re-renders this leaf and never the row. A button that can be
- * disabled comes inside a span, which takes the pointer it refuses. Outside a
- * repeating row, use `Tooltip`.
- */
 export function HoverTooltip({ label, side = 'top', children }: {
   label: React.ReactNode;
   side?: 'top' | 'bottom';

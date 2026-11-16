@@ -1,11 +1,3 @@
-/**
- * An extension's link templates, what the host compiles each into, and the
- * links each then names (null: not an item link). One table for the server's
- * compiler and matcher (`server/lib/trackers/extension-descriptor.test.js`)
- * and the UI's matcher over the served patterns (`matchTrackerUrl.test.ts`):
- * the UI never sees a template, so the compiled strings are pinned here and
- * both sides are held to them.
- */
 type ExtensionIdentifierKind = 'key-number' | 'number' | 'short-code';
 
 export const EXTENSION_IDENTIFIER_PATTERNS = {
@@ -20,7 +12,6 @@ type ExtensionLinkCase = {
   template: string;
   identifier: ExtensionIdentifierKind;
   compiled: { path: string; query?: { name: string } };
-  /** Links on `EXTENSION_LINK_HOST` and elsewhere, with the identifier each names. */
   urls: ReadonlyArray<readonly [url: string, identifier: string | null]>;
 };
 

@@ -4,8 +4,6 @@ import { promisify } from 'node:util';
 const inflate = promisify(inflateRaw);
 const MAX_FILE_BYTES = 512 * 1024;
 
-// Read only selected JSON entries in memory. Nothing from a VSIX is executed or
-// extracted onto the host filesystem.
 export function openThemeArchive(bytes) {
   let end = bytes.length - 22;
   const lower = Math.max(0, end - 65535);

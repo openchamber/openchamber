@@ -1353,6 +1353,36 @@ describe('gh CLI account consent', () => {
     }
   });
 
+  it('never runs gh for github.com while its switch is off and keeps the row that turns it back on', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    const hostsFile = path.join(ghConfigDir, 'hosts.yml');
+    await fs.writeFile(hostsFile, 'github.com:\n  user: cli-user\n  oauth_token: gho_cli\n');
+    const previous = { GH_CONFIG_DIR: process.env.GH_CONFIG_DIR, GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    delete process.env.GH_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    const fetch = stubGitHubUsers();
+    auth.setGhCliDisabled(true);
+    const cliStatus = async () => (await request(makeApp()).get('/api/source-control/github/auth/status').expect(200)).body.cli;
+    try {
+      expect(await cliStatus()).toEqual({ available: true, disabled: true, active: false });
+
+      // A gh signed in only through GH_TOKEN has no hosts.yml entry.
+      await fs.rm(hostsFile);
+      expect(await cliStatus()).toEqual({ available: false, disabled: true, active: false });
+      process.env.GH_TOKEN = 'env-token';
+      expect(await cliStatus()).toEqual({ available: true, disabled: true, active: false });
+
+      expect(await fs.access(path.join(directory, 'invoked-hosts.txt')).then(() => true, () => false)).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it('keeps an enterprise host switch through a network failure and drops it once gh is rejected', async () => {
     const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
     await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');

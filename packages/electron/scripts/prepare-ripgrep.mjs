@@ -13,17 +13,7 @@ const cacheRoot = path.join(electronRoot, '.cache', 'ripgrep');
 const lockfilePath = path.resolve(electronRoot, '..', '..', 'bun.lock');
 const require = createRequire(import.meta.url);
 
-/**
- * Find in files runs ripgrep. `@vscode/ripgrep` publishes the binary in a
- * platform package (`@vscode/ripgrep-<os>-<arch>`) that npm and Bun install
- * for the build host, which is the wrong one for a cross-built desktop app.
- * This downloads the target architecture's package from npm, the way
- * `prepare-opencode-cli.mjs` does for OpenCode, and stages its `rg` under
- * `resources/ripgrep`, which `extraResources` ships as `Resources/ripgrep`.
- * The server looks there first (`packages/web/server/lib/fs/ripgrep.js`).
- */
 const readPackagedVersion = () => {
-  // The package exports only its entry, so its manifest is found from there.
   const webRequire = createRequire(require.resolve('@openchamber/web/package.json'));
   const entry = webRequire.resolve('@vscode/ripgrep');
   const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(entry), '..', 'package.json'), 'utf8'));
@@ -36,9 +26,6 @@ const artifactUrl = (packageName, version) => (
 
 const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg';
 
-// The archive comes from the network, so it has to be the one `bun.lock`
-// pinned: the lockfile records a sha512 for every platform package, including
-// the ones the build host never installs.
 const readLockedIntegrity = (packageName, version) => {
   const spec = `"@vscode/${packageName}@${version}"`;
   const entry = fs.readFileSync(lockfilePath, 'utf8').split('\n').find((line) => line.includes(spec));
@@ -67,8 +54,6 @@ const download = async (url, destination) => {
 const extractArchive = (archivePath, destination) => {
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
-  // The archive is addressed relative to the destination: under Git Bash on
-  // Windows, GNU tar reads an absolute `D:\...` path as a remote host.
   const result = spawnSync('tar', ['-xzf', path.relative(destination, archivePath)], {
     cwd: destination,
     encoding: 'utf8',
@@ -128,8 +113,6 @@ const main = async () => {
     fs.chmodSync(outputBinary, 0o755);
   }
 
-  // A Windows arm64 build runs on an x64 runner, which cannot start an arm64
-  // executable; the lockfile check above already vouches for that archive.
   if (process.platform === 'win32' && targetArchitecture.node !== process.arch) {
     console.log(`[electron] prepared ripgrep (@vscode/${packageName}@${version}, not run on this ${process.arch} host): ${outputBinary}`);
     return;

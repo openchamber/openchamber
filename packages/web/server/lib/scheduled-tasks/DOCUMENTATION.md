@@ -10,6 +10,87 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 - The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
 
+## Invariants
+
+- Failed chat creation removes only an empty directory. Non-recursive removal
+  preserves any files that appear before cleanup.
+- A default variant belongs to the model selected from the same settings scope.
+  A project model never inherits the global model's variant.
+- Process identity reads return null when the process disappears, including
+  between the existence check and native inspection. An unreadable live identity
+  throws so cleanup cannot mistake an inspection failure for a dead owner.
+- New sessions carry the `scheduled` kind so unattended runs stay out of In work.
+- Session creation state is recorded before the running event so a client
+  refreshing from that event can already find the session.
+- Startup snapshots cleanup recovery records before project sync can dispatch
+  newly due tasks, keeping recovery separate from new runs.
+- Named-model validation accepts either the catalog's display `id` or upstream
+  `modelID` within the selected provider, matching session-route selection.
+
+## Decisions
+
+### Why target discovery caches directory membership and not each session
+
+Many candidate sessions share directories. Resolving ownership once per directory
+avoids hundreds of Git processes while keeping discovery and save validation on
+the same server-owned membership rule.
+
+### Why loop names are rejected and not clamped
+
+Storage clamps task names to 80 characters. Rejecting longer loop names keeps
+discovery identity keys equal to the stored task names.
+
+### Why loop approval excludes the enabled flag
+
+The approval fingerprint covers the name, schedule and execution that the user
+approves. The enabled flag is the value approval gates, so toggling it does not
+change the approved definition.
+
+### Why repository scope wins when the project is also the user folder
+
+A loop under the project's own `.agents/loops` remains repository content even
+when the same path is discovered in user scope. Keeping that classification
+preserves the local approval requirement.
+
+### Why isolation refuses runs before Git route registration
+
+The scheduler starts before Git routes register the worktree bridge. The initial
+bridge rejects isolation until registration supplies creation and removal, so an
+early isolated run cannot silently write into the checkout. Removal releases the
+run's OpenCode instance by worktree path, as ordinary worktree deletion does.
+
+### Why knowledge and permission enrollment failures allow dispatch
+
+Missing project background is a smaller loss than skipping the task, so knowledge
+sync is non-throwing. Permission auto-accept enrollment precedes dispatch to cover
+the first request; an enrollment failure leaves requests waiting for the user and
+allows the task to execute.
+
+### Why Auto selection waits for a session
+
+The Auto sentinel never reaches OpenCode as a model. The session starts with its
+default model, then Jev switches it to the prompt's selection using the session id
+so the routing decision appears on that session. Goal metadata records the chosen
+model. A missing routing dependency refuses an Auto run before session creation.
+
+### Why model checks reuse target validation and tolerate paused stale targets
+
+An enabled targeted save reuses its validated directory so the guard and catalog
+check read the session once. A paused task with an unresolved target stays
+editable; without a target directory, its catalog check stands down. Loop enabling
+checks the model before rewriting the file so rejection leaves the loop off.
+
+### Why an unchanged enable request leaves the loop file alone
+
+A loop file can be tracked in Git. A request matching the task's enabled state
+preserves both that file and its local approval without rewriting either.
+
+### Why browser capability and follow identity belong to the SSE connection
+
+A desktop shell and a browser tab can share one server while having different
+browser capabilities. Each connection records its own capability and identity so
+follow requests live exactly as long as the connection receiving their changes.
+
 ## Chats scope
 
 Chats (sessions outside any project) can have scheduled tasks too. They are

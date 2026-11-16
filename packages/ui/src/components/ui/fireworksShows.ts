@@ -2,18 +2,14 @@ import type { Celebration } from '@/lib/easter-eggs/calendar';
 
 import type { HolidayOrnament } from './holidayOrnaments';
 
-/** What is being celebrated. A merge is worth more than a push, so it fires more volleys. */
 export type CelebrationKind = 'push' | 'merge' | 'deletion';
 
 export interface CelebrationOptions {
   kind?: CelebrationKind;
-  /** Volleys to fire one after another; a merged stack fires one per layer. */
   volleys?: number;
-  /** The button that started it: the first burst comes from there, the volleys follow. */
   origin?: HTMLElement | null;
 }
 
-/** A point on screen, in percent of the viewport. */
 interface BurstOrigin {
   x: number;
   y: number;
@@ -29,14 +25,8 @@ export interface FireworksBurst {
 }
 
 export interface FireworksShow {
-  /**
-   * Confetti every day, a firework salute at New Year, ghosts tossing candy on
-   * Halloween, drawn things (hearts, flags, leaves) on the other holidays.
-   */
   particle: 'confetti' | 'salute' | 'ghost' | 'holiday';
-  /** Every colour of the show: confetti mixes them within one burst. */
   palette: readonly string[];
-  /** The drawn things a holiday burst throws, repeated in this order. */
   ornaments: readonly HolidayOrnament[];
   bursts: readonly FireworksBurst[];
 }
@@ -49,13 +39,11 @@ const LAYOUT = [
 
 const PALETTES = {
   default: ['--status-success', '--primary-base', '--status-info', '--status-warning'],
-  // Removed lines are red in every diff.
   deletion: ['--status-error', '--status-error', '--status-error'],
   newYear: ['--status-warning', '--primary-base', '--status-warning'],
   candy: ['--status-warning', '--primary-base', '--status-error'],
 } as const;
 
-// The order repeats through every burst, so an ornament listed twice is thrown twice as often.
 const HOLIDAY_ORNAMENTS = {
   valentines: ['heart'],
   stPatricks: ['clover'],
@@ -71,7 +59,6 @@ const HOLIDAY_ORNAMENTS = {
   winter: ['snowflake'],
 } satisfies Record<Exclude<Celebration, 'halloween' | 'newYear'>, readonly HolidayOrnament[]>;
 
-// Hearts and flowers read at confetti size; everything else has details that need more room.
 const CONFETTI_SIZED: ReadonlySet<HolidayOrnament> = new Set(['heart', 'flower']);
 
 export const holidayOrnamentScale = (ornament: HolidayOrnament): number => (CONFETTI_SIZED.has(ornament) ? 1 : 1.5);
@@ -80,10 +67,8 @@ const VOLLEY_GAP_MS = 450;
 const VOLLEY_SHIFT_X = [0, -9, 9, -4, 4] as const;
 const MAX_VOLLEYS = VOLLEY_SHIFT_X.length;
 const BASE_ON_SCREEN_MS = 3400;
-// Ghosts drift longer than confetti falls.
 const GHOST_EXTRA_MS = 800;
 
-// The volleys wait for the burst at the button to open first.
 const AFTER_ORIGIN_MS = 300;
 const ORIGIN_RADIUS = 140;
 
@@ -120,8 +105,6 @@ export const fireworksShowFor = (
   };
 };
 
-/** How long the overlay stays mounted: long enough for the last burst to finish. */
-/** The centre of the element, if it is still on screen. */
 export const burstOriginOf = (element: HTMLElement | null | undefined): BurstOrigin | null => {
   if (!element?.isConnected || window.innerWidth === 0 || window.innerHeight === 0) return null;
   const rect = element.getBoundingClientRect();

@@ -2,13 +2,6 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-// GNOME 46+ shows a window's icon only through a .desktop file whose name or
-// StartupWMClass matches the window's app id; a window without one gets the
-// generic executable icon, on Wayland and XWayland alike. An AppImage started
-// from a file manager has no such file, so the packaged app writes its own
-// unless another integration (Gear Lever, AppImageLauncher, appimaged) owns it.
-// GNOME re-matches open windows when the file appears, so the first launch
-// gets the icon a few seconds after this runs.
 
 const DESKTOP_FILE_NAME = 'openchamber.desktop';
 const WM_CLASS = 'openchamber';
@@ -21,8 +14,7 @@ const resolveDataHome = (env, homeDir) => {
   return value && path.isAbsolute(value) ? value : path.join(homeDir, '.local', 'share');
 };
 
-// Desktop Entry spec: a string value escapes backslashes; an Exec argument is
-// double-quoted with ", `, $ and \ escaped, and a literal % is written %%.
+// external: https://specifications.freedesktop.org/desktop-entry-spec/latest/exec-variables.html Exec quoting escapes reserved characters and doubles literal percent signs after string-value escaping.
 const escapeDesktopString = (value) => value.replace(/\\/g, '\\\\');
 const quoteExecArgument = (value) => `"${value.replace(/(["`$\\])/g, '\\$1')}"`.replace(/%/g, '%%');
 
@@ -70,9 +62,6 @@ const readFileOrNull = async (filePath) => {
   }
 };
 
-// Another launcher entry for this app in the user's applications folder, where
-// Gear Lever, AppImageLauncher and appimaged write theirs: one that claims our
-// window class, or one that starts this very AppImage.
 const findForeignEntry = async ({ directory, ownPath, appImagePath }) => {
   let names;
   try {
@@ -94,8 +83,6 @@ const findForeignEntry = async ({ directory, ownPath, appImagePath }) => {
   return null;
 };
 
-// The .deb and .rpm install their entry under the same name in a system data
-// directory; a user entry would hide it.
 const findInstalledPackageEntry = async (env, ownPath) => {
   const dirs = (env.XDG_DATA_DIRS ?? '').trim() || '/usr/local/share:/usr/share';
   for (const dir of dirs.split(':').filter((value) => path.isAbsolute(value))) {
@@ -129,13 +116,6 @@ const removeManagedEntry = async ({ desktopPath, iconPath }) => {
   return true;
 };
 
-/**
- * Keeps the user's launcher entry for a running AppImage in step with it:
- * written when nothing else integrates the app, rewritten when the AppImage
- * moved (in-app updates may rename it), and withdrawn once another
- * integration appears. Files without our marker are never touched.
- * Runs only in packaged Linux builds.
- */
 export const reconcileAppImageDesktopEntry = async ({
   env = process.env,
   homeDir = os.homedir(),
@@ -147,14 +127,10 @@ export const reconcileAppImageDesktopEntry = async ({
   const appImagePath = (env.APPIMAGE ?? '').trim();
   const appDir = (env.APPDIR ?? '').trim();
   if (!path.isAbsolute(appImagePath) || !path.isAbsolute(appDir) || /[\r\n]/.test(appImagePath)) {
-    // An installed .deb or .rpm ships its own openchamber.desktop, which an
-    // entry left by an earlier AppImage run would hide: ours takes precedence.
-    // An extracted AppImage also runs without APPIMAGE; it keeps the entry.
     const installed = await findInstalledPackageEntry(env, desktopPath);
     return { status: 'not-appimage', removed: installed ? await removeManagedEntry({ desktopPath, iconPath }) : false };
   }
 
-  // Gear Lever and the old AppImageKit integration launch with this set.
   if ((env.DESKTOPINTEGRATION ?? '').trim()) {
     return { status: 'external', removed: await removeManagedEntry({ desktopPath, iconPath }) };
   }
@@ -164,7 +140,6 @@ export const reconcileAppImageDesktopEntry = async ({
   if (ownKeys && !isManagedEntry(ownKeys)) {
     return { status: 'external', removed: false };
   }
-  // Menu editors hide an entry by writing one of these keys into it.
   if (ownKeys && (ownKeys.get('NoDisplay') === 'true' || ownKeys.get('Hidden') === 'true')) {
     return { status: 'hidden-by-user' };
   }
@@ -178,7 +153,6 @@ export const reconcileAppImageDesktopEntry = async ({
   const icon = await readFileOrNull(path.join(appDir, APPDIR_ICON_RELATIVE_PATH));
   if (!icon) return { status: 'no-icon' };
 
-  // Icon first: GNOME reads the entry as soon as it appears.
   const iconChanged = await writeIfChanged(iconPath, icon);
   const entryChanged = await writeIfChanged(desktopPath, Buffer.from(buildAppImageDesktopEntry({ appImagePath, iconPath }), 'utf8'));
   return { status: 'integrated', changed: iconChanged || entryChanged, desktopPath };

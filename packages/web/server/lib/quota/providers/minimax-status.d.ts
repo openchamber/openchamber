@@ -1,4 +1,3 @@
-/** MiniMax's `base_resp` envelope as it arrives in the response body. */
 export type MiniMaxBaseResp = {
   status_code?: unknown;
   status_msg?: unknown;

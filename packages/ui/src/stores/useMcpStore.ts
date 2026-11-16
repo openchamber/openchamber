@@ -31,12 +31,7 @@ type RefreshOptions = {
 };
 
 const ensureFreshInFlight = new Map<string, Promise<void>>();
-// Bumped on every runtime switch. Status is keyed by directory alone and two
-// instances can hold the same project path, so a request already in flight for
-// the previous instance would otherwise write its servers over the new one's.
 let mcpGeneration = 0;
-// Bumped per directory when its status is forgotten, so a read that started
-// before OpenCode stopped the directory cannot write the status back.
 const forgetGenerations = new Map<string, number>();
 
 type TestConnectionResult = {
@@ -50,47 +45,19 @@ interface McpStore {
   diagnosticsByDirectory: Record<string, McpRuntimeDiagnosticMap>;
   loadingKeys: Record<string, boolean>;
   lastErrorKeys: Record<string, string | null>;
-  /** When each directory's status was last fetched successfully. */
   refreshedAtKeys: Record<string, number>;
 
   getStatusForDirectory: (directory?: string | null) => McpStatusMap;
   getDiagnosticForDirectory: (directory?: string | null) => McpRuntimeDiagnosticMap;
   getErrorForDirectory: (directory?: string | null) => string | null;
   refresh: (options?: RefreshOptions) => Promise<void>;
-  /**
-   * Refresh only when the directory has no status yet or the last successful
-   * fetch is older than `maxAgeMs`. Mount-time consumers use this so a panel
-   * that remounts on every session switch does not refetch on every switch.
-   */
   ensureFresh: (options: RefreshOptions & { maxAgeMs: number }) => Promise<void>;
-  /**
-   * Re-read a directory whose status is already held, after OpenCode announced
-   * a change there. A directory nobody asked about is left alone: reading it
-   * would make OpenCode start it, MCP servers included.
-   */
   refreshIfHeld: (directory: string) => Promise<void>;
-  /**
-   * OpenCode stopped this directory's servers. The held status describes
-   * servers that are gone, and keeping it would make the shutdown's own
-   * announcements re-read the directory, which starts it again. A surface that
-   * shows the directory later reads it afresh.
-   */
   forgetDirectory: (directory: string) => void;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
-  /**
-   * The on/off switch. A disconnect alone lasts only until OpenCode starts the
-   * directory again (after an idle hour, a restart), so a configured server is
-   * turned off in the config file that defines it, where OpenCode keeps it off.
-   * A server no config file defines can only be disconnected.
-   */
   setEnabled: (name: string, enabled: boolean, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
-  /**
-   * MCP status is keyed by directory alone, and two instances can hold the same
-   * project path — so on a switch the previous instance's servers would be
-   * reported for the new one. Drop everything and let consumers re-ask.
-   */
   resetForRuntimeSwitch: () => void;
 }
 
@@ -193,8 +160,6 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory);
       if (!normalized) return;
       const key = toKey(normalized);
-      // A read already in flight would write the status back, and the next
-      // announcement would then find it held and start the directory again.
       forgetGenerations.set(key, (forgetGenerations.get(key) ?? 0) + 1);
       ensureFreshInFlight.delete(key);
       const state = get();
@@ -244,24 +209,15 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const configStore = useMcpConfigStore.getState();
       const generation = mcpGeneration;
-      // Without the config there is no telling whether the server has a file
-      // to keep it off, and a disconnect alone would not last.
       if (!await configStore.loadMcpConfigs({ force: true, directory: normalized })) {
         throw new Error('Failed to load MCP configs');
       }
-      // The app switched to another instance meanwhile; the same path there is
-      // another machine's config.
       if (generation !== mcpGeneration) return;
       const configured = useMcpConfigStore.getState().getMcpByName(name, normalized);
       const disabledInConfig = configured?.disabled === true;
       if (configured && disabledInConfig === enabled) {
-        // OpenCode watches the file and starts or stops the server itself.
         await configStore.updateMcp(name, { disabled: !enabled }, normalized);
       }
-      // Switching on a server the config already enables is a reconnect (a
-      // failed one, or one only disconnected). Switching off also disconnects:
-      // a server started by hand while its config says off stays running
-      // through an unchanged file.
       if (enabled && !disabledInConfig) await get().connect(name, normalized);
       else if (!enabled) await get().disconnect(name, normalized);
       else await get().refresh({ directory: normalized, silent: true });
@@ -271,10 +227,6 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const key = toKey(normalized);
       const previousStatus = get().getStatusForDirectory(normalized)[name];
-      // Only a server the user turned off goes back off after the test.
-      // Disconnecting leaves a server `disabled` in OpenCode, so doing it to a
-      // failed, unauthorized, pending or not yet read server would switch off
-      // the server the test just started.
       const wasDisabled = previousStatus?.status.status === 'disabled';
       let errorMessage: string | undefined;
       let warningMessage: string | undefined;

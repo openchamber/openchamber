@@ -32,13 +32,10 @@ type TodoSendDialogProps = {
   target: TodoSendTarget;
   projectDirectory: string | null;
   submitting?: boolean;
-  /** Offer a "Run as goal" checkbox (hidden in VS Code, where the loop does not run). */
   allowRunAsGoal?: boolean;
   onConfirm: (execution: TodoSendExecution) => Promise<void> | void;
 };
 
-// Stands in for the model picker while the project's defaults load, in the
-// trigger's shape so nothing moves when the picker replaces it.
 function ModelFieldSkeleton() {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
@@ -69,7 +66,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadConfigAgents = useConfigStore((state) => state.loadAgents);
   const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  // The catalogs of the project the dialog sends to, which need not be the active one.
   const pickerDirectory = projectDirectory ?? undefined;
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, projectDirectory));
   const agents = useConfigStore((state) => selectConfigAgentsForDirectory(state, pickerDirectory));
@@ -98,10 +94,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
 
-  // The dialog starts on the defaults of the project it sends to. The
-  // composer's pick belongs to whatever session is open, often in another
-  // project, so it never seeds the dialog. An agent picked while the
-  // defaults load stays.
   React.useEffect(() => {
     if (!open) return;
     setExecution(EMPTY_EXECUTION);
@@ -116,7 +108,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
       setDefaultsResolved(true);
       if (!defaults) return;
       setExecution((prev) => {
-        // The model and its effort cannot be picked yet: the picker shows once the defaults are here.
         const next = { ...prev, providerID: defaults.providerId, modelID: defaults.modelId, variant: defaults.variant ?? '' };
         if (!prev.picked.agent) next.agent = defaults.agentName ?? '';
         return next;
@@ -129,7 +120,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     };
   }, [open, projectDirectory, resolveDirectoryDefaultSelection]);
 
-  // Nothing resolved for the project: offer a model so the dialog can send.
   React.useEffect(() => {
     if (!open || !defaultsResolved || providers.length === 0 || execution.providerID) return;
 
@@ -153,13 +143,11 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
   const hasVariantOptions = variantOptions.length > 0;
 
-  // A configured model the catalog has not listed yet keeps its effort.
   React.useEffect(() => {
     if (!selectedModel || hasVariantOptions || !execution.variant) return;
     setExecution((prev) => ({ ...prev, variant: '' }));
   }, [selectedModel, hasVariantOptions, execution.variant]);
 
-  // A send before the defaults arrive would leave out what the user did not pick.
   const canConfirm = defaultsResolved && execution.providerID.trim().length > 0 && execution.modelID.trim().length > 0;
 
   const handleSubmit = React.useCallback(() => {

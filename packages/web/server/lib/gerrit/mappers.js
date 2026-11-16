@@ -1,32 +1,19 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { splitProjectPath } from '../source-control/project-path.js';
 
-/**
- * Gerrit answers as the neutral source-control DTOs the other providers emit
- * (`packages/ui/src/lib/source-control/types.ts`), plus the change-review
- * fields only a votes host fills: `voteLabels`, `submitRequirements`,
- * `revisions`. A project's id is its full Gerrit name; a change request's id
- * is `<project>#<number>`. REST paths name a change `<project>~<number>`,
- * built from `project` and `_number`: ChangeInfo's own `id` changed shape
- * between releases (3.8 answers the `project~branch~Change-Id` triplet, 3.10
- * `project~number` with a separate `triplet_id`), so it is never read.
- */
 
 const text = (value) => (isString(value) ? value : '');
 const integer = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-/** Gerrit's `2013-02-01 09:59:32.126000000` (UTC) as ISO 8601; null when it is not one. */
 export function gerritTimestamp(value) {
   const match = text(value).match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?$/);
   if (!match) return null;
   return `${match[1]}T${match[2]}.${(match[3] ?? '').padEnd(3, '0').slice(0, 3)}Z`;
 }
 
-/** The ref a patchset is fetched from: `refs/changes/<last two digits>/<change>/<patchset>`. */
 export const patchsetRef = (number, patchset) => `refs/changes/${String(number % 100).padStart(2, '0')}/${number}/${patchset}`;
 
-/** Gerrit's change id in a REST path, `project~number`, the project's slashes encoded. */
 export const changePath = (project, number) => `/changes/${encodeURIComponent(project)}~${number}`;
 
 const changeUrl = (origin, project, number) => `${origin}/c/${project}/+/${number}`;
@@ -41,7 +28,6 @@ export function mapGerritUser(value, identity) {
   return user;
 }
 
-/** A project by its full name; `owner` is everything before the last slash, '' for a top-level project. */
 export function mapGerritProject(name, identity, { defaultBranch, remoteName } = {}) {
   if (!text(name) || name.startsWith('/') || name.endsWith('/')) return null;
   const project = {
@@ -49,7 +35,6 @@ export function mapGerritProject(name, identity, { defaultBranch, remoteName } =
     id: name,
     ...splitProjectPath(name),
     url: `${identity.instance}/admin/repos/${name}`,
-    // Gerrit serves authenticated Git over HTTP under `/a/`.
     cloneUrl: `${identity.instance}/a/${name}`,
   };
   if (defaultBranch) project.defaultBranch = defaultBranch;
@@ -60,7 +45,6 @@ export function mapGerritProject(name, identity, { defaultBranch, remoteName } =
 const STATES = new Map([['NEW', 'open'], ['MERGED', 'merged'], ['ABANDONED', 'closed']]);
 export const changeState = (status) => STATES.get(status) ?? null;
 
-/** The current revision's number and ref, from `revisions` when it was read. */
 const currentRevision = (raw) => {
   const sha = text(raw.current_revision);
   const revision = sha && isPlainObject(raw.revisions) ? raw.revisions[sha] : null;
@@ -68,7 +52,6 @@ const currentRevision = (raw) => {
   return { sha: COMMIT_SHA.test(sha) ? sha : null, number, ref: text(revision?.ref) || (number ? patchsetRef(raw._number, number) : '') };
 };
 
-/** The commit message below its subject line, when the current revision's commit was read. */
 const descriptionOf = (raw, sha) => {
   const message = text(raw.revisions?.[sha]?.commit?.message);
   if (!message) return undefined;
@@ -90,7 +73,6 @@ export function mapGerritChange(raw, identity, project) {
     state,
     draft: raw.work_in_progress === true,
     base: raw.branch,
-    // The head is the current patchset's ref, not a branch.
     head: revision.ref || patchsetRef(raw._number, 1),
     labels: (Array.isArray(raw.hashtags) ? raw.hashtags : []).filter((tag) => text(tag)).map((name) => ({ name })),
   };
@@ -109,7 +91,6 @@ export function mapGerritChange(raw, identity, project) {
   if (updated) request.updatedAt = updated;
   if (raw.is_private === true) request.private = true;
   if (text(raw.topic)) request.topic = raw.topic;
-  // Mergeable means submittable: every submit requirement is met.
   if (state === 'open' && (raw.submittable === true || raw.submittable === false)) {
     request.mergeable = raw.submittable;
     request.mergeableState = raw.submittable ? 'clean' : 'blocked';
@@ -117,7 +98,6 @@ export function mapGerritChange(raw, identity, project) {
   return request;
 }
 
-/** `"+2"`, `" 0"`, `"-1"` as integers; null for anything else. */
 const voteValue = (key) => {
   const match = text(key).trim().match(/^([+-]?)(\d{1,2})$/);
   if (!match) return null;
@@ -126,11 +106,6 @@ const voteValue = (key) => {
 
 const LABEL_STATUSES = [['rejected', 'rejected'], ['approved', 'approved'], ['disliked', 'disliked'], ['recommended', 'recommended']];
 
-/**
- * The labels of a change read with `DETAILED_LABELS`: their values, what the
- * caller may vote (`permitted_labels`), and every non-zero vote. A zero in
- * `all` only says that person may vote, so it is not a vote.
- */
 export function mapGerritVoteLabels(raw, identity) {
   if (!isPlainObject(raw?.labels)) return [];
   const permitted = isPlainObject(raw.permitted_labels) ? raw.permitted_labels : {};
@@ -180,7 +155,6 @@ const REVISION_KINDS = new Map([
   ['MERGE_FIRST_PARENT_UPDATE', 'merge-first-parent-update'], ['NO_CODE_CHANGE', 'no-code-change'], ['NO_CHANGE', 'no-change'],
 ]);
 
-/** Patchsets oldest first; a change edit (`_number: "edit"`) is not one. */
 export function mapGerritRevisions(raw, identity) {
   if (!isPlainObject(raw?.revisions)) return [];
   return Object.entries(raw.revisions).flatMap(([sha, revision]) => {
@@ -194,11 +168,8 @@ export function mapGerritRevisions(raw, identity) {
   }).sort((a, b) => a.number - b.number);
 }
 
-/** A change message ("Patch Set 3: Code-Review+2") as a comment on the timeline. */
 export function mapGerritMessage(value, identity, url) {
   if (!isPlainObject(value) || !text(value.id) || !isString(value.message)) return null;
-  // A published message cannot be edited or deleted through the host: the
-  // comment keeps its id, and says nothing may be done with it.
   const comment = { ...identity, id: value.id, url, body: value.message, canUpdate: false, canDelete: false };
   const author = mapGerritUser(value.author, identity);
   if (author) comment.author = author;
@@ -208,10 +179,8 @@ export function mapGerritMessage(value, identity, url) {
   return comment;
 }
 
-/** A published inline comment (`/changes/{id}/comments` is keyed by path). */
 export function mapGerritInlineComment(path, value, identity, url) {
   if (!text(path) || !isPlainObject(value) || !text(value.id) || !isString(value.message)) return null;
-  // A published inline comment is immutable too; only a draft may change.
   const comment = { ...identity, id: value.id, url, body: value.message, path, canUpdate: false, canDelete: false };
   if (integer(value.line)) comment.line = value.line;
   const author = mapGerritUser(value.author, identity);
@@ -222,12 +191,10 @@ export function mapGerritInlineComment(path, value, identity, url) {
   return comment;
 }
 
-/** Gerrit's paths that are not files of the repository. */
 const MAGIC_PATHS = new Set(['/COMMIT_MSG', '/MERGE_LIST', '/PATCHSET_LEVEL']);
 
 const FILE_STATUSES = new Map([['A', 'added'], ['D', 'removed'], ['R', 'renamed'], ['C', 'added'], ['W', 'modified']]);
 
-/** A revision's `FileInfo` map, without the magic paths; a missing status is a modification. */
 export function mapGerritFiles(files) {
   if (!isPlainObject(files)) return null;
   return Object.entries(files).flatMap(([path, info]) => {
@@ -241,21 +208,12 @@ export function mapGerritFiles(files) {
   });
 }
 
-/**
- * The diff part of a `git format-patch` mail (`/revisions/{rev}/patch`):
- * the mail headers and message before the first `diff --git` and the
- * signature after the last hunk are dropped.
- */
 export function diffOfPatch(patch) {
   const start = patch.search(/^diff --git /m);
   if (start < 0) return '';
   return patch.slice(start).replace(/\n-- \n[^\n]*\n*$/, '\n');
 }
 
-/**
- * A unified diff split per file, keyed by the file's new path (its old path
- * for a deletion), each part keeping its own `diff --git` header.
- */
 export function splitUnifiedDiff(diff) {
   const parts = new Map();
   if (!isString(diff) || !diff) return parts;
@@ -275,12 +233,6 @@ export function splitUnifiedDiff(diff) {
   return parts;
 }
 
-/**
- * A relation chain as a stack, bottom first. `/related` lists the chain in
- * Git commit order, newest first, so it is reversed; entries that are only
- * commits (no change number) and changes of other projects are left out.
- * Null when the change has no relatives.
- */
 export function mapGerritRelatedStack(related, { origin, project, base }) {
   const changes = Array.isArray(related?.changes) ? related.changes : [];
   const layers = changes.flatMap((entry) => {
@@ -293,7 +245,7 @@ export function mapGerritRelatedStack(related, { origin, project, base }) {
       title: text(entry.commit?.subject),
       url: changeUrl(origin, project, number),
       state,
-      // `/related` does not say whether a relative is work in progress.
+      // external: https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#related-change-and-commit-info Related changes omit work-in-progress status.
       draft: false,
       head: patchsetRef(number, patchset),
     }];
@@ -301,7 +253,6 @@ export function mapGerritRelatedStack(related, { origin, project, base }) {
   return layers.length > 1 ? { number: null, base, layers } : null;
 }
 
-/** A change's live state in the shape the other providers' summaries use. */
 export function liveChangeSummary(ref, raw) {
   if (!isPlainObject(raw) || integer(raw._number) === null) return null;
   const state = changeState(raw.status) ?? 'closed';

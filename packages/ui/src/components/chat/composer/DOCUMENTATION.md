@@ -59,7 +59,14 @@ as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
 question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
+oldest pending form and counts the rest in its header. While the reader is
+away from the transcript's end (the scroll-to-bottom pill shows,
+`FormDockModeContext` from `ChatContainer` reads `reading`), the dock shrinks to its
+header row and opens again when they come back. A dock whose text field has
+focus stays open, since collapsing it would drop what is being typed. The
+header toggles it by hand at any time: opened while reading, it stays open;
+collapsed while reading, it opens again at the end like an automatic
+collapse; collapsed at the end, it stays collapsed. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
@@ -120,6 +127,38 @@ side panel keeps the full dock rather than a line of its own: the line asks
 for its card through the app-wide waiting-page request, which only the main
 timeline serves, so in the side panel it would move nothing, or move the main
 chat when that shows the same session.
+
+### Why the question dock collapses while the reader scrolls up
+
+The dock floats over the transcript, and a question with described options
+took about a third of a laptop window, covering the reply the question is
+about exactly while the user went back to read it. The scroll position is the
+reading signal the app already has, so no new control was added.
+
+While the dock is collapsed for reading, the transcript's tail spacer keeps
+the room it had for the open dock (`holdReserve`, published as
+`--chat-floating-panel-reserve`). With the spacer shrinking, a scroll shorter
+than the dock clamped the reader onto the end, which hid the pill and opened
+the dock again, so the user could not scroll up less than the dock's height.
+The overlays riding above the dock (the pill, the status row) keep following
+its real height. A collapse by hand while reading counts as a collapse for
+reading for the same reason: as a collapse that stays, it would give the room
+back and clamp the reader the same way. The room therefore comes back only
+together with the dock reopening, which the frame's resize observer already
+measures, so the release needs no timer or extra effect.
+
+The state reaches the dock through a context so the memoized composer does
+not re-render on every scroll away and back. One context carries both ways
+the column shapes the dock (`dock`, `reading`, `in-chat`, from
+`resolveFormDockMode`), so the "In the chat" choice travels the same way and
+the composer takes no prop for either. The collapse follows the
+context's change during render, and the text-field focus comes from the
+dock's own focus events; a field removed while focused (the next step) does
+not count as focused. The next question, taking the slot while the reader is
+away, mounts already collapsed for reading, so it starts from the room the
+column already holds (`readFloatingPanelTailReserve`) instead of its own
+header height. Panels that do not hold room (a permission, BTW) publish their
+own height as before.
 
 ### Why answer textareas measure content in one layout pass
 
@@ -199,6 +238,98 @@ nothing is queued. A first send that fails restores its text under the
 identity `DraftSendError` names: the created session's composer, or the
 reopened draft's, with the text typed meanwhile kept above the sent text
 (*A draft's first send* in `sync/DOCUMENTATION.md`).
+
+A send the page did not live to see settled comes back after the next start.
+On Enter the composer clears its draft and writes the sent text to
+`lib/unconfirmedSends.ts`; `sendMessage`'s `progress` adds the session a draft
+minted, the prompt's message id, and the moment its request leaves, and the
+record goes when the send resolves or its failure path has restored the text.
+A record left by a page that died (reload, app restart, PWA update, renderer
+crash) is restored by the main composer on mount
+(`hooks/useUnconfirmedSendRecovery.ts`) through the same `restoreDraft` a failed
+send uses, so text typed meanwhile stays above it. The target follows the
+failed-send rule: the created session's composer when the server has the
+minted session, the draft's otherwise. A project draft reopens under a new id
+after a reload, so its text goes to the new-session draft on screen when that
+draft is in the same folder, and to the folder's key otherwise (the next draft
+opened there claims it); the old draft is discarded from the shared drafts so
+its row does not list the text a second time. A request that never left comes back
+without asking anything; one that left comes back only when the server answers
+that it has no message with that id, and a command or shell line that left
+(no client-side id) is dropped. A server that cannot answer keeps the record
+for the next start, and so does a runtime switch while the server is asked:
+the answer came from another server. Files stay in memory, so only their
+names come back, as the dashed chips a reloaded draft draws.
+
+A new Chat's first send also leaves its prepared chat folder behind when the
+page dies before the session exists. The record carries that folder
+(`progress.sessionMinted` names it for a Chat draft only, never for a project
+folder). A first send that failed while the page lived but before its request
+left (the server down, say) leaves it too: the store's own removal waits in
+memory for the next connection and dies with the page, so `settle` keeps such
+a record, marked `textReturned` because the failure path already put the text
+back. A send whose request left has its session and settles without a trace.
+
+The folder goes on the start after the one that first found the minted
+session missing (`orphanSeen`). The page that found it takes the record over
+(its own page id, under its own lock), so a second client starting at the
+same moment, the desktop window and Mini Chat say, leaves it until that page
+is gone too. The folder goes once the server still answers 404 for it and
+the global session list, loaded for the check, holds no session in it
+(`isChatDirectoryStillReferenced`, the rule a deleted chat's folder follows).
+The record stays until the folder is gone or a session is found in it; a list
+that cannot load, a failed read and a runtime switch keep both for the next
+start. A live sending page never gets here (its record is skipped).
+
+A Chat draft prepares its folder when its first character is typed, and an
+unsent draft's folder outlives a reload too: the page that prepared it is gone,
+and the next page prepares its own. `prepareChatDraftDirectory` therefore
+records each prepared folder under the page that prepared it
+(`trackPreparedChatFolder`), and recovery treats a dead page's folder by the
+same two-start rule: the first start takes it over, a later one deletes it
+when the global session list holds no session in it, and drops the record
+when one does (the draft's first send made it a session's folder). A live
+page's folder, the draft on screen included, is never touched; a folder the
+store already removed (draft closed, switched to a project) answers 404 to the
+delete and its record goes. A folder a send record still names waits until
+that record is settled, so the send's own grace start is never skipped, and a
+session list that does not load keeps both folder and record.
+
+No folder is ever deleted without Web Locks. There the records live in the
+tab's `sessionStorage`, which a duplicated tab copies, so a record's owner
+cannot be told dead: prepared folders are not recorded, and a send's leftover
+folder is left on disk.
+
+### Why a left-behind chat folder waits a whole start before it goes
+
+A page that dies does not take back a create request already on its way: the
+server can still make the session after the next start has read 404, and a
+session whose folder is gone fails every prompt. No read on the client closes
+that window, so the first start only notes the folder and the next one, a page
+lifetime later, deletes it if the session is still missing. A leaked scratch
+folder for one more start costs nothing; a stranded session cannot be
+repaired. The global session list is the authority instead of a session list
+scoped to the folder, because a scoped read makes OpenCode start a location in
+a folder that is about to go.
+
+### Why an unconfirmed send is its own record and not the draft left in place
+
+Keeping the sent text in the draft until the send settles would show it in a
+second window's composer while the first still sends, and the composer's own
+flush on hide writes the cleared field over it anyway. The record names the
+page that wrote it, and each page holds a Web Lock under its id while it lives,
+so another tab or the Mini Chat window never restores a send that is still
+going; recovery itself runs under one lock, so two windows starting together
+restore a record once. Each record has its own storage key, so two windows
+writing at once never overwrite each other's progress. Where Web Locks do not
+exist (a plain-HTTP LAN address) liveness cannot be told, so the records go to
+the tab's `sessionStorage`: a reload of the same tab still finds them, another
+tab never does. A record is written to storage directly, not through the
+deferred storage the drafts use, because the page can stop before a deferred
+write flushes. Removing it, after a send settles or after recovery, first
+flushes the deferred storage (`flushDeferredStorage`), so the restored draft is
+stored before its record goes and a stop in between never loses both; recovery
+removes it while it still holds its lock, so a second window cannot find it.
 
 ### Why a session whose folder is gone gets a row and keeps its text
 
@@ -349,9 +480,10 @@ The shared frame measures its height and gap as
 `state/composerInsetReaders.ts` onto the elements that read it, never on the
 chat column (inherited from the column, every resize of the frame restyled
 the whole transcript). The floating status row, the recap hint and
-`ScrollToBottomButton` translate upward by that amount, the transcript's tail
-spacer and the end fade band grow by it (so the frame never covers the last
-rows), and the column carries `data-floating-panel` while any frame is
+`ScrollToBottomButton` translate upward by that amount, the end fade band
+grows by it and the transcript's tail spacer by its reserve twin
+`--chat-floating-panel-reserve` (equal to it except while a panel holds its
+room, see the question dock above; so the frame never covers the last rows), and the column carries `data-floating-panel` while any frame is
 mounted so the recap hint hides instead of landing over the transcript.
 Unmounting clears the offset and the marker; resizing or collapsing the frame
 updates it.

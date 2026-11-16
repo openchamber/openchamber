@@ -1573,7 +1573,6 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'الوتيرة: {rate}',
   'settings.usage.pace.waitSeparator': ' · انتظر ',
   'settings.usage.pace.predictionLabel': 'المتوقع: ',
-  'settings.usage.card.showInHeaderAria': 'إظهار في قائمة الشريط العلوي',
   'settings.usage.card.resetsAt': 'يُعاد التعيين {time}',
   'settings.usage.card.bar.used': 'مستخدم',
   'settings.usage.card.bar.remaining': 'متبقٍ',

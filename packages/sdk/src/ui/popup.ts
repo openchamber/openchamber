@@ -1,6 +1,5 @@
 import { onOutsideClick } from './dom.ts';
 
-/** Places a fixed popup under `trigger`; flips above when the room below is too small. */
 const placePopup = (popup: HTMLElement, trigger: HTMLElement): void => {
   const rect = trigger.getBoundingClientRect();
   popup.style.minWidth = `${Math.round(rect.width)}px`;
@@ -17,10 +16,6 @@ const placePopup = (popup: HTMLElement, trigger: HTMLElement): void => {
   }
 };
 
-/**
- * Attaches `popup` next to `trigger` and wires the ways it closes: outside press,
- * viewport resize, or scroll. Returns the disposer; the caller decides what `close` does.
- */
 export const openPopup = (
   host: Element,
   trigger: HTMLElement,

@@ -1,16 +1,3 @@
-/**
- * The picker for a project's issues and change requests, on whichever
- * provider hosts it, and a tracker's work items (Linear issues).
- *
- * Desktop shows the list and a preview of the highlighted item side by side,
- * so the user sees what they are about to attach. Mobile shows the list, and
- * a tap on a row opens its preview in place.
- *
- * `selection: 'multiple'` (the composer) checks any number of items, across
- * tabs, and attaches them together. `selection: 'single'` (New Worktree)
- * chooses one. Lists come from the shared reference cache, so switching tabs
- * or reopening the picker shows the last answer at once.
- */
 
 import * as React from 'react';
 
@@ -37,7 +24,6 @@ import {
     type ReferencePickerSource,
 } from './referencePickerItems';
 
-/** A failed confirm: the keys that did not go through stay checked. */
 export type ReferencePickerConfirmFailure = { failedKeys: string[]; message: string };
 
 type ReferencePickerDialogProps = {
@@ -46,19 +32,14 @@ type ReferencePickerDialogProps = {
     source: ReferencePickerSource;
     purpose: ReferencePreviewPurpose;
     selection: 'multiple' | 'single';
-    /** The project repository items come from. */
     directory: string | null;
-    /** Tab to open the repository source on; the last used one otherwise. */
     initialGitHubKind?: RepositoryReferenceKind;
-    /** Null closes the picker; a failure keeps it open with the message. */
     onConfirm: (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null>;
 };
 
 export function ReferencePickerDialog(props: ReferencePickerDialogProps) {
     const isMobile = useUIStore((state) => state.isMobile);
     if (!props.open) return null;
-    // Remounted per open, so every open starts from the remembered tab and an
-    // empty search without effects resetting state after the first paint.
     return <ReferencePickerSurface {...props} isMobile={isMobile} />;
 }
 
@@ -80,8 +61,6 @@ function ReferencePickerSurface({
 
     const browser = useReferenceBrowser({ source, directory, isMobile, initialGitHubKind, retainedItems: checked });
     const { highlightedItem, previewItem, previewKey, descriptor } = browser;
-    // The phone's list and preview share the sheet's scroller: the list's offset
-    // is kept while an item takes its place, and every preview starts at its top.
     const inPreview = isMobile && Boolean(browser.mobilePreviewKey && previewItem);
     const contentRef = usePreviewReturnScroll(inPreview ? browser.mobilePreviewKey : null);
 
@@ -111,7 +90,6 @@ function ReferencePickerSurface({
             : { source: 'repository', reference: item.reference, includeDiff: diffIncluded.has(referencePickerItemKey(item)) }
     ), [diffIncluded]);
 
-    /** Confirm the checked items plus `extra`, or just `extra` in single mode. */
     const confirm = React.useCallback(async (extra: ReferencePickerItem | null) => {
         if (confirming) return;
         const chosen = new Map(selection === 'multiple' ? checked : []);
@@ -196,8 +174,6 @@ function ReferencePickerSurface({
             ? t('references.picker.actions.attachCount', { count: checkedCount })
             : t('references.picker.actions.attach');
 
-    // In multiple mode the button attaches what is checked, or the
-    // highlighted item when nothing is; single mode always takes the highlight.
     const confirmTarget = isMobile ? previewItem : highlightedItem;
     const canConfirm = !confirming && (selection === 'multiple' ? checkedCount > 0 || Boolean(confirmTarget) : Boolean(confirmTarget));
     const runConfirm = () => void confirm(selection === 'multiple' && checkedCount > 0 && !(isMobile && previewItem) ? null : confirmTarget);

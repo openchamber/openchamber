@@ -209,14 +209,11 @@ export const useMenuActions = (
           handleChangeWorkspace();
           break;
 
-        // Legacy right-sidebar menu items now target the context surfaces
-        // that replaced the sidebar's tabs.
         case 'toggle-right-sidebar': {
           const directory = useDirectoryStore.getState().currentDirectory;
           if (!directory) break;
           const uiState = useUIStore.getState();
           const directoryKey = normalizeContextPanelDirectoryKey(directory);
-          // The right zone only: it is the panel this menu item always meant.
           const panelState = uiState.contextPanelByDirectory[directoryKey];
           const rightTabId = panelState
             ? resolveZoneActiveTabId(panelState.tabs, uiState.contextSurfaceZones, 'right', getZoneView(panelState, 'right').activeTabId)
@@ -289,8 +286,6 @@ export const useMenuActions = (
           onToggleMemoryDebug?.();
           break;
 
-        // Same history as the Back/Forward shortcuts, which this menu's
-        // accelerators shadow on Windows and Linux.
         case 'go-back':
           navigateSessionHistory(-1);
           break;

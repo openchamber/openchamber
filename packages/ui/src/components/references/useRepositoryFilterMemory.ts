@@ -1,4 +1,3 @@
-/** The repository filter a folder last used, remembered per repository and tab. */
 
 import * as React from 'react';
 
@@ -16,15 +15,6 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
 import { useRepositoryReadContext } from './referenceSources';
 
-/**
- * The persisted filter of the repository a folder's items are read from, for
- * one tab. `key` is null while the binding and accounts still load, or for a
- * folder that names no readable project, and then nothing is read or written.
- * The repository is resolved exactly as the label reader resolves it, so the
- * entry is that of the labels the panel offers: a fork clone and its upstream
- * keep separate entries whenever their resolved coordinates differ. The saved
- * filter is known before the list's first read, which waits for it.
- */
 export function useRepositoryFilterMemory(
     enabled: boolean,
     directory: string | null,

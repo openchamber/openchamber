@@ -26,7 +26,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const showDiagnostics = import.meta.env.DEV;
-  // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
@@ -147,7 +146,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     };
   }, [open, showDiagnostics]);
 
-  // Both rows render from the first frame so the dialog height stays put while versions load.
   const renderVersionRow = (labelKey: 'aboutDialog.openChamberVersionLabel' | 'aboutDialog.openCodeVersionLabel', value: string | null | undefined) => {
     if (value !== undefined) {
       return <p>{t(labelKey, { version: value ?? t('settings.openchamber.about.state.unknown') })}</p>;

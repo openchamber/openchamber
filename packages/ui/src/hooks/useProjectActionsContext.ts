@@ -43,19 +43,12 @@ export const resolveProjectActionsOwner = ({
   return projects.find((project) => project.id === activeProjectId) ?? null;
 };
 
-/**
- * Resolves the active project ref + working directory whose actions
- * `ProjectActionsProvider` runs. Directory
- * priority: worktree → session → draft → project path. A sticky ref keeps the last
- * good context so the actions button doesn't flicker during session switches.
- */
 export function useProjectActionsContext(): ProjectActionsContext | null {
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  // The directory alone: the whole record changes on every streamed step.
   const currentSessionDirectory = useSessionDirectory(currentSessionId ?? null);
 
   const worktreePath = useSessionUIStore((state) => {
@@ -68,7 +61,6 @@ export function useProjectActionsContext(): ProjectActionsContext | null {
     }
     return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
-  // `null` when no draft is open; the draft wins over the session while it is.
   const draftTargetsChat = useSessionUIStore((state) => (
     state.newSessionDraft?.open ? state.newSessionDraft.target === 'chat' : null
   ));
@@ -97,8 +89,6 @@ export function useProjectActionsContext(): ProjectActionsContext | null {
     return { id: ownerProject.id, path: ownerProject.path };
   }, [ownerProject]);
 
-  // A managed Chat belongs to no project: falling back to the active project
-  // would run its actions inside the chat's folder.
   const isManagedChat = draftTargetsChat ?? isChatDirectoryPath(sessionDirectory);
 
   const lastContextRef = React.useRef<ProjectActionsContext | null>(null);

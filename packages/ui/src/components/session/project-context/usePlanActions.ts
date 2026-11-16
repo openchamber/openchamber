@@ -17,14 +17,8 @@ type PlanAction = {
   onSelect: () => void;
 };
 
-/**
- * A plan's actions beyond its pin, the same in its list row and in the open
- * plan's menu: open the session it was written in, share or make personal,
- * delete with undo.
- */
 export const usePlanActions = (
   projectRef: ProjectRef,
-  /** After a move: the project, and the plan's id before and after it (they differ when a team-only plan is made personal). */
   onMoved?: (projectId: string, previousId: string, movedId: string) => void,
 ) => {
   const { t } = useI18n();
@@ -32,15 +26,10 @@ export const usePlanActions = (
   const removePlan = useProjectContextStore((state) => state.deletePlan);
   const [movingPlanId, setMovingPlanId] = React.useState<string | null>(null);
 
-  // The list reloads from the returned context; whoever shows the plan open
-  // follows it to its id after the move through `onMoved`.
   const handleMove = React.useCallback(async (plan: ProjectPlanLink) => {
     if (movingPlanId) return;
     setMovingPlanId(plan.id);
     try {
-      // An open view of this plan stops taking typing and writes what it has:
-      // the move takes the file away from under it and may give the plan a new
-      // id. A failed write keeps the plan where it is, with the text on screen.
       const projectId = resolveProjectContextId(projectRef);
       const held = await holdOpenPlan(projectId, plan.id);
       try {

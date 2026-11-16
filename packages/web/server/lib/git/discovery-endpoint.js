@@ -27,9 +27,6 @@ const validatePath = (value, { absolute }) => {
   return decoded;
 };
 
-// `ownRemote` marks the repository's own remote, as opposed to an endpoint its
-// content names. Its HTTPS URL may carry a user name on System transport; the
-// name is dropped here, so nothing derived from the remote inherits it.
 const parseEndpoint = (value, { ownRemote = false } = {}) => {
   if (!isString(value) || !value || value.trim() !== value
     || value.startsWith('-') || CONTROL_PATTERN.test(value) || value.includes('::')) {
@@ -94,8 +91,7 @@ const joinRelativePath = (parentPath, relative) => {
     || relative.includes('\\') || /[?#]/.test(relative)) {
     throw discoveryError('Relative Git discovery endpoint is invalid');
   }
-  // Git treats the repository endpoint as a directory. Thus ../child.git,
-  // rather than ./child.git, names a sibling of parent.git.
+  // external: https://git-scm.com/docs/git-submodule Relative submodule URLs treat the repository endpoint as a directory.
   const stack = parentPath.split('/').filter(Boolean);
   for (const component of relative.split('/')) {
     if (!component || component === '.') continue;

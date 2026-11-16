@@ -1,11 +1,3 @@
-/**
- * A host item's text is Markdown source, so it is edited in the composer's
- * editor: the same highlighting and code blocks as a prompt, with none of the
- * prompt's tokens resolving. `@name` stays the host's user, and a file path is
- * not a workspace file. Enter breaks the line; Mod+Enter saves, Escape cancels.
- * Pasted images are not taken, because a source-control write has nowhere to
- * put an upload.
- */
 
 import * as React from 'react';
 
@@ -23,7 +15,6 @@ interface ReferenceMarkdownEditorProps {
     onCancel: () => void;
     placeholder: string;
     disabled?: boolean;
-    /** Opens ready to type; a description leaves the title's own field the focus. */
     autoFocus?: boolean;
     maxLines?: number;
     'aria-label'?: string;
@@ -44,7 +35,6 @@ export const ReferenceMarkdownEditor: React.FC<ReferenceMarkdownEditorProps> = (
         fileIconVariant: themeVariant,
     }), [themeVariant]);
 
-    // An edit opens ready to type, the caret after the text it starts with.
     React.useLayoutEffect(() => {
         if (!autoFocus) return;
         const editor = editorRef.current;

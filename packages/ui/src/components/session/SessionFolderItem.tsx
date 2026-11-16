@@ -11,18 +11,10 @@ import type { CollapsedActivityState } from './sidebar/sessions/collapsedActivit
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
-  /**
-   * Optional display label override. Flat folder rendering shows nested
-   * folders at the top level with a "Parent / Child" path instead of
-   * indentation.
-   */
   displayName?: string;
   sessions: readonly TSessionNode[];
-  /** Everything filed here, what a section lists elsewhere and whole worktrees included. */
   memberCount?: number;
-  /** The project's name, where folders of several projects share a list. */
   projectLabel?: string;
-  /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
   collapsedActivityState?: CollapsedActivityState;
@@ -40,19 +32,12 @@ interface SessionFolderItemProps<TSessionNode> {
   onRenameDraftChange?: (value: string) => void;
   onRenameSave?: () => void;
   onRenameCancel?: () => void;
-  /** Ref callback from useDroppable – attach to folder header to make it a drop zone */
   droppableRef?: (node: HTMLElement | null) => void;
-  /** Whether a draggable session is currently hovering over this folder */
   isDropTarget?: boolean;
-  /** Create a new session scoped to this folder */
   onNewSession?: () => void;
-  /** Tree level of the folder row: 0 right under the project, 1 under a worktree. */
   depth?: number;
-  /** False for a folder with nothing in it: no chevron, and it does not toggle. */
   canExpand?: boolean;
-  /** Hide folder action buttons (rename/delete/new) */
   hideActions?: boolean;
-  /** Whether folder belongs to archived section */
   archivedBucket?: boolean;
 }
 
@@ -130,7 +115,6 @@ const SessionFolderItemBase = <TSessionNode,>({
     [isRenaming, onRenameDraftChange],
   );
 
-  // Auto-focus rename when externally triggered
   React.useEffect(() => {
     if (!isRenaming) return;
     const focusInput = () => {
@@ -148,21 +132,16 @@ const SessionFolderItemBase = <TSessionNode,>({
   }, [isRenaming]);
 
   const folderIconName = isCollapsed ? 'folder' : 'folder-open';
-  // An empty folder has nothing to show or hide.
   const toggleable = !renaming && canExpand;
 
   return (
     <div className="oc-folder">
-      {/* Folder header – also acts as a drop zone when droppableRef is provided */}
       <div
         ref={droppableRef}
-        // A file tree folder row: the chevron, then the folder icon and name.
         style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
         className={cn(
           'group/folder relative flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-md',
           'cursor-pointer',
-          // No hover fill: only session rows take one, so a pointer moving
-          // down the sidebar tells sessions from their containers.
           isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
         )}
         onClick={!toggleable ? undefined : (event) => {
@@ -186,21 +165,15 @@ const SessionFolderItemBase = <TSessionNode,>({
           ? t('sessions.sidebar.folderItem.expandAria', { folderName: folder.name })
           : t('sessions.sidebar.folderItem.collapseAria', { folderName: folder.name })}
       >
-        {/* 2px gaps put the folder name where the titles of its sessions,
-            one level deeper, start. */}
         <div className={cn(
           'min-w-0 flex items-center gap-0.5 flex-1',
           archivedBucket
             ? (alwaysShowActions ? 'pe-7' : 'group-hover/folder:pe-7 group-has-[:focus-visible]/folder:pe-7')
-            // Actions overlay on hover (new session, rename, delete = three
-            // 24px buttons anchored at the right edge); reserve room only
-            // while they are revealed, mirroring session-row behavior.
             : (alwaysShowActions ? 'pe-20' : 'group-hover/folder:pe-20 group-has-[:focus-visible]/folder:pe-20'),
         )}>
           {canExpand
             ? <FileTreeChevron expanded={!isCollapsed} />
             : <span aria-hidden className="size-3.5 flex-shrink-0" />}
-          {/* 12px glyph in the 14px icon slot (mx-px) keeps the name aligned. */}
           <Icon name={folderIconName} className={cn('mx-px h-3 w-3 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
 
           {renaming ? (
@@ -261,7 +234,6 @@ const SessionFolderItemBase = <TSessionNode,>({
             <div className="min-w-0 flex items-center gap-1.5 flex-1">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  {/* Like a worktree label: a step below full strength. */}
                   <span className={cn('typography-ui-label font-medium truncate', isDropTarget ? 'text-primary' : 'oc-group-label')}>
                     {displayName ?? folder.name}
                   </span>
@@ -282,7 +254,6 @@ const SessionFolderItemBase = <TSessionNode,>({
 
         </div>
 
-        {/* Action buttons */}
         {!renaming && (!hideActions || archivedBucket) ? (
           <div
             className={cn(
@@ -338,12 +309,9 @@ const SessionFolderItemBase = <TSessionNode,>({
         ) : null}
       </div>
 
-      {/* Folder body */}
       {!isCollapsed && renderBody ? (
         <div className="pb-1">
-          {/* Sub-folders first */}
           {subFolderItems}
-          {/* Then sessions */}
           {sessions.length > 0 ? (
             children
           ) : !subFolderItems ? (

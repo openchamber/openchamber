@@ -17,7 +17,6 @@ let nextPopoverAnchorId = 0;
 
 const isKeyboardEvent = (event: Event): event is KeyboardEvent => 'key' in event;
 
-/** Adds a bounded host popover preview to an extension-owned element. */
 export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorOptions): PopoverAnchorHandle => {
   const document = element.ownerDocument;
   const window = document.defaultView;
@@ -118,9 +117,6 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
     clearTimer();
     reportAnchorActivity();
   };
-  // A touch screen has no hover: a tap is how its user asks for the preview.
-  // The tap opens it (a phone host shows it as a sheet) and is the whole
-  // click, so the element's own click handler does not also run under it.
   const onPointerDown = (event: Event): void => {
     touchPointerDown = 'pointerType' in event && typeof event.pointerType === 'string'
       && event.pointerType !== '' && event.pointerType !== 'mouse';
@@ -129,7 +125,6 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   const onClick = (event: Event): void => {
     const tapped = touchPointerDown;
     touchPointerDown = false;
-    // A keyboard click (detail 0) after a cancelled touch stays the element's click.
     if (!tapped || ('detail' in event && event.detail === 0)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -174,13 +169,10 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   if (ownsExpanded) element.setAttribute('aria-expanded', 'false');
   if (options.label) element.setAttribute('aria-label', options.label);
   element.addEventListener('pointerenter', onPointerEnter);
-  // Crossing opaque iframe documents can omit an enter transition. A real
-  // pointer move over this element still establishes a new hover intent.
   element.addEventListener('pointermove', onPointerEnter);
   element.addEventListener('pointerleave', onPointerLeave);
   element.addEventListener('pointerdown', onPointerDown);
   element.addEventListener('pointercancel', onPointerCancel);
-  // Capture runs at the target before the element's own click listeners.
   element.addEventListener('click', onClick, true);
   element.addEventListener('focus', onFocus);
   element.addEventListener('focusout', onFocusOut);

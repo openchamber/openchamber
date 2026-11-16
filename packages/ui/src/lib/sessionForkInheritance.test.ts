@@ -26,6 +26,7 @@ const harness = (fork: Session, overrides: Partial<ForkInheritanceDeps> = {}) =>
   const reads: string[] = [];
   const writes: Array<[string, string]> = [];
   const patches: Metadata[] = [];
+  const permissions: Array<[string, Session['permissions']]> = [];
   const deps: ForkInheritanceDeps = {
     readGoalId: async () => 'goal_1',
     readObjective: async (sessionId) => {
@@ -39,10 +40,23 @@ const harness = (fork: Session, overrides: Partial<ForkInheritanceDeps> = {}) =>
     patchMetadata: async (_sessionId, updater) => {
       patches.push(updater(fork.metadata ?? {}));
     },
+    setPermissions: async (sessionId, rules) => {
+      permissions.push([sessionId, rules]);
+    },
     ...overrides,
   };
-  return { deps, reads, writes, patches };
+  return { deps, reads, writes, patches, permissions };
 };
+
+describe('a fork of an agent\'s worker session', () => {
+  test('is the user\'s own session: no link to the agent and the question tool back', async () => {
+    const fork = { ...forkWith({ openchamber: { kind: 'operator-child', parentID: 'ses_operator' } }), permissions: [{ action: 'question', resource: '*', effect: 'deny' as const }] };
+    const { deps, patches, permissions } = harness(fork);
+    await applyForkInheritance('ses_worker', fork, deps);
+    expect(permissions).toEqual([['ses_fork', []]]);
+    expect(patches).toEqual([{}]);
+  });
+});
 
 describe('withoutSourceOwnedLinks', () => {
   test('pauses an active goal so the fork does not pursue it in parallel', () => {

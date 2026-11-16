@@ -6,18 +6,9 @@ export type TodoSendExecution = {
   variant: string;
   agent: string;
   runAsGoal?: boolean;
-  /** What the user chose in the dialog. The rest follows the defaults of the directory the session runs in. */
   picked: { model: boolean; variant: boolean; agent: boolean };
 };
 
-/**
- * The selection a new session in `directory` sends its first message with.
- * The dialog shows the defaults of the project it was opened for; a new
- * worktree session runs in another directory, whose own defaults apply to
- * everything the user did not pick. A picked model keeps the effort the
- * dialog chose for it. When the directory resolves no model, the dialog's
- * values stand.
- */
 export const resolveExecutionForDirectory = async (
   directory: string,
   execution: TodoSendExecution,

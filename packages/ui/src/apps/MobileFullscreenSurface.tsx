@@ -10,8 +10,6 @@ import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CL
 
 const SURFACE_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
-// Enter-slide duration. Heavy content is revealed when this transition actually
-// ends (transitionend); this also feeds the fallback timer.
 const ENTER_DURATION_MS = 200;
 
 const ensureSurfaceRoot = (): HTMLElement | null => {
@@ -31,31 +29,15 @@ type MobileFullscreenSurfaceProps = {
   title?: React.ReactNode;
   subtitle?: React.ReactNode;
   trailing?: React.ReactNode;
-  /** If true, leave Escape available to nested content instead of dismissing the surface. */
   disableEscapeDismiss?: boolean;
-  /** If true, render no header and let the child render its own (with its own back button). */
   headerless?: boolean;
-  /** Drop the header's bottom divider (quiet single-page surfaces). */
   noHeaderBorder?: boolean;
   ariaLabel?: string;
-  /**
-   * `dialog` packs the same surface into a centered card over a scrim instead
-   * of covering the app. Tablets use it: a settings or instances page stretched
-   * across a 13" screen is mostly empty space, and losing the chat entirely for
-   * an app-level page is a heavier context switch than the content deserves.
-   */
   variant?: 'fullscreen' | 'dialog';
-  /**
-   * What the dialog centers on. App-level pages (settings, instances) belong to
-   * the whole window; content that came out of the chat column stays with it.
-   */
   dialogAlign?: 'chat' | 'app';
   children: React.ReactNode;
 };
 
-/** Fullscreen overlay surface for the phone layout: covers the whole app
-    (including the header), slides in from the right like a navigation push,
-    and closes via the header back arrow, Escape, or the Android back button. */
 export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = ({
   open,
   onClose,
@@ -77,11 +59,6 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
   const [contentReady, setContentReady] = React.useState(false);
   const surfaceRef = React.useRef<HTMLElement | null>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
-  // Keep onClose in a ref so the focus/keydown effect below depends only on `open`.
-  // The parent passes a fresh inline onClose on every render; if the effect depended
-  // on it, each parent re-render (e.g. an SSE store update) would re-run it and
-  // refocus the first element — stealing focus from whatever input the user is in
-  // and collapsing the keyboard mid-edit.
   const onCloseRef = React.useRef(onClose);
   React.useEffect(() => {
     onCloseRef.current = onClose;
@@ -100,10 +77,6 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
     return () => window.clearTimeout(id);
   }, [open]);
 
-  // Defer mounting heavy children until the enter slide finishes, so the
-  // animation stays smooth instead of competing with a large content render.
-  // Primary trigger is the slide's transitionend (below); this is just a
-  // fallback in case it never fires (reduced motion / interrupted transition).
   React.useEffect(() => {
     if (!open) {
       setContentReady(false);
@@ -183,23 +156,15 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
           : 'oc-keyboard-inset-surface oc-bottom-safe-surface oc-side-safe-area fixed inset-0 z-50',
       )}
       style={isDialog ? {
-        // Scale/fade instead of the push slide: the card is not a navigation
-        // step, and a settled `transform: none` keeps it off its own
-        // compositing layer (iOS clips those to the safe-area viewport).
         opacity: entered ? 1 : 0,
         transform: entered ? 'none' : 'scale(0.97)',
         transition: `opacity ${ENTER_DURATION_MS}ms ease-out, transform ${ENTER_DURATION_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
       } : {
         paddingTop: 'var(--oc-safe-area-top, 0px)',
-        // Push-style enter: slide in from the right edge; settled state drops
-        // the transform entirely so the surface isn't kept on a compositing
-        // layer (iOS clips those to the safe-area viewport).
-        // A pushed page arrives from the end of the line: the right, or the left in RTL.
         transform: entered ? 'none' : direction === 'rtl' ? 'translateX(-100%)' : 'translateX(100%)',
         transition: `transform ${ENTER_DURATION_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
       }}
       onTransitionEnd={(event) => {
-        // Reveal content exactly when the enter transition ends — not on a fixed timer.
         if (entered && event.target === event.currentTarget && event.propertyName === 'transform') {
           setContentReady(true);
         }
@@ -259,17 +224,12 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
       style={{
         background: 'rgb(0 0 0 / 0.45)',
         opacity: entered ? 1 : 0,
-        // 'chat' matches every other mobile overlay (the sessions sidebar keeps
-        // its width); 'app' ignores the panels and centers on the window.
-        // Plus the screen's own side insets: a landscape notch, the status bar
-        // column of iPhone Duo.
         paddingLeft: `calc(${dialogAlign === 'chat' ? `max(1rem, ${chatInsets.left}px)` : '1rem'} + var(--oc-safe-area-left, 0px))`,
         paddingRight: `calc(${dialogAlign === 'chat' ? `max(1rem, ${chatInsets.right}px)` : '1rem'} + var(--oc-safe-area-right, 0px))`,
         paddingTop: 'max(1rem, var(--oc-safe-area-top, 0px))',
       }}
       onClick={onClose}
     >
-      {/* Centred over the space above the keyboard: half its travel. */}
       <div data-keyboard-rider="0.5" className="flex w-full max-w-[720px] justify-center" onClick={(event) => event.stopPropagation()}>
         {surface}
       </div>

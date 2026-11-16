@@ -8,8 +8,6 @@ export function useAppFontEffects() {
   const { uiFont, monoFont, customUiFont, customMonoFont } = useFontPreferences();
   const uiFontWeight = useUIStore((state) => state.uiFontWeight);
 
-  // A layout effect, like ThemeProvider's size write: a page drawn in the
-  // chat reads these variables in a passive effect and must see the new ones.
   React.useLayoutEffect(() => {
     if (typeof document === 'undefined') {
       return;

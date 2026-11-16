@@ -2470,7 +2470,6 @@ export const settingsDict = {
   'settings.usage.pace.predictionLabel': 'Prognoza: ',
   'settings.usage.pace.predictionTooltip': 'Przewidywane użycie na koniec okna na podstawie obecnego tempa: {prediction}',
   'settings.usage.pace.rate': 'Tempo: {rate}',
-  'settings.usage.card.showInHeaderAria': 'Pokaż w menu nagłówka',
   'settings.usage.card.resetsAt': 'Resetuje się {time}',
   'settings.usage.card.bar.used': 'wykorzystane',
   'settings.usage.card.bar.remaining': 'pozostałe',

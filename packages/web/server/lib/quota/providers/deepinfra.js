@@ -58,11 +58,8 @@ export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } =
     }
 
     const payload = await response.json();
-    // Documented at https://docs.deepinfra.com/api-reference/account/me:
-    // checklist.stripe_balance is negative when funds are ready to spend and
-    // positive when money is owed, so the spendable credit is its negation.
+    // external: https://docs.deepinfra.com/api-reference/account/me Negative stripe_balance means spendable funds; positive means money owed.
     const rawBalance = payload?.checklist?.stripe_balance;
-    // A blank or absent balance is missing data, not a $0.00 balance.
     const stripeBalance = String(rawBalance ?? '').trim() === '' ? null : toNumber(rawBalance);
 
     if (stripeBalance === null) {

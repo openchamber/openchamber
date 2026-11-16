@@ -1,14 +1,3 @@
-/**
- * Streaming dictation state machine.
- *
- * Status flow: idle -> recording -> uploading -> idle | failed.
- * While recording, mic PCM chunks stream to the server, which transcribes them
- * segment by segment; confirm finalizes and resolves the full text. Nothing is
- * shown while recording — `partialTranscript` holds whatever the server has
- * transcribed so far and exists only so a failed dictation can be salvaged
- * instead of losing minutes of speech. Failed dictations also retain their
- * audio segments so retry can replay them.
- */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -29,9 +18,7 @@ export interface UseDictationResult {
     status: DictationStatus;
     isRecording: boolean;
     isProcessing: boolean;
-    /** Server-side transcript so far; recovery only, never shown while recording. */
     partialTranscript: string;
-    /** Subscribe to the normalized (0..1) mic level for the waveform. */
     subscribeLevel: (listener: DictationLevelListener) => () => void;
     duration: number;
     error: string | null;
@@ -141,8 +128,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         setPartialTranscript('');
     }, []);
 
-    // Transcripts of segments the server has already committed. Not rendered
-    // while recording; kept so a failed dictation can be salvaged.
     useEffect(() => {
         return dictationClient.onPartial((dictationId, text) => {
             const activeDictationId = senderRef.current?.getDictationId();
@@ -154,7 +139,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         });
     }, []);
 
-    // Restart the stream (replaying buffered segments) after a reconnect.
     useEffect(() => {
         return dictationClient.subscribeConnectionStatus((connected) => {
             if (!connected) {
@@ -230,18 +214,11 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         clearStreamingState();
 
         try {
-            // Cancel, Finish or unmount while the microphone prompt was open
-            // already ended this recording: nothing is left to time or stream.
             if (!(await audio.start())) {
                 return;
             }
             startDurationTracking();
-            // Open the stream eagerly so audio uploads while the user speaks
-            // and only the tail is left to transcribe on stop.
             await senderRef.current?.restartStream().catch((err) => {
-                // Non-fatal: segments buffer locally and finish() retries the
-                // start, but surface the reason (e.g. model downloading) so
-                // the overlay can show it.
                 reportError(err);
             });
         } catch (err) {
@@ -268,9 +245,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         setDuration(0);
         clearError();
 
-        // Optimistic: dismiss the overlay immediately. Tearing down the audio
-        // graph (AudioContext.close) can take up to ~1s on mobile WebViews and
-        // must not delay the visible response to Cancel.
         setStatus('idle');
         statusRef.current = 'idle';
         try {
@@ -341,10 +315,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         }
     }, [clearError, handleFailure, handleSuccess]);
 
-    /**
-     * Failed dictations still hold the last streamed partial transcript.
-     * Accept it as-is instead of retrying the full transcription.
-     */
     const acceptPartialTranscript = useCallback((): string | null => {
         if (statusRef.current !== 'failed') {
             return null;
@@ -375,9 +345,6 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         clearStreamingState();
     }, [clearError, clearStreamingState]);
 
-    // While recording without an open stream (e.g. the model is still
-    // downloading), retry the stream start so live partials kick in as soon
-    // as the provider becomes ready. Buffered segments replay on success.
     useEffect(() => {
         if (status !== 'recording' || errorReason !== 'model_download_in_progress') {
             return;

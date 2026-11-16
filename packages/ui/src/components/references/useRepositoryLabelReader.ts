@@ -1,4 +1,3 @@
-/** Reads the labels of the repository the reference browser points at. */
 
 import * as React from 'react';
 
@@ -10,13 +9,6 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
 import { useRepositoryReadContext } from './referenceSources';
 
-/**
- * Reads the labels of the repository the browser points at, when its filter
- * opens. Disabled on a tracker or a discussion, where the filter is not shown.
- * `ready` says the read can be attempted: it is false while the folder's
- * binding and accounts still load, and the returned read then fails on its own
- * message.
- */
 export function useRepositoryLabelReader(
     enabled: boolean,
     directory: string | null,
@@ -35,7 +27,5 @@ export function useRepositoryLabelReader(
         if (!readable || !project) throw new Error('The repository could not be identified');
         return sourceControl.referenceLabels(readable, project);
     }, [project, readable, sourceControl]);
-    // No provider at all (the VS Code runtime serves none) means no label list to offer:
-    // the section stays out rather than asking for a read that can only fail.
     return { ready: context !== null, supported: descriptors.length > 0, read };
 }

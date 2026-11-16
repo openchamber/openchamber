@@ -68,8 +68,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     fetchAgentEntity: s.fetchAgentEntity,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsDirectory));
 
@@ -81,15 +79,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     void loadDisabledAgents(settingsDirectory);
   }, [loadAgents, loadDisabledAgents, settingsDirectory]);
 
-  // Disabling keeps the agent's file; OpenCode just stops loading it. The last
-  // agent a chat can run as is never offered, so the composer keeps one.
   const selectablePrimaryCount = agents.filter((agent) => isPrimaryMode(agent.mode) && !isAgentHidden(agent)).length;
   const canDisable = (agent: Agent) => !(isPrimaryMode(agent.mode) && !isAgentHidden(agent) && selectablePrimaryCount <= 1);
 
   const setAgentDisabled = async (name: string, disabled: boolean) => {
     setPendingToggleAgent(name);
     try {
-      // Throws when the write fails; a write whose list refresh lags still landed.
       await updateAgent(name, { disabled }, settingsDirectory);
       if (disabled && selectedAgentName === name) setSelectedAgent(null);
       toast.success(disabled
@@ -108,7 +103,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
-    // Generate unique name
     const baseName = 'new-agent';
     let newName = baseName;
     let counter = 1;
@@ -117,7 +111,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       counter++;
     }
 
-    // Set draft and open the page for editing
     setAgentDraft({ name: newName, scope: 'user' });
     setSelectedAgent(newName);
     onItemSelect?.();
@@ -175,9 +168,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Copy the agent's OWN stored entry, not the resolved `AgentInfo`: the
-    // resolved view merges global config and built-in defaults, and baking
-    // those into a new file would silently widen the copy's permissions.
     // SAFETY: the agents store attaches `scope` to every entry it loads.
     const extAgent = agent as AgentWithExtras & { scope?: AgentScope };
     const envelope = await fetchAgentEntity(agent.name, settingsDirectory);
@@ -229,8 +219,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // A rename is a copy under a new name plus a delete, so it reads the
-    // agent's OWN stored entry for the same reason duplicating does.
     // SAFETY: the agents store attaches `scope` to every entry it loads.
     const renameExt = renameDialogAgent as AgentWithExtras & { scope?: AgentScope };
     const renameEnvelope = await fetchAgentEntity(renameDialogAgent.name, settingsDirectory);
@@ -245,7 +233,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }, settingsDirectory);
 
     if (createResult.ok) {
-      // Delete old agent
       const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsDirectory);
       if (deleteResult.ok) {
         toast.success(t('settings.agents.sidebar.toast.agentRenamed', { name: sanitizedName }));
@@ -273,16 +260,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
   };
 
-  // Hidden custom agents stay manageable here even though pickers exclude them.
-  // OpenCode drops a disabled agent once it re-reads its config; until then
-  // the agent's own file already says disabled, so it shows only there.
   const disabledNames = new Set(disabledAgents.map((agent) => agent.name));
   const manageableAgents = agents.filter((agent) => isAgentManageable(agent) && !disabledNames.has(agent.name));
   const shownAgents = manageableAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
   const builtInAgents = shownAgents.filter(isAgentBuiltIn);
   const customAgents = shownAgents.filter((agent) => !isAgentBuiltIn(agent));
 
-  // Group custom agents by subfolder
   const { groupedCustomAgents, ungroupedCustomAgents } = useMemo(() => {
     const groups: Record<string, typeof customAgents> = {};
     const ungrouped: typeof customAgents = [];
@@ -362,7 +345,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                   {t('settings.agents.sidebar.section.custom')}
                 </div>
 
-                {/* Grouped agents by subfolder */}
                 {groupedCustomAgents.map(({ name: groupName, agents: groupAgents }) => (
                   <SidebarGroup
                     key={groupName}
@@ -392,7 +374,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                   </SidebarGroup>
                 ))}
 
-                {/* Ungrouped agents (flat in root agents dir) */}
                 {ungroupedCustomAgents.map((agent) => (
                   <AgentListItem
                     key={agent.name}
@@ -476,7 +457,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         </DialogContent>
       </Dialog>
 
-      {/* Rename Dialog */}
       <Dialog open={renameDialogAgent !== null} onOpenChange={(open) => !open && setRenameDialogAgent(null)}>
         <DialogContent>
           <DialogHeader>
@@ -521,7 +501,6 @@ interface AgentListItemProps {
   onDelete?: () => void;
   onRename?: () => void;
   onDuplicate: () => void;
-  /** Absent when this agent cannot be switched off (the last one a chat can use). */
   onDisable?: () => void;
   getAgentModeIcon: (mode?: string) => React.ReactNode;
   isMenuOpen: boolean;

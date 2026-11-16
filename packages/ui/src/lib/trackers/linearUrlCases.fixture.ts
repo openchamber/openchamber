@@ -1,9 +1,3 @@
-/**
- * Linear issue links and the identifier each names (null: not an issue link).
- * One table for the server's `matchLinearUrl` (`server/lib/linear/tracker.test.js`)
- * and the UI's matcher over the served descriptor (`matchTrackerUrl.test.ts`),
- * since the rule exists on both sides.
- */
 export const LINEAR_URL_CASES: ReadonlyArray<readonly [url: string, identifier: string | null]> = [
   ['https://linear.app/openchamber/issue/ENG-12', 'ENG-12'],
   ['https://linear.app/openchamber/issue/eng-12/broken-login', 'ENG-12'],

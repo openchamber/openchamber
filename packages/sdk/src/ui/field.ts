@@ -10,10 +10,8 @@ export type TextFieldProps = {
   multiline?: boolean;
   rows?: number;
   disabled?: boolean;
-  /** Error text. Turns the ring red and replaces `helper`. */
   error?: string;
   helper?: string;
-  /** Monospace input, for tokens and identifiers. */
   mono?: boolean;
 };
 

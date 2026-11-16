@@ -13,15 +13,9 @@ type PinToMenuSlots = {
   SubContent: React.ElementType;
 };
 
-/**
- * The row menu's Pin item as a submenu: Pinned, the user's pin lists, a new
- * list, and Unpin while pinned. It takes the Pin item's place, so the menu
- * gains no item. `current` is the list the work is pinned in, or null.
- */
 export const PinToMenu: React.FC<{
   slots: PinToMenuSlots;
   current: string | null;
-  /** `list` null is Pinned. */
   onPin: (list: string | null) => void;
   onUnpin: () => void;
   triggerClassName?: string;

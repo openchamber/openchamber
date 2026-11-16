@@ -6,7 +6,6 @@ import { isActiveProjectActionTab, useTerminalStore } from '@/stores/useTerminal
 import { cn } from '@/lib/utils';
 import { RowMarkTooltip } from './RowMarkTooltip';
 
-/** A directory-scoped leaf subscription; output chunks do not rerender the indicator. */
 export const DirectoryActionIndicator = ({ directory, className }: { directory: string; className?: string }) => {
   const { t } = useI18n();
   const key = normalizeTerminalDirectory(directory);

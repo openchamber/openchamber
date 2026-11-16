@@ -4,11 +4,10 @@ import { registerZoneHeaderHost, ZONE_HEADER_SLOT_ATTRIBUTE } from './zoneHeader
 
 type HeaderEntry = { slot: HTMLDivElement; host: HTMLDivElement };
 type RegisterHeader = (entry: HeaderEntry) => () => void;
-// State-preserving DOM moves are newer than our TypeScript DOM declarations.
+// external: https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore State-preserving moves need an optional declaration with the installed DOM types.
 type HostParent = HTMLElement & { moveBefore?: (node: Node, child: Node | null) => void };
 const HeaderContext = React.createContext<RegisterHeader | null>(null);
 
-// Layout offsets include virtual positioning but exclude transient sortable transforms.
 function getLayoutTop(element: HTMLElement): number {
   let top = 0;
   let current: HTMLElement | null = element;
@@ -22,8 +21,6 @@ function getLayoutTop(element: HTMLElement): number {
   return top + (Number.isFinite(virtualStart) ? virtualStart : 0);
 }
 
-/** Keep the live controls mounted in one portal while moving its host between
- * the section and the viewport. Only the outgoing animation is a visual copy. */
 export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scrollRef, children }: {
   suspended?: boolean;
   layoutKey?: string;
@@ -44,8 +41,6 @@ export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scroll
   React.useLayoutEffect(() => {
     const root = scrollRef.current;
     if (suspended || !root) return;
-    // Keep the viewport layer inside the native scroller so wheel and touch
-    // gestures over a pinned header still scroll the list normally.
     const layer = document.createElement('div');
     layer.dataset.sidebarCrossfadeLayer = 'true';
     layer.className = 'pointer-events-none sticky top-0 z-30 h-0';
@@ -63,11 +58,7 @@ export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scroll
     const moveHost = (entry: HeaderEntry, parent: HostParent) => {
       const focused = document.activeElement;
       const restoreFocus = focused instanceof HTMLElement && entry.host.contains(focused);
-      // Chromium scrolls a moved focused element into view. A header clicked
-      // a moment ago keeps focus, so handing it back to its section above the
-      // viewport threw the list to the top, where it became the pinned header
-      // again; the next wheel step repeated it, and the list would not scroll
-      // until focus left the sidebar. The user's position stays put.
+      // external: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/focus Focus restoration can scroll, so header moves preserve the scroller position.
       const scrollTop = restoreFocus ? root.scrollTop : null;
       if (parent.moveBefore && parent.isConnected && entry.host.isConnected) {
         parent.moveBefore(entry.host, null);
@@ -121,8 +112,6 @@ export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scroll
           duration: 150,
           easing: 'ease-out',
         });
-        // The incoming live header sits under the fading opaque snapshot, so
-        // rows never shine through and the controls stay usable throughout.
         animation.onfinish = clearAnimation;
       }
     };
@@ -160,8 +149,6 @@ export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scroll
         }
         if (!observed.has(entry)) {
           resize.observe(entry.host);
-          // Section size changes move later boundaries without resizing the
-          // viewport (collapse, Show more, filtering, or arriving sessions).
           if (entry.slot.parentElement) resize.observe(entry.slot.parentElement);
           observed.add(entry);
         }
@@ -170,8 +157,6 @@ export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scroll
       frame = requestAnimationFrame(measure);
     };
     refreshRef.current = refresh;
-    // Scroll reads only the few zone headers' cached offsets, never row
-    // geometry, and writes only on a handoff.
     root.addEventListener('scroll', sync, { passive: true });
     refresh();
     measure();

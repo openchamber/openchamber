@@ -1,11 +1,3 @@
-// The setup commands a worktree runs when the server makes it on its own
-// (an agent's `session.create` or `session.moveToWorktree`), with no client
-// there to show the trust prompt. The New worktree dialog
-// resolves the same commands in the client (`resolveWorktreeSetupCommands` in
-// `packages/ui/src/lib/sharedTrustConfirmation.ts`) and sends them as the
-// creation's `startCommand`; this module gives the server the same answer.
-
-/** `$ROOT_PROJECT_PATH` and its older name `$ROOT_WORKTREE_PATH`, with or without braces. */
 const substituteProjectPath = (command, projectPath) => command
   .replace(/\$\{?ROOT_PROJECT_PATH\}?/g, projectPath)
   .replace(/\$\{?ROOT_WORKTREE_PATH\}?/g, projectPath);

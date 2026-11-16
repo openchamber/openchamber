@@ -56,6 +56,11 @@ describe('hasOpenChamberView', () => {
     expect(view('session.status', { sessionId: 'ses_1', directory: '/repo', sessionStatus: { type: 'waiting' } })).toBe(true);
     expect(view('session.messages', { sessionId: 'ses_1', directory: '/repo', role: 'all', messages: [{ id: 'm', role: 'assistant', createdAt: 1, completedAt: 2, model: 'a/b', text: 'Done.' }] })).toBe(true);
     expect(view('pr.watch', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);
+    expect(view('wait.start', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);
+    expect(view('wait.start', { waiting: { waitId: 'wait_1', source: 'timer', extension: 'OpenChamber', title: 'Timer', label: '10 min', args: { minutes: 10 }, status: 'waiting' }, next: 'x' })).toBe(true);
+    expect(view('wait.start', { next: 'x' })).toBe(false);
+    expect(view('wait.list', { waiting: [], sources: [{ source: 'timer', extension: 'OpenChamber', title: 'Timer' }] })).toBe(true);
+    expect(view('wait.stop', { waiting: [], stopped: 2 })).toBe(true);
     expect(view('pr.unwatch', { watching: false, stopped: true })).toBe(true);
     expect(view('pr.unwatch', { watching: [{ url: 'https://github.com/a/b/pull/2', number: 2, title: 'Other', status: 'open' }], stopped: true })).toBe(true);
     expect(view('work.name', { task: 'worktree', title: 'Login timeout', named: true, branch: 'fix/login' })).toBe(true);

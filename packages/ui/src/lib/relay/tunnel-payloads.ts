@@ -1,6 +1,3 @@
-// JSON payload guards and HTTP request normalization for the relay tunnel client.
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
-
 import type {
   TunnelHttpResponsePayload,
   TunnelStreamAbortPayload,
@@ -24,12 +21,8 @@ export const isWsClosePayload = (value: unknown): value is TunnelWsClosePayload 
 
 const ABSOLUTE_URL_PATTERN = /^[a-z][a-z\d+.-]*:\/\//i;
 
-// Placeholder base for parsing origin-relative request paths; never fetched.
-// Throwaway base for parsing relative runtime paths — only pathname+search are
-// ever read, the host is discarded. Shared so relay modules don't diverge on it.
 export const TUNNEL_PARSE_BASE = 'http://tunnel.invalid';
 
-/** Extracts `pathname?search` from an absolute or relative WS/HTTP URL. */
 export const wsUrlToTunnelPath = (url: string): string => {
   try {
     const parsed = ABSOLUTE_URL_PATTERN.test(url) ? new URL(url) : new URL(url, TUNNEL_PARSE_BASE);
@@ -83,19 +76,12 @@ const resolveBody = async (
   if (typeof body === 'string') return { body: singleChunk(new TextEncoder().encode(body)) };
   if (body instanceof ArrayBuffer) return { body: singleChunk(new Uint8Array(body.slice(0))) };
   if (ArrayBuffer.isView(body)) return { body: singleChunk(copyBytes(body)) };
-  // Blob / FormData / URLSearchParams: let Response serialize the body exactly
-  // like a native fetch would, and surface the content-type it derives
-  // (e.g. the multipart boundary for FormData).
   const probe = new Response(body);
   const contentType = probe.headers.get('content-type') ?? undefined;
   const bytes = new Uint8Array(await probe.arrayBuffer());
   return { body: singleChunk(bytes), contentType };
 };
 
-/**
- * Flattens a fetch-style (input, init) pair into the tunnel HttpRequest shape,
- * preserving method, headers, body bytes/stream, and abort signal.
- */
 export const normalizeTunnelRequest = async (
   input: string | URL | Request,
   init?: RequestInit,

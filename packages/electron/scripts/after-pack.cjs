@@ -16,16 +16,10 @@ module.exports = (context) => {
 
   const executablePath = path.join(contentsPath, 'MacOS', appInfo.productFilename);
   setExecutableUuid(executablePath, appInfo.id);
-  // The new UUID breaks Electron's ad-hoc signature, and arm64 kills an
-  // executable with a broken one. Re-sign ad hoc so builds that skip signing
-  // still launch; electron-builder's own signing replaces this. Only arm64:
-  // Electron's x64 framework carries no ad-hoc signature, so codesign refuses
-  // the executable there, and x64 runs an unsigned one anyway.
   if (context.arch === Arch.arm64) {
     execFileSync('codesign', ['--force', '--sign', '-', executablePath], { stdio: 'inherit' });
   }
 
-  // The compiled catalog sits with the other icons of the build's channel.
   const iconsDir = process.env.OPENCHAMBER_DESKTOP_CHANNEL === 'canary' ? 'icons-canary' : 'icons';
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', iconsDir, 'Assets.car');
 

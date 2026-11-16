@@ -1543,7 +1543,6 @@ export const settingsDict = {
   "settings.usage.pace.rate": "Темп: {rate}",
   "settings.usage.pace.waitSeparator": " · Зачекайте ",
   "settings.usage.pace.predictionLabel": "Прогноз: ",
-  "settings.usage.card.showInHeaderAria": "Показати в меню заголовка",
   "settings.usage.card.resetsAt": "Скидання {time}",
   "settings.usage.card.bar.used": "використано",
   "settings.usage.card.bar.remaining": "залишилось",

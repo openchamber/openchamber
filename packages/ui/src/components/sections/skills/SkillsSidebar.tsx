@@ -68,13 +68,9 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail: s.getSkillDetail,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
   const policies = useSkillsStore((state) => selectSkillPoliciesForDirectory(state, settingsDirectory));
-  // Why agents cannot use a skill: its switch is off, or a rule the switch
-  // cannot change (a wildcard) blocks it.
   const offReason = (skill: DiscoveredSkill): SkillOffReason => {
     if (!policies) return null;
     const state = getSkillSwitchState(policies, skill.id);
@@ -90,7 +86,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
-    // Generate unique name
     const baseName = 'new-skill';
     let newName = baseName;
     let counter = 1;
@@ -99,7 +94,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       counter++;
     }
 
-    // Set draft and open the page for editing
     setSkillDraft({ name: newName, scope: 'user', source: 'opencode', description: '' });
     setSelectedSkill(newName);
     onItemSelect?.();
@@ -143,19 +137,17 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Get full skill detail to copy
     const detail = await getSkillDetail(skill.name, settingsDirectory);
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
     }
 
-    // Set draft with prefilled values from source skill
       setSkillDraft({
         name: newName,
         scope: skill.scope || 'user',
         source: skill.source || 'opencode',
-        description: detail.sources.md.fields.includes('description') ? '' : '', // Will be populated from page
+        description: detail.sources.md.fields.includes('description') ? '' : '',
         instructions: '',
       });
     setSelectedSkill(newName);
@@ -192,7 +184,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Rename in place on disk so SKILL.md body and supporting files are preserved.
     const success = await renameSkill(renameDialogSkill.name, sanitizedName, settingsDirectory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
@@ -204,12 +195,10 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     setRenameDialogSkill(null);
   };
 
-  // Separate project and user skills
   const shownSkills = skills.filter((skill) => matchesRankQuery([skill.name, skill.description], query));
   const projectSkills = shownSkills.filter((s) => s.scope === 'project');
   const userSkills = shownSkills.filter((s) => s.scope === 'user');
 
-  // Helper: group a list of skills by their domain folder
   function groupSkillsByFolder(list: DiscoveredSkill[]) {
     const groups: Record<string, DiscoveredSkill[]> = {};
     const ungrouped: DiscoveredSkill[] = [];
@@ -405,7 +394,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
         </DialogContent>
       </Dialog>
 
-      {/* Rename Dialog */}
       <Dialog open={renameDialogSkill !== null} onOpenChange={(open) => !open && setRenameDialogSkill(null)}>
         <DialogContent>
           <DialogHeader>
@@ -448,7 +436,6 @@ type SkillOffReason = 'switch' | 'policy' | null;
 
 interface SkillListItemProps {
   skill: DiscoveredSkill;
-  /** Why agents cannot use this skill, or null when they can. */
   off: SkillOffReason;
   isSelected: boolean;
   onSelect: () => void;

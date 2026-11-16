@@ -22,20 +22,11 @@ const openSmallModelSettings = (): void => {
   useUIStore.getState().requestSettingsJump('sessions', 'sessions.small-model');
 };
 
-/**
- * Who checks goal progress after each turn: Jev or the small model. Without a
- * classification provider the Jev chip is disabled and the small model shows
- * as chosen, which is what the server does then; the saved choice comes back
- * once a provider is set up. The line below names what actually checks and
- * links to where that is configured: for Jev the shared note, which names the
- * classification provider in use.
- */
 export const SessionGoalCheckerField: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
   const { t } = useI18n();
   const checker = useUIStore((state) => state.sessionGoalChecker);
   const setChecker = useUIStore((state) => state.setSessionGoalChecker);
   const jevAvailable = useRoutingStore(selectSafetyNetAvailable);
-  // Enterprise mode leaves nothing to set up, so no link to a page offering only Off.
   const canSetUpJev = !useEnterpriseMode();
   const shown: SessionGoalChecker = jevAvailable ? checker : 'small-model';
 
@@ -75,7 +66,6 @@ export const SessionGoalCheckerField: React.FC<{ disabled?: boolean }> = ({ disa
   );
 };
 
-/** How many automatic turns a goal takes before it stops and hands back to the user. */
 export const SessionGoalMaxTurnsField: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
   const { t } = useI18n();
   const maxTurns = useUIStore((state) => state.sessionGoalMaxAutoTurns);

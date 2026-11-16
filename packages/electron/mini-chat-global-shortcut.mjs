@@ -1,7 +1,3 @@
-// Pure helpers for the Mini Chat global shortcut.
-//
-// main.mjs wires these to Electron's globalShortcut API; the electron tests
-// exercise the logic without an Electron runtime.
 
 export const MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY = 'desktopMiniChatGlobalShortcut';
 
@@ -15,7 +11,6 @@ const MODIFIER_TO_ACCELERATOR = {
   meta: 'Super',
   cmd: 'Super',
   command: 'Super',
-  // The Windows / Super key the settings recorder writes on Windows and Linux.
   super: 'Super',
   win: 'Super',
 };
@@ -50,17 +45,11 @@ const KEY_TO_ACCELERATOR = {
   '=': '=',
 };
 
-// A global shortcut grabs its key system-wide, so a plain or Shift-only key
-// would swallow ordinary typing in every app. Function keys are the exception.
 const GRABBING_MODIFIERS = new Set(['CommandOrControl', 'Control', 'Alt', 'Super']);
 for (let index = 1; index <= 24; index += 1) {
   KEY_TO_ACCELERATOR[`f${index}`] = `F${index}`;
 }
 
-// Combos use the in-app shortcut syntax ('mod+alt+n'). A global shortcut must
-// be a single chord — multi-chord sequences have no OS-level representation —
-// and every key must map onto an Electron accelerator token. Returns the
-// accelerator string, or null when the combo cannot be registered globally.
 export function convertShortcutComboToAccelerator(combo) {
   if (typeof combo !== 'string') return null;
   const trimmed = combo.trim();
@@ -89,22 +78,12 @@ export function convertShortcutComboToAccelerator(combo) {
   return [...modifiers, acceleratorKey].join('+');
 }
 
-// Collapses a stored setting value into a combo string, or null when the
-// shortcut is absent, empty, or explicitly unassigned.
 export function normalizeStoredShortcutCombo(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed === '' || trimmed === '__unassigned__' ? null : trimmed;
 }
 
-// Three-state behavior for a global shortcut press:
-//   focused mini chat        -> hide it
-//   other mini chats alive   -> focus the most recently focused one
-//   none, renderer alive     -> open a draft mini chat via the renderer
-//   none, no renderer window -> surface the main window so the next press works
-//
-// `windows` are plain descriptors ({ id, isMiniChat, isFocused, focusedAt });
-// ties on focusedAt keep the first (oldest) mini chat deterministically.
 export function selectMiniChatGlobalShortcutAction(windows, { hasRendererWindow }) {
   const miniChats = windows.filter((entry) => entry.isMiniChat === true);
   const focused = miniChats.find((entry) => entry.isFocused === true);

@@ -2,7 +2,6 @@ import http from 'node:http';
 
 const MAX_INPUT_BYTES = 64 * 1024;
 
-// The nonce comes from the environment, never argv, where any local user could read it.
 const [brokerUrl, operation] = process.argv.slice(2);
 const nonce = process.env.OPENCHAMBER_GIT_CREDENTIAL_NONCE;
 if (!brokerUrl || !nonce || operation !== 'get') process.exit(0);

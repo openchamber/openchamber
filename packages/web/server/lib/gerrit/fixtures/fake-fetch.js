@@ -8,26 +8,16 @@ export const PS3 = fixtures.shas.ps3;
 export const PS2 = fixtures.shas.ps2;
 export const CHANGE = '/changes/platform%2Fapp~42';
 
-/** A JSON answer as Gerrit sends it: the XSSI line, then the body. */
 const gerritJson = (body, status = 200) => new Response(`${XSSI}${JSON.stringify(body)}`, {
   status, headers: { 'content-type': 'application/json;charset=utf-8' },
 });
 
-/** A base64 text answer (`/patch`, `/content`) to `Accept: text/plain`. */
 export const gerritBase64 = (value) => new Response(value, {
   headers: { 'content-type': 'text/plain;charset=iso-8859-1', 'x-fyi-content-encoding': 'base64' },
 });
 
-/** A recorded refusal (`fixtures.errors.*`): plain text, or the JSON body (XSSI line included) a few refusals carry. */
 export const replay = ({ status, body, contentType = 'text/plain;charset=utf-8' }) => new Response(body, { status, headers: { 'content-type': contentType } });
 
-/**
- * A fetch double for Gerrit's REST API keyed by `METHOD /path` (the path
- * without the `/a` prefix and query, encoding kept: `/changes/platform%2Fapp~42`).
- * A route's value is a JSON body, a `Response`, or a function
- * `(request) => body | Response`. Every call is recorded with its method,
- * URL, headers, body, redirect mode and whether it went to `/a/`.
- */
 export function fakeGerrit(routes = {}) {
   const calls = [];
   const fetch = async (input, init = {}) => {
@@ -46,12 +36,10 @@ export function fakeGerrit(routes = {}) {
   return { fetch, calls };
 }
 
-/** The bound project: remote `origin` names platform/app. */
 export const resolvePlatformApp = async () => ({
   repos: [{ owner: 'platform', name: 'app', project: 'platform/app', repoPath: 'platform/app', url: `${ORIGIN}/admin/repos/platform/app`, remoteName: 'origin' }],
 });
 
-/** Routes for change 42 of platform/app as the context read sees it. */
 export function changeRoutes(extra = {}) {
   return {
     'GET /accounts/self': fixtures.accountSelf,

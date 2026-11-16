@@ -9,7 +9,6 @@ import {
 } from '../utils/index.js';
 import { miniMaxStatusError } from './minimax-status.js';
 
-// Status 3 indicates the window is not applicable for the current plan tier.
 const WINDOW_STATUS_INACTIVE = 3;
 
 const TEXT_MODELS = ['general', 'chat', 'text'];
@@ -40,8 +39,6 @@ const hasModelRemains = (payload) => {
   return Array.isArray(rems) && rems.length > 0;
 };
 
-// `{ payload }` when usable, `{ statusError }` when MiniMax reports a business
-// failure, `{}` when the request or the body is unusable.
 const fetchEndpoint = async (url, apiKey, fetchImpl) => {
   try {
     const response = await fetchImpl(url, {
@@ -67,21 +64,11 @@ const coercePercent = (value) => {
   return n !== null ? Math.max(0, Math.min(100, n)) : null;
 };
 
-/**
- * Check if a window (interval or weekly) is active for the current plan.
- * Status 3 means the window is not applicable (e.g. legacy plans without weekly limits).
- * When the status field is absent, default to active.
- */
 const isWindowActive = (status) => {
   const n = toNumber(status);
   return n === null || n !== WINDOW_STATUS_INACTIVE;
 };
 
-/**
- * Calculate window duration in seconds from API timestamps or remains_time.
- * MiniMax API returns remains_time in milliseconds (confirmed via live API testing:
- * 9664502 ms = 2.68h in a 5h window, consistent with remaining_percent).
- */
 const calculateWindowSeconds = (startAt, resetAt, remainsTimeMs) => {
   if (startAt && resetAt && resetAt > startAt) {
     return Math.floor((resetAt - startAt) / 1000);
@@ -210,8 +197,6 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
         }),
       };
 
-      // Only include the weekly window when the plan tier supports it.
-      // Status 3 = not applicable (e.g. legacy Coding Plan without weekly limits).
       const weeklyActive = isWindowActive(model.current_weekly_status);
       const hasWeeklyData =
         weeklyActive &&

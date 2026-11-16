@@ -47,8 +47,6 @@ async function statusCommand(options = {}) {
         pid: instance.pid,
         launchMode: instance.launchMode || 'daemon',
         passwordProtected: instance.source === 'probe' ? null : passwordProtected,
-        // The address the server was asked to bind, not the one a probe
-        // answered on: a server bound to 0.0.0.0 also answers on loopback.
         bindHost: storedOptions.host || null,
       };
     });

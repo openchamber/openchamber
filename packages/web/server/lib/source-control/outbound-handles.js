@@ -13,32 +13,11 @@ import { readBoundedResponseText } from '../guests/response-body.js';
 import { isString } from '../shared/guards.js';
 import { isProviderUsername } from './provider-id.js';
 
-/**
- * Outbound handles and the proxy behind them: how an extension's Git host
- * service reaches its forge without ever holding a token.
- *
- * For each call OpenChamber forwards to the service it mints a handle, 32
- * random bytes bound to `{ guestId, providerId, origin, token | null,
- * deadline }`, and revokes it when the call ends. The service sends forge
- * requests to the callback listener (`guests/host-callback.js`) with the
- * handle as its bearer; `serve` checks the handle, keeps the request on the
- * bound origin, adds the token in the header the extension declared, and
- * relays the answer. Every request a handle carried is recorded as
- * `{ method, status }` (status `null` until an answer arrives, `0` when none
- * did), which is what the adapter trusts about the forge, never the service's
- * own account of it.
- *
- * Nothing here logs: not the handle, the token, a body or a query.
- */
 
 const HANDLE_BYTES = 32;
 
 const refuse = (status, code, message) => ({ status, body: { error: { message, code } } });
 
-/**
- * The header value for a stored token, per `contributes.sourceControl.token`.
- * `basic` pairs it with the account's login, which `mint` required.
- */
 const tokenHeaderValue = ({ token, scheme, login }) => {
   if (scheme === 'bearer') return `Bearer ${token}`;
   if (scheme === 'token') return `token ${token}`;
@@ -64,14 +43,6 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
   /** @type {Map<string, { guestId: string, providerId: string, origin: string, credential: { token: string, header: string, scheme: string, login?: string } | null, deadline: number, methods: readonly string[], outbound: Array<{ method: string, status: number | null }> }>} */
   const grants = new Map();
 
-  /**
-   * A handle for one forwarded call. `credential` is `{ token, header, scheme }`
-   * (plus `login` for the `basic` scheme, refused without a usable one), or
-   * null for a call that must not carry a token (`auth.probe`). `methods`
-   * are the forge methods the call may send: a read gets `['GET']`, so only
-   * the mutation step the executor records can write. The returned
-   * `outbound` list fills as the service uses the handle; `revoke` ends it.
-   */
   const mint = ({ guestId, providerId, origin, credential = null, deadline, methods }) => {
     if (credential?.scheme === 'basic' && !isProviderUsername(credential.login)) {
       throw Object.assign(new Error('This Git host signs in with a username, and the account has none OpenChamber can send'), {
@@ -88,17 +59,12 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
     });
   };
 
-  /** Ends every handle of a guest, as when its provider is unregistered. */
   const revokeGuest = (guestId) => {
     for (const [handle, grant] of grants) {
       if (grant.guestId === guestId) grants.delete(handle);
     }
   };
 
-  /**
-   * The refusal for a bearer that is not a live handle, or null for one that
-   * is. The callback listener asks before it reads a body.
-   */
   const refusal = (bearer) => {
     const grant = grants.get(bearer);
     if (!grant) return refuse(403, 'HANDLE_UNKNOWN', 'This handle is not valid; it ends with the call it was given for');
@@ -109,7 +75,6 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
     return null;
   };
 
-  /** One forge request, as the callback listener received it. */
   const serve = async ({ bearer, body }) => {
     const refused = refusal(bearer);
     if (refused) return refused;
@@ -118,7 +83,6 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
     const parsed = sourceControlProviderSchemasV1.outboundRequest.safeParse(body);
     if (!parsed.success) return refuse(400, 'BAD_REQUEST', 'The forge request is malformed');
     const request = parsed.data;
-    // Refused before it is recorded: it never went out.
     if (!grant.methods.includes(request.method)) {
       return refuse(403, 'METHOD_NOT_ALLOWED', `This call may not send ${request.method} to the forge`);
     }
@@ -129,8 +93,6 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
     if (grant.credential) {
       headers[grant.credential.header] = tokenHeaderValue(grant.credential);
     }
-    // Recorded before it is sent: a write still in flight when the call ends
-    // may land, so it must never count as one that was refused.
     const record = { method: request.method, status: null };
     grant.outbound.push(record);
     let response;

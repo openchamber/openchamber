@@ -26,7 +26,6 @@ export const builtInRegistrySchema = z.object({
 
 export const isReservedBuiltInId = (id) => id.startsWith(BUILTIN_PREFIX);
 
-/** Only application startup supplies this root; manifests and HTTP input cannot select it. */
 export const readBuiltInRegistry = async (root = DEFAULT_BUILTIN_ROOT) => {
   const realRoot = await fs.realpath(root);
   const registry = builtInRegistrySchema.parse(JSON.parse(await fs.readFile(path.join(realRoot, 'registry.json'), 'utf8')));

@@ -9,7 +9,6 @@ import { createSecretRuns } from './secret-run.js';
 export const SECRET_REQUEST_MAX_LABEL_LENGTH = 120;
 export const SECRET_REQUEST_MAX_REASON_LENGTH = 1000;
 export const SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH = 80;
-// A token, a key or a password: the card's field is one line.
 const SECRET_MAX_VALUE_LENGTH = 16_000;
 export const SECRET_FILE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -17,32 +16,22 @@ const SAVED_NOTE = "The user saved the secret to file, which only this user can 
 const DECLINED_NOTE = "The user declined to give this secret. Continue without it or say what it blocks; ask again only if they want to.";
 const CHAT_SENT_EARLIER_NOTE = "The card did not wait: the user had already written in the chat before it appeared, and that message follows this result. Continue from that message; ask for the secret again only if it still fits.";
 
-/**
- * What the agent reads when the user wrote in the chat instead of answering
- * the card. The plugin builds that result itself (see ../agent-tool/runtime.js),
- * because the wait ends there, before this server hears of it.
- */
 export const SECRET_REQUEST_CLOSED_IN_CHAT_NOTE = "The user wrote in the chat before the call finished; their message follows this result. If the card was still waiting, they gave no secret; if they pasted one in the chat, tell them to rotate it, since the chat keeps it. A command secret.run had started was stopped.";
 
 const NOT_WAITING_MESSAGE = 'This request is no longer waiting for a secret';
 
 const readText = (value) => (isString(value) ? value.trim() : '');
 
-/**
- * Where saved secrets live: one file per secret, readable only by this user,
- * deleted 24 hours after it was written. The file is the only copy; the value
- * never enters the tool call, its result or the chat.
- */
 export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }) => {
   const write = async (value) => {
     await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
-    // `mkdir` applies the mode only to a directory it creates.
+    // external: https://nodejs.org/api/fs.html#fspromisesmkdirpath-options mkdir applies mode only when it creates the directory.
     await fsPromises.chmod(directory, 0o700);
     const file = path.join(directory, crypto.randomBytes(16).toString('hex'));
     try {
       await fsPromises.writeFile(file, value, { mode: 0o600, flag: 'wx' });
     } catch (error) {
-      // `wx` creates the file before writing, so a failed write can leave part of the secret.
+      // external: https://nodejs.org/api/fs.html#file-system-flags wx creates the file before writing, so a failed write can leave secret bytes.
       await fsPromises.rm(file, { force: true }).catch(() => {});
       throw error;
     }
@@ -64,21 +53,8 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
   return { write, remove, sweep };
 };
 
-/**
- * `secret.request`: the chat shows a card for the call, and the call waits
- * until the user saves a value or declines. The wait is a page wait
- * (`createPageAnswers`), so the session shows as waiting for the user the way
- * it does for a page, with the same pending list, events and notification.
- * Its answer carries `saved` or `declined` as the summary and the file path
- * as the data; the value itself never reaches the call.
- *
- * Like a page, the card does not wait when `hasUnreadChat` finds a message
- * the user sent before it appeared: OpenCode delivers that message only once
- * this call returns, so waiting would hold it back.
- */
 export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand }) => {
   const waits = createPageAnswers({ onWaitChange });
-  // `secret.run` waits on the same card, so one answer route reaches both.
   const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand });
 
   const assertEnabled = async () => {
@@ -117,7 +93,6 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     if (placeholder.length > SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH) {
       throw new OpenChamberControlError(`placeholder is ${placeholder.length} characters; the limit is ${SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH}`, 400);
     }
-    // A plugin generated before secrets could wait sends no call id.
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('This connection cannot wait for a secret', 400);
     }
@@ -126,8 +101,6 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     }
     const answer = await waits.wait({ sessionId, callId, title: label, directory, signal });
     const file = isString(answer.data?.file) ? answer.data.file : null;
-    // The answer can settle the wait just as the call ends (Stop, a chat
-    // message): nobody will read the path, so the file goes too.
     if (signal?.aborted) {
       if (file) await files.remove(file).catch(() => {});
       throw new OpenChamberControlError('The card stopped waiting before the user answered', 499);
@@ -138,8 +111,6 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { answer: { status: 'declined' }, note: DECLINED_NOTE };
   };
 
-  // A request that stopped waiting answers 404 with words the user reads in
-  // the card, never a silent success.
   const settle = (sessionId, callId, summary, data) => {
     try {
       waits.answer({ sessionId, callId, summary, data });
@@ -149,11 +120,6 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     }
   };
 
-  /**
-   * The chat's side. The value goes straight to its file, and only the path
-   * reaches the waiting call. When the call stopped waiting in the meantime
-   * the file is removed again, so no secret outlives a request nobody reads.
-   */
   const answer = async (input = {}) => {
     const sessionId = readText(input.sessionId);
     const callId = readText(input.callId);
@@ -185,7 +151,6 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { status: 'saved' };
   };
 
-  /** The fields a waiting `secret.run` card asks for; a 404 once it stopped waiting. */
   const fields = (input = {}) => {
     const asked = runs.fieldsFor(readText(input.sessionId), readText(input.callId));
     if (!asked) throw new OpenChamberControlError(NOT_WAITING_MESSAGE, 404);

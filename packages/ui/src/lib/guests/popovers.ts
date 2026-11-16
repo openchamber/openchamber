@@ -25,17 +25,9 @@ type PopoverPositionRequest = Pick<GuestPopoverRequest, 'anchor' | 'width' | 'he
 const GUTTER = 8;
 const GAP = 6;
 const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
-/** The host box an opened popover's frame sits in: a floating card, or the phone's sheet. */
 const GUEST_POPOVER_OVERLAY_SELECTOR = '[data-guest-popover-overlay]';
 const HIDDEN_SELECTOR = '[inert],[aria-hidden="true"],[data-base-ui-inert]';
 
-/**
- * A guest preview must never cover a host permission or modal dialog. Some
- * modal boxes are not in the way: one hidden from everyone (the phone keeps
- * its closed drawers mounted, off screen and `aria-hidden`), one the owner
- * frame sits in (the phone's workspace drawer holds the Status tab), and the
- * phone's sheet that holds the popover itself.
- */
 export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
   !frame.isConnected || frame.closest(HIDDEN_SELECTOR) !== null
   || frame.ownerDocument.documentElement.classList.contains('oc-dialog-open')
@@ -45,11 +37,6 @@ export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
   ))
 );
 
-/**
- * Calls `onBlocked` once a host modal opens over an open popover's owner, or
- * the owner is hidden, so an idle guest's popover (floating or in the phone's
- * sheet) never stays above a dialog that opened after it. Returns the disposer.
- */
 export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked: () => void): (() => void) => {
   const view = ownerFrame.ownerDocument.defaultView;
   if (!view) return () => {};
@@ -73,7 +60,6 @@ export type GuestPopoverActivation = {
   close: (reason: 'escape' | 'outside' | 'anchor' | 'owner' | 'closed' | 'replaced') => void;
 };
 
-/** One document-owned lease. A stale owner may never release a replacement. */
 export class GuestPopoverController {
   #active: GuestPopoverActivation | null = null;
 
@@ -116,7 +102,6 @@ export const getGuestPopoverController = (ownerDocument: Document): GuestPopover
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
-/** Converts an owner-frame CSS-pixel anchor into a host viewport position. */
 export const positionGuestPopover = (request: PopoverPositionRequest): GuestPopoverPosition | null => {
   const { anchor, frame, viewport } = request;
   if (frame.clientWidth <= 0 || frame.clientHeight <= 0 || viewport.width <= GUTTER * 2 || viewport.height <= GUTTER * 2) return null;

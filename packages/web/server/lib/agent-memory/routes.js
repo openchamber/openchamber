@@ -1,21 +1,3 @@
-/**
- * OpenChamber agent memory routes.
- *
- * The scope is a query parameter rather than part of the path, because global
- * and project memory are the same resource with two homes: one set of handlers
- * that resolve `?scope=global` or `?scope=project&projectId=...`. Getting the
- * scope wrong must fail loudly, never silently write the user's global memory
- * from a project-scoped call.
- *
- * Memory is created by the agent through the `openchamber_memory` tool, so
- * there is no create route here; the panel reads, corrects, and deletes.
- *
- * The body parser is attached per route rather than globally: the generic
- * OpenCode proxy needs an unread request stream, so `core-routes` parses only
- * an explicit allowlist of path prefixes. A route that forgets this sees
- * `req.body` as undefined and rejects every write as a malformed body.
- */
-
 import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
 
@@ -38,11 +20,6 @@ const respondWithError = (res, error, fallbackMessage) => {
   return res.status(500).json({ error: message || fallbackMessage });
 };
 
-/**
- * Resolves the target scope, or returns the reason it could not be resolved.
- * A project request without an id is rejected here rather than quietly falling
- * back to global, which would write project facts into every other project.
- */
 const resolveScope = (query) => {
   if (query.scope === 'global') {
     return { target: { scope: 'global' } };
@@ -59,23 +36,12 @@ const resolveScope = (query) => {
 export const registerAgentMemoryRoutes = (app, dependencies) => {
   const { agentMemoryRuntime, isAgentMemoryEnabled } = dependencies;
 
-  /**
-   * One gate for the whole surface. The settings toggle disables the feature,
-   * not just its UI: with memory off, these routes must not read or write the
-   * store at all, or a stale client would keep editing memory the user believes
-   * is turned off.
-   */
   const requireEnabled = async (_req, res, next) => {
     if (!isAgentMemoryEnabled) {
       return next();
     }
     try {
-      // Awaited: the setting is read from disk, and testing the returned
-      // promise for truthiness would leave the gate permanently open.
       if (!(await isAgentMemoryEnabled())) {
-        // Flagged, not merely 404: a missing entry answers 404 too, and a
-        // client that could not tell them apart would report a deleted memory
-        // as the whole feature being switched off.
         return res.status(404).json({ error: 'Agent memory is disabled', disabled: true });
       }
     } catch {
@@ -98,11 +64,6 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
     }
   });
 
-  /**
-   * Both scopes in one response. The panel always shows them together, and two
-   * separate requests would let one scope render while the other is still
-   * loading, which reads as memory that has gone missing.
-   */
   app.get('/api/agent-memory/all', requireEnabled, async (req, res) => {
     const projectId = typeof req.query.projectId === 'string' && req.query.projectId.trim().length > 0
       ? req.query.projectId
@@ -113,8 +74,6 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
         agentMemoryRuntime.readDreamState({ scope: 'global' }),
         projectId ? agentMemoryRuntime.readDreamState({ scope: 'project', projectId }) : null,
       ]);
-      // The last dreaming pass of each scope, without its snapshot: the panel
-      // shows one line and an undo, never the entries as they were.
       const dreamOf = (state) => (state?.record ? { ...state.record, canUndo: !state.record.undone && Boolean(state.snapshot) } : null);
       return res.json({ ...memory, dream: { global: dreamOf(globalDream), project: dreamOf(projectDream) } });
     } catch (caught) {

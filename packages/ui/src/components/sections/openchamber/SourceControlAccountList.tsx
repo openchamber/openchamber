@@ -28,19 +28,9 @@ const groupSourceControlAccounts = (
   return Array.from(groups.values());
 };
 
-/**
- * A short handle for one credential of an account that has several.
- *
- * Re-authenticating adds a credential rather than replacing one, because
- * anything already bound to the old credential must keep reading as that
- * credential rather than being silently retargeted. So one person can appear
- * with two rows of the same kind, and only then does a row need a handle; a
- * reference with no short form is internal and never shown.
- */
 const credentialHandle = (id: string): string | null =>
   /[0-9a-f]{8}(?=-[0-9a-f]{4}-)/i.exec(id)?.[0] ?? null;
 
-/** An account without an avatar shows its provider's mark. */
 const ProviderMark: React.FC<{ provider: string }> = ({ provider }) => (
   <ProviderIcon descriptor={useSourceControlProvider(provider)} variant="fill" className="size-4 text-muted-foreground" />
 );
@@ -49,9 +39,7 @@ type SourceControlAccountListProps = {
   accounts: SourceControlAuthAccount[];
   avatarAlt: (username: string) => string;
   sourceLabel: (account: SourceControlAuthAccount) => string;
-  /** What is wrong with a credential, or null when it works. */
   statusLabel: (account: SourceControlAuthAccount) => string | null;
-  /** Marks the credential this account acts as when nothing names another. */
   currentLabel: string;
   renderActions: (account: SourceControlAuthAccount) => React.ReactNode;
 };
@@ -96,7 +84,6 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
             {group.accounts.map((account) => {
               const source = sourceLabel(account);
               const status = statusLabel(account);
-              // Rows of different kinds already tell themselves apart.
               const handle = group.accounts.some((other) => other !== account && sourceLabel(other) === source)
                 ? credentialHandle(account.id) : null;
               return (
@@ -117,8 +104,6 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
                     {group.accounts.length > 1 && account.current
                       ? <span className="oc-tile-inset rounded-full px-1.5">{currentLabel}</span> : null}
                   </div>
-                  {/* Actions keep to the row's end, also when a narrow card wraps them under the label:
-                      a borderless action at the start would sit indented by its own padding. */}
                   <div className="ms-auto flex flex-wrap justify-end gap-2">{renderActions(account)}</div>
                 </div>
               );

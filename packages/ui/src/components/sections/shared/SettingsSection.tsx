@@ -10,92 +10,46 @@ import { isSettingsAnchorAvailable, type SettingsSearchAvailabilityContext } fro
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
-/**
- * Width cap shared by every settings value picker.
- *
- * `applyTypography` scales the `--typography-*` vars but never the root rem,
- * so a rem-based cap (`max-w-48`) stays 192px while the label inside it grows,
- * and the value clips at 150–200% interface font size. `ch` is measured
- * against the trigger's own `typography-ui-label` font, so the cap grows with
- * the setting.
- *
- * A trigger hugs its value, the chevron right after it, so a short value is a
- * short button rather than a wide box with the chevron pushed to its edge.
- * The cap keeps a long value from stretching across the pane; it truncates.
- */
 const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-fit max-w-[28ch]';
 
-/** Settings select trigger in stacked cells. */
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 
-/** Settings select trigger in SettingsFieldRow control columns. */
 export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 
-/**
- * Width for every settings NumberInput stepper. Font-relative for the same
- * reason as the trigger cap above: a rem-fixed `w-16`/`w-20`/`w-24`/`w-32`
- * clips its own digits once the interface font is scaled up. The explicit
- * `typography-ui-label` pins `ch` to the same scaled font the inner numeric
- * field renders in, since the wrapper would otherwise inherit an unscaled one.
- * The rem part holds the two buttons, which are wider on a phone than `ch`
- * grows; the `ch` part holds five digits, the longest value (a port).
- */
 export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[calc(5.75rem+5ch)]';
 
-/** Compact reset / icon action next to a settings control (matches h-8 controls). */
 export const SETTINGS_ICON_BUTTON_CLASS =
   'h-8 w-8 px-0 text-muted-foreground hover:text-foreground';
 
-/** Custom dropdown triggers (ModelSelector / AgentSelector) in settings field rows. */
 // oxlint-disable-next-line react/only-export-components
 export const SETTINGS_CUSTOM_TRIGGER_CLASS = cn(
   dropdownTriggerVariants(),
   SETTINGS_TRIGGER_WIDTH_CLASS,
 );
 
-/** Shared width for stacked control clusters (select/input + reset). */
 export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[24rem]';
 
-/**
- * Row wrapping a NumberInput + unit label + reset.
- * Keep the stepper intrinsic — never flex-grow it or +/- buttons stretch unevenly.
- */
 export const SETTINGS_NUMBER_STEPPER_ROW_CLASS = 'flex w-full min-w-0 items-center gap-2';
 
-/** Unit suffix next to a settings number stepper (%, px, …). */
 export const SETTINGS_NUMBER_UNIT_CLASS =
   'typography-meta shrink-0 text-muted-foreground tabular-nums';
 
-/** Vertical stack spacing for fields inside a column. */
 export const SETTINGS_FIELDS_STACK_CLASS = 'space-y-4';
 
-/** Compact checkbox / radio list stack. */
 export const SETTINGS_OPTION_STACK_CLASS = 'space-y-1.5';
 
-/**
- * Settings heading classes by context (size + default color).
- * Prefer these over ad-hoc typography-* + color combinations.
- */
-/** L1 — page / detail-pane title (larger, quieter than section titles). */
 export const SETTINGS_PAGE_TITLE_CLASS =
   'typography-settings-page-title text-muted-foreground';
-/** L2 — section title inside a settings page. */
 export const SETTINGS_SECTION_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
-/** L3 — control-group heading inside a section. */
 const SETTINGS_GROUP_TITLE_CLASS =
   'typography-settings-group-title text-foreground';
-/** L4 — field / control labels. */
 export const SETTINGS_FIELD_LABEL_CLASS =
   'typography-settings-field-label text-foreground';
-/** Supporting copy under page or section titles. */
 export const SETTINGS_DESCRIPTION_CLASS =
   'typography-settings-description text-muted-foreground';
-/** Supporting copy under group titles and fields. */
 export const SETTINGS_HELPER_CLASS = 'typography-meta text-muted-foreground';
-/** Callout / alert headline inside a section (not a control-group title). */
 export const SETTINGS_CALLOUT_TITLE_CLASS = 'typography-meta font-medium text-foreground';
-/** Brand / product name under a logo — quieter than L1 page title. */
 export const SETTINGS_BRAND_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
 
@@ -105,19 +59,9 @@ export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ childre
   </span>
 );
 
-/**
- * The device context the Settings view tests availability with. A badge outside
- * it (the project edit dialog) stays hidden, and an opener such as a tab never
- * announces a control the device does not render.
- */
 const SettingsAvailabilityContext = React.createContext<SettingsSearchAvailabilityContext | null>(null);
 export const SettingsAvailabilityProvider = SettingsAvailabilityContext.Provider;
 
-/**
- * The "new" badge for one or more search anchors: shown when any of them is new
- * to this client. The shared rows render it for their own `settingsItem`, so a
- * page's nav badge always has a row on that page that says which control it means.
- */
 export const SettingsNewBadge: React.FC<{ items: readonly (string | undefined)[] }> = ({ items }) => {
   const { t } = useI18n();
   const ctx = React.useContext(SettingsAvailabilityContext);
@@ -126,33 +70,18 @@ export const SettingsNewBadge: React.FC<{ items: readonly (string | undefined)[]
 };
 
 interface SettingsSectionProps {
-  /** Section title. Strings render as the shared h2 style. */
   title?: React.ReactNode;
-  /** Optional supporting text under the title. */
   description?: React.ReactNode;
-  /** Optional icon/badge next to the title. */
   titleAccessory?: React.ReactNode;
-  /** Helper text hidden behind an info icon next to the title. */
   info?: React.ReactNode;
-  /** Optional action aligned to the right of the header. */
   headerAction?: React.ReactNode;
   children: React.ReactNode;
-  /**
-   * A rule above the section. Sections are set apart by space (the gap above
-   * each one), so this is for the rare section that needs a line as well.
-   * @default false
-   */
   divider?: boolean;
   className?: string;
   contentClassName?: string;
   settingsItem?: string;
 }
 
-/**
- * Shared settings section chrome: single-style header, set apart from the
- * section above by one gap (`pt-10`). The first section of its container,
- * and the first one the page renders (SettingsPageLayout), takes no gap.
- */
 export const SettingsSection: React.FC<SettingsSectionProps> = ({
   title,
   description,
@@ -180,8 +109,6 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             {title != null ? (
-              // Beside a header action, the title line is the action's 28px
-              // height, so the two share a centre line.
               <div className={cn('flex items-center gap-2', headerAction != null && 'min-h-7')}>
                 {typeof title === 'string' || typeof title === 'number' ? (
                   <h2 className={SETTINGS_SECTION_TITLE_CLASS}>{title}</h2>
@@ -210,7 +137,6 @@ interface SettingsTwoColumnProps {
   className?: string;
 }
 
-/** Responsive two-column settings grid used when space allows. */
 export const SettingsTwoColumn: React.FC<SettingsTwoColumnProps> = ({
   children,
   className,
@@ -228,7 +154,6 @@ interface SettingsGroupTitleProps {
   as?: 'h2' | 'h3' | 'div';
 }
 
-/** In-section control-group heading (quieter than SettingsSection title). */
 export const SettingsGroupTitle: React.FC<SettingsGroupTitleProps> = ({
   children,
   className,
@@ -244,7 +169,6 @@ export const SettingsGroupTitle: React.FC<SettingsGroupTitleProps> = ({
 interface SettingsControlGroupProps {
   title?: React.ReactNode;
   description?: React.ReactNode;
-  /** Helper text hidden behind an info icon next to the group title. */
   info?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
@@ -252,7 +176,6 @@ interface SettingsControlGroupProps {
   settingsItem?: string;
 }
 
-/** Labeled control cluster inside a section (radios, chips, stacked fields). */
 export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
   title,
   description,
@@ -286,9 +209,7 @@ export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
 interface SettingsStackedFieldProps {
   label: React.ReactNode;
   description?: React.ReactNode;
-  /** Helper text hidden behind an info icon next to the label. */
   info?: React.ReactNode;
-  /** Where helper text sits relative to the control. @default 'before' */
   descriptionPlacement?: 'before' | 'after';
   children: React.ReactNode;
   settingsItem?: string;
@@ -296,10 +217,6 @@ interface SettingsStackedFieldProps {
   controlClassName?: string;
 }
 
-/**
- * Label (+ optional description) above a control — for two-column cells.
- * Prefer this over SettingsFieldRow inside SettingsTwoColumn (FieldRow overflows half-width columns).
- */
 export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
   label,
   description,
@@ -334,26 +251,15 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
 interface SettingsFieldRowProps {
   label: React.ReactNode;
   description?: React.ReactNode;
-  /** Helper text hidden behind an info icon next to the label. */
   info?: React.ReactNode;
   children: React.ReactNode;
   settingsItem?: string;
   className?: string;
   controlClassName?: string;
-  /** Extra node next to the label, before the info hint (e.g. a "new" badge). */
   labelAccessory?: React.ReactNode;
-  /** Align control to the trailing edge on desktop. @default true */
   alignEnd?: boolean;
 }
 
-/**
- * Side-by-side form row: fixed label column + control cluster.
- * Use inside full-width sections or single columns.
- *
- * The row's own vertical padding keeps two stacked rows of 32px controls
- * apart (8px between them), so a list of field rows needs no spacing of its
- * own and labels keep one rhythm whatever control sits beside them.
- */
 export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   label,
   description,
@@ -403,7 +309,6 @@ interface SettingsInsetProps {
   settingsItem?: string;
 }
 
-/** Optional inset block under a section (spacing only; section dividers own borders). */
 export const SettingsInset: React.FC<SettingsInsetProps> = ({
   children,
   className,
@@ -429,17 +334,10 @@ interface SettingsCheckboxRowProps {
   settingsItem?: string;
   className?: string;
   labelAccessory?: React.ReactNode;
-  /** Helper text hidden behind an info icon next to the label. */
   info?: React.ReactNode;
-  /**
-   * A line under the label that holds its own controls (a link). It sits
-   * outside the clickable row, so the link is not a button inside a button,
-   * and lines up with the label.
-   */
   footer?: React.ReactNode;
 }
 
-/** Shared checkbox setting row with keyboard support. */
 export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
   checked,
   onChange,
@@ -485,8 +383,6 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
         onChange={onChange}
         disabled={disabled}
         ariaLabel={ariaLabel}
-        // With a description below, the box lines up with the label's line
-        // rather than the middle of both lines.
         className={hasDescription ? 'mt-0.5 self-start' : undefined}
       />
       <div className="flex min-w-0 flex-col">
@@ -496,8 +392,6 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
-        {/* A description stays at full strength on a disabled row: it is
-            usually what says why the option is off and how to turn it on. */}
         {hasDescription ? (
           <span className={SETTINGS_HELPER_CLASS}>{description}</span>
         ) : null}
@@ -509,7 +403,6 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
   return (
     <div data-settings-item={settingsItem}>
       {row}
-      {/* Checkbox (16px) plus the row's gap (8px): the footer starts under the label. */}
       <div className="ps-6">{footer}</div>
     </div>
   );
@@ -525,7 +418,6 @@ interface SettingsRadioOptionProps {
   className?: string;
 }
 
-/** Single radio option row used inside SettingsRadioGroup. */
 export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
   selected,
   onSelect,
@@ -584,7 +476,6 @@ interface SettingsRadioGroupProps {
   className?: string;
 }
 
-/** Accessible radio group wrapper with compact vertical spacing. */
 export const SettingsRadioGroup: React.FC<SettingsRadioGroupProps> = ({
   'aria-label': ariaLabel,
   children,
@@ -601,13 +492,7 @@ interface SettingsChipOption<T extends string> {
   value: T;
   label: React.ReactNode;
   disabled?: boolean;
-  /** Replaces the raised look while this option is the chosen one (a brand colour, for example). */
   selectedClassName?: string;
-  /**
-   * Shown on hover (long-press on touch). The popup stays open while the
-   * pointer is on it, so it may carry a link. Keep what the user must read
-   * visible elsewhere: touch users rarely long-press.
-   */
   tooltip?: React.ReactNode;
 }
 
@@ -619,12 +504,6 @@ interface SettingsChipGroupProps<T extends string> {
   'aria-label'?: string;
 }
 
-/**
- * An option's explanation, shown at once on hover: it is how the choice is
- * read, not a hint after the fact. A disabled option, whose tooltip usually
- * says why, also opens it on tap, since a tap does nothing else there and
- * touch has no hover; a tap elsewhere closes it.
- */
 const ChipTooltip: React.FC<{
   disabled?: boolean;
   content: React.ReactNode;
@@ -636,7 +515,6 @@ const ChipTooltip: React.FC<{
 
   React.useEffect(() => {
     if (!open || !disabled) return;
-    // A press inside the popup is on its link (Set up access, say), which must still get the click.
     const closeOnOutsidePress = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return;
       if (triggerRef.current?.contains(event.target) || popupRef.current?.contains(event.target)) return;
@@ -661,13 +539,9 @@ const ChipTooltip: React.FC<{
   }
   return (
     <Tooltip delayDuration={0} open={open} onOpenChange={setOpen}>
-      {/* A disabled button gets no pointer events, so the tooltip hangs on a
-          wrapper. Base UI closes a tooltip when its trigger is pressed, so
-          that handler is skipped, as in SettingsInfoHint. */}
       <TooltipTrigger
         asChild
         onPointerDown={(event) => event.preventBaseUIHandler()}
-        // Opens, never toggles: with a mouse the hover has already opened it.
         onClick={(event) => {
           event.preventBaseUIHandler();
           setOpen(true);
@@ -680,12 +554,6 @@ const ChipTooltip: React.FC<{
   );
 };
 
-/**
- * Compact segmented enum picker, drawn like the active-pill tab strip: the
- * options sit in a recessed track and the chosen one is raised out of it.
- * The track is as tall as the other settings controls (32px), so a row with
- * chips lines up with a row holding a select or a stepper.
- */
 export function SettingsChipGroup<T extends string>({
   value,
   options,
@@ -715,8 +583,6 @@ export function SettingsChipGroup<T extends string>({
             className={cn(
               'rounded-md !font-normal',
               selected
-                // Light themes paint elevated darker than the canvas, so the
-                // raised option takes the canvas colour there, like the tab pill.
                 ? option.selectedClassName
                   ?? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
                 : 'text-muted-foreground hover:bg-transparent hover:text-foreground',

@@ -9,11 +9,6 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
 
-/**
- * Dates and times as the app asks for them: local ISO dates, a month
- * calendar, and a time field that follows the 12/24-hour preference. Shared
- * by the scheduled task editor and the date field of UI blocks.
- */
 
 const parseISODateToLocal = (value: string): Date | null => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -301,7 +296,6 @@ export const TimePill: React.FC<TimePillProps> = ({
   return (
     <div
       className={cn(
-        // The height of a dropdown trigger, so a date and its time line up in one row.
         'oc-surface-elevated oc-raised oc-field inline-flex h-7 w-fit items-center gap-1 rounded-md bg-surface-elevated',
         use24Hour ? 'px-2' : 'ps-2 pe-1',
       )}
@@ -362,11 +356,6 @@ const isSameCalendarDay = (a: Date, b: Date) => (
   && a.getDate() === b.getDate()
 );
 
-/**
- * A date as a dropdown trigger that opens a month calendar. The value is a
- * local ISO date (YYYY-MM-DD), empty for none. With `disablePast`, days and
- * months before today cannot be picked.
- */
 export function DatePicker({ value, onChange, placeholder, disablePast = false, disabled, ariaLabel }: {
   value: string;
   onChange: (isoDate: string) => void;
@@ -378,8 +367,6 @@ export function DatePicker({ value, onChange, placeholder, disablePast = false, 
   const { t } = useI18n();
   const { locale, weekStartsOn, weekdays } = useCalendarPreferences();
   const [openState, setOpen] = React.useState(false);
-  // A field that turns disabled while its calendar is open (an answer arrived
-  // from another device) closes it, so nothing changes the frozen value.
   const open = openState && !disabled;
   if (disabled && openState) setOpen(false);
   const pick = (isoDate: string) => {
@@ -396,7 +383,6 @@ export function DatePicker({ value, onChange, placeholder, disablePast = false, 
     <Popover.Root
       open={open}
       onOpenChange={(next) => {
-        // It opens on the chosen month, wherever it was browsed to before.
         if (next) setMonth(startOfMonth(parseISODateToLocal(value) ?? todayDate));
         setOpen(next);
       }}

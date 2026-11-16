@@ -1,18 +1,3 @@
-/**
- * Which project's memory a session directory belongs to.
- *
- * A session often runs in a worktree, whose path is not the project's path.
- * Keying memory by the session directory filed a worktree's memories under a
- * project the panel never reads, so the agent stored them and the user never
- * saw them. Every worktree of a repository shares one project memory, which is
- * also what the user means by "this project".
- *
- * A directory that is itself a configured project is taken as-is; anything else
- * resolves to its primary worktree. The configured check comes first because a
- * user may register a worktree as a project in its own right, and that choice
- * has to win over the git topology.
- */
-
 import path from 'node:path';
 
 import { createProjectIdFromPath } from '../projects/project-id.js';
