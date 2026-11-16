@@ -8,16 +8,8 @@ import { isExtensionProviderId, isProviderId } from './provider-id.js';
 import { normalizeSshUrl } from './ssh-url.js';
 
 const AUTH_VERSION = 3;
-// Version 3 plus one origin-keyed section per further provider (Gitea and
-// whatever follows). Written only while such a section holds something.
 const EXTRA_SECTIONS_VERSION = 4;
-// Version 4 plus an optional `sshUrl` on an origin-keyed instance, where a
-// provider's SSH clone host differs from its web address. Written only while
-// an instance holds one. An older build cannot read a file that carries one,
-// so the address is the only reason a file leaves version 4.
 const INSTANCE_SSH_URL_VERSION = 5;
-// The two sections every version-3 file carries; any other provider id is an
-// extra section.
 const BUILT_IN_SECTIONS = ['gitlab', 'github'];
 const emptyState = () => ({ version: AUTH_VERSION, providers: { gitlab: { instances: {} }, github: { instances: {} } } });
 const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
@@ -132,8 +124,6 @@ function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentia
   return instances;
 }
 
-// Every section except GitHub's is keyed by instance origin, with the
-// credential shape GitLab introduced.
 const originInstanceParser = (provider) => ({
   parseInstanceKey: (raw) => {
     let origin;
@@ -162,29 +152,11 @@ function parseVersionTwo(value) {
   return { version: 2, providers: parseGitLabSection(value.providers) };
 }
 
-// Version 2 held only GitLab (`providers.gitlab.instances`, keyed by origin).
-// Version 3 adds `providers.github.instances` (keyed by host) to this same
-// server token store, so a GitHub Enterprise instance's personal access tokens
-// live in the file GitLab already uses. A version 2 file is read into the
-// version 3 shape in memory but stays version 2 on disk until a GitHub
-// Enterprise credential is stored: earlier releases read only version 2, so
-// a user who never added an enterprise host can still go back to one.
 function parseSection(value, parser, allowSshUrl = false) {
   if (!isPlainObject(value) || !exactKeys(value, ['instances'])) throw invalidState();
   return { instances: parseProviderInstances(value.instances, { ...parser, allowSshUrl }) };
 }
 
-// Version 4 is version 3 plus extra sections keyed by provider id. An id is
-// checked for syntax only, and an extra section is kept as read (`raw`) until
-// a provider of this build asks for it, which parses it strictly then. A
-// section no provider asks for is written back untouched, whatever its shape,
-// so an older or newer provider set never loses another's credentials, and a
-// section that does not parse fails only its own provider's calls.
-//
-// Version 5 is version 4 plus an optional `sshUrl` on an instance, so a
-// provider whose SSH clone host differs from its web address can recognise
-// remotes there. A version 3 or 4 file refuses that field: it names something
-// those releases would drop.
 function parseVersionThreeToFive(value) {
   if (!isPlainObject(value) || !exactKeys(value, ['version', 'providers'])
     || ![AUTH_VERSION, EXTRA_SECTIONS_VERSION, INSTANCE_SSH_URL_VERSION].includes(value.version)
@@ -234,13 +206,6 @@ function serializeOriginSection(section) {
 const isEmptyRawSection = (raw) => exactKeys(raw, ['instances'])
   && isPlainObject(raw.instances) && Object.keys(raw.instances).length === 0;
 
-/**
- * The oldest version that can hold the state, so a user who never needed a
- * newer one can still go back to a release that reads only the older:
- * version 2 while only GitLab holds anything, version 3 once a GitHub
- * Enterprise host is stored, version 4 only while an extra section is not
- * empty, version 5 once any instance holds a separate SSH address.
- */
 function serializeState(state) {
   const instances = serializeOriginSection(state.providers.gitlab);
   const githubInstances = {};
@@ -279,11 +244,6 @@ function serializeState(state) {
     if (Object.keys(section.instances).length) extras[id] = { instances: serializeOriginSection(section) };
   }
   const providers = { gitlab: { instances }, github: { instances: githubInstances }, ...extras };
-  // Every instance in the document decides the version, including the ones a
-  // section kept as read carries: an extra section this process never parsed
-  // still holds the `sshUrl` the parser refuses below version 5, so choosing
-  // the version from the parsed sections alone would write a file this store
-  // then cannot read.
   const hasSshUrl = Object.values(providers).some((section) => isPlainObject(section.instances)
     && Object.values(section.instances).some((instance) => isPlainObject(instance) && instance.sshUrl !== undefined));
   if (hasSshUrl) return { version: INSTANCE_SSH_URL_VERSION, providers };
@@ -304,18 +264,9 @@ function publicInstance(instance) {
   return result;
 }
 
-// A token this close to expiring is renewed before it is handed out, so a
-// request never starts with one that dies on the way.
 const REFRESH_MARGIN_MS = 5 * 60_000;
-// Longer than one refresh request may take, so a process waiting on another's
-// renewal sees its result.
 const RENEW_LOCK_WAIT_MS = 15_000;
 
-/**
- * `refreshOAuthToken({ provider, origin, refreshToken })` trades an OAuth
- * refresh token for `{ accessToken, refreshToken?, expiresIn? }`. Without it,
- * stored OAuth tokens are handed out as they are.
- */
 export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000, refreshOAuthToken, now = Date.now }) {
   let transactions = Promise.resolve();
   const writeState = async (state) => {
@@ -340,8 +291,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     let value;
     try { value = JSON.parse(encoded); }
     catch (error) { throw invalidState(error); }
-    // Version 2 was GitLab-only; it is read into the version 3 shape after
-    // validation (`github` starts empty) without rewriting the file.
     if (value.version === 2) {
       return { version: AUTH_VERSION, providers: { ...parseGitLabSection(value.providers), github: { instances: {} } } };
     }
@@ -381,8 +330,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     && Boolean(credential.refreshToken) && credential.expiresAt !== undefined
     && credential.expiresAt - now() < REFRESH_MARGIN_MS;
   const renewals = new Map();
-  // An origin section that was never written reads as empty. An extra section
-  // still as read parses strictly here, for the provider that asks for it.
   const sectionInstances = (state, provider) => {
     if (!Object.hasOwn(state.providers, provider)) return {};
     const section = state.providers[provider];
@@ -397,18 +344,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
   };
   const findCredential = (state, provider, origin, credentialId) => sectionInstances(state, provider)[origin]?.credentials
     .find((candidate) => candidate.credentialId === credentialId) ?? null;
-  /**
-   * Renews one OAuth credential, once per credential however many readers
-   * ask. GitLab revokes the access token and refresh token a refresh spends,
-   * so two processes sharing this file (the desktop app and a web server)
-   * must never spend the same refresh token: the loser's refresh is refused
-   * and the token the winner stored stops working. Renewal therefore holds a
-   * cross-process lock of its own for the network call, and a process that
-   * waited on it finds the refresh token already replaced and uses the new
-   * one. The credential keeps its id and revision, so bindings pinned to it
-   * keep working. A rejected refresh leaves the credential as it is; the
-   * request that then fails marks it invalid the usual way.
-   */
+  // external: https://docs.gitlab.com/api/oauth2/ GitLab refresh tokens are single-use, so renewal is serialized across processes.
   const renew = (provider, origin, credential) => {
     const key = `${provider}\0${origin}\0${credential.credentialId}`;
     const pending = renewals.get(key);
@@ -442,21 +378,13 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     if (!(refreshOAuthToken instanceof Function)) return;
     const expiring = await read((state) => (sectionInstances(state, provider)[origin]?.credentials ?? [])
       .filter((credential) => (!credentialId || credential.credentialId === credentialId) && needsRenewal(credential)));
-    // A renewal still busy elsewhere leaves this read with the token as stored;
-    // a request it then fails renews on demand.
     await Promise.all(expiring.map((credential) => renew(provider, origin, credential).catch((error) => {
       if (error?.code !== 'SOURCE_CONTROL_LOCK_BUSY') throw error;
     })));
   };
 
-  /**
-   * One origin-keyed section: GitLab's, and the one every further provider
-   * gets under its own id. Credentials are the GitLab shape (`token`, optional
-   * OAuth refresh), keyed by normalized origin; the caller normalizes.
-   */
   const originSection = (provider) => Object.freeze({
     listInstances: () => read((state) => Object.keys(sectionInstances(state, provider))),
-    /** Every instance's separate SSH address, in one read. */
     listSshUrls: () => read((state) => {
       const urls = {};
       for (const [origin, instance] of Object.entries(sectionInstances(state, provider))) {
@@ -465,11 +393,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return urls;
     }),
     listAccounts: (origin) => read((state) => sectionInstances(state, provider)[origin]?.credentials ?? []),
-    /**
-     * Renews an OAuth credential now, whatever its expiry says. For a request
-     * GitLab just refused: true means a fresh token is stored and the account
-     * should not be written off yet.
-     */
     renewAccount: async (origin, credentialId) => {
       if (!(refreshOAuthToken instanceof Function)) return false;
       const credential = await read((state) => sectionInstances(state, provider)[origin]?.credentials
@@ -545,7 +468,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       chooseActive(instance);
       return { changed: true, value: true };
     }),
-    /** Stores the instance's separate SSH address, or removes it when null. */
     setSshUrl: (origin, sshUrl) => mutate((state) => {
       if (sshUrl !== null && !validText(sshUrl)) throw invalidState();
       const instances = writableInstances(state, provider);
@@ -585,12 +507,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     return sections.get(provider);
   };
 
-  /**
-   * Forgets an extension provider's whole section, every instance and
-   * credential, in one locked write: removing an extension removes its
-   * accounts. A built-in provider's section is never dropped this way. True
-   * when the file held the section.
-   */
   const dropSection = (provider) => {
     if (!isExtensionProviderId(provider)) return Promise.reject(new Error(`Source control auth section cannot be dropped: ${provider}`));
     return mutate((state) => {
@@ -601,22 +517,15 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
   };
 
   return Object.freeze({
-    // GitLab's section is the store's own surface, as it was before sections.
     ...section('gitlab'),
     section,
     dropSection,
-    // GitHub Enterprise lives in this same server token store, next to GitLab:
-    // one entry per host, each with its own credentials, active account and gh
-    // CLI switch. github.com's device-flow accounts stay in github-auth.json;
-    // the github module routes every non-github.com host here (`github/auth.js`).
     github: Object.freeze({
       listInstances: () => read((state) => Object.keys(state.providers.github.instances)),
       listAccounts: (host) => read((state) => state.providers.github.instances[host]?.credentials ?? []),
       readInstance: (host) => read((state) => publicInstance(state.providers.github.instances[host] ?? emptyInstance())),
       readAccount: (host, credentialId, revision) => read((state) => findInInstance(state.providers.github.instances[host] ?? emptyInstance(), credentialId, revision)),
       readAccountAnyInstance: (credentialId, revision) => read((state) => {
-        // The instance a credential id belongs to travels with the record, so a
-        // caller knows which API root its token belongs to.
         for (const [host, instance] of Object.entries(state.providers.github.instances)) {
           const credential = findInInstance(instance, credentialId, revision);
           if (credential) return { ...credential, host };
@@ -700,8 +609,6 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         const instance = instances[host] ?? emptyInstance();
         const nextActive = Boolean(active) && !instance.cliDisabled;
         const requested = validText(login) ? login : null;
-        // No login argument keeps the account the instance already had; null
-        // pins gh's own active login, which is what earlier releases always used.
         const nextLogin = !nextActive ? null : login === undefined ? (instance.cliLogin ?? null) : requested;
         const changed = instance.cliActive !== nextActive || (instance.cliLogin ?? null) !== nextLogin;
         instance.cliActive = nextActive;
