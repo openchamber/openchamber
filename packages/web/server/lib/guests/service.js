@@ -30,7 +30,6 @@ const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const SERVICE_READY_TIMEOUT_MS = 15_000;
 const SERVICE_KILL_TIMEOUT_MS = 5_000;
 const SERVICE_HEALTH_PATH = '/health';
-/** Inbound auth header the service must require. */
 const OPENCHAMBER_SERVICE_AUTH_HEADER = 'authorization';
 
 /**
@@ -54,13 +53,10 @@ const startingByGuest = new Map();
 /** @type {Map<string, Promise<void>>} */
 const stoppingByGuest = new Map();
 
-// Requests retain their lifecycle object across awaits. A later host start
-// cannot reopen admission for work that belonged to the previous host.
 let hostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
 
 let openCodeProvider = null;
 
-/** One host-owned OpenCode transport for approved local services. */
 export const configureGuestOpenCodeProvider = (provider) => {
   if (openCodeProvider) throw new Error('Stop the previous OpenCode provider before replacing it.');
   openCodeProvider = provider;
@@ -228,7 +224,6 @@ const lastFailures = new Map();
 
 export const getServiceFailure = (guestId) => lastFailures.get(guestId) ?? null;
 
-/** A reinstall under the same id must not inherit the removed one's failure. */
 export const forgetServiceFailure = (guestId) => {
   lastFailures.delete(guestId);
 };
@@ -271,7 +266,6 @@ const clearIdleStop = (guestId) => {
   idleStops.delete(guestId);
 };
 
-/** Long-lived consumers (a surface viewer) that keep an idle-stopping service up. */
 const holds = new Map();
 
 const armIdleStop = (guestId, idleMs) => {
@@ -281,8 +275,6 @@ const armIdleStop = (guestId, idleMs) => {
   const timer = setTimeout(() => {
     const current = idleStops.get(guestId);
     if (!current || current.inflight > 0 || (holds.get(guestId) ?? 0) > 0) {
-      // A request is running or a viewer is attached; whichever ends last
-      // re-arms the timer.
       return;
     }
     idleStops.delete(guestId);
@@ -368,7 +360,6 @@ const discardRuntime = async (guestId) => {
   stoppingByGuest.set(guestId, stopped);
   try {
     await stopped;
-    // A child that outlived SIGKILL keeps its record for the next host's reaper.
     if (child.exitCode !== null || child.signalCode) await runtime.released;
   } finally {
     stoppingByGuest.delete(guestId);
@@ -415,15 +406,12 @@ const announceServiceEnded = (guestId) => {
   }
 };
 
-/** Test seam: the pid of a guest's running service, or `null`. */
 export const readServicePid = (guestId) => runtimes.get(guestId)?.child.pid ?? null;
 
 export const stopAllGuestServices = async () => {
   const starts = [...startingByGuest.values()];
   const ids = new Set([...runtimes.keys(), ...startingByGuest.keys(), ...stoppingByGuest.keys()]);
   const stops = [...ids].map((id) => stopGuestService(id));
-  // Cancelled starts reject normally. Await their cleanup as well as children
-  // already registered when shutdown began.
   await Promise.allSettled([...starts, ...stops]);
   const provider = openCodeProvider;
   openCodeProvider = null;
@@ -439,7 +427,6 @@ export const stopAllGuestServices = async () => {
  */
 const recordServiceProcess = (registryDir, child, service) => {
   const { pid } = child;
-  // A spawn that failed has no pid and never emits `exit`.
   if (!registryDir || !Number.isInteger(pid)) return Promise.resolve();
   const recorded = recordGuestService(registryDir, { pid, ...service });
   const exited = new Promise((resolve) => {
@@ -497,12 +484,8 @@ const startGuestService = async ({
   lifecycle,
 }) => {
   assertGuestHostActive(lifecycle);
-  // A service a dead host left running may still hold what this one needs (a
-  // socket, a profile lock), so it is gone before anything spawns.
   await lifecycle.orphansReaped;
   assertGuestHostActive(lifecycle);
-  // A replacement must not occupy the same guest slot while its previous
-  // child is still stopping; host shutdown must be able to drain both.
   const previousStop = stoppingByGuest.get(guestId);
   if (previousStop) await previousStop;
   assertGuestHostActive(lifecycle);
@@ -513,8 +496,6 @@ const startGuestService = async ({
   if (existing) {
     await discardRuntime(guestId);
   }
-  // The request's epoch, read before its first store access: a Pause that
-  // finished anywhere since then is a cancellation, spawn included.
   const cancelled = () => !lifecycle.accepting || stopEpochOf(guestId) !== epoch;
   const stoppedError = () => new GuestServiceError('The service was stopped before it became ready.', 'NO_SERVICE');
 
@@ -554,8 +535,6 @@ const startGuestService = async ({
   if (Object.keys(socketEnv).length > 0) {
     env.OPENCHAMBER_SERVICE_SOCKETS = JSON.stringify(socketEnv);
   }
-  // How the service calls OpenChamber back (`host-callback.js`). The address
-  // alone opens nothing: each route asks for a bearer of its own.
   env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
   if (openCode) {
     if (!openCodeProvider) throw new GuestServiceError('OpenCode access is unavailable on this host.', 'NO_SERVICE');
@@ -571,7 +550,6 @@ const startGuestService = async ({
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  // Ownership starts at spawn, including a child that never becomes ready.
   const released = recordServiceProcess(lifecycle.registryDir, child, { guestId, token, entry: absoluteEntry });
   const output = collectProcessOutput(child);
 
@@ -590,7 +568,6 @@ const startGuestService = async ({
   child.once('exit', (code, signal) => {
     const current = runtimes.get(guestId);
     if (current === runtime) {
-      // A deliberate stop drops the runtime first, so this exit was unexpected.
       if (code || signal) {
         const detail = [output.snapshot(), signal ? `Stopped by ${signal}.` : ''].filter(Boolean).join('\n');
         lastFailures.set(guestId, { at: Date.now(), output: detail });
@@ -603,8 +580,6 @@ const startGuestService = async ({
 
   const ready = await waitForServiceReady(port, token, () => cancelled() || child.exitCode !== null || Boolean(child.signalCode));
   if (cancelled()) {
-    // Pause landed while the process was coming up; stopGuestService found
-    // this runtime (registered above) and is killing it, or already did.
     if (runtimes.get(guestId) === runtime) {
       await discardRuntime(guestId);
     }
@@ -636,12 +611,6 @@ const startGuestService = async ({
  *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
  *   socketOverrides?: Record<string, string>,
  * }} params
- */
-/**
- * Environment variables a guest service may inherit from the host process.
- * The host env also carries the UI password, tool tokens, and whatever API
- * keys the user exported; a third-party process gets none of that, only what
- * a locale-aware Node process needs to find its tools and temp dir.
  */
 const INHERITED_SERVICE_ENV_NAMES = new Set([
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TEMP', 'TMP', 'TZ',
@@ -734,9 +703,6 @@ export const openGuestServiceRequest = async ({
   if (!isGuestRequestPath(requestPath)) {
     throw new GuestServiceError('Request path must stay on the service.', 'BAD_PATH');
   }
-  // A Pause that lands anywhere between here and the proxied call bumps
-  // this; the request then ends with NO_SERVICE instead of using the
-  // enabled flag it read before the pause.
   const epoch = stopEpochOf(guestId);
   const store = await readExtensionStore(persistPath);
   assertGuestHostActive(lifecycle);
@@ -747,11 +713,6 @@ export const openGuestServiceRequest = async ({
       'DISABLED',
     );
   }
-  // Every service is a third-party process running as the user. Declared
-  // permissions describe what it intends to touch; they do not confine it, so
-  // the grant is required whether or not the manifest declared any.
-  // `granted` is the catalog's effective list: it already drops `service`
-  // when the package's permissions changed after the user approved them.
   if (!Array.isArray(granted) || !granted.includes('service')) {
     throw new GuestServiceError('Allow this extension\'s local service in Settings → Extensions.', 'NO_SERVICE');
   }
@@ -761,7 +722,6 @@ export const openGuestServiceRequest = async ({
 
   let runtime = runtimes.get(guestId);
   if (!runtime || runtime.status !== 'ready' || runtime.child.exitCode !== null || runtime.child.signalCode) {
-    // A folder mid-rebuild is listed from its last loaded manifest and grants; the new files are not what the user approved.
     if (isGuestPackageUnloaded(packageRoot)) {
       throw new GuestServiceError('The extension is being rebuilt; try again once its build finishes.', 'NO_SERVICE');
     }
@@ -801,8 +761,6 @@ export const openGuestServiceRequest = async ({
 
   /** @type {Record<string, string>} */
   const headers = {
-    // Host-set context (surface viewer headers) first: nothing in it can
-    // replace the bearer or the content type below.
     ...extraHeaders,
     Accept: accept,
     [OPENCHAMBER_SERVICE_AUTH_HEADER]: `Bearer ${runtime.token}`,
@@ -818,8 +776,6 @@ export const openGuestServiceRequest = async ({
   const settleIdle = () => {
     if (!idleStopMs) return;
     trackInflight(guestId, -1);
-    // Measured from the end of the last request, not its start: a long
-    // action must not be cut short by a timer armed before it began.
     if (runtimes.get(guestId) === runtime) armIdleStop(guestId, idleStopMs);
   };
   let response;
@@ -840,18 +796,12 @@ export const openGuestServiceRequest = async ({
     announceServiceEnded(guestId);
     throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
   }
-  // The body is still streaming when we return; the idle window starts once
-  // the caller has read it (or dropped it), which is what `finished` marks.
   return {
     response,
     finished: settleIdle,
   };
 };
 
-/**
- * Panel-shaped proxy: text answer, refused over `responseMax`. Same params as
- * `openGuestServiceRequest` plus `responseMax`.
- */
 export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RESPONSE_MAX, ...params }) => {
   const { response, finished } = await openGuestServiceRequest(params);
   let body;

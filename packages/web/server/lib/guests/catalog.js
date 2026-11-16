@@ -17,7 +17,6 @@ import { toPublicLinks } from './links.js';
 
 const builtInsByStore = new Map();
 
-/** Registers the app-shipped catalog for one server instance, never a user install directory. */
 export const registerBuiltInGuests = async ({ persistPath, root }) => {
   const registry = await readBuiltInRegistry(root);
   builtInsByStore.set(persistPath, registry);
@@ -42,7 +41,6 @@ const MIME_BY_EXT = {
 
 export const isGuestPanelId = (value) => typeof value === 'string' && PANEL_ID.test(value);
 
-/** Whether `relativePath`, already checked by the manifest parse, is a folder that stays inside the package. */
 const isGuestPackageFolder = async (packageRoot, relativePath) => {
   try {
     const rootReal = await fs.realpath(packageRoot);
@@ -90,16 +88,10 @@ export const guestAssetContentType = (filePath) => {
   return MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? null;
 };
 
-/** Documents and scripts are served only to extensions with an execution entry. */
 const isGuestFrameContentType = (contentType) => (
   contentType.startsWith('text/html') || contentType.startsWith('text/javascript')
 );
 
-/**
- * A `.js` URL can be served from a sibling `.ts` that the host compiles.
- * `hasRuntime` means the guest has a frame the host loads (`hasGuestFrame`).
- * Tools-only packages can serve assets, never HTML or JS.
- */
 export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRuntime = true } = {}) => {
   const filePath = await resolveGuestAssetPath(packageRoot, relativePath);
   const contentType = filePath ? guestAssetContentType(filePath) : null;
@@ -142,7 +134,6 @@ export const resolveGuestPackageRoot = async (rawPath) => {
   }
 };
 
-/** Every relative `script src` on the entry page must be a real `.js` file. TypeScript is not enough. */
 const guestBuiltScriptsReady = async (packageRoot, entry) => {
   const entryPath = await resolveGuestAssetPath(packageRoot, entry);
   if (!entryPath) {
@@ -162,7 +153,6 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   return true;
 };
 
-// Every list in the app reads a provider's logo, so its size counts against each of them.
 const isDrawableProviderLogo = async (packageRoot, relativePath) => {
   const resolved = await resolveGuestAssetPath(packageRoot, relativePath);
   if (!resolved) return false;
@@ -179,7 +169,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   const parsed = parseManifestJson(raw);
   if (!parsed.ok) {
-    // The parser names the field and the rule, so the author sees why.
     return { ok: false, code: 'invalid-manifest', reason: parsed.message };
   }
   if (!skipEngineCheck && !parsed.version) {
@@ -197,7 +186,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     }
   }
   const panel = parsed.manifest.contributes.panel;
-  // The visible panel and background runtime are optional independent entries.
   if (hasGuestPage(parsed.manifest.contributes)) {
     const entryPath = await resolveGuestAssetPath(packageRoot, panel.entry);
     if (!entryPath) {
@@ -228,7 +216,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.size !== undefined) {
     guest.entrySize = panel.size;
   }
-  // The phone shows the panel page (and what reuses it) only on this opt-in.
   if (panel.entry && panel.mobile === true) {
     guest.entryMobile = true;
   }
@@ -252,8 +239,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (attach) {
     guest.attach = attach;
   }
-  // A dialog page is checked like panel.entry: the HTML must exist and every
-  // relative script it loads must already be built.
   const attachEntry = resolveAttachEntry(parsed.manifest.contributes);
   if (attachEntry) {
     if (!await resolveGuestAssetPath(packageRoot, attachEntry)) {
@@ -277,9 +262,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     if (page !== true && page?.title) guest.pageTitle = page.title;
     if (resolvePageMobile(parsed.manifest.contributes)) guest.pageMobile = true;
   }
-  // The Work Status section is checked like any other entry, and may be the
-  // package's only frame. A source section has no frame: the host reads it
-  // from the service.
   const statusEntry = resolveStatusSectionEntry(parsed.manifest.contributes);
   if (statusEntry) {
     if (!await resolveGuestAssetPath(packageRoot, statusEntry)) {
@@ -299,7 +281,6 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     if (section !== true && section?.defaultExpanded !== undefined) guest.statusDefaultExpanded = section.defaultExpanded;
     if (section !== true && section?.requiresProject !== undefined) guest.statusRequiresProject = section.requiresProject;
   }
-  // File editors are frames of their own too; each entry is checked the same way.
   const fileEditors = parsed.manifest.contributes.fileEditors ?? [];
   for (const editor of fileEditors) {
     if (!await resolveGuestAssetPath(packageRoot, editor.entry)) {
@@ -361,31 +342,24 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     }
     guest.service = parsed.manifest.contributes.service;
   }
-  // The Git host a `source-control` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.sourceControl) {
     guest.sourceControl = parsed.manifest.contributes.sourceControl;
   }
-  // The session events the service subscribed to; the parse requires a service with it.
   if (parsed.manifest.contributes.sessionEvents) {
     guest.sessionEvents = parsed.manifest.contributes.sessionEvents;
   }
-  // The waits agents may start on the service; the parse requires a service with them.
   if (parsed.manifest.contributes.waits) {
     guest.waits = parsed.manifest.contributes.waits;
   }
-  // The notification channel a `notifications` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.notifications) {
     guest.notifications = parsed.manifest.contributes.notifications;
   }
-  // The work item tracker a `tracker` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.tracker) {
     guest.tracker = parsed.manifest.contributes.tracker;
   }
-  // The usage provider a `quota` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.quota) {
     guest.quota = parsed.manifest.contributes.quota;
   }
-  // The service acts on sessions, adds to what agents read, or answers `@`; the parse requires a service with each.
   if (parsed.manifest.contributes.sessionControl) {
     guest.sessionControl = parsed.manifest.contributes.sessionControl;
   }
@@ -401,14 +375,12 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.links) {
     guest.links = parsed.manifest.contributes.links;
   }
-  // The package's skills folder; a declared folder that is not there fails the install.
   if (parsed.manifest.contributes.skills) {
     if (!await isGuestPackageFolder(packageRoot, parsed.manifest.contributes.skills)) {
       return { ok: false, code: 'invalid-manifest' };
     }
     guest.skills = parsed.manifest.contributes.skills;
   }
-  // The package's OpenCode plugin folder: a directory with a package.json naming an entry that exists, or the install fails.
   if (parsed.manifest.contributes.opencodePlugin) {
     if (!await resolveOpenCodePluginFolder(fs, packageRoot, parsed.manifest.contributes.opencodePlugin)) {
       return { ok: false, code: 'invalid-opencode-plugin' };
@@ -429,14 +401,12 @@ const withSource = (guest, source, displayPath) => ({
   path: displayPath,
 });
 
-/** Whether the package has any page the host loads: panel, background, full-screen page, status section, file editor, or block. */
 export const hasGuestFrame = (guest) => Boolean(
   guest.entry || guest.backgroundEntry || guest.pageEntry || guest.statusEntry
     || (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0)
     || (Array.isArray(guest.blocks) && guest.blocks.length > 0),
 );
 
-/** What a running service asked its card to say; memory only, since it says so again when it next starts. */
 const configurationNotes = new Map();
 
 /**
@@ -452,12 +422,6 @@ export const setGuestConfigurationNote = (guestId, message) => {
   return true;
 };
 
-/**
- * Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest.
- * `toolLinkSettings` are the setting values the guest's card links read
- * (`toolLinkSettingsOf`); only the catalog route passes them, since the chat
- * draws from the catalog alone.
- */
 export const toPublicGuest = (guest, toolLinkSettings = null) => {
   const row = {
     id: guest.id,
@@ -491,8 +455,6 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (guest.revision > 0) {
     row.revision = guest.revision;
   }
-  // Git installs remember where they came from so the UI can offer updates.
-  // The URL is the one the user typed at install; it carries no credentials.
   if (guest.source === 'git' && guest.gitOrigin && typeof guest.gitOrigin.url === 'string') {
     row.origin = guest.gitOrigin.ref
       ? { url: guest.gitOrigin.url, ref: guest.gitOrigin.ref }
@@ -523,12 +485,9 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     row.filesystem = [...guest.filesystem];
   }
-  // Shown on the approval card: the frame may exchange data with these.
   if (Array.isArray(guest.origins) && guest.origins.length > 0) {
     row.origins = [...guest.origins];
   }
-  // Actions, commands, and tools are the parsed manifest entries as they
-  // are: the UI decides which ones to apply from the grant and the enabled flag.
   if (Array.isArray(guest.actions) && guest.actions.length > 0) {
     row.actions = guest.actions.map((action) => ({ ...action }));
   }
@@ -566,31 +525,24 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   if (service) {
     row.service = service;
   }
-  // What the approval dialog names: the Git host's label and the instances it reaches.
   if (guest.sourceControl) {
     row.sourceControl = toPublicSourceControl(guest.sourceControl);
   }
-  // What the approval dialog names: the events the service is told about, and whether with their text.
   if (guest.sessionEvents) {
     row.sessionEvents = toPublicSessionEvents(guest.sessionEvents);
   }
-  // What the approval dialog names: the waits whose text may wake a session.
   if (guest.waits) {
     row.waits = toPublicWaits(guest.waits);
   }
-  // What the approval dialog and the Integrations card name: the channel and where its account lives.
   if (guest.notifications) {
     row.notifications = toPublicNotifications(guest.notifications);
   }
-  // What the approval dialog and the tracker's account card name: the tracker, where its accounts live, how one signs in.
   if (guest.tracker) {
     row.tracker = toPublicTracker(guest.tracker);
   }
-  // What the approval dialog names: the OpenCode providers whose credentials the usage provider receives.
   if (guest.quota) {
     row.quota = toPublicQuota(guest.quota);
   }
-  // What the approval dialog and the requested list read.
   if (guest.sessionControl) {
     row.sessionControl = { content: guest.sessionControl.content === true };
   }
@@ -610,7 +562,6 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
     row.mentions = { label: guest.mentions.label };
   }
   if (guest.links) {
-    // A template the compiler refuses drops this row's links, never the catalog.
     try {
       row.links = toPublicLinks(guest.links);
     } catch (error) {
@@ -624,12 +575,6 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   return row;
 };
 
-/**
- * The rail asks for every panel file through `findInstalledGuest`, and each
- * listing re-reads every package's manifest and HTML. A short-lived cache per
- * store file absorbs that burst; any store write drops it, and the TTL bounds
- * how long an on-disk edit to a folder-installed package goes unnoticed.
- */
 const CATALOG_CACHE_TTL_MS = 5_000;
 /** @type {Map<string, { expiresAt: number, guests: Awaited<ReturnType<typeof listInstalledGuestsUncached>> }>} */
 const catalogCache = new Map();
@@ -675,10 +620,6 @@ const lastLoadedGuests = new Map();
 
 export const lastLoadedGuestAt = (packageRoot) => lastLoadedGuests.get(packageRoot)?.guest ?? null;
 
-/**
- * A root listed from its last loaded row: its files on disk are not what the
- * row's declarations and grants describe, so no service starts from them.
- */
 export const isGuestPackageUnloaded = (packageRoot) => lastLoadedGuests.get(packageRoot)?.unloaded === true;
 
 export const noteGuestPackageChanged = (persistPath, id) => {
@@ -688,13 +629,6 @@ export const noteGuestPackageChanged = (persistPath, id) => {
   invalidateGuestCatalog(persistPath);
 };
 
-/**
- * Enterprise mode, applied on every read after the cache so a policy change
- * counts at once: a package whose gated capabilities the policy refuses keeps
- * none of them, and `enterpriseBlocked` names them for Settings. Every route
- * and proxy takes grants from this row, so none of them can use the refused
- * capabilities.
- */
 const withEnterprisePolicy = (guests) => {
   const policy = readEnterprisePolicy();
   if (!policy.enterpriseMode) return guests;
@@ -730,7 +664,6 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
   const builtIns = builtInsByStore.get(persistPath);
   if (builtIns) {
     for (const entry of builtIns.extensions) {
-      // Reserve the ID even when this individual package is broken.
       seen.add(entry.id);
       const root = await fs.realpath(path.join(builtIns.root, entry.directory)).catch(() => null);
       if (!root || !root.startsWith(builtIns.root + path.sep)) {
@@ -759,14 +692,9 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     if (!root) {
       continue;
     }
-    // Already-installed packages stay listed even if engines.openchamber is newer
-    // than this host. Install is the gate.
     const loaded = await loadGuestFromPackageRoot(root, { skipEngineCheck: true });
     const previous = lastLoadedGuests.get(root);
     if (loaded || previous) lastLoadedGuests.set(root, { guest: loaded ?? previous.guest, unloaded: !loaded });
-    // A folder rebuilt in place fails to load while its build has emptied the
-    // output. Its last loaded row stays listed meanwhile, so no reader drops its
-    // tabs or roles before the finished build replaces it.
     const guest = loaded ?? previous?.guest;
     if (!guest || seen.has(guest.id) || isReservedBuiltInId(guest.id)) {
       continue;
@@ -785,9 +713,6 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     guests.push({
       ...withSource(guest, source, root),
       gitOrigin,
-      // Grants are narrowed to what the user actually approved for this
-      // version: a widened filesystem list, a new API origin, or new service
-      // permissions drop that capability until the dialog runs again.
       capabilityGrants: effectiveGrants(
         stored.capabilityGrants?.[guest.id] ?? [],
         stored.capabilityScopes?.[guest.id],

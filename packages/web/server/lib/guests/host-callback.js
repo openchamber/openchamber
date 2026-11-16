@@ -1,24 +1,6 @@
 import http from 'node:http';
 
-/**
- * The callback listener: the one way a host-spawned extension service calls
- * OpenChamber back. A plain Node HTTP server on `127.0.0.1:0`, started on
- * first use and kept apart from the Express app on purpose: nothing that
- * reaches the app (the relay, tunnels, UI auth, a LAN bind) reaches this
- * port, and nothing registered on the app is served here.
- *
- * Each route is `POST <path>` with a JSON body and `Authorization: Bearer
- * <capability>`; the route's owner decides what the bearer means (a
- * source-control call's outbound handle, `source-control/outbound-handles.js`)
- * and is asked whether it admits the bearer before any body is read
- * (`refusal(bearer)`: the answer that turns it away, or null), so an unknown
- * caller cannot make the host buffer a body.
- * Answers are JSON: whatever the route returns, or `{ error: { message, code } }`
- * when the listener refuses the request itself.
- */
 
-// A forge request body is at most 1 MB of text; as a JSON string it can grow
-// to six bytes a character (`\u0000`), and the envelope adds a little.
 const REQUEST_BODY_MAX = 6_200_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -38,10 +20,6 @@ const send = (response, { status, body }, done) => {
   response.end(text, done);
 };
 
-/**
- * The body as text, or null as soon as it grows past the cap. Nothing past
- * the cap is read: the caller answers and then cuts the connection.
- */
 const readBody = (request) => new Promise((resolve, reject) => {
   const chunks = [];
   let size = 0;
@@ -65,8 +43,6 @@ const answer = async (request) => {
   const route = routes.get(path);
   if (!route) return refuse(404, 'NOT_FOUND', 'Unknown callback route');
   if (request.method !== 'POST') return refuse(405, 'BAD_METHOD', 'Callback routes take POST');
-  // A web page can address a loopback port; only a process the host started
-  // calls this listener, and it sends no Origin.
   if (request.headers.origin !== undefined) return refuse(403, 'BAD_ORIGIN', 'Browsers cannot call this listener');
   const authorization = request.headers.authorization ?? '';
   const bearer = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length).trim() : '';
@@ -74,7 +50,6 @@ const answer = async (request) => {
   const refused = route.refusal(bearer);
   if (refused) return { ...refused, close: true };
   const text = await readBody(request);
-  // The rest of the body is not read: the connection is cut once this is sent.
   if (text === null) return { ...refuse(413, 'BODY_TOO_LARGE', 'The request body is too large'), close: true };
   let body;
   try {
@@ -97,7 +72,6 @@ const startListener = () => new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(0, '127.0.0.1', () => {
     server.off('error', reject);
-    // The listener never keeps the host process alive on its own.
     server.unref();
     const address = server.address();
     resolve({ server, url: `http://127.0.0.1:${address.port}` });
@@ -118,7 +92,6 @@ export const setHostCallbackRoute = (path, route) => {
   };
 };
 
-/** The listener's base URL (`http://127.0.0.1:<port>`), starting it on first use. */
 export const hostCallbackUrl = async () => {
   listening ??= startListener().catch((error) => {
     listening = null;
@@ -127,7 +100,6 @@ export const hostCallbackUrl = async () => {
   return (await listening).url;
 };
 
-/** Stops the listener; the next `hostCallbackUrl` starts a new one on a new port. */
 export const stopHostCallbackListener = async () => {
   const current = listening;
   listening = null;

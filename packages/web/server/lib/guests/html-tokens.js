@@ -10,7 +10,6 @@ const withToken = (url, token) => {
 
 const firstQueryValue = (value) => (Array.isArray(value) ? value[0] : value);
 
-/** Query `oc_url_token` for guest HTML. Empty when the query is missing or not a token. */
 export const parseGuestUrlToken = (value) => {
   const first = firstQueryValue(value);
   if (first == null || first === '') {
@@ -21,7 +20,6 @@ export const parseGuestUrlToken = (value) => {
 
 const SCRIPT_SRC = /<script\b[^>]*?\ssrc=(["'])(?!https?:|\/\/|data:|#)([^"']+)\1/gi;
 
-/** Relative `script src` values. Absolute, protocol-relative, data, and hash URLs are skipped. */
 export const listRelativeGuestScriptHrefs = (html) => {
   if (html === '') {
     return [];
@@ -36,7 +34,6 @@ export const listRelativeGuestScriptHrefs = (html) => {
   return hrefs;
 };
 
-/** Resolve a relative href against the entry HTML path. Stays inside the package. */
 export const resolveGuestHtmlRelativePath = (entry, href) => {
   const withoutHash = href.split('#')[0] ?? '';
   const raw = withoutHash.split('?')[0];
@@ -62,10 +59,8 @@ export const resolveGuestHtmlRelativePath = (entry, href) => {
   return segments.join('/');
 };
 
-/** Relative script, link, and img URLs: the subresources `injectGuestAssetTokens` rewrites. */
 export const listRelativeGuestAssetHrefs = (html) => [...html.matchAll(RELATIVE_ASSET)].map((match) => match[3]);
 
-/** Copy the iframe URL token onto relative script/link/img URLs in guest HTML. */
 export const injectGuestAssetTokens = (html, token) => {
   if (!token) {
     return html;
