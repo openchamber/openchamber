@@ -207,8 +207,6 @@ export function createNetworkOperationRegistry({
     if (entry.completion) Object.assign(value, entry.completion);
     return cloneAndFreeze(value);
   };
-  // A sync completion always carries its three step results, a cancelled
-  // plan included: none of the steps ran.
   const plannedCancellation = (entry, message) => ({
     state: 'cancelled',
     error: { code: 'CANCELLED', message },
@@ -221,9 +219,6 @@ export function createNetworkOperationRegistry({
     const plannedCutoff = now() - plannedRetentionMs;
     let removed = 0;
     for (const [operationId, entry] of entries) {
-      // With a store, an unstarted plan cannot simply vanish from memory: its
-      // durable record would stay `planned` and hold a capacity slot forever.
-      // It is cancelled instead, durably, and then ages out as terminal.
       if (store && entry.state === 'planned' && !entry.recovered && !entry.cancellationRequested
         && entry.createdAt <= plannedCutoff) {
         entry.cancellationRequested = true;

@@ -117,12 +117,6 @@ export function normalizeGitCredentialEndpoint(endpoint) {
 
 const GIT_LFS_ENDPOINT_SUFFIX = '/info/lfs';
 
-/**
- * git-lfs asks the credential helper for the repository URL it derives from the LFS
- * endpoint by stripping `/info/lfs`, not for the endpoint itself. A lease for such an
- * endpoint must therefore also answer for that repository path; custom endpoints
- * without the suffix get no alias.
- */
 export function gitLfsCredentialEndpointAliases(endpoint) {
   const normalized = normalizeGitCredentialEndpoint(endpoint);
   if (!normalized.path.endsWith(GIT_LFS_ENDPOINT_SUFFIX)) return Object.freeze([]);
@@ -162,7 +156,7 @@ const runFile = (file, args, { input = '', deadline = Date.now() + 30_000, contr
   const stderr = [];
   let inputError;
   child.stdin.on('error', (error) => {
-    // ssh-keygen may close stdin after reading its key. Its exit code and verified output remain authoritative.
+    // external: https://github.com/openssh/openssh-portable/blob/master/ssh-keygen.c ssh-keygen may close stdin after reading its key; its exit code and verified output remain authoritative.
     if (error.code !== 'EPIPE') inputError = error;
   });
   child.stdout.on('data', (chunk) => stdout.push(chunk));
@@ -313,7 +307,6 @@ export const snapshotSshPrivateKey = async ({
       publicKey = (await execute('ssh-keygen', ['-y', '-P', '', '-f', snapshotPath], { deadline, controls })).stdout;
     } catch (error) {
       if (!passphrase || ['EACCES', 'EPERM', 'ENOENT'].includes(error?.code)) throw error;
-      // Only the helper's environment carries the secret. Neither argv nor its file contains it.
       const windows = process.platform === 'win32';
       const windowsRoot = process.env.SystemRoot || 'C:\\Windows';
       const helperPath = `${snapshotPath}.askpass${windows ? '.ps1' : ''}`;
@@ -408,12 +401,6 @@ export async function inspectManagedSshCredential(record, { snapshotRoot, fsImpl
   return { status: 'ready' };
 }
 
-/**
- * Whether a normalized Git endpoint is a provider instance's own origin: the
- * same host and port over HTTPS, or over plain HTTP when the instance is a
- * loopback origin of a provider that allows loopback HTTP
- * (`loopback-http.js`). No other host is ever reached in the clear.
- */
 export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
   const https = origin.protocol === 'https:' && endpoint.protocol === 'https';
   const loopbackHttp = origin.protocol === 'http:' && endpoint.protocol === 'http'
@@ -422,11 +409,6 @@ export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
     && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
 };
 
-/**
- * A managed HTTPS credential reaches only its own instance: the descriptor's
- * origin, and only the default instances when the provider grants transport
- * nowhere else (GitHub Enterprise tokens never clone or push).
- */
 const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
   if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
   if (descriptor.transport.managedHttpsInstances === 'default-only'
@@ -444,13 +426,6 @@ const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
   }
 };
 
-/**
- * `readTransportCredential({ provider, instance, credentialId, credentialRevision })`
- * answers the provider's neutral transport credential (`secret`, `user`,
- * identity and status) or null; `describeProvider(id)` answers the provider's
- * descriptor or null. An id no provider answers for fails closed before any
- * credential lookup or spawn.
- */
 export function createGitCredentialResolver({
   readTransportCredential,
   describeProvider,

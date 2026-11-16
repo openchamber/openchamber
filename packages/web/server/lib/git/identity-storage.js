@@ -20,13 +20,6 @@ const TRANSPORTS = ['account', 'ssh', 'system', 'anonymous'];
 const validProfileText = (value, { required = false, max = 512 } = {}) => isString(value)
   && value.length <= max && (!required || value.trim().length > 0);
 
-/**
- * The account an identity acts as, addressed the way bindings address one.
- *
- * Only the reference is stored. The credential behind it lives in the provider
- * auth store, so an identity that names a disconnected account resolves to
- * nothing rather than to a stale secret.
- */
 const parseIdentityAccount = (value) => {
   if (value === null || value === undefined) return null;
   if (!isPlainObject(value)
@@ -39,10 +32,6 @@ const parseIdentityAccount = (value) => {
     accountId: isExtensionProviderId(value.provider) ? value.accountId : value.accountId.trim() };
 };
 
-/**
- * An identity written before identities carried a transport says who commits
- * and nothing about how transfers authenticate, which is what System Git is.
- */
 const parseIdentityTransport = (value) => {
   if (value === undefined) return 'system';
   if (!TRANSPORTS.includes(value)) throw new TypeError('Invalid Git identity transport');
@@ -66,10 +55,6 @@ export const parsePublicGitIdentityProfile = (value, expectedId) => {
   const transport = parseIdentityTransport(value.transport);
   const sshCredentialId = value.sshCredentialId === null || value.sshCredentialId === undefined
     ? null : value.sshCredentialId.trim();
-  // An identity is a signature, a way to push and pull, and optionally the
-  // account it acts as. Only the account transport needs that account; the
-  // machine's own Git, a managed key and anonymous reads need none, and an
-  // account beside them still answers for issues and change requests.
   if (transport === 'account' && !account) throw new TypeError('An account transport requires an account');
   if (transport === 'ssh' && !sshCredentialId) throw new TypeError('An SSH transport requires a managed key');
   if (transport !== 'ssh' && sshCredentialId) throw new TypeError('Only an SSH transport names a managed key');
@@ -92,10 +77,6 @@ export const toPublicGitIdentityProfile = (value) => {
   let account = null;
   try { account = parseIdentityAccount(value.account); }
   catch { account = null; }
-  // A stored record from before identities carried a transport pushes and
-  // pulls with the machine's own Git; the legacy `authType`, `sshKey` and
-  // `host` beside it named no credential this build can resolve, so they are
-  // not carried forward.
   let transport = 'system';
   try { transport = parseIdentityTransport(value.transport); }
   catch { transport = 'system'; }
@@ -158,9 +139,6 @@ export function createGitIdentityStore({
     try {
       const stats = fsImpl.fstatSync(handle);
       if (!stats.isFile()) throw invalidStore();
-      // A file this version wrote is private. One an earlier release wrote
-      // carries whatever the umask gave it at the time (0664 on a Linux with
-      // user-private groups), so it is read and made private, not refused.
       const extraMode = process.platform !== 'win32' ? stats.mode & 0o077 : 0;
       if (extraMode !== 0 && !allowShippedMode) throw invalidStore();
       let state;
@@ -270,5 +248,5 @@ export const getProfile = (id) => defaultStore().getProfile(id);
 export const createProfile = (profileData) => defaultStore().createProfile(profileData);
 export const updateProfile = (id, updates) => defaultStore().updateProfile(id, updates);
 
-/** @public Read by Git routes through the lazy-loaded Git library. */
+/** @public */
 export const deleteProfile = (id) => defaultStore().deleteProfile(id);

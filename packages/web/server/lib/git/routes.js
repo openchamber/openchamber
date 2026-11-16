@@ -19,25 +19,8 @@ const toGitRemoteSummary = (remote) => ({
   pushUrl: redactRemoteUrl(remote?.pushUrl),
 });
 
-// A removal should not hang on an unresponsive OpenCode server: disposal is
-// best-effort and `removeWorktree` swallows its failure.
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 
-/**
- * Builds the best-effort disposal hook handed to `removeWorktree`, also run
- * when a repair completes a failed checkout so OpenCode opens the repaired
- * folder afresh. The URL and auth headers are route dependencies, so this
- * module never resolves the OpenCode runtime itself, and both are read at
- * call time. OpenCode 2 has no
- * instance route; evicting the location drops its cached services (file
- * watchers, LSP, MCP), which is what held the worktree folder.
- *
- * A session of a project opened on a folder of its repository runs in that
- * folder of the worktree (`<worktree>/ai`), which is a location of its own, so
- * every running location inside the worktree is evicted along with its root.
- * When the location list cannot be read, the root is still evicted and the
- * list error is rethrown for the removal wrapper to log.
- */
 const toLocationKey = (directory) => String(directory || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
@@ -68,9 +51,6 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 };
 
 
-// Actions the user starts here may run a project's environment command, so
-// hooks find the project's tools; reads the UI repeats on its own may not
-// (lib/environment/refresh-scope.js).
 const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
@@ -93,9 +73,6 @@ export function registerGitRoutes(app, {
     return gitLibraries;
   };
 
-  // A path from an earlier status listing that no longer resolves is a stale
-  // row or a nested repository, not a server fault.
-  // The client splits a larger changeset into requests of this size.
   const GIT_DIFFS_MAX_PATHS = 1000;
   const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
   const sendGitPathError = (res, error) => {
@@ -126,11 +103,8 @@ export function registerGitRoutes(app, {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
-  // Git could not tell whether the directory is a repository (`probeRepository`):
-  // its message goes to the client instead of a "not a repository" answer.
   const isUnreadableRepositoryError = (error) => error?.code === 'GIT_REPOSITORY_UNREADABLE';
   const unreadableRepositoryBody = (error) => ({ error: error.message, code: error.code });
-  // Every repository check a client acts on reports a Git that could not answer.
   const probeOptions = { failOnGitError: true };
 
   const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
@@ -160,9 +134,6 @@ export function registerGitRoutes(app, {
     return worktrees;
   };
 
-  // A contributor-fork checkout runs no project command before its checkout
-  // trust passes, so its teardown is skipped. A provenance read that fails
-  // throws, and the removal keeps the worktree.
   const isContributorCheckout = contributorProvenance?.read instanceof Function
     ? async (worktreeDirectory) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
     : undefined;
@@ -187,7 +158,6 @@ export function registerGitRoutes(app, {
     ];
     let publicCode;
     if (code === 'GIT_NETWORK_OPERATION_NOT_FOUND') publicCode = 'NOT_FOUND';
-    // A grant whose account needs attention is an access problem the user fixes.
     else if (error?.reason === 'needs-attention') publicCode = 'AUTHENTICATION_REQUIRED';
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
@@ -215,8 +185,6 @@ export function registerGitRoutes(app, {
     };
     const reason = redactor.error(error, messages[publicCode]);
     console.error('Git network operation request failed:', reason);
-    // A refused request says what was wrong with it; these reasons are the
-    // planner's and the stores' own fixed text, redacted like the log line.
     return res.status(status).json({ error: publicCode === 'INVALID_REQUEST' ? reason : messages[publicCode], code: publicCode });
   };
   const operationId = (req) => isString(req.params?.id) && NETWORK_OPERATION_ID.test(req.params.id)
@@ -567,9 +535,6 @@ export function registerGitRoutes(app, {
     return directories;
   };
 
-  // Read one directory per worker and answer `projects` in input order. Failures
-  // are the directory's own: `readDirectory` returns an error entry instead of
-  // throwing, so one bad project never blanks the rest.
   const readProjectBatch = async (req, res, readDirectory) => {
     const directories = resolveBatchDirectories(req.body);
     if (!directories || directories.length === 0) {
@@ -593,13 +558,6 @@ export function registerGitRoutes(app, {
     return res.json({ projects: projects.filter(Boolean) });
   };
 
-  /**
-   * One read for many project directories. Every entry answers the repository
-   * check; `fields` adds `status` and `root` (primary worktree root) only when
-   * the caller asks for them. A status read runs a dozen Git processes, so a
-   * caller that only needs the cheap answers never pays for one. It stays
-   * proxyable into a space because each question is answerable there on its own.
-   */
   app.post('/api/git/projects', async (req, res) => {
     const { isGitRepository, getStatus, resolvePrimaryWorktreeRoot, observeWorktreeTopology } = await getGitLibraries();
     const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
@@ -622,8 +580,6 @@ export function registerGitRoutes(app, {
         const failures = [];
         const reads = [];
         if (wantsStatus) {
-          // Mirror `GET /api/git/status`: a status read is where an externally
-          // added or removed worktree gets noticed.
           void observeWorktreeTopology(directory);
           reads.push((async () => {
             try {
@@ -646,10 +602,6 @@ export function registerGitRoutes(app, {
             }
           })());
         }
-        // Status and primary root are independent reads of the same repository,
-        // so a directory costs the slower of the two instead of their sum. The
-        // worker pool above bounds how many directories run at once, and the git
-        // service bounds status reads.
         await Promise.all(reads);
         if (failures.length > 0) entry.errors = failures;
         return entry;
@@ -666,19 +618,11 @@ export function registerGitRoutes(app, {
     });
   });
 
-  /**
-   * The worktree list for many project directories, kept on its own route so it
-   * can stay refused across the space boundary exactly like
-   * `/api/git/worktrees`.
-   */
   app.post('/api/git/project-worktrees', async (req, res) => {
     const { getWorktrees, observeWorktreeTopology } = await getGitLibraries();
     return readProjectBatch(req, res, async (directory) => {
       try {
         const worktrees = await enrichWorktreeProvenance(await getWorktrees(directory));
-        // Mirror `GET /api/git/worktrees`: a non-empty listing is one of the two
-        // ways the server notices a worktree added outside the app (terminal or
-        // agent), and the client now reads worktrees through this route.
         if (worktrees.length > 0) {
           void observeWorktreeTopology(directory);
         }
@@ -758,11 +702,6 @@ export function registerGitRoutes(app, {
       let profile = null;
 
       if (profileId === 'global') {
-        // The system identity is the absence of an override, not a copy of it:
-        // the repository stops naming an author and reads the machine's, which
-        // is what keeps it following later changes there. A machine with no
-        // author of its own can still say "no override applies here", so this
-        // answers with the author it found, or with none.
         await clearLocalIdentity(directory);
         const globalIdentity = await getGlobalIdentity();
         const profile = globalIdentity?.userName && globalIdentity?.userEmail
@@ -815,9 +754,6 @@ export function registerGitRoutes(app, {
         return res.json(nonRepoStatusPayload());
       }
 
-      // Clients ask for status while they work in a repository, so this is
-      // where an externally added or removed worktree gets noticed. It runs
-      // beside the status call and never delays or fails the response.
       void observeWorktreeTopology(directory);
 
       const mode = req.query.mode === 'light' ? 'light' : undefined;
@@ -827,8 +763,6 @@ export function registerGitRoutes(app, {
       if (isUnreadableRepositoryError(error)) {
         return res.status(500).json(unreadableRepositoryBody(error));
       }
-      // Non-repo / GitError must not abort callers that enumerate projects or
-      // sessions (e.g. sidebar discovery). Log a warning and continue.
       if (isNonRepoGitError(error)) {
         console.warn('Git status skipped for non-repository path:', extractGitErrorText(error));
         return res.json(nonRepoStatusPayload());
@@ -961,9 +895,6 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // The same reads as GET /api/git/diff for many paths of one side, so a
-  // client that needs a whole changeset makes one request instead of one per
-  // file. Per-path failures are entries of the answer, not a failed request.
   app.post('/api/git/diffs', async (req, res) => {
     const { getPathDiffs } = await getGitLibraries();
     try {
@@ -1322,9 +1253,6 @@ export function registerGitRoutes(app, {
       }
 
       const [remotes, addresses] = await Promise.all([getRemotes(directory), getRepositoryRemoteUrls(directory)]);
-      // Git operations here cannot use a remote on disk, so it is not offered.
-      // `getRemotes` reads an address with a space as empty, so the addresses
-      // that decide this come from the reader repository identity uses.
       const onDisk = new Set(addresses
         .filter((remote) => isDiskPathRemoteUrl(remote.fetchUrl) || isDiskPathRemoteUrl(remote.pushUrl))
         .map((remote) => remote.name));
@@ -1356,15 +1284,12 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // A review host's preflight: gives the checked-out commit the Change-Id
-  // trailer its commit-msg hook would have added, computed locally.
   app.post('/api/git/change-id', userAction(async (req, res) => {
     const directory = resolveDirectoryQuery(req.query?.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     try {
       const { addChangeIdToHead } = await import('../source-control/change-id.js');
       const { sha, changeId, branch } = await addChangeIdToHead(directory, req.body?.expectedHead);
-      // The cached status of that branch was read for the old tip.
       onBranchRewritten?.({ directory, branch });
       return res.json({ sha, changeId });
     } catch (error) {
@@ -1519,7 +1444,6 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      // Only `remote=live` asks every remote over the network.
       const branches = await getBranches(directory, { remote: req.query.remote === 'live' ? 'live' : 'local' });
       res.json(branches);
     } catch (error) {
@@ -1727,9 +1651,6 @@ export function registerGitRoutes(app, {
       }
 
       const worktrees = await enrichWorktreeProvenance(await getWorktrees(directory));
-      // An empty list means "not a repository", or a bare repository with no
-      // linked worktree yet; neither has topology to track. A worktree created
-      // from the terminal in such a repository shows up on the next list call.
       if (worktrees.length > 0) {
         void observeWorktreeTopology(directory);
       }
@@ -1738,16 +1659,11 @@ export function registerGitRoutes(app, {
       if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') {
         return res.status(500).json({ error: 'Failed to verify contributor worktree provenance', code: 'UNKNOWN' });
       }
-      // A directory outside any repository still answers `[]` from getWorktrees.
-      // Anything else is a real failure the client must not mistake for "no
-      // worktrees", or it would drop the ones it already knows.
       console.error('Failed to get worktrees:', error);
       res.status(500).json({ error: error.message || 'Failed to get worktrees' });
     }
   });
 
-  // User renames win. A session move seeds an agent-owned title unless the
-  // session's title was explicitly given by the user.
   app.put('/api/git/worktrees/title', userAction(async (req, res) => {
     const { setWorktreeTaskTitle } = await getGitLibraries();
     try {
@@ -1766,7 +1682,6 @@ export function registerGitRoutes(app, {
     }
   }));
 
-  // The user pinning a worktree's task to the top of the sidebar, or unpinning it.
   app.put('/api/git/worktrees/pin', userAction(async (req, res) => {
     const { setWorktreePinned } = await getGitLibraries();
     try {
@@ -1820,7 +1735,6 @@ export function registerGitRoutes(app, {
       }
       res.json(await worktreeCreation.create(directory, req.body || {}));
     } catch (error) {
-      // A refusal carries the same error shape as every other one here, so the reason reaches the user.
       if (error instanceof WorktreeCreationError) {
         const body = { error: error.message, code: error.code };
         if (error.remoteName !== undefined) body.remoteName = error.remoteName;
@@ -1878,7 +1792,6 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // A user action, so the teardown command gets the project's current environment, as creation does.
   app.delete('/api/git/worktrees', userAction(async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {
@@ -1917,9 +1830,6 @@ export function registerGitRoutes(app, {
     }
   }));
 
-  // Runs a worktree's teardown commands without removing it: a delete that also
-  // removes the remote branch calls this first, so a failing teardown stops it
-  // before the remote branch goes.
   app.post('/api/git/worktrees/teardown', userAction(async (req, res) => {
     const { teardownWorktree } = await getGitLibraries();
     const directory = resolveDirectoryQuery(req.query.directory);
@@ -1953,8 +1863,6 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // Archived worktrees: `directory` is the project (any of its checkouts),
-  // except restore, which works in the new checkout of the archive's branch.
   const ARCHIVE_ERROR_STATUS = new Map([
     ['WORKTREE_ARCHIVE_NOT_FOUND', 404],
     ['WORKTREE_ARCHIVE_IN_PROGRESS', 409],
@@ -2168,7 +2076,5 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // The session service creates worktrees from change requests through the
-  // same checks the route uses.
   return { createWorktree: worktreeCreation.create, createWorktreeInstanceDisposer };
 }

@@ -18,9 +18,6 @@ const EVICTABLE_STATES = new Set(['succeeded', 'partial', 'conflicted', 'failed'
 const STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
 ]);
-// The operations this build plans and resumes. A record naming another one was
-// written by a build with a wider catalogue: readable and reconcilable, never
-// resumable here.
 const OPERATIONS = new Set([
   'fetch', 'pull', 'push', 'delete-remote-branch', 'sync', 'clone',
   'contributor-fetch', 'checkout-hydration', 'checkout-actions',
@@ -74,12 +71,7 @@ const exactKeys = (value, required, optional = []) => {
 const isIdentifier = (value, max = 1024) => isString(value) && value.length > 0
   && value.length <= max && value.trim() === value && !/[\0\r\n]/.test(value);
 const isOperationId = (value) => isString(value) && /^[A-Za-z0-9_-]{1,200}$/.test(value);
-// A name this build does not know is printed in a warning, so it is a name and
-// not free text: kebab-case carries no scheme, path or secret.
 const isVocabularyName = (value) => isString(value) && /^[a-z][a-z0-9-]{0,63}$/.test(value);
-// A name this build cannot read gets no shape rules, but its target must still
-// not carry what this store exists to keep out: endpoints, paths, credentials,
-// process output. Keys and values stay bounded names and opaque scalars.
 const isOpaqueTargetValue = (value, key = '', depth = 0) => {
   if (depth > 8) return false;
   if (value === null || value === true || value === false || Number.isSafeInteger(value)) return true;
@@ -102,9 +94,6 @@ const foreignNames = (record) => {
   const operation = snapshot?.target?.operation;
   const steps = Array.isArray(snapshot?.completedSteps)
     ? snapshot.completedSteps.filter((step) => !STEPS.has(step)) : [];
-  // Codes come only from the error positions the parser validated as code
-  // names; a `code` inside an opaque foreign target is bounded text that may
-  // carry terminal escapes, so it is kept in the file and never printed.
   const errors = [
     snapshot?.error,
     ...(Array.isArray(snapshot?.stepResults) ? snapshot.stepResults.map((step) => step?.error) : []),
@@ -146,8 +135,6 @@ const isSafeDisplayEndpoint = (value) => {
   try {
     const endpoint = new URL(value);
     const pathname = decodeURIComponent(endpoint.pathname);
-    // Plain HTTP only to this machine (a provider's loopback development
-    // instance); the planner decided it may be reached.
     return (['https:', 'ssh:'].includes(endpoint.protocol) || (endpoint.protocol === 'http:' && isLoopbackHost(endpoint.hostname)))
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
@@ -264,8 +251,6 @@ const isTransport = (value) => {
     && isVerification(value.verification, value.mode);
 };
 const isRef = (value) => isIdentifier(value, 4096) && value.startsWith('refs/');
-// Revision 0 is a repository nobody bound: its remotes use system Git, and the
-// planner and binding service accept it, so its operations are stored too.
 const isRepositoryTargetBase = (value, operation, required = [], optional = []) => isPlainObject(value)
   && exactKeys(value, ['operation', 'repositoryId', 'bindingRevision', 'configRevision', 'remote', ...required], optional)
   && value.operation === operation
@@ -360,8 +345,6 @@ const isHydration = (value, allowUnknownVocabulary = false) => isPlainObject(val
   && value.lfs.every((part) => isHydrationPart(part, allowUnknownVocabulary))
   && expectedHydrationStatus([...value.submodules, ...value.lfs]) === value.status;
 const isSnapshot = (value, operationId, state, completedSteps, allowUnknownVocabulary = false) => {
-  // A record this build cannot name keeps its envelope, its state rules and the
-  // public-value bounds; only the operation-specific shape is out of reach.
   const foreignOperation = allowUnknownVocabulary && !OPERATIONS.has(value?.target?.operation);
   const errorCodeFits = (code) => STATE_ERROR_CODES[state]?.has(code)
     || (allowUnknownVocabulary && !ERROR_CODES.has(code) && isErrorCodeName(code));
@@ -381,8 +364,6 @@ const isSnapshot = (value, operationId, state, completedSteps, allowUnknownVocab
       : ['planned', 'running'].includes(state) ? value.error === undefined
         : isPublicError(value.error, allowUnknownVocabulary) && errorCodeFits(value.error.code))
     && (value.stepResults === undefined
-      // Ordered sync results belong to a sync, and to a record naming an
-      // operation this build cannot place.
       ? !(value.target.operation === 'sync' && TERMINAL_STATES.has(state))
       : (value.target.operation === 'sync' || foreignOperation)
         && isStepResults(value.stepResults, allowUnknownVocabulary))
@@ -395,9 +376,6 @@ const isSnapshot = (value, operationId, state, completedSteps, allowUnknownVocab
     && validatePublicValue(value);
 };
 
-// The process that claimed a record. Several OpenChamber servers may share one
-// data directory (the desktop app and a CLI server, say), so recovery must not
-// treat another live server's running operation as one a restart interrupted.
 const isOwner = (value) => isPlainObject(value)
   && exactKeys(value, ['pid', 'host', 'instance'])
   && Number.isSafeInteger(value.pid) && value.pid > 0
@@ -531,8 +509,6 @@ export function createGitNetworkOperationStore({
     catch (error) { return error?.code === 'EPERM'; }
   };
   let writes = Promise.resolve();
-  // Holds only the foreign records of the latest read, so it stays within
-  // maxRecords and a record still in the file is reported once per store.
   let reportedForeignRecords = new Set();
   const reportForeignRecords = (foreign) => {
     for (const [id, record] of foreign) {

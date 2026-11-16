@@ -13,13 +13,6 @@ const MAX_QUERY_BYTES = 64 * 1024;
 const NONE = Object.freeze({ mode: 'none' });
 const SYSTEM = Object.freeze({ mode: 'system' });
 
-/**
- * The origin a redacted remote URL points at: HTTPS, or plain HTTP on a
- * loopback host (a provider's local development instance; the credential
- * resolver then answers only when that loopback origin is the credential's
- * own provider instance and the provider allows loopback HTTP, the rule
- * every managed transfer follows). Null for anything else.
- */
 const transferOrigin = (displayUrl) => {
   try {
     const url = new URL(displayUrl);
@@ -36,36 +29,14 @@ const queryOrigin = (query) => {
   return transferOrigin(`${protocol}://${host}`);
 };
 
-/** A repository path without its slashes or `.git`, so `o/r` and `/o/r.git` compare equal. */
 const repositoryPath = (value) => value.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
 
-/**
- * Whether Git's query path names this remote URL's repository. git-lfs asks
- * for the LFS endpoint under it (`o/r.git/info/lfs`), which is the same
- * repository.
- */
 const pathMatches = (queryPath, displayUrl) => {
   const own = repositoryPath(new URL(displayUrl).pathname);
   const asked = queryPath.replace(/^\/+|\/+$/g, '');
   return repositoryPath(asked) === own || asked.startsWith(`${own}/`) || asked.startsWith(`${own}.git/`);
 };
 
-/**
- * The grant that answers for this endpoint: `{ grant, endpointUrl }`, the
- * string `'unavailable'`, or null when no grant names the endpoint.
- *
- * Git sends the repository path because the repository's `.git/config` turns
- * on `credential.useHttpPath`, so an origin and a fork on the same host, bound
- * to different accounts, each get their own. A repository configured before
- * that sends no path; it is answered only when every grant on the host agrees.
- *
- * A grant only answers while the binding still matches the repository's own
- * remotes and is ready, which is the same readiness the Git panel shows. A
- * grant that names the endpoint but is not ready (its account was
- * disconnected, or the remote changed) is unavailable rather than absent:
- * handing it to the machine's own chain would push as another account while
- * the panel says this one needs repair.
- */
 const grantForEndpoint = (read, origin, queryPath) => {
   const current = new Map(read.repository.remotes.map((remote) => [remote.name, remote]));
   const matches = [];
@@ -77,7 +48,6 @@ const grantForEndpoint = (read, origin, queryPath) => {
     const vouched = remote && grant.readiness === 'ready'
       && grant.fetch.fingerprint === remote.fetch.fingerprint
       && grant.push.fingerprint === remote.push.fingerprint;
-    // System needs no acknowledgement to be what it already is: the machine.
     matches.push(vouched || grant.mode === 'system' ? { grant, endpointUrl: urls[0] } : 'unavailable');
   }
   if (matches.length === 0) return null;
@@ -87,13 +57,6 @@ const grantForEndpoint = (read, origin, queryPath) => {
   return sameAnswer ? first : 'unavailable';
 };
 
-/**
- * The endpoint to resolve the credential against.
- *
- * The repository's own remote URL is canonical: Git's query path may be an
- * LFS sub-path or missing (a repository configured before path matching), and
- * the grant is what decides the account, so the endpoint comes from there.
- */
 const credentialEndpoint = (endpointUrl) => {
   const url = new URL(endpointUrl);
   const protocol = url.protocol === 'http:' ? 'http' : 'https';
@@ -105,22 +68,6 @@ const credentialEndpoint = (endpointUrl) => {
   };
 };
 
-/**
- * OpenChamber answering Git wherever a repository names it.
- *
- * A repository given an identity with an account has `.git/config` name this
- * helper as its credential chain, so `git push` acts as that account from
- * any shell: the person's terminal, the agent's, a script. The helper reaches
- * the server through an endpoint file in the data directory that the server
- * rewrites on every start, port and secret included, so a repository's
- * configuration stays valid across restarts and app updates.
- *
- * The server answers only for the repository the helper runs in: the grant
- * of that repository's own binding, resolved to a credential for this one
- * request. A repository bound to System Git, or nothing, is handed back to
- * the person's own chain by the helper itself. Nothing is persisted here
- * beyond the endpoint file, and no secret ever reaches a repository.
- */
 export function createGitRepositoryCredentialRuntime({
   readBinding,
   credentialResolver,
@@ -197,14 +144,7 @@ export function createGitRepositoryCredentialRuntime({
   };
 
   return Object.freeze({
-    /** The command a repository's `.git/config` names as its credential helper. */
     helperCommand: () => `!'${launcherPath.replace(/\\/g, '/').replace(/'/g, `'\\''`)}'`,
-    /**
-     * Writes what Git needs to reach this server: the launcher, which pins
-     * this executable and tells Electron to run as Node, and the endpoint
-     * file with the port and a fresh secret. Called once the server listens;
-     * a repository configured against an earlier start keeps working.
-     */
     publish: async () => {
       const port = getActivePort();
       if (!Number.isInteger(port) || port <= 0) {
@@ -213,8 +153,6 @@ export function createGitRepositoryCredentialRuntime({
       activeSecret = randomBytes(32).toString('base64url');
       const url = `http://${callbackHost()}:${port}/api/git/repository-credential`;
       await writePrivate(endpointFilePath, `${JSON.stringify({ version: 1, url, secret: activeSecret })}\n`, 0o600);
-      // No `exec`: under Electron the command starts with a variable
-      // assignment, which `exec` would take for the program to run.
       const script = `#!/bin/sh\n${helperShellCommand(path.resolve(helperPath), [endpointFilePath], helperLaunch)} "$@"\n`;
       await writePrivate(launcherPath, script, 0o700);
     },
