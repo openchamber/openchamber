@@ -6,6 +6,7 @@
     {
       "id": "list",
       "name": "Sessions in the sidebar",
+      "sources": ["packages/ui/src/components/session/SessionSidebar.tsx", "packages/ui/src/components/session/sidebar/SessionSidebarRows.tsx", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts", "packages/ui/src/components/session/sidebar/list/useSessionListSync.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx"],
       "what": "The sidebar lists the project's sessions; a click opens one, and the open one is highlighted.",
       "reach": "The left sidebar, under In work and under the project.",
       "proof": "Every session has a row with its title; a click shows that session's chat, highlights its row and puts its id in the URL.",
@@ -59,6 +60,7 @@
     {
       "id": "live",
       "name": "Live updates from other clients",
+      "sources": ["packages/ui/src/components/session/sidebar/list/useSessionListSync.ts"],
       "what": "Sessions and messages created elsewhere (another window, the CLI, a phone) appear without a reload, also after the server was down for a while.",
       "reach": "Keep the app open while another client works in the project.",
       "proof": "A session created elsewhere gets a row; a prompt sent elsewhere into the open session shows with its answer; both still arrive after the server restarted under an open page.",
@@ -107,6 +109,7 @@
     {
       "id": "manage",
       "name": "Renaming, finishing, archiving and deleting",
+      "sources": ["packages/ui/src/components/layout/Header.tsx", "packages/ui/src/components/layout/HeaderSessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx"],
       "what": "The session menu renames and deletes a session; a row's buttons mark it done or archive it.",
       "reach": "The ... beside the session title above the chat, or the buttons a sidebar row shows on hover.",
       "proof": "The new title shows in the row and stays after a reload; a done session leaves In work; archive and delete ask to confirm, then the session leaves the sidebar and stays gone after a reload.",
@@ -188,6 +191,7 @@
     {
       "id": "row-open",
       "name": "Opening a session from its row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/rowBoxClick.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sessionSidePanel.ts"],
       "what": "Any point of a row opens its session, Enter opens the focused row, Shift+click opens it beside the current one.",
       "reach": "The left sidebar's session rows.",
       "proof": "A click on the row's box outside the title opens it; Enter on a focused row opens it; Shift+click shows the session's chat in the right panel and keeps the current one open.",
@@ -240,6 +244,7 @@
     {
       "id": "row-rename",
       "name": "Renaming a session in its row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowRename.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowRename.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx"],
       "what": "Double-click on a row, or Rename in its right-click menu, turns the title into a field; Enter, the check or a click elsewhere saves, Escape keeps the old title.",
       "reach": "Double-click a session row, or right-click it and pick Rename.",
       "proof": "The field holds the whole title selected, so typing replaces it; the saved title shows in the row and survives a reload; after Escape the old title is back.",
@@ -335,6 +340,7 @@
     {
       "id": "row-menu",
       "name": "A row's right-click menu",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/useSessionRowMenus.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionActionsMenuItems.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionMarkdownExport.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sections/PinToMenu.tsx", "packages/ui/src/components/session/SessionFolderItem.tsx", "packages/ui/src/components/session/MoveSessionDialog.tsx"],
       "what": "Right-click on a row, or Shift+F10 on a focused one, opens the session menu; from it the user pins the session, files it in a new folder, moves it to another project or exports it.",
       "reach": "Right-click a session row in the sidebar.",
       "proof": "The menu opens on the row; a pinned row carries the pin mark; New folder files the session in a folder named in place; Another project opens the Move session dialog; Export Markdown says the session was exported.",
@@ -428,6 +434,7 @@
     {
       "id": "row-actions",
       "name": "A row's hover buttons",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/sessionRowLayout.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/pages/SidebarPageRow.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],
       "what": "Pointing at a row shows its buttons: Track as in work for a session that is not in work, and Archive, which turns into Delete while Shift is held and then deletes without asking.",
       "reach": "Point at a session row in the sidebar.",
       "proof": "Track puts the session under In work; with Shift held the button reads Delete, and its click removes the session with no dialog, for good.",
@@ -479,6 +486,7 @@
     {
       "id": "row-state",
       "name": "What a row says about its session",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/useSessionRowLiveState.ts", "packages/ui/src/components/session/sidebar/sessions/sessionRowMarks.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionRowTooltipBody.tsx", "packages/ui/src/components/session/sidebar/sessions/useScrollDismissedTooltip.ts", "packages/ui/src/components/session/SessionActivityIndicator.tsx", "packages/ui/src/components/session/SessionActivityDuration.tsx"],
       "what": "A row shows a running mark and the elapsed time while the agent works, an unread mark, the turn's time and a bold title once a turn ends unseen, a shield or a question mark while the agent waits on the user, the goal mark while it works toward a goal, and a tooltip with the title and project.",
       "reach": "Watch a session's row while it works in the background; point at a row.",
       "proof": "Each mark shows in its state and leaves when the state ends: opening the session clears unread; Alt+click marks a read session unread and back.",
@@ -585,6 +593,7 @@
     {
       "id": "row-tree",
       "name": "Subsessions under a row",
+      "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowChevrons.tsx", "packages/ui/src/components/session/sidebar/sessions/useExpandedParents.ts", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx"],
       "what": "A row with sessions nested under it opens and closes them with its chevron, in one-line and in Detailed rows.",
       "reach": "A session whose agent started a worker of its own; its chevron in the sidebar.",
       "proof": "Expand shows the nested row, Collapse hides it again.",
@@ -626,6 +635,7 @@
     {
       "id": "row-select",
       "name": "Selecting several sessions",
+      "sources": ["packages/ui/src/components/session/sidebar/shell/SidebarHeader.tsx", "packages/ui/src/components/session/sidebar/sessions/useSessionRowInteractions.ts", "packages/ui/src/components/session/sidebar/sessions/sessionRowOrder.tsx", "packages/ui/src/components/session/sidebar/sessions/SessionNodeItem.tsx", "packages/ui/src/components/session/sidebar/sessionSidebarRowModel.ts"],
       "what": "In Select sessions mode a click picks a row instead of opening it, Shift+click picks every row between; the open session is filled once even when it is listed twice.",
       "reach": "Display mode in the sidebar header > Select sessions.",
       "proof": "Picked rows say so and the open session stays open; a session listed in In work and under its project has one filled row.",
