@@ -270,6 +270,439 @@
       ]
     },
     {
+      "id": "tool-rows",
+      "name": "Opening a tool row",
+      "what": "Each tool call the agent made is a row; opening it shows what the call did in that tool's own terms: a command's output, the file a write created, the task list, a search's matches, the error of a failed call, a script's JSON answer, calls and cut output, what an OpenCode or OpenChamber tool did.",
+      "reach": "Open a session where the agent ran a command, wrote a file, set a task list, searched, made a failing edit or ran a script; click a row, or focus it and press Enter or Space.",
+      "proof": "Collapsed, the row shows only its name and target; opened, the output, the written lines, every task, the error or the JSON shows under it, and a second click or key hides it again.",
+      "scenarios": [
+        {
+          "id": "shell-output",
+          "kind": "path",
+          "title": "Opening a Shell Command row shows what the command printed, and Copy output copies it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools shell output"},
+            {"do": "session.send", "session": "s", "prompt": "Print the verify banner in the shell."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.message", "text": "verify-banner-42", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.message", "text": "verify-banner-42"},
+            {"do": "see", "on": "chat.message", "text": "verify-second-56"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "click", "on": "chat.toolCopyOutput"},
+            {"do": "clipboard", "contains": "verify-banner-42\nverify-second-56"}
+          ]
+        },
+        {
+          "id": "keyboard",
+          "kind": "path",
+          "title": "Enter and Space on a focused tool row close and open it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools keyboard"},
+            {"do": "session.send", "session": "s", "prompt": "Print the verify banner in the shell."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.message", "text": "verify-banner-42"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "chat.message", "text": "verify-banner-42"},
+            {"do": "press", "key": " "},
+            {"do": "see", "on": "chat.message", "text": "verify-banner-42"}
+          ]
+        },
+        {
+          "id": "write-preview",
+          "kind": "path",
+          "title": "A Write File row counts the written lines and opens to them as added lines",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools write"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "+5"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "second-note-line", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Write File"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "second-note-line"}
+          ]
+        },
+        {
+          "id": "task-list",
+          "kind": "path",
+          "title": "A Tasks row names the task in progress and opens to the whole list",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools tasks"},
+            {"do": "session.send", "session": "s", "prompt": "Plan the verify work as a task list."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "1/3 · Patch the verify retry"},
+            {"do": "see", "on": "chat.message", "text": "Rerun the verify suite", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Tasks"},
+            {"do": "see", "on": "chat.message", "text": "Reproduce the verify failure"},
+            {"do": "see", "on": "chat.message", "text": "Rerun the verify suite"}
+          ]
+        },
+        {
+          "id": "failed-call",
+          "kind": "break",
+          "title": "A failed Edit File row opens to the error the tool reported",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools failure"},
+            {"do": "session.send", "session": "s", "prompt": "Edit the verify marker that is not in retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.message", "text": "Could not find oldString", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Edit File"},
+            {"do": "see", "on": "chat.message", "text": "Error:"},
+            {"do": "see", "on": "chat.message", "text": "Could not find oldString in src/api/retry.ts"}
+          ]
+        },
+        {
+          "id": "json-output",
+          "kind": "path",
+          "title": "A script's JSON answer switches between a summary, the raw text and a tree, and copies",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools json"},
+            {"do": "session.send", "session": "s", "prompt": "Return the verify owners as JSON."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "Script"},
+            {"do": "click", "on": "chat.toolJsonView", "view": "navigable"},
+            {"do": "see", "on": "chat.message", "text": "owner-ALPHA · { revision: 3 }"},
+            {"do": "click", "on": "chat.toolJsonView", "view": "raw"},
+            {"do": "see", "on": "chat.message", "text": "\"id\":\"owner-BETA\""},
+            {"do": "gone", "on": "chat.message", "text": "owner-ALPHA · { revision: 3 }"},
+            {"do": "click", "on": "chat.toolJsonView", "view": "formatted"},
+            {"do": "gone", "on": "chat.message", "text": "\"id\":\"owner-BETA\""},
+            {"do": "see", "on": "chat.message", "text": "{2 items}"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "click", "on": "chat.toolCopyOutput"},
+            {"do": "clipboard", "contains": "\"id\":\"owner-ALPHA\""},
+            {"do": "click", "on": "chat.toolJsonView", "view": "navigable"},
+            {"do": "see", "on": "chat.message", "text": "owner-ALPHA · { revision: 3 }"}
+          ]
+        },
+        {
+          "id": "opencode-call",
+          "kind": "path",
+          "title": "A script's one OpenCode call reads as that call, and opens to its result with the raw answer a click away and back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools opencode call"},
+            {"do": "session.send", "session": "s", "prompt": "List the verify worktrees."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "OpenCode"},
+            {"do": "see", "on": "chat.toolRow", "text": "Listed worktrees"},
+            {"do": "click", "on": "chat.toolRow", "text": "Listed worktrees"},
+            {"do": "see", "on": "chat.message", "text": "/project"},
+            {"do": "see", "on": "chat.message", "text": "directory", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolAction", "text": "Show the raw answer"},
+            {"do": "see", "on": "chat.message", "text": "directory"},
+            {"do": "click", "on": "chat.toolAction", "text": "Show the summary"},
+            {"do": "gone", "on": "chat.message", "text": "directory"},
+            {"do": "see", "on": "chat.message", "text": "/project"},
+            {"do": "see", "on": "chat.toolAction", "text": "Show the raw answer"}
+          ]
+        },
+        {
+          "id": "openchamber-call",
+          "kind": "path",
+          "title": "A script's one OpenChamber call reads as that tool's action, and opens to its own view with the raw answer a click away",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools openchamber call"},
+            {"do": "session.send", "session": "s", "prompt": "Save the verify note to the project knowledge."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "Knowledge"},
+            {"do": "see", "on": "chat.toolRow", "text": "Saved to project knowledge · The verify runner answers from a fixture model."},
+            {"do": "click", "on": "chat.toolRow", "text": "Knowledge"},
+            {"do": "see", "on": "chat.toolAction", "text": "Open in Project knowledge"},
+            {"do": "click", "on": "chat.toolAction", "text": "Show the raw answer"},
+            {"do": "gone", "on": "chat.toolAction", "text": "Open in Project knowledge"},
+            {"do": "see", "on": "chat.toolAction", "text": "Show the summary"},
+            {"do": "click", "on": "chat.toolAction", "text": "Show the summary"},
+            {"do": "see", "on": "chat.toolAction", "text": "Open in Project knowledge"}
+          ]
+        },
+        {
+          "id": "search-output",
+          "kind": "path",
+          "title": "Opening a Search Files row shows what it searched for and what it found",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools search"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.message", "text": "Found 7 matches", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Search Files"},
+            {"do": "see", "on": "chat.message", "text": "Pattern: withRetry"},
+            {"do": "see", "on": "chat.message", "text": "Found 7 matches"}
+          ]
+        },
+        {
+          "id": "script-calls",
+          "kind": "path",
+          "title": "A script that called one namespace twice is titled by it, and opens to its code and its list of calls",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools script calls"},
+            {"do": "session.send", "session": "s", "prompt": "List the verify worktrees twice in one script."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "Listed worktrees ×2"},
+            {"do": "click", "on": "chat.toolRow", "text": "Listed worktrees ×2"},
+            {"do": "see", "on": "chat.message", "text": "const second = await tools.opencode.worktree_list()"},
+            {"do": "see", "on": "chat.message", "text": "Tool calls"},
+            {"do": "see", "on": "chat.toolCall", "text": "opencode.worktree_list", "count": 2}
+          ]
+        },
+        {
+          "id": "script-truncated",
+          "kind": "path",
+          "title": "A script whose output OpenCode cut says so in its opened row, with where the whole output is",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools script truncated"},
+            {"do": "session.send", "session": "s", "prompt": "Print the long verify report from a script."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "Script"},
+            {"do": "see", "on": "chat.message", "text": "Output was truncated — "},
+            {"do": "see", "on": "chat.message", "text": "/tool-output/"}
+          ]
+        },
+        {
+          "id": "openchamber-failure",
+          "kind": "break",
+          "title": "A failed OpenChamber call keeps its action's name and opens to the reason",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools openchamber failure"},
+            {"do": "session.send", "session": "s", "prompt": "Delete the verify note that does not exist."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "knowledge.delete"},
+            {"do": "click", "on": "chat.toolRow", "text": "knowledge.delete"},
+            {"do": "see", "on": "chat.message", "text": "Note not found: verify-missing-note"},
+            {"do": "see", "on": "chat.toolAction", "text": "Show the raw answer"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tool-files",
+      "name": "A file change from its tool row",
+      "what": "A row that wrote or edited a file opens that file in Files, opens its diff in Changes, and shows the edit unified or side by side.",
+      "reach": "In a session where the agent wrote or edited a file: the arrow after the row's name, or open the row and hover it for its file actions.",
+      "proof": "Files shows the file's tab and its lines, Changes shows the file's diff, and the edit in the row switches between one column and two.",
+      "scenarios": [
+        {
+          "id": "open-file",
+          "kind": "path",
+          "title": "The arrow after a Write File row's name opens the written file in Files",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools open file"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolOpenFile"},
+            {"do": "see", "on": "files.tab", "text": "verify-notes.md"},
+            {"do": "see", "on": "files.preview", "text": "second-note-line"}
+          ]
+        },
+        {
+          "id": "open-diff",
+          "kind": "path",
+          "title": "Open file diff on an opened Edit File row shows the file in Changes",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools open diff"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "isAbortError"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts", "count": 0, "timeout": 1},
+            {"do": "hover", "on": "chat.toolRow", "text": "+3"},
+            {"do": "click", "on": "chat.toolOpenDiff"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"}
+          ]
+        },
+        {
+          "id": "open-at-change",
+          "kind": "path",
+          "title": "Open file at first change on an opened Edit File row opens the file in Files scrolled to that line",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools open at change"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "isAbortError"},
+            {"do": "hover", "on": "chat.toolRow", "text": "+3"},
+            {"do": "click", "on": "chat.toolOpenAtChange"},
+            {"do": "see", "on": "files.tab", "text": "retry.ts"},
+            {"do": "see", "on": "files.line", "text": "// A cancelled request is the caller's decision", "inView": true},
+            {"do": "see", "on": "files.line", "text": "export interface RetryOptions", "inView": true, "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "diff-layout",
+          "kind": "path",
+          "title": "The side-by-side switch on an opened Edit File row shows the edit in two columns and back in one",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools diff layout"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "hover", "on": "chat.toolRow", "text": "+3"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.split"},
+            {"do": "gone", "on": "diff.unified"},
+            {"do": "hover", "on": "chat.toolRow", "text": "+3"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "gone", "on": "diff.split"}
+          ]
+        },
+        {
+          "id": "patch-files",
+          "kind": "path",
+          "title": "A patch over two files lists both on its row and opens to a diff with its own actions per file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools patch"},
+            {"do": "session.send", "session": "s", "prompt": "Add the two verify patch notes.", "model": "perf/gpt-5-scripted"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "patch-one.md"},
+            {"do": "see", "on": "chat.toolRow", "text": "patch-two.md"},
+            {"do": "see", "on": "chat.toolOpenDiff", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Apply Patch"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "patch-one-line"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "patch-two-line"},
+            {"do": "see", "on": "chat.toolOpenDiff", "count": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tool-running",
+      "name": "A command or subagent still at work",
+      "what": "While a command or subagent runs, its row shows it is working and offers Stop; opened, a command's row shows what it printed so far. A stopped one reads as stopped by the user, not failed.",
+      "reach": "Let the agent start a long command, one in the background, or a slow subagent, and watch its row.",
+      "proof": "Stop shows while it runs, the output so far shows in the opened row, and after Stop the row says stopped and Stop is gone.",
+      "scenarios": [
+        {
+          "id": "stop-command",
+          "kind": "path",
+          "title": "A running command shows its output so far and Stop, and reads as stopped after Stop",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools stop command"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "Run the long verify watcher in the shell.", "wait": false},
+            {"do": "see", "on": "chat.toolStop"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.message", "text": "verify-watcher-12"},
+            {"do": "click", "on": "chat.toolStop"},
+            {"do": "see", "on": "chat.toolRow", "text": "stopped"},
+            {"do": "see", "on": "chat.message", "text": "Stopped by you."},
+            {"do": "gone", "on": "chat.toolStop"}
+          ]
+        },
+        {
+          "id": "background-command",
+          "kind": "path",
+          "title": "A command moved to the background says so, and Stop ends it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools background command"},
+            {"do": "session.send", "session": "s", "prompt": "Run the verify watcher in the background."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "in background"},
+            {"do": "click", "on": "chat.toolRow", "text": "Shell Command"},
+            {"do": "see", "on": "chat.message", "text": "verify-background-25"},
+            {"do": "click", "on": "chat.toolStop"},
+            {"do": "see", "on": "chat.toolRow", "text": "stopped"},
+            {"do": "gone", "on": "chat.toolRow", "text": "in background"},
+            {"do": "gone", "on": "chat.toolStop"}
+          ]
+        },
+        {
+          "id": "stop-subagent",
+          "kind": "path",
+          "title": "A running subagent offers Stop, and reads as stopped after it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools stop subagent"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "Ask a slow subagent about the parser.", "wait": false},
+            {"do": "see", "on": "chat.toolRow", "text": "Verify slow parser"},
+            {"do": "see", "on": "chat.toolStop"},
+            {"do": "click", "on": "chat.toolStop"},
+            {"do": "see", "on": "chat.toolRow", "text": "stopped"},
+            {"do": "gone", "on": "chat.toolStop"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tool-conversation",
+      "name": "Subagents, questions and !commands as rows",
+      "what": "A subagent's row opens to its answer and to its own session; a question the agent asked shows what it asked and, once answered, what the user chose; a !command the user ran that failed says why on its row.",
+      "reach": "Let the agent hand work to a subagent or ask a question; run !ls on a folder that is not there.",
+      "proof": "The subagent's answer under its row and its session in a panel tab; the question's options, then only the chosen answer; the failure's last line on the closed row and the error in the opened one.",
+      "scenarios": [
+        {
+          "id": "subagent",
+          "kind": "path",
+          "title": "A subagent row opens to the subagent's answer, and its arrow opens the subagent's session",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools subagent"},
+            {"do": "session.send", "session": "s", "prompt": "Ask a subagent about the TypeScript bump."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.toolRow", "text": "Verify TypeScript bump"},
+            {"do": "see", "on": "chat.message", "text": "Bumped. Two errors came up", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.toolRow", "text": "Verify TypeScript bump"},
+            {"do": "see", "on": "chat.message", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.openSubtask"},
+            {"do": "see", "on": "panel.chatTab", "text": "Verify TypeScript bump"},
+            {"do": "see", "on": "panel", "text": "Bumped. Two errors came up"}
+          ]
+        },
+        {
+          "id": "question",
+          "kind": "path",
+          "title": "A question row shows the options while it waits and only the chosen answer after",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools question"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "Ask me which verify mode to use.", "wait": false},
+            {"do": "click", "on": "chat.toolRow", "text": "Question"},
+            {"do": "see", "on": "chat.message", "text": "Which verify mode should run?"},
+            {"do": "see", "on": "chat.message", "text": "Full verify"},
+            {"do": "click", "on": "dialog.button", "text": "Quick verify"},
+            {"do": "click", "on": "dialog.button", "text": "Submit"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "gone", "on": "chat.message", "text": "Full verify"},
+            {"do": "see", "on": "chat.message", "text": "Which verify mode should run?"},
+            {"do": "see", "on": "chat.message", "text": "Quick verify"}
+          ]
+        },
+        {
+          "id": "failed-command",
+          "kind": "break",
+          "title": "A failed !command says why on its closed row and shows the error when opened",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools failed command"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "!ls verify-missing-dir"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.anyToolRow", "text": "No such file or directory"},
+            {"do": "see", "on": "chat.scroller", "text": "Error:", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.anyToolRow", "text": "ls verify-missing-dir"},
+            {"do": "see", "on": "chat.scroller", "text": "Error:"},
+            {"do": "gone", "on": "chat.anyToolRow", "text": "No such file or directory"}
+          ]
+        },
+        {
+          "id": "question-dismissed",
+          "kind": "break",
+          "title": "A question the user dismissed opens to the dismissal as its error",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Tools question dismissed"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "Ask me which verify mode to use.", "wait": false},
+            {"do": "click", "on": "dialog.button", "text": "Dismiss"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "Question"},
+            {"do": "see", "on": "chat.message", "text": "The user dismissed this question"},
+            {"do": "gone", "on": "chat.message", "text": "Full verify"}
+          ]
+        }
+      ]
+    },
+    {
       "id": "prompt",
       "name": "Actions under a prompt",
       "what": "Under a prompt, on hover: the time it was sent, Copy, and a menu with Save as snippet, Select messages, Pin into context and Fork from here.",

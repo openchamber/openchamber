@@ -581,6 +581,140 @@ const VERIFY_TURNS = [
   operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
   operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
   operatorWorktreeTurn("operator_phone_1", OPERATOR_PHONE_PROMPT, "Phone worker", "phone-fix"),
+  // Tool rows of the chat (scripts/verify/zones/chat.json, feature `tools`):
+  // one turn per kind of row, each with output a scenario can name.
+  {
+    id: "tools_shell",
+    prompt: "Print the verify banner in the shell.",
+    steps: [{ text: "Printing it.", calls: [{ name: "shell", arguments: { command: "echo verify-banner-$((6 * 7)); echo verify-second-$((7 * 8))" } }] }],
+    answer: "The banner is printed.\n",
+  },
+  {
+    id: "tools_shell_long",
+    prompt: "Run the long verify watcher in the shell.",
+    steps: [{ text: "Starting the watcher.", calls: [{ name: "shell", arguments: { command: "echo verify-watcher-$((3 * 4)); sleep 120; echo verify-watcher-done" } }] }],
+    answer: "The watcher ended.\n",
+  },
+  {
+    id: "tools_shell_background",
+    prompt: "Run the verify watcher in the background.",
+    steps: [{ text: "Starting it in the background.", calls: [{ name: "shell", arguments: { command: "echo verify-background-$((5 * 5)); sleep 120", background: true } }] }],
+    answer: "The watcher runs in the background.\n",
+  },
+  {
+    id: "tools_write",
+    prompt: "Write the verify notes file.",
+    steps: [{ text: "Writing it.", calls: [{ name: "write", arguments: { path: "notes/verify-notes.md", content: "# Verify notes\n\nfirst-note-line\nsecond-note-line\n" } }] }],
+    answer: "The notes file is written.\n",
+  },
+  {
+    id: "tools_todo",
+    prompt: "Plan the verify work as a task list.",
+    steps: [{
+      text: "Planning it.",
+      calls: [{
+        name: "todowrite",
+        arguments: { todos: [
+          { content: "Reproduce the verify failure", status: "completed" },
+          { content: "Patch the verify retry", status: "in_progress" },
+          { content: "Rerun the verify suite", status: "pending" },
+        ] },
+      }],
+    }],
+    answer: "The list is set.\n",
+  },
+  {
+    id: "tools_failure",
+    prompt: "Edit the verify marker that is not in retry.ts.",
+    steps: [{ text: "Editing it.", calls: [{ name: "edit", arguments: { path: "src/api/retry.ts", oldString: "verify-marker-not-present", newString: "verify-marker-replaced" } }] }],
+    answer: "The marker is not there.\n",
+  },
+  {
+    id: "tools_json",
+    prompt: "Return the verify owners as JSON.",
+    steps: [{ text: "Collecting them.", calls: [{ name: "execute", arguments: { code: "const owners = ['alpha', 'beta'].map((name, index) => ({ id: 'owner-' + name.toUpperCase(), revision: index + 3 })); return { owners, total: owners.length }" } }] }],
+    answer: "Two owners.\n",
+  },
+  {
+    id: "tools_subagent",
+    prompt: "Ask a subagent about the TypeScript bump.",
+    steps: [{
+      text: "Asking a subagent.",
+      calls: [{ name: "subagent", arguments: { agent: "general", description: "Verify TypeScript bump", prompt: "Bump TypeScript to 5.7 and fix whatever breaks." } }],
+    }],
+    answer: "The subagent answered.\n",
+  },
+  {
+    id: "tools_subagent_slow",
+    prompt: "Ask a slow subagent about the parser.",
+    steps: [{
+      text: "Asking a subagent that takes its time.",
+      calls: [{ name: "subagent", arguments: { agent: "general", description: "Verify slow parser", prompt: "Look at the parser.", model: "perf/think-30s" } }],
+    }],
+    answer: "The slow subagent is on it.\n",
+  },
+  {
+    // OpenCode offers `patch` instead of `edit` and `write` only to GPT models: send it to `perf/gpt-5-scripted`.
+    id: "tools_patch",
+    prompt: "Add the two verify patch notes.",
+    steps: [{
+      text: "Adding both in one patch.",
+      calls: [{ name: "patch", arguments: { patchText: "*** Begin Patch\n*** Add File: notes/patch-one.md\n+patch-one-line\n*** Add File: notes/patch-two.md\n+patch-two-line\n*** End Patch" } }],
+    }],
+    answer: "Both notes are added.\n",
+  },
+  {
+    id: "tools_script_calls",
+    prompt: "List the verify worktrees twice in one script.",
+    steps: [{ text: "Listing twice.", calls: [{ name: "execute", arguments: { code: "const first = await tools.opencode.worktree_list(); const second = await tools.opencode.worktree_list(); return { lists: [first, second].length }" } }] }],
+    answer: "Listed twice.\n",
+  },
+  {
+    id: "tools_script_long",
+    prompt: "Print the long verify report from a script.",
+    steps: [{ text: "Printing it.", calls: [{ name: "execute", arguments: { code: "return Array.from({ length: 6000 }, (_, index) => 'verify report line ' + index).join('\\n')" } }] }],
+    answer: "The report is long.\n",
+  },
+  {
+    id: "tools_openchamber_failure",
+    prompt: "Delete the verify note that does not exist.",
+    steps: [{ text: "Deleting it.", calls: [{ name: "execute", arguments: { code: "return await tools.openchamber_knowledge({ action: 'knowledge.delete', parameters: { kind: 'note', id: 'verify-missing-note' } })" } }] }],
+    answer: "There was no such note.\n",
+  },
+  {
+    // The subagent's report comes back to the parent as a new message.
+    id: "tools_subagent_report",
+    prompt: "Verify TypeScript bump",
+    answer: "Noted the subagent's report.\n",
+  },
+  {
+    id: "tools_question",
+    prompt: "Ask me which verify mode to use.",
+    steps: [{
+      text: "Asking.",
+      calls: [{
+        name: "question",
+        arguments: { questions: [{
+          question: "Which verify mode should run?",
+          header: "Verify mode",
+          options: [{ label: "Quick verify", description: "Only the changed zone" }, { label: "Full verify", description: "Every zone" }],
+        }] },
+      }],
+    }],
+    answer: "Running that mode.\n",
+  },
+  {
+    id: "tools_opencode_call",
+    prompt: "List the verify worktrees.",
+    steps: [{ text: "Listing them.", calls: [{ name: "execute", arguments: { code: "return await tools.opencode.worktree_list()" } }] }],
+    answer: "Those are the worktrees.\n",
+  },
+  {
+    id: "tools_openchamber_call",
+    prompt: "Save the verify note to the project knowledge.",
+    steps: [{ text: "Saving it.", calls: [{ name: "execute", arguments: { code: "return await tools.openchamber_knowledge({ action: 'knowledge.save', parameters: { kind: 'note', body: 'The verify runner answers from a fixture model.' } })" } }] }],
+    answer: "Saved.\n",
+  },
 ]
 
 const TURNS = [

@@ -483,6 +483,9 @@ export const fixtureProviderConfig = (port) => ({
           { name: `Fixture agent, ${calls} tool calls ${parallel} at a time, then ${rate} characters/s`, tool_call: true },
         ])),
         ["agent-20tools-wait3000ms-300cps", { name: "Fixture agent, 20 tool calls, 3 s to each step's first token, then 300 characters/s", tool_call: true }],
+        // OpenCode gives `patch` instead of `edit` and `write` to models named
+        // `gpt-*`; this one exists so a scripted turn can call `patch`.
+        ["gpt-5-scripted", { name: "Fixture GPT-style model, patch tool", tool_call: true }],
       ]),
     },
   },

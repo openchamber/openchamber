@@ -154,6 +154,8 @@ const opencodeConfig = (fixturePort, deadPort) => {
     // Everything else runs without asking; a read of a `.secret` file asks,
     // so a scenario can show a permission request.
     permission: { read: { "*.secret": "ask" } },
+    // Released builds keep `todowrite` behind a flag; the chat's Tasks row needs it.
+    experimental: { todo: true },
   }
 }
 

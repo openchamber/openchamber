@@ -146,5 +146,14 @@
   "chat.fold": {"selector": "[data-live-turn-activity] button[aria-expanded]", "means": "The Activity header of a turn in Collapsed activity mode; a click opens or closes the turn's tool rows."},
   "chat.foldOpen": {"selector": "[data-live-turn-activity] button[aria-expanded=\"true\"]", "means": "An Activity header whose fold is open."},
   "chat.anyToolRow": {"selector": "[data-scrollbar=\"chat\"] [role=\"button\"][class*=\"group/tool\"]", "means": "A tool call row anywhere in the transcript, the row of a !command the user ran included; pair it with text."},
-  "chat.changedFile": {"selector": "[data-message-id] button[aria-label=\"Open {path}\"][title=\"{path}\"]", "means": "A file the turn changed, as a pill under the latest turn's answer (Settings > Chat: changed files)."}
+  "chat.changedFile": {"selector": "[data-message-id] button[aria-label=\"Open {path}\"][title=\"{path}\"]", "means": "A file the turn changed, as a pill under the latest turn's answer (Settings > Chat: changed files)."},
+  "chat.toolOpenFile": {"selector": "[data-message-id] button[aria-label=\"Open file\"]", "means": "The arrow after a file tool's name in its row (Edit File, Write File); opens the file in Files."},
+  "chat.toolOpenAtChange": {"selector": "[data-message-id] button[aria-label=\"Open file at first change\"]", "means": "The pencil an opened file change row shows on hover; opens the file in Files at its first changed line."},
+  "chat.toolOpenDiff": {"selector": "[data-message-id] button[aria-label=\"Open file diff\"]", "means": "The pull request icon an opened file change row shows on hover; opens the file's diff in Changes."},
+  "chat.toolCopyOutput": {"selector": "[data-message-id] button[aria-label=\"Copy output\"]", "means": "The copy button over a tool's output in an opened row (a command's output, JSON)."},
+  "chat.toolJsonView": {"selector": "[data-message-id] button[aria-label=\"Show {view} JSON\"]", "means": "A view switch over a tool's JSON output: view navigable (a summary), formatted (a tree) or raw (the text)."},
+  "chat.toolAction": {"selector": "[data-message-id] [aria-hidden=\"false\"] button", "means": "A button inside an opened tool row; pair it with its text (Show the raw answer, Show the summary)."},
+  "chat.toolCall": {"selector": "[data-message-id] [aria-hidden=\"false\"] li", "means": "A call in the Tool calls list of an opened Script row; pair it with the tool's name."},
+  "chat.toolStop": {"selector": "[data-message-id] button[aria-label=\"Stop command\"], [data-message-id] button[aria-label=\"Stop subagent\"]", "means": "The red Stop at the end of a tool row whose command or subagent still runs."},
+  "panel.chatTab": {"selector": "[data-right-slot] [role=\"tab\"]", "means": "A tab of the context panel, such as a subagent's chat opened from its row; pair it with its label."}
 }
