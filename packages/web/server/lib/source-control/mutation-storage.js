@@ -48,7 +48,6 @@ const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
 const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'draft', 'commented', 'failureStatus', 'failureCode'];
-// A merge GitHub accepted without finishing it yet: in a merge queue, or still running.
 const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
 const emptyState = () => ({ version: VERSION, records: {} });
@@ -62,8 +61,6 @@ const hasExactKeys = (value, required, optional = []) => {
 };
 const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
 const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
-// Revision 0 is the designed no-binding state the binding service accepts
-// (DOCUMENTATION.md, binding-service section), so the storage gate matches it.
 const isNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const isFailureStatus = (value) => Number.isSafeInteger(value) && value >= 400 && value <= 599;
 
@@ -86,8 +83,6 @@ const isActor = (value) => isPlainObject(value)
   && isNonEmptyString(value.instance)
   && isNonEmptyString(value.accountId);
 
-// A project's owner is empty only for a top-level project of a provider whose
-// projects need none (`repositoryPath: 'path'`, Gerrit's `demo`).
 const isProject = (value, provider) => isPlainObject(value)
   && hasExactKeys(value, ['id', 'owner', 'name'])
   && isNonEmptyString(value.id)
@@ -304,7 +299,6 @@ export function createMutationStore({
     const state = await readState();
     const existing = Object.hasOwn(state.records, key) ? state.records[key] : undefined;
     if (!existing) throw mutationError('SOURCE_CONTROL_MUTATION_NOT_FOUND', 'Source control mutation record was not found');
-    // The result's project is checked against the record's provider.
     if (completion.result !== undefined && !isTerminalResult(completion.result, existing.actor.provider)) throw invalidState();
     const result = copyResult(completion.result);
     if (existing.inputDigest !== inputDigest) {

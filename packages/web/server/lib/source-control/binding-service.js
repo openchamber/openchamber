@@ -30,7 +30,6 @@ const requiredString = (value, name, makeError = bindingInputError) => {
   return value.trim();
 };
 
-// Extension IDs are opaque strings; whitespace can be part of the verified identity.
 const requiredIdentityString = (value, name, provider, makeError = bindingInputError) => {
   if (!isExtensionProviderId(provider)) return requiredString(value, name, makeError);
   if (!isString(value) || !value.length) throw makeError(`${name} is required`);
@@ -43,13 +42,6 @@ const providerOrigin = (provider, instance) => {
   return descriptor.instance.origin(instance);
 };
 
-/**
- * The repository an approved endpoint names on one instance, or throws.
- *
- * An SSH endpoint counts when its host is the instance hostname, when it is an
- * alias the server user's SSH configuration resolves to that hostname, or when
- * its host and port are the instance's separate SSH address `sshUrl`.
- */
 const providerRepositoryForEndpoint = async (provider, instance, endpoint, { reachesInstance = sshHostReaches, sshUrl = null } = {}) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
@@ -61,8 +53,6 @@ const providerRepositoryForEndpoint = async (provider, instance, endpoint, { rea
   const configuredSsh = parseSshUrl(sshUrl);
   const hostMatches = normalized.host === hostname
     || ((provider === 'gitea' || provider === 'forgejo') && normalized.protocol === 'ssh'
-      // URL display metadata strips the SSH user. Without the raw endpoint,
-      // Match user cannot establish which service Git would reach.
       && !endpoint.displayUrl.includes('://')
       && await reachesInstance(normalized.host, hostname, sshUserOf(endpoint.displayUrl)))
     || (normalized.protocol === 'ssh' && configuredSsh !== null
@@ -75,27 +65,16 @@ const providerRepositoryForEndpoint = async (provider, instance, endpoint, { rea
     ? descriptor.projectPathOfRemote({ protocol: normalized.protocol, path: normalized.path })
     : normalized.path.replace(/\.git$/i, '');
   const parts = isString(path) ? path.split('/') : [];
-  // A path provider (Gerrit) also hosts projects with no owner segment.
   const minimum = allowsTopLevelProjects(descriptor) ? 1 : 2;
   if (parts.length < minimum || parts.some((part) => !part)) throw bindingInputError('provider repository path is invalid');
   return splitProjectPath(path);
 };
 
-/**
- * Sets the association's informational `repository`, left out for a
- * top-level project (an empty owner): persisted bindings keep a non-empty
- * owner, so the file stays readable by builds that predate such projects.
- */
 const assignRepository = (association, repository) => {
   if (repository.owner) association.repository = repository;
   else delete association.repository;
 };
 
-/**
- * The provider associations an approved binding input names, or throws. Each
- * instance answers with its own SSH address, read by the caller, so one remote
- * on a split host does not make every instance match it.
- */
 const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshHostReaches, sshUrls = new Map() } = {}) => {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
@@ -208,9 +187,6 @@ const parseAuxiliary = (value) => {
   return bindings;
 };
 
-/**
- * A managed credential can serve only the protocol it was issued for.
- */
 const credentialServesEndpoint = (credentialId, rawEndpoint) => {
   try {
     return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
@@ -219,16 +195,6 @@ const credentialServesEndpoint = (credentialId, rawEndpoint) => {
   }
 };
 
-/**
- * The grant a submodule or LFS endpoint inherits when none names it.
- *
- * A checkout's submodules and LFS objects are fetched the way the checkout
- * itself is: an unbound repository uses the machine's own Git for them, and
- * a bound one answers with the parent remote's own grant when the endpoint
- * lives on the same host, which is where a project's submodules nearly always
- * are. A different host is a different trust decision and is left to an
- * explicit grant.
- */
 const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
   if (!binding) return { mode: 'system', readiness: 'ready' };
   const parent = parentRemote ? binding.remotes.find((entry) => entry.name === parentRemote) : null;
@@ -244,9 +210,6 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
   }
   if (!endpointHost || endpointHost !== parentHost) return null;
   if (parent.mode === 'managed') {
-    // An SSH key cannot authenticate an HTTPS LFS or submodule endpoint, and
-    // an HTTPS credential cannot authenticate an SSH one. The endpoint needs
-    // its own grant when the parent's transport cannot serve it.
     return parent.credentialId && credentialServesEndpoint(parent.credentialId, rawEndpoint)
       ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
       : null;
@@ -254,10 +217,6 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
   return { mode: parent.mode, readiness: 'ready' };
 };
 
-/**
- * The remote grant that stands for the repository's identity: the one its
- * provider association names, else `origin`, else the first ready one.
- */
 const identityRemoteGrant = (binding) => {
   const ready = binding.remotes.filter((entry) => entry.readiness === 'ready');
   const primary = binding.providers[0]?.primaryRemote;
@@ -275,18 +234,6 @@ const endpointAuthority = (url) => {
   }
 };
 
-/**
- * The grant a remote without its own record inherits from the repository's
- * identity.
- *
- * An identity answers for the repository rather than for one address. The
- * System identity reaches every remote the way the machine's Git does; an
- * account, a key or an anonymous read reaches every remote on the host and
- * protocol it was granted for, a fork beside its upstream included. A remote
- * elsewhere, or one its transport cannot speak, stays without a grant until
- * it is given its own. A remote's own record always wins, and inherited
- * grants are never persisted: they follow the identity as it changes.
- */
 const inheritedRemoteGrant = (binding, remote) => {
   const parent = identityRemoteGrant(binding);
   if (!parent || !remote.fetch || !remote.push) return null;
@@ -308,7 +255,6 @@ const inheritedRemoteGrant = (binding, remote) => {
   return Object.freeze(grant);
 };
 
-/** The grant an unconfigured repository holds for one of its remotes. */
 const implicitSystemRemote = (remote) => Object.freeze({
   name: remote.name, mode: 'system', readiness: 'ready',
   fetch: { fingerprint: remote.fetch?.fingerprint }, push: { fingerprint: remote.push?.fingerprint },
@@ -341,11 +287,6 @@ const normalizeProviderInstance = (provider, instance, makeError = bindingInputE
   }
 };
 
-/**
- * The spelling two records of one provider compare by: the provider's own
- * normalization, or the stored text itself for a provider this build does
- * not know, so an association it wrote can still be named and removed.
- */
 const providerInstanceKey = (provider, instance, makeError = bindingInputError) => (
   sourceControlProviderDescriptors.has(provider)
     ? normalizeProviderInstance(provider, instance, makeError)
@@ -359,7 +300,6 @@ const unavailableProviderError = () => {
   return error;
 };
 
-/** The host a remote address or a provider instance points at, lowercased; null when it names none. */
 export const hostOf = (value) => {
   const text = String(value ?? '').trim();
   if (!text) return null;
@@ -395,7 +335,6 @@ const transportContextError = (message) => readContextError(
   400,
 );
 
-/** A mutation target; `owner` may be empty only for a provider whose projects need none (`repositoryPath: 'path'`). */
 const parseTarget = (value, provider) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['project'], ['number', 'head', 'base', 'headSha'])
@@ -443,11 +382,6 @@ export function createBindingService({
     return context;
   };
   const resolve = (directory) => resolveWith(directory, resolveRepository);
-  /**
-   * The SSH address of each named provider instance, when the provider keeps
-   * one. A read failure leaves it out: the instance then matches only its web
-   * host, the pre-change behavior, never a guessed address.
-   */
   const readSshUrls = async (pairs) => {
     const urls = new Map();
     if (!(readProviderSshUrl instanceof Function)) return urls;
@@ -525,8 +459,6 @@ export function createBindingService({
   };
   const presentRead = async (stored) => {
     if (!stored.binding) return stored;
-    // Inherited grants are part of what a reader sees, never of what a
-    // mutation writes back, so they are added only to the presented read.
     const granted = new Set(stored.binding.remotes.map((remote) => remote.name));
     const inherited = (stored.repository?.remotes ?? [])
       .filter((remote) => !granted.has(remote.name))
@@ -575,20 +507,12 @@ export function createBindingService({
     if (current.revision !== bindingRevision || (current.binding && current.binding.revision !== bindingRevision)) {
       throw staleBindingError('Source control repository binding changed', current);
     }
-    // A remote added or removed beside the bound one changes the public config
-    // revision but not what the provider answers for; the provider's own
-    // readiness below says when its endpoint moved.
     const providers = current.binding?.providers ?? [];
     const boundProvider = providers.find((candidate) => candidate.provider === provider
       && normalizeProviderInstance(candidate.provider, candidate.instance) === instance
       && candidate.accountId === accountId
       && candidate.primaryRemote === primaryRemote);
     if (!boundProvider) {
-      // A repository nobody bound to this host, bound to an identity that
-      // names no account, or bound to an account that is gone, is read with
-      // the account the client is signed in to, as it was before bindings
-      // existed. The remote must really be on that host; whether the account
-      // exists, the provider route decides.
       const boundToHost = providers.some((candidate) => candidate.provider === provider
         && candidate.readiness !== 'account-unavailable'
         && normalizeProviderInstance(candidate.provider, candidate.instance) === instance);
@@ -659,17 +583,11 @@ export function createBindingService({
       throw conflict('Git transport repository remotes changed');
     }
     const repositoryRemote = context.remotes.find((candidate) => candidate.name === remote);
-    // A repository nobody configured uses the machine's own Git for every
-    // remote, exactly as before bindings existed. Its revision is the store's
-    // tombstone revision, so a later configuration still invalidates a plan
-    // made against the unbound state.
     const boundRemote = current.binding
       ? current.binding.remotes.find((candidate) => candidate.name === remote)
         ?? (repositoryRemote ? inheritedRemoteGrant(current.binding, repositoryRemote) : null)
       : (repositoryRemote ? implicitSystemRemote(repositoryRemote) : null);
     if (!repositoryRemote || !boundRemote) throw conflict('Git transport remote binding changed');
-    // Not a binding that moved under the caller: the grant's account is gone
-    // or needs confirming, so the user has to act, and retrying cannot help.
     if (boundRemote.readiness !== 'ready') {
       throw Object.assign(conflict('Git transport remote binding needs attention'), { reason: 'needs-attention' });
     }
@@ -699,9 +617,6 @@ export function createBindingService({
       transportMode: boundRemote.mode,
     };
     if (boundRemote.credentialId) authority.credentialId = boundRemote.credentialId;
-    // The providers this remote is the primary remote of, through a ready
-    // association: the Git planner opens a change host's review refs
-    // (`refs/for/*`, `refs/changes/*`) on such a remote only.
     const primaryOf = (current.binding?.providers ?? [])
       .filter((candidate) => candidate.primaryRemote === remote && candidate.readiness === 'ready')
       .map((candidate) => candidate.provider);
@@ -749,20 +664,12 @@ export function createBindingService({
 
   return {
     resolveContext: async (directory) => publicContext(await resolve(directory)),
-    // Endpoints and modes only: the caller decides which hosts OpenChamber
-    // answers for, and learns nothing else about any repository.
     listRemoteGrants: () => store.listRemoteGrants(),
     get: async (directory) => presentRead(await readCurrent(await resolve(directory))),
     present: presentRead,
     validateReadContext: (input) => validateAuthority(input, invalidReadInput, bindingInputError),
     validateMutationContext: async (input) => {
       const context = await validateAuthority(input, mutationContextError);
-      // A write goes to the provider on the repository's behalf, so what the
-      // binding granted must still describe the repository: the provider's
-      // remote (checked above) and every remote with a transport grant, none
-      // moved or gone. A remote added beside them (an upstream, a fork a
-      // change request was checked out from) grants nothing and changes
-      // nothing the write relies on, so it does not block it.
       const repository = await resolve(context.directory);
       const current = await readCurrent(repository);
       if (current.binding?.remotes.some((grant) => grant.readiness === 'config-changed')) {
@@ -776,7 +683,6 @@ export function createBindingService({
     },
     validateGitTransportContext,
     validateGitAuxiliaryContext,
-    // Only the clone executor can transfer its captured grant to a newly published checkout.
     bindClonedRepository: async ({ directory, approvedEndpoint, transportMode, credentialId, unverifiedConfirmed, providerAccount, auxiliaryGrants = [] }) => {
       if (!['system', 'managed', 'anonymous'].includes(transportMode)
         || (transportMode === 'anonymous' && (credentialId !== undefined || unverifiedConfirmed !== undefined
@@ -806,11 +712,6 @@ export function createBindingService({
         if (grant.transportMode === 'system') input.unverifiedConfirmed = grant.unverifiedConfirmed;
         return input;
       }));
-      // The account chosen while cloning is the account this repository acts
-      // as. Persisting it here is what stops the setup asking for the same
-      // answer a second time before issues and change requests work.
-      // The transport resolver carries the raw URL alongside the redacted
-      // endpoint; the provider contract accepts only the redacted pair.
       const cloneSshUrls = providerAccount ? await sshUrlsFor([providerAccount]) : new Map();
       const providers = providerAccount
         ? await parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }],
@@ -1146,7 +1047,6 @@ export function createBindingService({
         const sshUrls = await sshUrlsFor([{ provider: input.provider.provider, instance: input.provider.instance }]);
         const [provider] = await parseProviders([input.provider], context.remotes, { reachesInstance, sshUrls });
         const previous = providers[targetIndex];
-        // Account repair retains the approved endpoint. A changed destination needs a new association.
         if (previous?.endpoint && previous.primaryRemote === provider.primaryRemote) {
           provider.endpoint = previous.endpoint;
           assignRepository(provider, await providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint,
@@ -1223,12 +1123,10 @@ export function createBindingService({
       const record = await store.compareAndSwap(context.repositoryId, expectedRevision, null);
       return { repository: publicContext(context), ...record };
     },
-    /** A newly connected account takes over what its user's gone account held (`adoptAccount`). */
     accountConnected: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
       if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
-      // Nothing of a provider this build does not know can be adopted.
       if (!sourceControlProviderDescriptors.has(provider) || !(store.adoptAccount instanceof Function)) return [];
       return store.adoptAccount({
         provider,

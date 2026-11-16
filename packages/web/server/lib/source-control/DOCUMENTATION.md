@@ -68,7 +68,11 @@ The CLI owns its credentials. These handles have no token and an empty outbound 
 
 Provider execution uses `<mutation-json-file>.execution-<sha256-key>.lock`. Snapshot locks are brief and never span provider network calls. Different execution keys and different stores can progress while another provider request runs. These locks support multiple daemons sharing the same data root; there is no global backend lock. All writers must use this contract and the same file location on a filesystem that supports exclusive creation and atomic same-directory rename. Older unlocked writers, external file edits, and removal or replacement of the data directory while writers run are unsupported.
 
-Each acquisition writes its owner — process ID, hostname, time and a nonce — and keeps its file handle open. Normal `finally` cleanup verifies the pathname still identifies that handle's device/inode before unlinking and closing. Failed initialization cleans only that acquisition's file identity. A contender that finds an existing lock reads its owner: a process on this machine that no longer exists left it behind, and the contender removes it once and retries; removal renames the file to a unique name first (atomic, so only one contender takes it) and checks it took the device/inode it inspected, linking back a newer lock it took by mistake, so two contenders that judged the same dead lock never delete each other's fresh one; a lock from another machine, or one without an owner record, is removed only when it is older than five minutes, longer than any writer stays inside one. A lock whose owner is alive, or too young to attribute, is waited on and reported busy.
+Each acquisition writes its process ID, hostname, time and nonce and keeps its file handle open through unlink, so its inode cannot be reused before the ownership check. Normal `finally` cleanup verifies the pathname still identifies that handle's device/inode before unlinking and closing. Failed initialization cleans only that acquisition's file identity. A contender reclaims a lock whose local owner no longer exists. A lock from another machine, or one without an owner record, is reclaimed only after five minutes. A lock whose owner is alive, or too young to attribute, is waited on and reported busy.
+
+### Why abandoned-lock removal uses a guard and not a rename
+
+Every removal of another owner's lock holds `<lock>.guard` and rechecks its content and filesystem identity through one open handle, because concurrent reclaimers could otherwise delete a newly acquired lock using stale evidence. Renaming the lock aside also frees its name for another contender before inspection finishes; exclusive creation grants ownership without that gap. Async and synchronous callers share this contract, and guards older than 10 seconds are reclaimable because live guard holders perform only a few filesystem operations.
 
 Recovery therefore needs no operator: a crashed desktop backend or a killed server leaves a lock that the next reader reclaims, and a retained `running` mutation is then reconciled from provider reads and never performed again; an unproved outcome remains sticky `outcome-unknown`. The risk that remains is a lock removed while its owner is alive on another machine sharing the data root over a network filesystem for longer than five minutes, which the age bound accepts in exchange for a store that never needs hand cleanup.
 
@@ -128,7 +132,7 @@ Provider account references authorize provider API calls. Git credential referen
 
 Raw Git endpoints stay behind the source-control and Git execution boundary. Existing-repository operations accept a remote name plus redacted display URL and fingerprint from the authoritative binding response; they never trust a client-provided fetch or push URL. HTTP/HTTPS display forms contain no userinfo, query, or fragment. SSH URL forms may retain a non-secret username but no password, query, or fragment; strict SCP forms remain valid. The network service rejects unsafe authoritative URLs before plan registration or argv construction, then passes only a validated server-resolved endpoint to Git after revalidation. Clone is the explicit parent-endpoint exception because a new checkout has no repository identity or binding. Its auxiliary grants still contain no raw discovered child or LFS URL. The Git module owns its protocol allowlist, keeps endpoints out of public operation state, and redacts failures.
 
-`bindClonedRepository` is an executor-only callback, not an HTTP mutation. It compares the published checkout's actual fetch and push endpoints with the executor's captured approved endpoint, then creates revision 1 with the exact selected remote transport and only auxiliary grants matched to endpoints and kinds discovered during execution. It does not infer provider or author associations. The legacy `/api/fs/clone` requires explicit System confirmation for the parent and every System auxiliary grant, or returns `GIT_NETWORK_OPERATION_REQUIRED`. See `../git/DOCUMENTATION.md` for the canonical clone selection, retained-checkout partial results, cleanup, and runtime contracts.
+`bindClonedRepository` is an executor-only callback, not an HTTP mutation. It compares the published checkout's actual fetch and push endpoints with the executor's captured approved endpoint, then creates revision 1 with the exact selected remote transport and only auxiliary grants matched to endpoints and kinds discovered during execution. When the executor supplies the chosen provider account, the binding persists its association so issues and change requests work without asking for that account again. Provider validation receives only redacted endpoint metadata. The callback infers no provider account or author association. The legacy `/api/fs/clone` requires explicit System confirmation for the parent and every System auxiliary grant, or returns `GIT_NETWORK_OPERATION_REQUIRED`. See `../git/DOCUMENTATION.md` for the canonical clone selection, retained-checkout partial results, cleanup, and runtime contracts.
 
 Provider-neutral issue, upstream, branch, change-request status, list, and detailed context reads carry the repository ID, binding revision, provider instance, immutable account ID, and primary remote returned by this binding read. Before provider credential or cache lookup, repository resolution, or a provider call, the server resolves the directory again and rejects a missing binding, a non-ready selected association, a changed approved provider endpoint or config revision, a stale revision, and any repository, provider, instance, account, or primary-remote mismatch. A sibling association or transport needing attention does not block this provider. List and upstream resolution start from the trusted primary remote. Explicit issue, branch, and change-request repository selectors remain inside that repository's fork network, and a fork-network resolution failure is an error rather than an authoritative empty result. The one exception is a linked read: `linked=1` on a bound read (`readContextOf`), or `linked: true` on a walkthrough's change request source, reads the item a link named wherever its repository is on the same instance, with the same bound account. Writes validate their own context and never see the flag, so a repository outside the network can be read and never changed. A change request is in reach when the repository it targets is in that network; the repository its head comes from is not checked, because the host serves a fork's head under the target repository and already authorises the token for the request. So a maintainer's upstream clone reads, comments on, reviews and merges a contributor's fork pull request on every host. `repository-network.js` (`changeRequestNetworkTarget`) is that rule, and GitHub, GitLab and Gitea (so Forgejo too) call it (Gerrit has no forks, so it checks the one project the binding names); creating a change request is the other direction, where each provider still requires the head remote's repository to be in the network. Repository coordinates and URLs remain server-resolved. Provider-returned clone URLs must match the resolved provider origin and project coordinates before they enter a worktree request. Retired `/api/github` resource aliases return `SOURCE_CONTROL_CONTEXT_REQUIRED` instead of entering this contract with ambient authority.
 
@@ -209,7 +213,61 @@ An installed extension can also be a provider, without a change here: a package 
 
 A provider is a new destination for a token and for what the user writes into issues, pull requests and comments. Load the `enterprise-boundary` skill before adding one. Self-hosted GitLab, Gitea, Forgejo and Gerrit are not gated by enterprise mode today, and whether they should be is an open question for the maintainer (`../gitea/DOCUMENTATION.md`, Enterprise mode).
 
+## Invariants
+
+- An unconfigured repository's derived System grants carry the store's tombstone revision, so later configuration invalidates plans made against the unbound state. Missing accounts and grants needing confirmation require user action and do not become retryable stale-binding errors.
+- A provider instance's separate SSH address belongs only to that instance. Failure to read it permits only the ordinary web-host match and grants no guessed SSH address. Instance SSH addresses omit usernames because Git selects them per remote.
+- Extension user IDs retain their verified string, including whitespace; presentation safety never rewrites identity.
+- Extension calls receive only declared revision and vote inputs. Unsupported inputs fail before dispatch so an older service cannot silently answer a different question.
+- Non-create mutation replay uses the original stored target. A create resolves again because its initial claim has no created item number; its receipt uses the number the provider records.
+- Change-Id amendment rejects interrupted Git operations even when their tracked tree is clean, because continuing them after replacing the branch tip can resume from a commit that is gone.
+- Repository identity versioning keeps old config-byte revisions outside current binding authority until explicit resave. The binding contract stays dependency-free because it also runs in the web client.
+
 ## Decisions
+
+### Why OAuth renewal holds a separate cross-process lock
+
+GitLab refresh tokens are single-use, so renewal holds a separate lock across the network call and re-reads the credential after acquiring it. A waiter uses the replacement token while the credential ID and revision remain stable for existing bindings. Expiry-triggered reads keep the stored token if renewal stays busy; a refused request can renew on demand, and a rejected refresh leaves invalidation to the normal request failure path.
+
+### Why auth versions inspect unparsed provider sections
+
+Version selection inspects every serialized instance, including opaque sections this process never parses, because an `sshUrl` in any section requires version 5. Choosing from parsed sections alone can write a snapshot the store itself refuses to read.
+
+### Why session secrets stay outside session objects
+
+Providers keep tokens and verified CLI users in module-owned `WeakMap` entries keyed by the exact session object, so serializing or logging a session cannot expose a token. CLI identity uncertainty preserves the user's activation switch and keeps it visible for explicit deactivation; only confirmed absence or token refusal clears it.
+
+### Why startup repair is separate from route registration
+
+Route registration performs no identity backfill and reaches for no default identity stores, because registering routes must not read or lock a data directory the caller did not select. The runtime owning the real stores starts repair after the server is up.
+
+### Why stale planned audits expire and running audits remain
+
+An unstarted Git plan expires after 15 minutes or is cancelled on restart, so a planned audit older than an hour cannot represent work that can still start and would otherwise hold capacity forever. Running audit records retain their uncertain outcome.
+
+### Why upload streaming accepts only pictures and clips
+
+Serving an uploaded HTML page or SVG from the application origin can execute script, so the shell restricts uploads to its image and video allowlist and checks decoded filenames against traversal. Generic binary responses use the filename to select an allowed media type. Upload authorization failures belong to the file and leave the account valid. Image and video requests use URL authentication; `ui-auth/ui-auth.js` derives its allowed upload prefixes from provider descriptors.
+
+### Why extensions declare comment editing separately
+
+Posting comments grants no edit or delete capability. The descriptor and published presentation derive comment editing from the same explicit capability so the UI cannot offer a write the routes refuse. Extension uploads remain disabled because the service wire cannot carry a streaming provider `Response`; starting review threads remains disabled with review threads.
+
+### Why review validation leaves draft emptiness to the provider
+
+A review can consist solely of unpublished comments held on the host, so only the provider can determine whether it is empty. Verdict reviews and submits pin `target.headSha` to the commit or patchset the user read, preventing a later upload from receiving that action; the target already participates in the digest.
+
+### Why status reads resolve accounts before cache lookup
+
+Account resolution precedes cache lookup so a removed or rotated credential cannot receive a cached answer. A transient failure without a last-known answer returns 503 so clients retain their current state. Remounting an extension discards its prior descriptor's cached answers, and failed implementation loads remain retryable on the next request.
+
+### Why outbound attempts are recorded before sending
+
+A write still in flight when a service call ends can reach the forge, so its attempt enters the handle's evidence before dispatch. A method refused before dispatch creates no attempt, which lets failure classification distinguish a prevented write from an uncertain outcome.
+
+### Why provenance lookups use directory-only identity
+
+Change-request status reads look up contributor provenance by repository ID and Git directory identity alone. Resolving full repository topology there adds 5 Git processes per directory for fields the lookup never reads; callers needing remotes use the full resolver.
 
 ### Why repository IDs retain their first device number
 

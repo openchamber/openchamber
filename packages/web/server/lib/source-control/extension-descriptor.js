@@ -41,8 +41,6 @@ import { extensionProviderId } from './provider-id.js';
 
 /** @typedef {import('./provider-contract').ProviderDescriptor} ProviderDescriptor */
 
-// Bounded placeholders: no unbounded repetition anywhere, so a path cannot
-// make the compiled pattern backtrack without limit, whatever the templates.
 const SEGMENT = '[^/]{1,256}';
 const TOKEN_SOURCE = new Map([
   ['{owner}', SEGMENT],
@@ -57,12 +55,6 @@ const invalidContribution = (guestId, reason) => new Error(`Source control contr
 
 const escapeLiteral = (segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/**
- * One URL template (`/{owner}/{repo}/pulls/{number}`) as a regular
- * expression source: literal segments escaped, placeholders bounded. A
- * template must name its owner (or namespace), repo and number once each,
- * the same rule the UI's link matcher applies.
- */
 const templateSource = (template, fail) => {
   if (!isString(template) || !template.startsWith('/') || template.length > TEMPLATE_MAX) fail('URL template must be a path');
   const seen = [];
@@ -85,17 +77,10 @@ const templateSource = (template, fail) => {
   return source;
 };
 
-/**
- * `urls.thread.pattern` from the change request and issue templates: group
- * one is the thread's path, and the match ends where the thread does, as the
- * built-ins' hand-written patterns do. Never a regular expression the
- * extension wrote.
- */
 const threadPattern = ({ changeRequest, issue }, fail) => {
   const templates = [changeRequest, issue];
   if (!templates.every((list) => Array.isArray(list) && list.length <= TEMPLATES_MAX)) fail('URL templates are invalid');
   const sources = templates.flat().map((template) => templateSource(template, fail));
-  // No template: a pattern that never matches.
   if (!sources.length) return /(?!)/;
   return new RegExp(`^(${sources.map((source) => `(?:${source})`).join('|')})(?:/|$)`);
 };
@@ -141,7 +126,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
     const url = new URL(origin);
     if (url.protocol === 'http:' && !declared.allowLoopbackHttp) throw new Error(`${label} instances must use HTTPS`);
     if (url.port && !declared.allowPort) throw new Error(`${label} instance must not name a port`);
-    // A built-in's credential for its own host must never be routed to an extension.
     if (builtInDefaultHosts.has(url.hostname)) throw new Error(`${label} cannot serve ${url.hostname}, which a built-in provider serves`);
     return origin;
   };
@@ -163,7 +147,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   if (contribution.token?.createPath) token.createPath = contribution.token.createPath;
   const login = contribution.login ? Object.freeze({ ...contribution.login }) : null;
 
-  // Basic auth sends `login:token`, so the Settings card asks for the login.
   const settings = [Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' })];
   if (contribution.token?.scheme === 'basic') {
     settings.push(Object.freeze({ key: 'username', type: 'username', secret: false, scope: 'instance' }));
@@ -173,7 +156,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   const changeBased = {};
   if (capabilities.reviewModel) changeBased.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions) changeBased.revisions = true;
-  // Only a service that answers `/pr/draft` says so; older ones keep the route off.
   if (capabilities.draftConversion) changeBased.draftConversion = true;
   const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
 
@@ -182,7 +164,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
     label,
     terminology: Object.freeze({ changeRequest: contribution.terminology.changeRequest, ci: contribution.terminology.ci }),
     referencePrefix: Object.freeze({ changeRequest: contribution.referencePrefix.changeRequest, issue: contribution.referencePrefix.issue }),
-    // The generic identity mark; an extension draws its own only in the UI.
     iconId: 'branch',
     instance: Object.freeze({
       form: 'origin',
@@ -199,22 +180,18 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
       ci: capabilities.ci,
       comments: capabilities.comments,
-      // Declared, not inherited from `comments`: an extension that only posts
-      // must not gain the edit and delete routes.
       commentEdit: capabilities.commentEdit === true,
       reviews: capabilities.reviews,
       state: capabilities.state,
       labels: capabilities.labels,
       reviewers: capabilities.reviewers,
       reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
-      // Uploads stream a provider Response, which the service wire cannot carry.
       uploads: false,
       stacks: false,
       changeRequestPatch: capabilities.changeRequestPatch,
       liveSummaries: capabilities.liveSummaries,
       referencePicker: false,
       multipleAccounts: true,
-      // No `createVia`: absent means `api`, so an extension creates through `/pr/create`.
       ...changeBased,
     }),
     authMethods: Object.freeze({ device: false, pat: Boolean(token), cli: login ?? false }),
@@ -227,7 +204,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
     }),
     urls: Object.freeze({
       thread: Object.freeze({
-        // Only the declared hosts when the user cannot add another.
         hosts: declared.custom ? 'any' : freezeList(new Set(defaultInstances.map((origin) => new URL(origin).hostname))),
         pattern,
       }),
@@ -250,7 +226,6 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       sharedNumberSpace: presentation.sharedNumberSpace,
       abbreviation: presentation.abbreviation,
       promptNoun: presentation.promptNoun,
-      // Without a mark of its own the UI draws the generic branch.
       icon: Object.freeze(presentation.iconPath ? { path: presentation.iconPath } : { sprite: 'git-branch' }),
       instances: Object.freeze({
         multiple: declared.custom || defaultInstances.length > 1,
@@ -267,17 +242,13 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       }),
       features: Object.freeze({
         referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-        // Starting a thread needs review threads, which the host keeps off.
         startThread: false,
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
         issueEdit: presentation.features.issueEdit === true,
         changeRequestEdit: presentation.features.changeRequestEdit === true,
-        // The box is a plain search: the standard routes pass it as text only.
         advancedSearch: false,
-        // The same switch as the capability: it gates the edit and delete routes,
-        // so publishing it from anywhere else would offer a write that 501s.
         commentEdit: capabilities.commentEdit === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
