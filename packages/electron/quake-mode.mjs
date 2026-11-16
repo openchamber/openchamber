@@ -58,8 +58,24 @@ export function readQuakeModeSettings(root) {
   };
 }
 
-// Quake geometry for one display: attached to the top, full display width,
-// `heightFraction` of the display height. Takes plain bounds ({ x, y, width,
+// Select the cursor display's usable area, falling back to the primary display.
+export function getQuakeDisplayBounds(screen) {
+  try {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    if (display?.workArea || display?.bounds) return display.workArea || display.bounds;
+  } catch {
+    // Cursor lookup can fail on a locked screen or remote desktop.
+  }
+  try {
+    const primary = screen.getPrimaryDisplay();
+    return primary?.workArea || primary?.bounds || null;
+  } catch {
+    return null;
+  }
+}
+
+// Quake geometry for one display: attached to the top, full usable width,
+// `heightFraction` of the usable height. Takes plain bounds ({ x, y, width,
 // height }) so it stays testable without Electron's screen module.
 export function computeQuakeBounds(displayBounds, heightFraction = DEFAULT_QUAKE_MODE_HEIGHT_FRACTION) {
   const bounds = displayBounds ?? {};

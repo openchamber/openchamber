@@ -93,6 +93,7 @@ import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
   computeQuakeBounds,
+  getQuakeDisplayBounds,
   parseQuakeHeightFraction,
   QUAKE_MODE_ENABLED_KEY,
   QUAKE_MODE_HEIGHT_KEY,
@@ -2521,25 +2522,6 @@ const shouldHideMainWindowToQuake = (browserWindow) => {
   return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
 };
 
-// The display the Quake window opens on: the one holding the cursor (like
-// Windows Terminal), falling back to the primary display.
-const getQuakeDisplayBounds = () => {
-  try {
-    const cursor = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursor);
-    if (display?.bounds) return display.bounds;
-  } catch {
-    // A cursor that cannot be read (locked screen, RDP edge) falls through.
-  }
-  try {
-    const primary = screen.getPrimaryDisplay();
-    if (primary?.bounds) return primary.bounds;
-  } catch {
-    return null;
-  }
-  return null;
-};
-
 // Shows the existing main window as the Quake dropdown WITHOUT navigating or
 // reloading it, then focuses it so the user can type immediately. The window
 // stays an ordinary window (taskbar entry, Alt+Tab, minimize/maximize all work
@@ -2566,7 +2548,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (process.platform === 'darwin') app.focus({ steal: true });
     if (browserWindow.isMinimized()) browserWindow.restore();
     if (state.quakeNormalMaximized) browserWindow.unmaximize();
-    const displayBounds = getQuakeDisplayBounds();
+    const displayBounds = getQuakeDisplayBounds(screen);
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
