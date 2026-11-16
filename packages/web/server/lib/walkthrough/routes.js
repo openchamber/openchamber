@@ -4,14 +4,9 @@ import { supportsChangeRequestPatch, supportsChangeRequestRevisions } from './pu
 import { allowsTopLevelProjects } from '../source-control/project-path.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
-// The composer's provider, which the model stays on; anything else is no provider.
 const providerIdSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
 const modelIdSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
 
-// `req.destroyed` is true for every healthy request once the body parser has
-// consumed the stream, so using it as a disconnect check silently swallows every
-// response. The response socket is the one that actually reflects whether the
-// client is still there.
 const clientIsGone = (res) => res.writableEnded || res.destroyed;
 
 export function registerWalkthroughRoutes(app, { getWalkthroughService, validateReadContext }) {
@@ -67,11 +62,9 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         code: 'UNSUPPORTED_WALKTHROUGH_PROVIDER',
       });
     }
-    // An empty owner names a top-level project, which only a path-style provider has.
     if (source.sourceRepo?.owner === '' && !allowsTopLevelProjects(sourceControlProviderDescriptors.get(readContext.provider))) {
       throw Object.assign(new Error('pr sources require a valid repository'), { statusCode: 400 });
     }
-    // A named revision only where the host keeps revisions; elsewhere it would read as the current one.
     if (source.revision !== undefined && !supportsChangeRequestRevisions(readContext.provider)) {
       throw Object.assign(new Error('This source control provider does not keep change request revisions'), {
         statusCode: 400,
@@ -109,8 +102,6 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
     }
   });
 
-  // The comparison view needs the complete published patch, without model
-  // readiness checks, generated-file filtering, or local working-tree reads.
   app.get('/api/walkthrough/pr-diff', async (req, res) => {
     try {
       const query = new URL(req.originalUrl, 'http://localhost').searchParams;
@@ -118,9 +109,6 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       const source = parseSource(readSource(query.get('source')));
       if (source.kind !== 'pr') return res.status(400).json({ error: 'A pull request source is required' });
-      // Same exact binding authority as the walkthrough routes: the repository
-      // and account come from the checkout's binding, and a named source
-      // repository is only checked against it.
       const readContext = await validatePullRequestContext(source, Object.fromEntries(query), directory);
       const { getPullRequestDiff } = await getWalkthroughService();
       const { patch } = await getPullRequestDiff(readContext?.directory ?? directory, source.number, readContext, {
@@ -134,8 +122,6 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
     }
   });
 
-  // One file, both sides, straight from GitHub: the comparison view expands
-  // collapsed context on demand without touching the working tree.
   app.get('/api/walkthrough/pr-file', async (req, res) => {
     try {
       const query = new URL(req.originalUrl, 'http://localhost').searchParams;
@@ -162,10 +148,6 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
     }
   });
 
-  // Deliberately not aborted when the client disconnects: generation runs for
-  // minutes and a refresh must not throw the work away. Leaving detaches the
-  // client; the job finishes and caches its result. Stopping is an explicit
-  // request below.
   app.post('/api/walkthrough/generate', async (req, res) => {
     try {
       const { directory, source, force, model, providerID, modelID, language } = req.body || {};
@@ -196,8 +178,6 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
     }
   });
 
-  // Memory-only, so it is safe to poll while a generation runs. The full read
-  // re-runs the whole git pipeline and must not be used for this.
   app.get('/api/walkthrough/progress', async (req, res) => {
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';

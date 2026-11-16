@@ -19,24 +19,12 @@ import { readWalkthroughModelOverride, readWalkthroughModelVariant } from './mod
 import { loadSourceSections, parseSource, sourceKey, WalkthroughSourceError } from './sources.js';
 import { supportsChangeRequestPatch } from './pull-request.js';
 
-// Walkthrough generation is always user-initiated and never automatic: it costs
-// tokens, and a background regeneration on every keystroke would be a way to
-// spend a budget without anyone deciding to.
-
-// This module is imported lazily, which means module-level work lands on the
-// first walkthrough request. Housekeeping has no business being there, so it is
-// deferred and never awaited: the request proceeds immediately and the prune
-// interleaves behind it.
 setTimeout(() => {
   void pruneMissingRepositories().catch(() => {
     // Housekeeping failing is not worth surfacing or retrying.
   });
 }, 0).unref?.();
 
-// A hang guard, not a pace-setter. Losing a nearly-finished generation wastes
-// real money and minutes, while an over-long deadline only holds a job slot, so
-// this errs long. It scales because a three-hunk edit and a 500-hunk pull
-// request have no business sharing a deadline.
 const GENERATION_TIMEOUT_BASE_MS = 120_000;
 const GENERATION_TIMEOUT_PER_HUNK_MS = 1_000;
 const GENERATION_TIMEOUT_MAX_MS = 900_000;
@@ -45,47 +33,18 @@ const generationTimeoutMs = (hunkCount) => Math.min(
   GENERATION_TIMEOUT_MAX_MS,
   GENERATION_TIMEOUT_BASE_MS + Math.max(0, hunkCount) * GENERATION_TIMEOUT_PER_HUNK_MS,
 );
-// A full walkthrough is a few thousand tokens of JSON. The budget exists for
-// what comes before it: reasoning models spend the same allowance thinking and
-// return nothing when it runs out, which is a bill for no answer.
-//
-// So the ask is derived from the model rather than fixed. A flat 24k was the
-// same number for a 64k-context model and for one that admits to 384k output
-// tokens, and on the latter it was the only reason generation failed.
-//
-// The reserve subtracted from the input budget is the same number, always: ask
-// for more than was reserved and a large diff overruns the context mid-answer,
-// which surfaces as a truncation bug rather than a budgeting one.
 const MIN_OUTPUT_TOKENS = 24_000;
-// A ceiling, because the reserve is taken out of the input allowance: a model
-// that would let us ask for 384k tokens of answer would also let us spend a
-// third of a million tokens of context reserving them, and no walkthrough needs
-// that much thinking.
 const MAX_OUTPUT_TOKENS = 96_000;
-// Above this share of the context, the reserve starts costing more diff than
-// the extra room is worth.
 const OUTPUT_CONTEXT_SHARE = 0.25;
 
-/**
- * Answer allowance for a specific model: as much as it admits it can emit,
- * bounded by a share of its context and never below what this feature always
- * asked for.
- */
 const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
   const wanted = Math.min(
     MAX_OUTPUT_TOKENS,
     Math.max(MIN_OUTPUT_TOKENS, Math.floor((Number(contextTokens) || 0) * OUTPUT_CONTEXT_SHARE)),
   );
-  // A model whose own limit is below the floor gets its limit: asking for more
-  // than a provider allows is rejected outright by some and ignored by others.
   return Number(outputTokenLimit) > 0 ? Math.min(wanted, Number(outputTokenLimit)) : wanted;
 };
 
-/**
- * The reader's preferences for walkthroughs, from the Walkthrough Magic Prompt.
- * They change what the model writes, so a file that cannot be read fails the
- * generation instead of quietly sending none.
- */
 async function readInstructions(directory, deps) {
   if (!deps.readWalkthroughInstructions) return '';
   try {
@@ -98,22 +57,8 @@ async function readInstructions(directory, deps) {
 const fail = (message, statusCode, extra = {}) =>
   Object.assign(new Error(message), { statusCode, ...extra });
 
-// Generation outlives the request that started it.
-//
-// A dropped connection and a deliberate cancel look identical at the socket, so
-// tying the work to the request lifetime meant an accidental refresh threw away
-// a minute of paid-for work. Jobs are keyed by repository + source, so a client
-// that comes back attaches to the running job instead of starting a second one,
-// and cancelling is an explicit request rather than a side effect of leaving.
 const jobs = new Map();
 
-// Providers that answered a schema request with a 4xx. Retrying the schema on
-// every generation means paying for a call we already know will fail, so the
-// refusal is remembered and the fallback goes first next time.
-//
-// Process-lifetime only, on purpose: a provider that gains structured-output
-// support should not need a settings change to be tried again — a restart is
-// enough, and the cost of one wasted first attempt after that is small.
 const schemaRefusedBy = new Set();
 
 const modelKey = (model) => `${model.providerID}/${model.modelID}`;
@@ -148,39 +93,19 @@ const readContextForSource = (source, readContext) => {
   return Object.freeze(canonicalReadContext(readContext));
 };
 
-/**
- * Coarse stages, reported so a long wait is legible.
- *
- * Only phases a person can actually wait on are named. Building the digest and
- * reading the cache take single-digit milliseconds; giving them their own rows
- * would imply progress where there is none. `retrying` appears only when a
- * provider rejects the schema and the prompt-side fallback runs.
- */
 const setStage = (repoRoot, sourceKeyValue, stage, readContext) => {
   const job = jobs.get(jobKey(repoRoot, sourceKeyValue, readContext));
   if (job) job.stage = stage;
 };
 
-/**
- * Current stage of a running generation, or `null` when nothing is running.
- * Reads memory only — no git, no network — so it is cheap to poll.
- */
 export function getGenerationStage(repoRoot, sourceKeyValue, readContext) {
   return jobs.get(jobKey(repoRoot, sourceKeyValue, readContext))?.stage ?? null;
 }
 
-/**
- * Whether a generation is currently running for a source. Lets a reconnecting
- * client show progress instead of an empty panel.
- */
 export function isGenerating(repoRoot, sourceKeyValue, readContext) {
   return jobs.has(jobKey(repoRoot, sourceKeyValue, readContext));
 }
 
-/**
- * Resolve the pair the job registry is keyed by, for callers that need to look
- * a job up without doing any diff work.
- */
 /** @public */
 export async function getRepositoryRootFor(directory, rawSource, rawReadContext) {
   const source = parseSource(rawSource);
@@ -188,10 +113,6 @@ export async function getRepositoryRootFor(directory, rawSource, rawReadContext)
   return { repoRoot: await getRepositoryRoot(directory), sourceKey: sourceKey(source), readContext };
 }
 
-/**
- * Stop a running generation. Only an explicit request does this — leaving the
- * page does not.
- */
 export async function cancelWalkthroughGeneration({ directory, source: rawSource, readContext: rawReadContext }) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
@@ -204,24 +125,6 @@ export async function cancelWalkthroughGeneration({ directory, source: rawSource
 
 const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
 
-/**
- * Resolve the model for this feature: the walkthrough override when set,
- * otherwise whatever the small-model chain resolves to.
- */
-/**
- * Resolve the model for this feature. An explicit per-review choice outranks the
- * saved setting, which in turn outranks the small-model chain — the user picking
- * a roomier model for a risky change is the most specific intent there is.
- * A free zen model without a login counts as unset here, and the small-model
- * chain decides (`../small-model/DOCUMENTATION.md`, *Free tier and the
- * session fallback*).
- */
-// `providerID` / `modelID` are the user's composer: without a model of its
-// own choosing, the walkthrough stays on that provider rather than on
-// whichever provider happens to be connected, and on that model when the
-// provider has no small one.
-// The saved thinking level goes with the saved model only: a model picked for
-// one review runs at its own default level.
 const resolveModel = (directory, explicitModel, providerID, modelID) => {
   const savedModel = readWalkthroughModelOverride();
   const overrideModel = explicitModel || savedModel;
@@ -237,9 +140,6 @@ const resolveModel = (directory, explicitModel, providerID, modelID) => {
 
 export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
 
-/**
- * Current diff for a source, parsed into files and hunks.
- */
 async function loadCurrentDiff(directory, source, deps, readContext) {
   const { sections } = await loadSourceSections(directory, source, { ...deps, readContext });
   const built = buildDigest(sections);
@@ -249,13 +149,6 @@ async function loadCurrentDiff(directory, source, deps, readContext) {
 const stopHunkIds = (walkthrough) =>
   walkthrough.chapters.flatMap((chapter) => chapter.stops.flatMap((stop) => stop.hunkIds));
 
-/**
- * Compare a stored walkthrough against the diff as it is right now.
- *
- * Staleness is not a heuristic here: a hunk id is a hash of the hunk's content,
- * so an anchor that no longer resolves is proof that the code it described has
- * changed or gone. Anchors that still resolve are still accurate.
- */
 function resolveAgainstCurrent(walkthrough, hunkIndex) {
   const missingHunkIds = [];
   const staleStopIds = [];
@@ -293,10 +186,6 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
   patch: hunk.patch,
 })));
 
-/**
- * Read the last walkthrough for a source, resolved against the current diff.
- * Never generates and never spends tokens.
- */
 export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
@@ -305,14 +194,9 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   const language = normalizeLanguage(rawLanguage);
 
   const pointer = readPointer(repoRoot, key, readContext);
-  // One diff, one model lookup, both answers. These used to be separate
-  // endpoints the client called in parallel, which meant every panel open ran
-  // the whole git pipeline twice.
   const [built, model, instructions] = await Promise.all([
     loadCurrentDiff(directory, source, deps, readContext),
     resolveModel(directory, explicitModel, providerID, modelID).catch(() => null),
-    // Readiness only measures the prompt; an unreadable preference fails the
-    // generation that would send it, not the read.
     readInstructions(directory, deps).catch(() => ''),
   ]);
   const { files } = built;
@@ -328,14 +212,6 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   };
   addReadContext(base, readContext);
 
-  // Ask the cache for *this* request before falling back to the pointer.
-  //
-  // The pointer only knows which walkthrough was generated here last, which
-  // after a model or language switch is the answer to a different question:
-  // the panel would keep showing the English review while the picker said
-  // Ukrainian, even though the Ukrainian one was sitting in the cache. The key
-  // is computed from the diff this read already parsed, so this costs a file
-  // read and no git work at all.
   const requestedKey = model
     ? buildCacheKey({
       repoRoot,
@@ -351,15 +227,9 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   const requested = requestedKey ? readCachedWalkthrough(requestedKey) : null;
   const entry = requested ?? (pointer ? readCachedWalkthrough(pointer.cacheKey) : null);
   if (!entry) {
-    // No pointer, or the pointer outlived its entry (eviction, manual cleanup).
-    // "No walkthrough" is the truthful answer either way; the pointer is left
-    // for the next generation to overwrite.
     return { ...base, walkthrough: null };
   }
 
-  // Showing it makes it the last walkthrough shown here, and a regeneration
-  // re-authors from whatever the reader is actually looking at. Only written
-  // when it moved, so an unchanged read stays a pure read.
   if (requested && pointer?.cacheKey !== requestedKey) {
     writePointer(repoRoot, key, {
       repoRoot,
@@ -373,44 +243,24 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
     ...base,
     walkthrough: entry.walkthrough,
     model: entry.model,
-    // The language the text on screen is actually written in, which is not
-    // necessarily the one being asked for now. The picker needs the difference:
-    // it is what lets it default to what produced this rather than to a setting.
     language: entry.language ?? null,
     generatedAt: entry.generatedAt,
     ...resolveAgainstCurrent(entry.walkthrough, hunkIndex),
   };
 }
 
-/**
- * Whether the resolved model can do this job, computed from a digest the caller
- * already built.
- *
- * Folded into the walkthrough read rather than living on its own endpoint: both
- * answers need the same diff, and computing it twice doubled the git work on
- * every panel open.
- */
 function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions }) {
   if (!model) return { ready: false, reason: 'no-model' };
 
   if (hunkCount === 0) {
-    // "Only a lockfile changed" is a different answer from "nothing changed",
-    // and the user can act on it (commit and move on) rather than wonder why
-    // the review refuses.
     const reason = files.length > 0 && generatedFileCount === files.length ? 'only-generated' : 'empty-diff';
     return { ready: false, reason, model, generatedFileCount };
   }
 
-  // A resolved override/config model can still have no usable login. Refuse up
-  // front and omit the model — offering an unauthenticated selection in the
-  // picker is what made the old raw auth error feel like a product bug.
   if (model.hasLogin === false) {
     return { ready: false, reason: 'no-provider-login' };
   }
 
-  // Built with the same language the generation would use: the instruction is
-  // part of the prompt, so a readiness answer computed without it would be
-  // measuring a request nobody is going to send.
   const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language, instructions });
   const requiredChars = prompt.length + system.length;
 
@@ -431,13 +281,6 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   return { ready: true, model, requiredChars, availableChars: model.inputCharBudget, hunkCount, fileCount };
 }
 
-/**
- * Generate a walkthrough for a source.
- *
- * Returns the cached entry when the diff, model, and prompt are all unchanged —
- * which also means returning to a previous state of the working tree costs
- * nothing.
- */
 export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
@@ -445,8 +288,6 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   const key = sourceKey(source);
   const language = normalizeLanguage(rawLanguage);
 
-  // Attach to a running job rather than starting a second one. A user who
-  // refreshed and pressed the button again wants the answer, not two bills.
   const existing = jobs.get(jobKey(repoRoot, key, readContext));
   if (existing) return existing.promise;
 
@@ -520,13 +361,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     }
   }
 
-  // A forced regeneration hands the model its own previous narrative so it can
-  // keep what is still true instead of starting from a blank page. The old
-  // anchors are deliberately not included — they belong to code that has moved.
-  // Only the same model writing in the same language counts as "its own": a
-  // review asked of another model or language is a fresh one, and handing it
-  // the last entry would have it copy that entry while the prompt claims the
-  // code moved on.
   let previousWalkthrough = null;
   const pointer = readPointer(repoRoot, key, readContext);
   if (pointer) {
@@ -563,15 +397,10 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     responseSchema: options.responseSchema,
     onOverflow: 'error',
     timeoutMs: generationTimeoutMs(hunkCount),
-    // The number the input budget was already reduced by, not a fresh guess.
     maxOutputTokens: model.outputTokens ?? MIN_OUTPUT_TOKENS,
     signal,
   });
 
-  // Roughly half the catalog does not declare `structured_output`, and some of
-  // those providers reject the schema outright. A rejected request shape is not
-  // a dead end: the shape can travel in the prompt instead, and the response
-  // parser is already tolerant of imperfect JSON.
   const withSchema = () => run({ prompt, system, responseSchema });
   const withoutSchema = () => run({
     prompt,
@@ -604,8 +433,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   let usedSchema = false;
 
   if (schemaRefusedBy.has(modelKey(model))) {
-    // Already known to refuse: skip straight to the fallback rather than pay
-    // for a call whose failure is a foregone conclusion.
     setStage(repoRoot, key, 'retrying', readContext);
     try {
       raw = await withoutSchema();
@@ -637,9 +464,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   try {
     walkthrough = normalizeWalkthrough(parseModelJson(raw.text), idByAlias, digest.files);
   } catch (error) {
-    // Without schema support the model was asked for JSON in prose and did not
-    // deliver: that is a capability problem the user can fix by switching model,
-    // so it gets the picker rather than a parser error.
     if (!usedSchema) {
       throw fail(
         `${modelLabel(model)} could not return the structured response a walkthrough needs`,
@@ -666,8 +490,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   };
   addReadContext(entry, readContext);
 
-  // A failed write costs a regeneration next time; it must never fail the
-  // request that already produced a good walkthrough.
   writeCachedWalkthrough(cacheKey, entry);
   writePointer(repoRoot, key, { repoRoot, sourceKey: key, cacheKey, generatedAt }, readContext);
 

@@ -1,18 +1,11 @@
 import crypto from 'crypto';
 
-// Parsing a unified diff into addressable hunks lives here and only here. The
-// model anchors its narrative to hunk ids, the client resolves those ids back
-// to rendered code, and staleness is "an id the current diff no longer has" —
-// all three break the moment two implementations disagree about what an id is,
-// so the client is never given the algorithm, only the results.
-
 const FILE_HEADER = /^diff --git /;
 const HUNK_HEADER = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@(.*)$/;
 
 const shortHash = (value) => crypto.createHash('sha1').update(value).digest('hex').slice(0, 8);
 
 const parsePathsFromFileHeader = (line) => {
-  // `diff --git a/old b/new`, with either side quoted when it contains spaces.
   const match = /^diff --git (?:"?a\/(.+?)"?) (?:"?b\/(.+?)"?)$/.exec(line);
   if (!match) return null;
   return { oldPath: match[1], newPath: match[2] };
@@ -50,15 +43,9 @@ export function parseDiffFiles(patch, scope = 'diff') {
   const closeHunk = () => {
     if (!current || !hunk) return;
     const body = hunk.lines.join('\n');
-    // The id covers the header and the body, so any edit to the hunk — even one
-    // that keeps its line numbers — produces a different id. That is what makes
-    // "this stop is stale" detectable without diffing narratives.
     const digest = shortHash(`${hunk.header}\n${body}`);
     const seen = current.hunkDigests.get(digest) ?? 0;
     current.hunkDigests.set(digest, seen + 1);
-    // A file can legitimately contain byte-identical hunks (repeated boilerplate
-    // edits). Disambiguate by occurrence so ids stay unique without becoming
-    // positional for the common case.
     const suffix = seen === 0 ? '' : `-${seen + 1}`;
 
     current.hunks.push({
@@ -139,10 +126,6 @@ export function parseDiffFiles(patch, scope = 'diff') {
   };
 }
 
-/**
- * Flatten parsed files into an id-keyed index for resolution and staleness
- * checks.
- */
 export function indexHunks(files) {
   const index = new Map();
   for (const file of files) {
@@ -153,10 +136,6 @@ export function indexHunks(files) {
   return index;
 }
 
-/**
- * Every hunk id in the diff, in file-then-position order. Used to compute the
- * "not covered by any stop" tail.
- */
 export function listHunkIds(files) {
   const ids = [];
   for (const file of files) {

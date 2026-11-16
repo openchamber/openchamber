@@ -1,25 +1,13 @@
-// Shape of the walkthrough the model must produce, plus normalization of what
-// it actually produced. The model is only ever trusted for prose and grouping —
-// every anchor it returns is re-resolved against the digest here, and anything
-// that does not resolve is dropped rather than rendered as a broken stop.
-
 export const WALKTHROUGH_VERSION = 1;
 
-// Bumping this invalidates every cached walkthrough, which is the point: a
-// changed prompt produces different output and old entries would misrepresent
-// what the current code would say.
 export const PROMPT_VERSION = 5;
 
 export const MAX_CHAPTERS = 6;
 export const MAX_STOPS = 16;
 export const MAX_HUNKS_PER_STOP = 14;
 export const MAX_CHAPTER_TITLE_CHARS = 24;
-// Observations are meant to be rare; past these the reader stops telling the
-// one that matters from the rest, so the surplus is dropped.
 export const MAX_OBSERVATIONS = 6;
 const MAX_OBSERVATIONS_PER_STOP = 2;
-// One note per file left out of the stops; a bound so a runaway answer cannot
-// bloat the cache entry.
 const MAX_ROUTINE_NOTES = 200;
 
 const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
@@ -128,8 +116,6 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
           droppedAnchors += 1;
           continue;
         }
-        // One hunk belongs to exactly one stop; a model that anchors the same
-        // code twice would otherwise render it twice in the stream.
         if (usedIds.has(id)) continue;
         if (hunkIds.length >= MAX_HUNKS_PER_STOP) break;
         usedIds.add(id);
@@ -186,10 +172,6 @@ export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
   };
 }
 
-/**
- * A note belongs to a file the digest has and a stop left at least partly
- * uncovered: that is where the reader meets it, in the uncovered tail.
- */
 function normalizeRoutine(rawRoutine, digestFiles, idByAlias, usedIds) {
   const leftOut = new Set(digestFiles
     .filter((file) => file.hunks.some((hunk) => !usedIds.has(idByAlias.get(hunk.alias))))
@@ -207,10 +189,6 @@ function normalizeRoutine(rawRoutine, digestFiles, idByAlias, usedIds) {
   return routine;
 }
 
-/**
- * Extract a JSON object from a model response that may or may not honour the
- * schema — some providers wrap it in prose or a fenced block.
- */
 export function parseModelJson(text) {
   if (typeof text !== 'string' || !text.trim()) {
     throw Object.assign(new Error('Model returned an empty response'), { code: 'invalid-walkthrough' });
