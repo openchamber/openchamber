@@ -478,7 +478,8 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, laterPages, sharePages });
+  const readSession = async (sessionID) => (await getClient()).session.get({ sessionID });
+  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, readSession, laterPages, sharePages });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
@@ -957,16 +958,8 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId, startedByExtension) => {
-    // The tool path forwards raw JSON, so a boolean parameter can arrive as the
-    // string "true". Both of these are compared with `=== true` below, which
-    // would read a string as false and silently drop the behavior: a dispatch
-    // whose result is never delivered, or a call that returns before the turn
-    // it asked to wait for. Reject a non-boolean loudly instead.
-    if (input.wait !== undefined && !isBoolean(input.wait)) {
-      throw new OpenChamberControlError('wait must be a boolean', 400);
-    }
-    if (input.returnResult !== undefined && !isBoolean(input.returnResult)) {
-      throw new OpenChamberControlError('returnResult must be a boolean', 400);
+    for (const name of ['wait', 'returnResult', 'ownWork']) {
+      if (input[name] !== undefined && !isBoolean(input[name])) throw new OpenChamberControlError(`${name} must be a boolean`, 400);
     }
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
@@ -977,7 +970,11 @@ export const createOpenChamberControlService = (dependencies) => {
     }
     const sessionID = asNonEmptyString(input.sessionId);
     const parentSessionID = asNonEmptyString(contextSessionId);
-    const returnResult = input.returnResult === true;
+    const ownWork = input.ownWork === true;
+    if (ownWork && action !== 'session.create') throw new OpenChamberControlError('ownWork applies only to session.create', 400);
+    if (ownWork && !parentSessionID) throw new OpenChamberControlError('ownWork needs a calling session to nest the new session under', 400);
+    const returnResult = input.returnResult === true
+      || (ownWork && input.returnResult === undefined && input.wait !== true && Boolean(dispatchResults) && Boolean(asNonEmptyString(input.prompt)));
     if (returnResult) assertReturnResult(action, input, parentSessionID);
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
@@ -1002,8 +999,6 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
-    // A pull request makes a worktree of its own, so its branch name (and a
-    // start ref the session service refuses) travel without a worktree name.
     if (input.pullRequest !== undefined) {
       payload.pullRequest = input.pullRequest;
       if (!payload.worktree) {
@@ -1012,16 +1007,16 @@ export const createOpenChamberControlService = (dependencies) => {
         if (asNonEmptyString(input.startRef)) payload.worktree.startRef = input.startRef.trim();
       }
     }
-    // The prompt's message names the session whose agent sent it, so the
-    // receiving transcript can link back. A session prompting itself has
-    // nothing to link to.
     if (parentSessionID && !(action === 'session.send' && sessionID === parentSessionID)) {
       payload.promptedBySessionId = parentSessionID;
     }
     const startedAt = now();
     let result;
     if (action === 'session.create') {
-      result = await sessionService.create(payload, ...(startedByExtension ? [{ startedByExtension }] : []));
+      const createOptions = {};
+      if (startedByExtension) createOptions.startedByExtension = startedByExtension;
+      if (ownWork) createOptions.operatorParentId = parentSessionID;
+      result = await sessionService.create(payload, ...(Object.keys(createOptions).length > 0 ? [createOptions] : []));
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {

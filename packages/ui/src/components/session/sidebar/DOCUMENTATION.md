@@ -395,6 +395,47 @@ the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
 
+## Sessions an agent runs for its own work
+
+An agent that calls `session.create` with `ownWork` starts a worker it runs
+itself (`packages/web/server/lib/openchamber-control/DOCUMENTATION.md`). The
+server marks it `metadata.openchamber.kind === 'operator-child'` with the
+caller's id as `parentID`, and `sessionParentID` projects that into
+`session.parentID`, as it does for workflow agents. Everything the tree reads
+from `parentID` follows: the worker renders under its agent wherever it lives
+(another worktree, another project), has no root row and no In work entry of
+its own, rolls its pending permissions and questions into the agent's row and
+chat, archives and restores with it, and leaves In work when the agent's work
+is done. It gets a row under the agent, unlike a workflow agent, because it is
+one session the user may want to open.
+
+- **Count.** The agent's row shows how many of its direct workers run and how
+  many finished (`OperatorChildrenCount`, in the row's badges on desktop, web,
+  VS Code and the phone). Running is the live status index: the worker or a
+  subagent under it is active; every other worker counts as finished.
+- **Take over.** Only the session's menu (Take over) or its worktree's menu
+  (Take over the agent's sessions, for every worker living in that worktree)
+  hands a worker to the user. Opening it or writing in it changes nothing.
+  Taking over drops the link (`withSessionMetadata` re-derives `parentID` on
+  every metadata change, so the row moves at once), removes the session's
+  rule that denies the `question` tool, and opens it in In work.
+- **Done while workers run.** Every Done the user starts (the row, its menu,
+  the header, the composer's Mark done, a worktree's or space's Done, bulk
+  Mark done, a run lane, the palette, the overview, the phone) first asks
+  `settleRunningOperatorChildren` about the sessions it closes. With a worker
+  under them still running, one question opens (`OperatorChildrenDoneDialog`,
+  mounted by `GlobalQuestionDialogs` in every app root): stop them, or let
+  them finish. Stop interrupts each running worker and whatever runs under
+  it; closing the dialog cancels the Done. Archive on Done keeps its own guard
+  after that: a worker still running in the worktree keeps it.
+
+### Why a running worker asks before Done and not after
+
+Archive on Done reads whether the worktree is busy only after the work left
+In work, and a worker in another worktree never makes it busy, so Done would
+leave workers running unseen. The question comes before anything changes,
+names the workers, and is the only place the user learns they still run.
+
 ## Multi-run rows
 
 A multi-run (`lib/multirun/runs.ts`, two or more active members) renders as one
@@ -1509,8 +1550,9 @@ members, as the run itself does; the survivor Keep leaves has no run to show.
 A session row's menu is already as long as it should be. A new session-level
 action goes where actions of its kind already live, such as the chat's
 work-status panel (`components/chat/work-status/`), and not into the row menu;
-a "Link PR" entry there was turned down for this reason. Keep warm is the one
-item added since, because the maintainer asked for that placement. Add a menu
+a "Link PR" entry there was turned down for this reason. Keep warm, and Take
+over on an agent's worker session only, are the items added since, because the
+maintainer asked for those placements. Add a menu
 item only when the maintainer asks for that placement.
 
 ### Hierarchy ideas that were tried and rejected

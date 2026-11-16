@@ -31,6 +31,7 @@ import {
   type ConfigDocument,
   type FilePart,
   type Message,
+  type Metadata,
   type Part,
   type Project,
   type Session,
@@ -42,6 +43,7 @@ import {
 } from "./model"
 import { formatModelSelection, parseModelSelection } from "../modelIdentifier"
 import { workflowAgentParentId } from "../sessionWorkflowMetadata"
+import { operatorChildParentId } from "../sessionOperatorChild"
 
 /** One item of an assistant message's ordered content. */
 export type AssistantContentItem = SessionMessageAssistant["content"][number]
@@ -51,9 +53,22 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
-export const sessionParentID = (record: { parentID?: string; metadata?: Session["metadata"] }): string | undefined => (
-  record.parentID ?? workflowAgentParentId(record.metadata)
+const linkedParentID = (metadata: Session["metadata"]): string | undefined => (
+  workflowAgentParentId(metadata) ?? operatorChildParentId(metadata)
 )
+
+export const sessionParentID = (record: { parentID?: string; metadata?: Session["metadata"] }): string | undefined => (
+  record.parentID ?? linkedParentID(record.metadata)
+)
+
+export function withSessionMetadata(session: Session, metadata: Metadata): Session {
+  const next: Session = { ...session, metadata }
+  if (session.parentID !== linkedParentID(session.metadata)) return next
+  const parentID = linkedParentID(metadata)
+  if (parentID) next.parentID = parentID
+  else delete next.parentID
+  return next
+}
 
 export function projectSession(info: SessionInfo): Session {
   return compact({

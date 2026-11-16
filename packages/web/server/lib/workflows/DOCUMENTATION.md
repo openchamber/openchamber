@@ -309,6 +309,13 @@ at once: the card reads the run from this server, so it survives a reload,
 shows on every device, and the agent's turn is not held while the user reads
 the plan.
 
+A session an agent runs for its own work (`session.create` with `ownWork`)
+can propose a run too, and nobody reads that session's chat. Its card also
+shows in the chat of the session the user does read, the top of the chain
+of such workers, named after the worker that proposed it
+(`packages/ui/src/components/chat/workflows/OperatorChildWorkflowApprovals.tsx`).
+The run is still the worker's, and its agents nest under the worker.
+
 ### Why approval can be switched off, and why enterprise mode does not gate it
 
 The approval click is what stops an agent from spending many agents unasked,

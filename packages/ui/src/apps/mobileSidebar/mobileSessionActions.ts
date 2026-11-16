@@ -7,6 +7,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { setSessionPinList } from '@/sync/session-pins';
 import { getSessionPinList } from '@/lib/sessionPins';
 import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
@@ -61,6 +62,7 @@ export const toggleMobileSessionWork = async (session: Session, sessionsInWork: 
       await setSessionWorkState(session.id, getSessionDirectory(session) || null, 'open');
       return;
     }
+    if (!await settleRunningOperatorChildren(sessionsInWork.map((entry) => entry.id))) return;
     for (const entry of sessionsInWork) {
       await setSessionWorkState(entry.id, getSessionDirectory(entry) || getSessionDirectory(session) || null, 'done');
     }

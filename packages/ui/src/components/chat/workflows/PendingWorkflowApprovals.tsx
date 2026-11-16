@@ -5,11 +5,26 @@ import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import { WorkflowRunCard } from './WorkflowRunCard';
+import { OperatorChildWorkflowApprovals } from './OperatorChildWorkflowApprovals';
 
 const NO_LIVE_MESSAGES: readonly string[] = [];
 
 /** Runs can arrive before their proposing call, or outlive the loaded history. */
-export function PendingWorkflowApprovals({ sessionId, messages, liveMessageIds = NO_LIVE_MESSAGES, directory }: {
+export function PendingWorkflowApprovals(props: {
+  sessionId: string;
+  messages: readonly ChatMessageEntry[];
+  liveMessageIds?: readonly string[];
+  directory?: string;
+}) {
+  return (
+    <>
+      <OwnWorkflowApprovals {...props} />
+      <OperatorChildWorkflowApprovals sessionId={props.sessionId} />
+    </>
+  );
+}
+
+function OwnWorkflowApprovals({ sessionId, messages, liveMessageIds = NO_LIVE_MESSAGES, directory }: {
   sessionId: string;
   messages: readonly ChatMessageEntry[];
   liveMessageIds?: readonly string[];

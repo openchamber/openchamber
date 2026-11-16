@@ -298,6 +298,33 @@ other.
   result carries `resultDelivery`: `pending` with a note for the agent, or
   `not-scheduled` with the reason (the prompt never landed, or registering
   failed); the session keeps running either way, so neither is thrown.
+- `session.create` with `ownWork: true` makes a session that is part of the
+  calling agent's own work (an operator's child), not one the user asked for.
+  It needs a calling session (400 without one) and applies to create only.
+  The session service creates it with `metadata.openchamber` `{ kind:
+  'operator-child', parentID: <caller> }`, a session permission rule that
+  denies the `question` tool (OpenCode drops a wholly denied tool from the
+  model's list), and, before any prompt, a synthetic message with
+  `resume: false` (`source: 'openchamber-operator-child'`) telling the agent
+  that the user does not interact with it, to ask in plain text in its answer
+  and that the answer goes to the agent that started it
+  (`../openchamber-sessions/create-session.js`). A failed note is logged and
+  the session stays: the refusals below still tell the agent. With a prompt
+  `returnResult` defaults to true, so the answer comes back; an explicit
+  `false` turns that off. `sessionParentId` (`../session-lineage.js`) reads
+  the link, so the session is a subsession for In work, goals, assist,
+  auto-accept lineage and `session.list`, and the UI nests it under the
+  caller wherever it lives. `render.page` refuses `awaitAnswer` and
+  `answerLater` in such a session with a 403 that says to ask in text, read
+  from the session record per call; a failed read lets the page wait as
+  before. The user takes a session over only from its sidebar menu or its
+  worktree's (`packages/ui/src/sync/session-take-over.ts`): the link goes, the
+  `question` rule goes and the session opens in In work. A fork of such a
+  session is the user's from the start: both fork repairs (`fork-inheritance.js`
+  here, `sessionForkInheritance.ts` in the UI) drop the link and the rule,
+  which OpenCode copies into a fork. The metadata store's
+  `onWritten` tells the lineage cache and the auto-accept cache, which then
+  read the session again.
 - `returnResult` and `wait` must be booleans when present. Both are compared
   with `=== true`, so a string `"true"` (the tool path forwards raw JSON, and a
   model or harness can stringify a boolean) would read as false: a dispatch
@@ -446,8 +473,9 @@ other.
   `projectId` and `directory` together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
-- `session.list` returns top-level sessions newest first (OpenCode's
-  `parentID: null`); `children` adds subagent sessions. Each session is
+- `session.list` returns top-level sessions newest first (no parent by
+  `sessionParentId`: OpenCode's, a workflow agent's or an ownWork link);
+  `children` adds subagents and those. Each session is
   trimmed to `id`, `title`, `directory`, `updated`, `archived`, `parentID`,
   `agent`, `model`, `outcome` (plus the In work fields and `status` below):
   the raw OpenCode record averaged about 1,100 characters on real sessions,
@@ -719,15 +747,21 @@ discovery cannot establish the default choice. Checking it once before creation
 lets the caller retry a known directory without polling, sending a prompt with
 an unintended model, or accumulating empty sessions.
 
-### Why a dispatched session links back from its prompt and does not nest in the sidebar
+### Why only ownWork nests a dispatched session, and by metadata
 
-A dispatched session used to nest under the caller's work in the sidebar
-(`metadata.openchamber.originSessionID` on the session). These sessions are
-the user's own conversations, such as PRs a triage session splits off for a
-separate discussion: nesting hid them under one chevron, reshuffled them when
-the caller was archived, and made `work.name` in each of them rename the
-caller. They stay roots now, and the link sits on the prompt that started
-them, where it says who sent which message.
+A dispatched session the user asked for is their own conversation, such as a
+PR a triage session splits off for a separate discussion. It stays a root,
+with the link on the prompt that started it, where it says who sent which
+message. An older build nested every dispatched session under the caller
+(`metadata.openchamber.originSessionID`): that hid the user's conversations
+under one chevron, reshuffled them when the caller was archived, and made
+`work.name` in each rename the caller. So nesting is now the agent's explicit
+claim, `ownWork`, for a worker it runs and collects itself; overnight an
+operator starts a dozen of them, and as roots they crowded the user's own
+sessions and In work. The link is OpenChamber metadata, as for workflow
+agents, and never OpenCode's `parentID`: OpenCode wakes a `parentID` parent
+with a `<subagent>` report after every round, while an operator decides when
+it reads its workers (`returnResult`, `session.messages`).
 
 ### Why Chats uses an explicit destination id
 

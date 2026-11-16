@@ -86,6 +86,11 @@ runtime and for the agent tool's `session.list`.
 - A known subsession costs nothing: `../session-lineage.js` remembers which
   sessions have a parent (from `session.created` events and from any record
   read anyway), and a known one is skipped before any read or Jev call.
+  A session an agent runs for its own work (`session.create` with `ownWork`)
+  is a subsession by its metadata link, so it never opens on its own: its
+  work is its parent's, and it leaves In work with it. When the user takes it
+  over, the link goes and the lineage forgets it, so its next message opens
+  it like any root.
 - Every failure (no classification provider, Jev error or timeout, an
   unreadable session) leaves state unchanged and returns an unknown gate, so
   session assist runs exactly as it did without Jev.

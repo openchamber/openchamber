@@ -383,8 +383,9 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'schema');
     expect(tool.openchamber.description).toContain('A dispatch returns at once');
     expect(tool.openchamber.description).toContain('returnResult brings its final answer back here');
-    // Agents also have OpenCode's own subagent tool; the line between the two is drawn up front.
-    expect(tool.openchamber.description).toContain('use the subagent tool');
+    expect(tool.openchamber.description).toContain('A session you start to get work done and collect its answer takes ownWork');
+    expect(tool.openchamber.description).toContain('go to the subagent tool');
+    expect(tool.openchamber.input.properties.parameters.properties.ownWork).toMatchObject({ type: 'boolean' });
     expect(tool.openchamber.input.properties.action.enum).toContain('session.messages');
     // An agent never blocks on a session: no wait or timeout in its schema.
     const controlParameters = tool.openchamber.input.properties.parameters.properties;

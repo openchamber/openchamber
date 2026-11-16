@@ -10,6 +10,7 @@ import {
   mergeConfigDocuments,
   projectAgent,
   projectAssistantContent,
+  withSessionMetadata,
   projectMessage,
   projectSession,
   projectToolPart,
@@ -43,6 +44,23 @@ describe("projectSession", () => {
     expect(projectSession({ ...sessionInfo, metadata }).parentID).toBe("ses_parent")
     expect(projectSession({ ...sessionInfo, parentID: "ses_opencode", metadata }).parentID).toBe("ses_opencode")
     expect("parentID" in projectSession({ ...sessionInfo, metadata: { openchamber: { parentID: "ses_parent" } } })).toBe(false)
+  })
+
+  test("a session an agent runs for its own work nests under that agent's session until the user takes it over", () => {
+    const link = { openchamber: { kind: "operator-child", parentID: "ses_operator", work: { state: "open" } } }
+    const child = projectSession({ ...sessionInfo, metadata: link })
+    expect(child.parentID).toBe("ses_operator")
+
+    const takenOver = withSessionMetadata(child, { openchamber: { work: { state: "open" } } })
+    expect("parentID" in takenOver).toBe(false)
+    expect(withSessionMetadata(takenOver, link).parentID).toBe("ses_operator")
+  })
+
+  test("a metadata change never moves a subagent away from its OpenCode parent", () => {
+    const subagent = projectSession({ ...sessionInfo, parentID: "ses_opencode" })
+    const relinked = withSessionMetadata(subagent, { openchamber: { kind: "operator-child", parentID: "ses_other" } })
+    expect(relinked.parentID).toBe("ses_opencode")
+    expect(withSessionMetadata(subagent, {}).parentID).toBe("ses_opencode")
   })
 
   test("an untitled session gets an empty title rather than undefined", () => {

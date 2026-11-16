@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inspectLocalImage } from '../markdown-image-grants/inspect-image.js';
 import { isString } from '../shared/guards.js';
+import { isOperatorChildSession } from '../session-lineage.js';
 import { OpenChamberControlError } from './error.js';
 
 // The page travels in the tool call's input, which OpenCode stores with the
@@ -302,9 +303,22 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
  * page existed. With `answerLater` the call returns at once and `laterPages`
  * keeps the page open until the user answers it (./later-pages.js).
  */
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, laterPages = null, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+const OPERATOR_CHILD_REFUSAL = 'Nobody answers pages in this session: the user does not interact with it, and your final answer goes to the agent that started it. Show the page without awaitAnswer or answerLater, and write your question in plain text in your answer';
+
+const isOperatorChild = async (readSession, sessionId) => {
+  try {
+    return isOperatorChildSession(await readSession(sessionId));
+  } catch {
+    return false;
+  }
+};
+
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, readSession = async () => null, laterPages = null, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
+  }
+  if ((input.awaitAnswer === true || input.answerLater === true) && sessionId && await isOperatorChild(readSession, sessionId)) {
+    throw new OpenChamberControlError(OPERATOR_CHILD_REFUSAL, 403);
   }
   // Refused before anything else, so a stale schema or a hand-made call
   // learns that sharing is unavailable rather than what is wrong with its page.

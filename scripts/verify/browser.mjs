@@ -165,11 +165,11 @@ export class Page {
     return point
   }
 
-  async click(target, timeoutMs) {
+  async click(target, timeoutMs, button = "left") {
     const point = await this.hover(target, timeoutMs)
     if (!point) return null
-    await this.mouse("mousePressed", point, { button: "left", buttons: 1, clickCount: 1 })
-    await this.mouse("mouseReleased", point, { button: "left", buttons: 0, clickCount: 1 })
+    await this.mouse("mousePressed", point, { button, buttons: button === "right" ? 2 : 1, clickCount: 1 })
+    await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount: 1 })
     return point
   }
 

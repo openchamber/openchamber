@@ -31,6 +31,7 @@ import { createOpenCodeSessionArchive, createSessionArchive } from './session-ar
 import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { createSession } from './create-session.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
@@ -352,21 +353,6 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
     });
   }
   if (agent) await client.session.switchAgent({ sessionID, agent });
-};
-
-const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null }) => {
-  const input = { location: { directory } };
-  const openchamberMetadata = {};
-  if (title) {
-    input.title = title;
-    if (titleByUser) openchamberMetadata.workTitle = { title, by: 'user' };
-  }
-  if (startedByExtension) openchamberMetadata.startedByExtension = startedByExtension;
-  if (Object.keys(openchamberMetadata).length > 0) input.metadata = { openchamber: openchamberMetadata };
-  const session = await client.session.create(input);
-  const sessionID = asNonEmptyString(session?.id);
-  if (!sessionID) throw new Error('failed to create session');
-  return sessionID;
 };
 
 const forkSession = async ({ client, sessionID, messageID }) => {
@@ -1179,7 +1165,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   };
 
   // `options` come from this server, never from a request body.
-  const createInDirectory = async (payload, { titleByUser = false, startedByExtension = null } = {}, onCreated = () => {}) => {
+  const createInDirectory = async (payload, { titleByUser = false, startedByExtension = null, operatorParentId = null } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1309,6 +1295,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(title ? { title } : {}),
       titleByUser,
       startedByExtension,
+      operatorParentId,
     });
     onCreated();
 
@@ -1466,6 +1453,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           readObjective,
           writeObjective,
           writeMetadata: (sessionID, patch) => writeMetadata(sessionID, patch, directory),
+          writePermissions: (sessionID, permissions) => client.session.update({ sessionID, permissions }),
         });
       }
 

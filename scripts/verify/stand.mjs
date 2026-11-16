@@ -252,8 +252,17 @@ const attachStand = (info) => {
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }
+  // `session list` names top-level sessions only; the raw list adds the ones
+  // linked to a parent by metadata (workflow agents, an agent's own workers),
+  // which deleting their parent leaves behind.
+  const listLinkedSessions = async () => {
+    const response = await fetch(`${info.apiUrl}/api/session?limit=1000`).catch(() => null)
+    const listed = response?.ok ? listedSessions(await response.json()) : null
+    return Array.isArray(listed) ? listed.map((record) => ({ id: record.id, directory: record.location?.directory ?? record.directory })) : []
+  }
   const reset = async () => {
-    const { sessions = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
+    const { sessions: roots = [] } = cli(["list", "--all", "--limit", "1000"], 120_000, { anyDirectory: true })
+    const sessions = [...new Map([...roots, ...await listLinkedSessions()].map((session) => [session.id, session])).values()]
     const foreign = sessions.filter((session) => !insideStand(session.directory))
     if (foreign.length) throw new Error(`The server on ${info.apiUrl} holds sessions outside ${info.root} (${foreign[0].directory}); it is not this stand, so nothing was deleted.`)
     for (const session of sessions) {

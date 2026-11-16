@@ -14,7 +14,7 @@ import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
@@ -1640,7 +1640,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
               }} />
               <AppLinkConfirmDialog />
               <SnippetQuickCreateDialog />
-              <SharedTrustConfirmDialog />
+              <GlobalQuestionDialogs />
               <OpenCodeTrustDialog />
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
               <MobileToaster />

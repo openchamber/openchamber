@@ -17,6 +17,8 @@ import { getMultiRunIdentity } from '@/lib/multirun/identity';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import type { Session } from '@/lib/opencode/model';
 import { getSessionPinList } from '@/lib/sessionPins';
+import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
+import { takeOverSession } from '@/sync/session-take-over';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
@@ -150,6 +152,10 @@ export function SessionActionsMenuItems({
     } catch {
       toast.error(t('sessions.warming.toggleFailed'));
     }
+  };
+
+  const takeOver = () => {
+    void takeOverSession(session.id, directory).catch(() => toast.error(t('sessions.sidebar.session.takeOver.failed')));
   };
 
   const copySessionId = () => {
@@ -513,6 +519,14 @@ export function SessionActionsMenuItems({
           <Item onClick={work.toggle} className="[&>svg]:me-1">
             <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 h-4 w-4" />
             {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+          </Item>
+        </SessionMenuItemHint>
+      ) : null}
+      {!archived && isOperatorChildSession(session) ? (
+        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.takeOver')}>
+          <Item onClick={takeOver} className="[&>svg]:me-1" data-session-take-over={session.id}>
+            <Icon name="user" className="me-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.takeOver')}
           </Item>
         </SessionMenuItemHint>
       ) : null}

@@ -10,7 +10,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
@@ -144,7 +144,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 )}
                 <AppLinkConfirmDialog />
                 <SnippetQuickCreateDialog />
-                <SharedTrustConfirmDialog />
+                <GlobalQuestionDialogs />
                 <OpenCodeTrustDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />

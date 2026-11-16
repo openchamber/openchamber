@@ -474,6 +474,36 @@ const VERIFY_WORKFLOW_SCRIPT = [
   "return parallel(['src/api/retry.ts', 'src/api/client.ts'].map((file) => () => agent('List what ' + file + ' exports.', { label: file, model: 'perf/stream-100cps' })))",
 ].join("\n")
 
+/**
+ * Turns the behavior scenarios (`scripts/verify`) play that no design shot
+ * shows. `OPERATOR_PROMPT` makes the agent start a worker session as part of
+ * its own work (`session.create` with `ownWork`) on a model that thinks for
+ * thirty seconds, so the worker is still running while the scenario looks.
+ */
+export const OPERATOR_PROMPT = "Start a worker session of your own for the parser fix."
+export const OPERATOR_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the lexer fix."
+export const OPERATOR_TAKEOVER_PROMPT = "Start a worker of your own in a new worktree that I may take over."
+// A new worktree's OpenCode location answers its first agent read empty, so
+// the first create answers `partialAction: worktree-created`; a real agent
+// retries in that folder, and so does this one.
+const operatorWorktreeCode = (title, worktree) => [
+  "const parse = (value) => (typeof value === 'string' ? JSON.parse(value) : value);",
+  `const worker = { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true };`,
+  `let result = parse(await tools.openchamber({ action: 'session.create', parameters: { ...worker, worktree: '${worktree}' } }));`,
+  "const directory = result?.data?.directory ?? result?.directory;",
+  "for (let attempt = 0; attempt < 20 && directory && !(result?.data?.sessionId ?? result?.sessionId); attempt += 1) {",
+  "  result = parse(await tools.openchamber({ action: 'session.create', parameters: { ...worker, directory } }));",
+  "}",
+  "return result;",
+].join("\n")
+
+const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
+  id,
+  prompt,
+  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree) } }] }],
+  answer: "The worker runs in its own worktree.\n",
+})
+
 const VERIFY_TURNS = [{
   id: "verify_workflow",
   prompt: "Run the workflow we agreed on over the API files.",
@@ -482,7 +512,21 @@ const VERIFY_TURNS = [{
     calls: [{ name: "openchamber_workflow", arguments: { action: "workflow.run", parameters: { script: VERIFY_WORKFLOW_SCRIPT } } }],
   }],
   answer: "The workflow card is in the chat; its report comes back here when the run ends.\n",
-}]
+}, {
+  id: "operator_1",
+  prompt: OPERATOR_PROMPT,
+  steps: [{
+    text: "Starting a worker for it.",
+    calls: [{
+      name: "execute",
+      arguments: { code: "return await tools.openchamber({ action: 'session.create', parameters: { title: 'Parser worker', prompt: 'Fix the parser.', model: 'perf/think-30s', ownWork: true } })" },
+    }],
+  }],
+  answer: "The worker is running; its answer comes back here when it finishes.\n",
+},
+  operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
+  operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
+]
 
 const TURNS = [
   ...DESIGN_SESSIONS.flatMap((session) => session.turns.map((turn, index) => ({ ...turn, id: `${session.key}_${index + 1}` }))),
