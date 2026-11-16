@@ -18,7 +18,6 @@ const NativeFocus = registerPlugin<ReadingAudioFocusPlugin>('ReadingAudioFocus')
 const grantSchema = z.object({ granted: z.boolean() });
 const changeSchema = z.object({ id: z.string(), state: z.enum(['paused', 'gained', 'lost']) });
 
-/** A reading-scoped lease. Other runtimes leave audio policy to their existing players. */
 export const createReadingAudioFocus = (
     onLoss: () => void,
     plugin: ReadingAudioFocusPlugin | null = getClientPlatform() === 'android' ? NativeFocus : null,
@@ -78,7 +77,6 @@ export const createReadingAudioFocus = (
                 }
                 const result = grantSchema.parse(await plugin.acquire({ id }));
                 if (disposed) {
-                    // The request may have completed after an earlier release crossed the bridge.
                     await plugin.release({ id });
                     throw new DOMException('Reading stopped', 'AbortError');
                 }
