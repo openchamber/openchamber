@@ -249,6 +249,7 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
+  tiers: { type: 'array', description: 'For render.tierChooser: one { tier, model } object per tier; the model is the candidate for that tier, as provider/model or a bare model id', items: { type: 'object', properties: { tier: { type: 'string' }, model: { type: 'string' } } } },
 };
 
 // When to act (link an issue, save a memory, draw a page) is stated once, in
@@ -458,9 +459,40 @@ const singleActionSchema = (definition) => ({
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
+const defaultedActionSchema = (definitions, defaultAction) => {
+  const fullNames = definitions.map((definition) => definition.action);
+  const bareNames = fullNames.map((action) => action.slice(action.indexOf('.') + 1));
+  return {
+    property: {
+      type: 'string',
+      description: definitions.map((definition) => `${definition.action}: ${definition.description}`).join('; '),
+    },
+    required: [],
+    normalize: String.raw`        if (typeof args.action === "string" && args.action.trim().startsWith("{")) {
+          try {
+            const revived = JSON.parse(args.action)
+            if (revived !== null && typeof revived === "object" && !Array.isArray(revived)) {
+              const { action: revivedAction, parameters: revivedParameters, ...revivedFields } = revived
+              const nested = revivedParameters !== null && typeof revivedParameters === "object" && !Array.isArray(revivedParameters) ? revivedParameters : {}
+              for (const [field, value] of Object.entries({ ...revivedFields, ...nested })) {
+                if (!Object.hasOwn(args, field)) args[field] = value
+              }
+              if (typeof revivedAction === "string") args.action = revivedAction
+            }
+          } catch {}
+        }
+        if (!${JSON.stringify(fullNames)}.includes(args.action) && !${JSON.stringify(bareNames)}.includes(args.action)) args.action = ${JSON.stringify(defaultAction)}
+`,
+  };
+};
+
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false, defaultAction = null }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
-  const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
+  const actionSchema = defaultAction
+    ? defaultedActionSchema(definitions, defaultAction)
+    : definitions.length === 1
+      ? singleActionSchema(definitions[0])
+      : multiActionSchema(definitions);
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
@@ -677,6 +709,11 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // never showed and an answer had no call to reach.
       codeMode: false,
       answers: true,
+      // render.page stays the default call: it predates the second
+      // action, and page calls that omit the action (or pack it into
+      // a JSON string, the failure the single-action schema's revival
+      // exists for) must keep reaching it.
+      defaultAction: 'render.page',
     }));
   }
 

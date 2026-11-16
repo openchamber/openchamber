@@ -29,6 +29,16 @@ describe('assembleTierOptions', () => {
     ]);
   });
 
+  it('rejects a bare model id more than one provider offers', () => {
+    const shared = [
+      ...catalog,
+      { id: 'gpt-5-codex', providerID: 'azure', name: 'GPT-5 Codex (Azure)', cost: { input: 2, output: 12 } },
+    ];
+    expect(() => assembleTierOptions({ tiers: [{ tier: 'frontier', model: 'gpt-5-codex' }], catalog: shared })).toThrow(/more than one provider/);
+    const [option] = assembleTierOptions({ tiers: [{ tier: 'frontier', model: 'azure/gpt-5-codex' }], catalog: shared });
+    expect(option.inputPerM).toBe(2);
+  });
+
   it('rejects an empty tier list and a model the catalog does not know', () => {
     expect(() => assembleTierOptions({ tiers: [], catalog })).toThrow(/non-empty list/);
     expect(() => assembleTierOptions({ tiers: [{ tier: 'cheap', model: 'nope' }], catalog })).toThrow(/not in the catalog/);
@@ -37,37 +47,26 @@ describe('assembleTierOptions', () => {
 });
 
 describe('createTierChooserAction', () => {
-  it('renders the standardized card through render.page and returns the submitted pick', async () => {
-    const renderPage = vi.fn(async (input) => {
-      expect(input.awaitAnswer).toBe(true);
-      expect(input.html).toContain('Select Execution Tier');
-      expect(input.html).toContain('anthropic/claude-sonnet-4-5');
-      return {
-        title: 'Select Execution Tier',
-        answer: { answered: true, summary: 'Selected Standard Tier', data: { tier: 'standard', model: 'anthropic/claude-sonnet-4-5' } },
-        note: 'answered',
-      };
-    });
-    const action = createTierChooserAction({ listModels: async () => catalog, renderPage });
+  it('builds the standardized card for render.page and names the follow-up call', async () => {
+    const action = createTierChooserAction({ listModels: async () => catalog });
     const result = await action(
       { tiers: [{ tier: 'standard', model: 'claude-sonnet-4-5' }] },
       { sessionId: 's1', callId: 'c1' },
     );
-    expect(result).toEqual({
-      title: 'Select Execution Tier',
-      tier: 'standard',
-      model: 'anthropic/claude-sonnet-4-5',
-      summary: 'Selected Standard Tier',
-      note: 'answered',
-    });
-    expect(renderPage).toHaveBeenCalledTimes(1);
+    expect(result.title).toBe('Select Execution Tier');
+    expect(result.html).toContain('Select Execution Tier');
+    expect(result.html).toContain('anthropic/claude-sonnet-4-5');
+    expect(result.tiers).toEqual([
+      expect.objectContaining({ tier: 'standard', model: 'anthropic/claude-sonnet-4-5', inputPerM: 3, outputPerM: 15 }),
+    ]);
+    expect(result.note).toContain('render.page');
+    expect(result.note).toContain('awaitAnswer');
   });
 
-  it('propagates the render error when the tool is off, changing nothing', async () => {
-    const renderPage = vi.fn(async () => {
-      throw new Error('The render tool is turned off in OpenChamber settings');
-    });
-    const action = createTierChooserAction({ listModels: async () => catalog, renderPage });
-    await expect(action({ tiers: [{ tier: 'cheap', model: 'claude-haiku-4-5' }] }, {})).rejects.toThrow(/turned off/);
+  it('honors a caller-provided title', async () => {
+    const action = createTierChooserAction({ listModels: async () => catalog });
+    const result = await action({ title: 'Pick a lane', tiers: [{ tier: 'cheap', model: 'claude-haiku-4-5' }] }, {});
+    expect(result.title).toBe('Pick a lane');
+    expect(result.html).toContain('Pick a lane');
   });
 });

@@ -518,15 +518,14 @@ export const createOpenChamberControlService = (dependencies) => {
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
   // `render.tierChooser` (#14 slice 2): the tier card's production
-  // caller — catalog pricing assembled here, the card rendered
-  // through render.page's wait, the pick returned to the agent.
+  // caller — catalog pricing assembled and the card built here; the
+  // agent shows it through render.page's wait and applies the pick.
   const tierChooser = createTierChooserAction({
     listModels: async (directory) => {
       const client = await getClient(asNonEmptyString(directory) || '');
       const catalog = await client.model.list();
       return catalog.data;
     },
-    renderPage,
   });
 
   const models = async () => {
