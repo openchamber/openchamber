@@ -7,19 +7,12 @@ import { ENVIRONMENT_VARIABLE_NAME_PATTERN } from '@/lib/environmentApi';
 import { useI18n } from '@/lib/i18n';
 
 type EnvironmentVariablesEditorProps = {
-  /** Names of the stored variables. Values never reach the UI. */
   names: string[];
   disabled?: boolean;
-  /** Stores a value; resolves true when it was saved. */
   onSet: (name: string, value: string) => Promise<boolean>;
   onRemove: (name: string) => Promise<boolean>;
 };
 
-/**
- * A list of environment variable names with a way to add a variable, replace
- * a stored value or remove one. A stored value is never shown: replacing it
- * means typing a new one.
- */
 export const EnvironmentVariablesEditor: React.FC<EnvironmentVariablesEditorProps> = ({
   names,
   disabled = false,
@@ -147,7 +140,6 @@ export const EnvironmentVariablesEditor: React.FC<EnvironmentVariablesEditorProp
           <Input
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
-            // An identifier is written the same in every language.
             placeholder="NAME"
             aria-label={t('settings.environment.editor.nameAria')}
             aria-invalid={nameInvalid || undefined}

@@ -9,13 +9,6 @@ import { useI18n } from '@/lib/i18n';
 import type { TrackerAPI, TrackerProviderId } from '@/lib/api/types';
 import { trackerSettingsCopy } from './trackerSettingsCopy';
 
-/**
- * Session status comments for a connected tracker with `sessionComments`.
- * They are written where other people read them, so they stay off until the
- * user turns them on. The server posts nothing while this is off, including
- * the completed and failure comments the event hub sends without going through
- * this interface.
- */
 export function TrackerSessionComments({
   trackers,
   providerId,
@@ -23,7 +16,6 @@ export function TrackerSessionComments({
 }: {
   trackers: TrackerAPI;
   providerId: TrackerProviderId;
-  /** The tracker's product name, for sentences that name it. */
   provider: string;
 }) {
   const { t } = useI18n();

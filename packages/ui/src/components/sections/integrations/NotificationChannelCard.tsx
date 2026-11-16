@@ -22,7 +22,6 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
 
-/** The origin of a server address typed so far, or null while it is not one yet. */
 const typedOrigin = (value: string): string | null => {
   try {
     const url = new URL(value.trim());
@@ -34,17 +33,10 @@ const typedOrigin = (value: string): string | null => {
 
 type NotificationChannelCardProps = {
   channel: NotificationChannel;
-  /** The extension's catalog row, for its icon; the channel delivers without it. */
   guest: InstalledGuest | null;
   onChanged: () => Promise<void>;
 };
 
-/**
- * The account of one extension notification channel: where it lives (typed
- * for a `user` instance), the token (and a username for `basic`), Connect and
- * Disconnect. Connecting is the whole switch: an approved extension with an
- * account delivers, one without does not.
- */
 export const NotificationChannelCard: React.FC<NotificationChannelCardProps> = ({ channel, guest, onChanged }) => {
   const { t } = useI18n();
   const iconSrc = React.useMemo(
@@ -67,7 +59,6 @@ export const NotificationChannelCard: React.FC<NotificationChannelCardProps> = (
     };
   }, []);
 
-  // Connecting again keeps the server the account is on; the user retypes it only to move.
   const storedInstance = channel.account?.instance;
   React.useEffect(() => {
     if (storedInstance) setInstance(storedInstance);
@@ -79,7 +70,6 @@ export const NotificationChannelCard: React.FC<NotificationChannelCardProps> = (
   const needsAttention = Boolean(account && account.account.status === 'invalid');
   const needsUsername = tokenFormat.username;
   const accountName = account ? (account.account.name || account.account.login || account.account.id) : '';
-  // Where a token is made: on the channel's server, the connected one, or the one typed so far.
   const tokenOrigin = instances.kind === 'fixed' ? instances.origin : (account?.instance ?? typedOrigin(instance));
   const createTokenUrl = tokenFormat.createPath && tokenOrigin ? `${tokenOrigin}${tokenFormat.createPath}` : null;
 
@@ -139,7 +129,6 @@ export const NotificationChannelCard: React.FC<NotificationChannelCardProps> = (
         toast.error(failureText(result.code, result.message));
         return;
       }
-      // The server took the token: it leaves the field, as the guest card's does.
       setToken('');
       setUsername('');
       reportSettingsSaveState('saved');
@@ -191,7 +180,6 @@ export const NotificationChannelCard: React.FC<NotificationChannelCardProps> = (
           </p>
         ) : null}
         {needsAttention ? (
-          // A written-off account is a problem the user fixes here: it stays visible.
           <p className="typography-meta text-[var(--status-warning)]">
             {account?.account.invalidReason === 'instance-changed'
               ? t('settings.integrations.channels.invalid.movedHint', { name: label })

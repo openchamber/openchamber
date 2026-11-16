@@ -29,7 +29,6 @@ import { SettingsInlineLink } from '@/components/sections/classification/JevAcce
 
 const PROVIDER_POLICIES_DOCS_URL = 'https://opencode.ai/v2/docs/policies/';
 
-/** Whether the OpenCode config denies any provider; null while unknown or when the read failed. */
 const useConfigDeniesAnyProvider = (directory: string | null): boolean | null => {
   const [restricted, setRestricted] = React.useState<boolean | null>(null);
   React.useEffect(() => {
@@ -38,7 +37,6 @@ const useConfigDeniesAnyProvider = (directory: string | null): boolean | null =>
     opencodeClient.configDeniesAnyProvider(directory)
       .then((value) => { if (!cancelled) setRestricted(value); })
       .catch((error) => {
-        // Unknown is not "no policy": stay quiet, but leave a trace.
         console.warn('[providers] could not read OpenCode provider policies:', error instanceof Error ? error.message : String(error));
         if (!cancelled) setRestricted(null);
       });
@@ -47,15 +45,6 @@ const useConfigDeniesAnyProvider = (directory: string | null): boolean | null =>
   return restricted;
 };
 
-/**
- * Enterprise mode keeps OpenChamber from adding providers, but which ones
- * OpenCode may use is its own `provider.use` policy. The config files are
- * readable; rules from a connected OpenCode Console workspace are not (OpenCode
- * keeps them in memory), and they arrive only through its `opencode`
- * integration. So: no policy and no Console is a certain gap and a warning;
- * no policy with Console connected is a maybe and an info line. Nothing extra
- * is said while either answer is unknown.
- */
 const EnterpriseProvidersNotice: React.FC<{ directory: string | null; integrations: readonly IntegrationInfo[] | null }> = ({ directory, integrations }) => {
   const { t } = useI18n();
   const restricted = useConfigDeniesAnyProvider(directory);
@@ -111,16 +100,10 @@ const EnterpriseProvidersNotice: React.FC<{ directory: string | null; integratio
   );
 };
 
-/**
- * Classification providers answer OpenChamber's own Jev decisions (safety
- * net, Auto), not OpenCode, so they get one card of their own that opens a
- * dedicated page. Absent where there is no OpenChamber server (VS Code).
- */
 const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   const { t } = useI18n();
   const available = useRoutingStore((state) => state.available);
   const jevAvailable = useRoutingStore((state) => state.jevAvailable);
-  // Off is a choice, not a problem to fix, so it gets no warning.
   const off = useRoutingStore((state) => state.classifier?.selected === 'off');
   if (!available) return null;
   return (
@@ -143,10 +126,6 @@ const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
 
 type GridProvider = Provider & { models: Model[] };
 
-/**
- * One OpenCode Console sign-in connects both Zen and Go, so their cards say how
- * each one bills; otherwise the pair reads as the same provider twice.
- */
 const BILLING_KEY_BY_PROVIDER = new Map<string, I18nKey>([
   ['opencode', 'settings.providers.card.billing.payPerUse'],
   ['opencode-go', 'settings.providers.card.billing.subscription'],
@@ -154,23 +133,15 @@ const BILLING_KEY_BY_PROVIDER = new Map<string, I18nKey>([
 
 interface ProviderGridProps {
   providers: readonly GridProvider[];
-  /** Null while the integration list is loading; cards then show no status. */
   integrations: readonly IntegrationInfo[] | null;
   directory: string | null;
   onSelect: (providerId: string) => void;
   onConnect: () => void;
   onOpenClassification: () => void;
-  /** Providers turned off in the user's config; null where the runtime cannot tell. */
   disabledProviders?: readonly string[] | null;
   onEnableProvider?: (providerId: string) => void;
 }
 
-/**
- * Providers configured in the selected project's own config. Everything else
- * comes from the user's config, credentials or the environment. Read through
- * the OpenChamber-only source endpoint, because the SDK does not expose which
- * config file defined a provider.
- */
 const useProjectProviderIds = (providers: readonly GridProvider[], directory: string | null): ReadonlySet<string> => {
   const [projectIds, setProjectIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
@@ -188,7 +159,6 @@ const useProjectProviderIds = (providers: readonly GridProvider[], directory: st
         const sources = payload?.sources ?? payload?.data?.sources;
         return sources?.project?.exists === true ? provider.id : null;
       } catch {
-        // A provider whose source cannot be read just loses its Project chip.
         return null;
       }
     })).then((ids) => {
@@ -221,18 +191,14 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
   return <SettingsCardPill tone={tone}>{label}</SettingsCardPill>;
 };
 
-/** Browse view of the Providers page: one card per provider OpenCode reports. */
 export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
-  // Alphabetical by name, so a card is found by scanning rather than in the
-  // order the providers happened to be configured.
   const alphabetical = React.useMemo(() => [...providers].sort((a, b) =>
     (a.name || a.id).localeCompare(b.name || b.id, undefined, { sensitivity: 'base' })), [providers]);
   const filtered = rankByQuery(alphabetical, query, (provider) => [provider.name || provider.id, provider.id]);
   const hasQuery = query.trim().length > 0;
-  // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
 
   return (
@@ -254,7 +220,6 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       ) : null}
 
       <div className={SETTINGS_CARD_GRID_CLASS}>
-        {/* The one way in to connecting a provider, so it leads the grid. */}
         {hasQuery || locked ? null : (
           <SettingsAddCard
             label={t('settings.providers.grid.connect')}
@@ -294,7 +259,6 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
         })}
       </div>
 
-      {/* OpenCode drops a disabled provider from its list, so this is the only way back. */}
       {disabledProviders && disabledProviders.length > 0 && onEnableProvider ? (
         <SettingsSection title={t('settings.providers.disabled.title')} info={t('settings.providers.disabled.info')}>
           <div className="space-y-1">

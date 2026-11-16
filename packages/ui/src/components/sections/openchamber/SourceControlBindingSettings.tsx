@@ -11,18 +11,8 @@ type RepositoryConfigurationDialogProps = {
   directory: string;
 };
 
-/** Every editor after the first in the dialog is separated by the settings divider. */
 const DIALOG_DIVIDER_CLASS = 'border-t border-edge pt-4';
 
-/**
- * What a repository needs beyond its identity.
- *
- * The identity carries the account, the transport and the signature, and the
- * panel names it on its own button, so this holds only what an identity does
- * not say: which of the repository's other addresses that identity may answer
- * for, and the separate grants submodules and Git LFS need. Starting over is
- * choosing the System identity.
- */
 export const RepositoryConfigurationDialog: React.FC<RepositoryConfigurationDialogProps> = ({ open, onOpenChange, directory }) => {
   const { t } = useI18n();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);

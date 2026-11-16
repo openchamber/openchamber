@@ -10,29 +10,18 @@ type SkillUse = 'auto' | 'manual' | 'off';
 const ALWAYS_ON = getSkillSwitchState([], '');
 
 interface SkillUseFieldProps {
-  /** The installed skill; null while a new skill is drafted, which cannot be off yet. */
   skill: DiscoveredSkill | null;
   directory: string | null;
-  /** The skill file's "run only when called" flag, saved with the page. */
   manual: boolean;
   onManualChange: (manual: boolean) => void;
-  /** The skill file cannot be edited (a built-in skill), so neither can the flag. */
   manualLocked: boolean;
 }
 
-/**
- * When agents use a skill: on their own, only when it is called by name, or
- * not at all. "When called" is a flag in the skill file; "Off" is a policy in
- * the OpenCode config that leaves the file alone (`skillSwitch.ts`). Off moves
- * only once the server has written the config, so a failed write leaves the
- * choice where it was.
- */
 export const SkillUseField: React.FC<SkillUseFieldProps> = ({ skill, directory, manual, onManualChange, manualLocked }) => {
   const { t } = useI18n();
   const policies = useSkillsStore((state) => selectSkillPoliciesForDirectory(state, directory));
   const setSkillEnabled = useSkillsStore((state) => state.setSkillEnabled);
   const [saving, setSaving] = React.useState(false);
-  // Statements never read: whether the skill is off is unknown, so nothing can be chosen yet.
   const unknown = skill !== null && policies === null;
   const { enabled, rule, switchable } = React.useMemo(
     () => (skill && policies ? getSkillSwitchState(policies, skill.id) : ALWAYS_ON),
@@ -59,7 +48,6 @@ export const SkillUseField: React.FC<SkillUseFieldProps> = ({ skill, directory, 
     if ((next === 'manual') !== manual) onManualChange(next === 'manual');
   };
 
-  // A rule the choice does not own decides: a wildcard deny, or an allow.
   const ruleNote = (() => {
     if (unknown) return t('settings.skills.page.use.unknown');
     if (!rule || (rule.effect === 'deny' && switchable)) return undefined;

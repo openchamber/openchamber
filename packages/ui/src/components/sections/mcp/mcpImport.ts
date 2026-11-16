@@ -21,7 +21,6 @@ export interface ImportedMcpResult {
   readonly timeoutExecution: string;
   readonly codemode: McpCodemodeChoice;
   readonly disabled: boolean;
-  /** Absent in the paste means legacy, as OpenCode reads it. */
   readonly protocol: McpProtocol;
 }
 
@@ -56,7 +55,6 @@ function buildResult(
   const environment = buildEnv(raw, 'env', 'environment');
   const headers = buildEnv(raw, 'headers');
 
-  // OAuth is snake_case in v2 and camelCase in v1; both spellings are read.
   const oauth = isObject(raw.oauth) ? raw.oauth : null;
   const oauthClientId = readString(oauth, 'client_id', 'clientId');
   const oauthClientSecret = readString(oauth, 'client_secret', 'clientSecret');
@@ -96,7 +94,6 @@ function buildResult(
   };
 }
 
-/** First of the given keys that holds a non-empty string. */
 function readString(source: Record<string, unknown> | null, ...keys: string[]): string {
   if (!source) return '';
   for (const key of keys) {
@@ -106,7 +103,6 @@ function readString(source: Record<string, unknown> | null, ...keys: string[]): 
   return '';
 }
 
-/** First of the given keys that reads as a positive whole number. */
 function readNumeric(source: Record<string, unknown> | null, ...keys: string[]): string {
   if (!source) return '';
   for (const key of keys) {
@@ -169,10 +165,6 @@ function buildEnv(
   return [];
 }
 
-/**
- * v2 splits the timeout by phase; a v1 paste carries one number, which stood
- * for the whole request, so it lands on `execution`.
- */
 function buildTimeouts(raw: Record<string, unknown>): { startup: string; catalog: string; execution: string } {
   if (isObject(raw.timeout)) {
     return {
@@ -184,10 +176,6 @@ function buildTimeouts(raw: Record<string, unknown>): { startup: string; catalog
   return { startup: '', catalog: '', execution: positiveInteger(raw.timeout) };
 }
 
-/**
- * v2 uses `disabled`; a v1 paste says `enabled`. When neither is present the
- * server is active, which is what both versions mean by an absent flag.
- */
 function buildDisabled(raw: Record<string, unknown>): boolean {
   if (raw.disabled === true) return true;
   if (raw.disabled === false) return false;
@@ -195,10 +183,6 @@ function buildDisabled(raw: Record<string, unknown>): boolean {
   return false;
 }
 
-/**
- * Extract a single named server entry from a parsed JSON object.
- * Returns null if the shape does not contain exactly one identifiable server.
- */
 function extractSingleServer(
   obj: Record<string, unknown>,
 ): { name: string; entry: Record<string, unknown> } | null {
@@ -243,19 +227,6 @@ function isServerConfig(val: Record<string, unknown>): boolean {
   );
 }
 
-/**
- * Parse a raw JSON string as an MCP server snippet and return a normalized
- * result or a structured error. Does not mutate the current draft — the caller
- * applies the result to form state. Both OpenCode versions are accepted; the
- * result is always in the v2 vocabulary.
- *
- * Supported shapes:
- *   { "mcpServers": { "name": { ... } } }   (Claude Desktop / generic)
- *   { "mcp": { "servers": { "name": { ... } } } }   (OpenCode 2)
- *   { "mcp": { "name": { ... } } }          (OpenCode 1)
- *   { "name": { ... } }
- *   { ...serverConfig }
- */
 export function parseImportedMcpSnippet(
   raw: string,
   options?: { fallbackName?: string },
@@ -279,7 +250,6 @@ export function parseImportedMcpSnippet(
 
   const obj = parsed as Record<string, unknown>;
 
-  // Detect single named entry inside { "mcpServers": { "name": { ... } } }
   const mcpServers = obj.mcpServers;
   if (isObject(mcpServers)) {
     const keys = Object.keys(mcpServers);
@@ -302,8 +272,6 @@ export function parseImportedMcpSnippet(
     return buildResult(serverName, inferType(entry as Record<string, unknown>), entry as Record<string, unknown>);
   }
 
-  // v2 config shape { "mcp": { "servers": { "name": { ... } } } }, and the v1
-  // shape { "mcp": { "name": { ... } } } it replaced.
   const mcpSection = obj.mcp;
   const mcp = isObject(mcpSection) && isObject(mcpSection.servers)
     ? mcpSection.servers
@@ -329,7 +297,6 @@ export function parseImportedMcpSnippet(
     return buildResult(serverName, inferType(entry as Record<string, unknown>), entry as Record<string, unknown>);
   }
 
-  // Detect single named entry { "serverName": { ... } }
   const single = extractSingleServer(obj);
   if (single) {
     return buildResult(
@@ -339,7 +306,6 @@ export function parseImportedMcpSnippet(
     );
   }
 
-  // Treat top-level as a bare server config
   if (isServerConfig(obj)) {
     const type = inferType(obj);
     const name = typeof obj.name === 'string' && obj.name.trim()
@@ -363,11 +329,6 @@ function inferType(entry: Record<string, unknown>): 'local' | 'remote' {
   return 'local';
 }
 
-/**
- * Apply an imported result to a new or existing McpDraft.
- * All fields from the result override the draft, but fields only
- * relevant to the opposite transport type are cleared.
- */
 export function applyImportedMcpToDraft(
   result: ImportedMcpResult,
   currentDraft: Partial<McpDraft> & { name?: string },
@@ -392,7 +353,6 @@ export function applyImportedMcpToDraft(
     oauthRedirectUri: result.type === 'remote' ? result.oauthRedirectUri : '',
     oauthCallbackPort: result.type === 'remote' ? result.oauthCallbackPort : '',
     oauthAuthServerMetadataUrl: result.type === 'remote' ? result.oauthAuthServerMetadataUrl : '',
-    // `startup` only means something for a server OpenChamber spawns.
     timeoutStartup: result.type === 'local' ? result.timeoutStartup : '',
     timeoutCatalog: result.timeoutCatalog,
     timeoutExecution: result.timeoutExecution,

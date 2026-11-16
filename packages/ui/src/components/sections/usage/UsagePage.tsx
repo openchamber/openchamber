@@ -80,7 +80,6 @@ export const UsagePage: React.FC = () => {
     ? usage
       ? t('header.services.usageRefreshFailedStale', { error: refreshError })
       : refreshError
-    // OpenCode Go reports a failed Go read beside the Console budgets it still has.
     : selectedResult?.configured && selectedResult.error
       ? selectedResult.error
       : null;
@@ -198,10 +197,6 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {/* Only the selected provider's own failure belongs in its panel. The
-          store's global `error` is whichever provider failed first and has no
-          UI consumer left; shown here it labeled DeepSeek with Claude's
-          rate-limit message. */}
       {selectedProviderError && (
         <div className="mb-8 rounded-lg bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
@@ -209,10 +204,8 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {/* Providers with an inline credentials form don't need the "go to Providers" banner — the form IS the fix. */}
       {selectedResult && !selectedResult.configured && !hasCredentialsForm && (
         <div className="mb-8 rounded-lg bg-[var(--status-warning-background)] px-4 py-3">
-          {/* Claude usage comes from Claude Code's own login, which Providers cannot add. */}
           {selectedProviderId === 'claude' ? (
             <>
               <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('settings.usage.page.state.claudeSignedOutTitle')}</p>
