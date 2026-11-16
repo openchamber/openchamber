@@ -50,11 +50,12 @@ card and the Workflows panel open them.
 - `routes.js`: the user's side for the chat card, the work-status panel and
   the Workflows panel: `GET /api/openchamber/workflows?sessionId=` or
   `?directory=` (run summaries of a session or of every session in a
-  directory), `GET /api/openchamber/workflows/saved?directory=` (the project's
+  directory; `directory` repeats for a project's folder and its worktrees), `GET /api/openchamber/workflows/saved?directory=` (the project's
   saved workflows), `POST /api/openchamber/workflows/start` (the user runs a
   saved workflow: in the given session, or a new one made for it, started at
   once since the click is the approval, reported back and waking that session
-  like a run its agent proposed), `GET /api/openchamber/workflows/:runId` (the last 200 log lines, the
+  like a run its agent proposed; `scriptDirectory` names the project folder a
+  saved workflow is read from when the session is in a worktree), `GET /api/openchamber/workflows/:runId` (the last 200 log lines, the
   script, args and result), `GET /api/openchamber/workflows/:runId/agents/:key`
   (one agent's prompt and full answer),
   `POST /api/openchamber/workflows/:runId/{approve,decline,stop,resume}` and
@@ -198,6 +199,55 @@ session proposed. `workflow.save` writes a script to
   aside and the rest load. At most 100 runs are kept; finished ones are pruned
   by oldest end, never an open one, the one just saved, or one whose report
   has not gone out.
+- An agent waits for its session's idle event and falls back to a poll when an
+  event is missed, such as across a reconnect of the event hub. An unknown
+  status is never taken as the turn being over.
+- An agent whose parent session cannot be read does not start, so it never runs
+  on permission rules looser than the parent's. Its allow rules are appended
+  after the parent's rules, so they win.
+- Interrupting an agent that is already gone is logged and ignored: the run is
+  being stopped either way.
+- A schema with a `required` key that `additionalProperties: false` rules out
+  fails before an agent runs.
+- A PID whose liveness check answers `EPERM` is alive: the process exists and
+  belongs to another user.
+- A run the user deleted stays deleted. A report delivery or an agent still
+  settling holds its object, and a later save must not write its file back.
+  Deleting also cancels the run's throttled broadcast, which would otherwise
+  put the run back on screen.
+- Report delivery re-checks the report object at every attempt. A resume that
+  replaced the report is never delivered or marked by an older attempt, and
+  both a 409 and a 404 mark the report delivered.
+- An agent's session id is saved and announced immediately, before the agent
+  works: the chat leaves workflow agents out of its subagent rows by that id,
+  and a restart needs it to report the agent as stopped. A stop that arrives
+  during that save creates no session.
+- A stop of the run ends every agent at once, so only an agent's own end leaves
+  a log line.
+- A worker that cannot start fails the run; the run never stays running.
+- A run stores only the agent options the script gave, because the replay key
+  hashes that object. JSON drops undefined fields, so an absent `args`, model
+  or schema reads as absent rather than null.
+- A submitted answer is checked as JSON text first and as it came last, so
+  `"42"` still answers a schema that wants a string.
+- A light run keeps one character past the preview limit, so `truncate` adds
+  its ellipsis exactly when the full text would have.
+- Older run files can lack `agentsStarted` and the owner fields; the schema
+  accepts them and a missing agent count reads as 0.
+- Pruning runs after a committed save, so a retention failure is logged and
+  never turns that save into a failed one.
+- A settled run read through `get()` is held whole until the next save makes it
+  light again, so a resume, a delete and retention see the same working object.
+  Concurrent first reads share one read, and the full record is published only
+  over the light form it was read for.
+- A deletion removes the run again after its file is gone, because a queued
+  save may have republished it meanwhile.
+- Delivering pending reports waits for recovery to finish, so the reports of
+  runs it just marked go too. It can be called again while it runs.
+- Messages the worker queued before the run ended belong to no run and are
+  dropped.
+- `args` can arrive as a JSON string because a tool call argument may be
+  stringified, so a string that looks like an object or array is parsed.
 
 ## Decisions
 
@@ -251,7 +301,9 @@ a boundary against the agent, which has a shell; it keeps a script from
 reaching or stalling the server. The worker source is a string (`eval: true`)
 so it runs the same from the source tree under Bun, from `node_modules` under
 Node, and from inside the desktop app's asar archive, where a worker file path
-would not load.
+would not load. `parallel()` and `pipeline()` are written inside that context,
+in the script's own realm, so the promises and arrays they return belong to the
+script.
 
 ### Why agents are linked by metadata and not OpenCode's `parentID`
 
@@ -332,6 +384,53 @@ nothing enterprise mode guards and has no policy key.
 The client only writes the setting. `workflow.run` reads it from the settings
 file when the agent calls it, so a cleared checkbox holds whatever a client
 sends, and a change applies to the next run without an OpenCode restart.
+
+### Why the client gets the origin and the directory travels as a header
+
+Every v2 route lives under `/api` and the client appends that itself, so the
+client is built from the origin alone. The directory is a request header, so
+one client can be built per session directory without rebuilding route paths.
+
+### Why `/workflows/saved` is registered before `/:runId`
+
+Express matches routes in registration order. After `/:runId`, `saved` would be
+read as a run id.
+
+### Why delete checks the run state and not the active set
+
+An execution leaves `active` only once its end save resolves, so for a moment
+after the run's end is saved the run is finished yet still listed there. The
+run's state is the rule: a running or awaiting run is stopped or declined
+first. Deleting in that overlap is safe, because the deletion drops an
+undelivered report and the removed-run guard keeps the run from coming back.
+
+### Why the preview is copied through JSON
+
+A slice of a long string keeps the whole string alive in V8, so the preview is
+copied out to let the full answer go. The copy keeps one character past the
+preview limit so `truncate` still adds its ellipsis exactly when the full text
+would have.
+
+### Why a run caps its agents
+
+A script with a loop must not be able to spend a subscription in a minute, so
+a run works at most 8 agents at once and starts at most 200 across its
+attempts. A run that needs more is split into several.
+
+### Why the Linux process start ticks are read after the last `)`
+
+`/proc/<pid>/stat` keeps the command in parentheses, and that command can
+contain spaces and closing parentheses. The start time is the 20th
+space-separated field after the final `)`, so splitting anywhere earlier reads
+the wrong field.
+
+### Why the meta object is evaluated in a fresh context
+
+`meta` is a plain literal, so anything that needs more than a short timeout is
+not one. The literal crosses back as JSON, which makes the object belong to the
+server's realm and leaves only literal values in it. Its end is found by
+counting braces outside strings, template literals and comments, and the value
+is evaluated separately, so only its extent has to be found.
 
 ## Runtime parity
 
