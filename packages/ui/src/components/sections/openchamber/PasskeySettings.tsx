@@ -185,7 +185,6 @@ export const PasskeySettings: React.FC = () => {
     if (renameSubmittingRef.current) {
       return;
     }
-    // Opening the editor and leaving it unchanged is not a rename.
     if (renameDraft.trim() === (passkey.customLabel ?? '')) {
       setRenamingId((current) => (current === passkey.id ? null : current));
       return;
@@ -202,8 +201,6 @@ export const PasskeySettings: React.FC = () => {
       } else {
         await loadPasskeys();
       }
-      // Only close the editor for this row; another row may have opened
-      // while the save was in flight.
       setRenamingId((current) => (current === passkey.id ? null : current));
       toast.success(t('settings.openchamber.passkeys.toast.renamed'));
     } catch (error) {

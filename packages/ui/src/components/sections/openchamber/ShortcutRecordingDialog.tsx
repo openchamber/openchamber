@@ -54,21 +54,13 @@ interface ShortcutRecordingDialogProps {
     replaceActionId?: ShortcutActionId,
   ) => void;
   onOpenChange: (open: boolean) => void;
-  /** Maximum number of chords in the sequence. OS-level global shortcuts only support one. @default 2 */
   maxChords?: number;
-  /**
-   * Most keys held at once, modifiers included. In-app shortcuts stay at three;
-   * a global shortcut needs room for all four modifiers plus a key (a "hyper"
-   * key sends Ctrl+Shift+Cmd+Option). @default 3
-   */
   maxKeys?: number;
 }
 
 interface RecordingOptions {
   maxKeys: number;
-  /** On macOS Control and Command are separate keys and record separately. */
   macModifiers: boolean;
-  /** Backspace records as a key; by default it removes the last chord. */
   recordBackspace: boolean;
 }
 
@@ -78,9 +70,6 @@ const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
   recordBackspace: false,
 };
 
-// `mod` is Command on macOS and Control elsewhere. On macOS a held Control is
-// its own `ctrl` modifier, so Ctrl+N never records as Cmd+N; elsewhere Meta is
-// the Windows / Super key and records as `super`, never as Control.
 function modifierParts(
   event: Pick<RecordingKeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>,
   { macModifiers }: RecordingOptions,
@@ -138,7 +127,6 @@ function modifierKeyUpToCombo(event: React.KeyboardEvent<HTMLDivElement>, option
   if (!MODIFIER_KEYS.has(key)) return null;
   if (getPhysicalKeyCount(event, true) > options.maxKeys) return null;
 
-  // The released modifier no longer shows in the event's flags; count it as held.
   const parts = modifierParts({
     metaKey: event.metaKey || key === 'meta',
     ctrlKey: event.ctrlKey || key === 'control',

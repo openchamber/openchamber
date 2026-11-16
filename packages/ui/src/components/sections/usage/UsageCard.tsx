@@ -32,10 +32,6 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const displayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-  // A balance-only window (DeepSeek's credits balance) carries a value label
-  // and no percentage. An empty track with a "used" caption under it read as
-  // "0% used", so the bar and its caption only render when there is a share
-  // to show; the reset time still does.
   const hasPercent = displayPercent !== null;
   const barLabel = displayMode === 'remaining'
     ? t('settings.usage.card.bar.remaining')

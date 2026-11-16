@@ -6,15 +6,8 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { ClientAuthAPI } from '@/lib/api/types';
 
-// The relay status is read only for this notice, so it polls slowly: the
-// server reports a conflict after two evictions within ten minutes.
 const STATUS_POLL_MS = 30_000;
 
-/**
- * Shown while another copy of this server's data, usually on a second
- * computer, keeps taking the relay slot, so devices added for "Anywhere" land
- * on either computer. Offers to give this computer its own relay identity.
- */
 export function RelayConflictNotice({ clientAuth }: { clientAuth: ClientAuthAPI }) {
   const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();
@@ -24,7 +17,6 @@ export function RelayConflictNotice({ clientAuth }: { clientAuth: ClientAuthAPI 
   React.useEffect(() => {
     let cancelled = false;
     const load = () => {
-      // A failed read keeps the last known state.
       clientAuth.getRelayHostStatus()
         .then((status) => { if (!cancelled) setConflict(status.identityConflict); })
         .catch(() => {});

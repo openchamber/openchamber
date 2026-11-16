@@ -140,14 +140,10 @@ const SkillsInstalledPage: React.FC = () => {
     setSelectedSkill: s.setSelectedSkill,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName, settingsDirectory) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
-  // Only a list that has been read can say a selection is gone: Settings in
-  // VS Code opens on a skill before its own tab has read the list.
   const skillsLoaded = useSkillsStore((state) => selectSkillsLoadedForDirectory(state, settingsDirectory));
   const hasStaleSelection = Boolean(skillsLoaded && selectedSkillName && !selectedSkill && !skillDraft);
   const isReadOnlySkill = selectedSkill?.path === '<built-in>';
@@ -307,7 +303,6 @@ const SkillsInstalledPage: React.FC = () => {
 
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
-    // File-view token colors for code supporting files; markdown stays on lezer.
     const highlightLanguage = getLanguageFromExtension(filePath);
     const useHighlight = Boolean(highlightLanguage) && highlightLanguage !== 'markdown';
     const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useHighlight ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
@@ -345,8 +340,6 @@ const SkillsInstalledPage: React.FC = () => {
     return null;
   };
 
-  // An existing skill writes itself; a new one is only created once the user
-  // confirms it, so an abandoned draft never reaches disk.
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const skillName = selectedSkillName?.trim();
     if (isNewSkill || isReadOnlySkill || !skillName) return AUTOSAVE_UNCHANGED;
@@ -401,7 +394,6 @@ const SkillsInstalledPage: React.FC = () => {
 
   const handleDisableModelInvocationChange = (next: boolean) => {
     setDisableModelInvocation(next);
-    // A new skill is written once, on Create.
     if (!isNewSkill) autosave.requestSave();
   };
 
@@ -715,8 +707,6 @@ const SkillsInstalledPage: React.FC = () => {
                 SKILL_EDITOR_HEIGHT_CLASS,
               )}
               onKeyDown={(event) => {
-                // The editor fills the section, so leaving it to save is a
-                // chore; the usual shortcut writes it where you are.
                 if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                   event.preventDefault();
                   autosave.requestSave();
@@ -827,7 +817,6 @@ const SkillsInstalledPage: React.FC = () => {
       </SettingsPageLayout>
 
 
-      {/* Add/Edit File Dialog */}
       <Dialog
         open={deleteFilePath !== null}
         onOpenChange={(open) => {
@@ -864,9 +853,6 @@ const SkillsInstalledPage: React.FC = () => {
           setIsFileDialogOpen(true);
           return;
         }
-        // Editing an existing supporting file has no Save button: closing the
-        // dialog writes it. A brand new file is only created on confirm, so
-        // closing it away leaves nothing behind.
         if (editingFilePath !== null && newFileContent !== originalFileContent) {
           void handleSaveFile();
           return;

@@ -91,11 +91,7 @@ export const BehaviorPage: React.FC = () => {
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
   const [responseStyleCustomInstructions, setResponseStyleCustomInstructions] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleCustomInstructions);
   const [isLoading, setIsLoading] = React.useState(true);
-  // What is currently on disk. Every field is compared against this, so a save
-  // writes only what actually changed and a refreshed value is never clobbered.
   const savedRef = React.useRef<BehaviorSettingsState | null>(null);
-  // AGENTS.md exactly as last read or written (null: no file). A save sends it
-  // so the server refuses to overwrite a file edited elsewhere in the meantime.
   const agentsMdOnDiskRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
@@ -126,10 +122,6 @@ export const BehaviorPage: React.FC = () => {
           }
         }
 
-        // AGENTS.md is the source of truth OpenCode reads at runtime, so an
-        // existing file is authoritative even when it is empty. The persisted
-        // copy (globalBehaviorPrompt) is only a fallback for a missing file or
-        // a failed read.
         let promptSource: BehaviorPromptSource = { kind: 'missing' };
         if (agentsMdRes.ok) {
           const agentsData = agentsMdResponseSchema.parse(await agentsMdRes.json());
@@ -163,9 +155,6 @@ export const BehaviorPage: React.FC = () => {
     return () => abort.abort();
   }, []);
 
-  // AGENTS.md is often edited in another editor while this page stays open.
-  // Coming back to the window re-reads it; the editor follows only when it
-  // holds no edit of its own, and a pending edit is guarded by the save.
   const promptRef = React.useRef(prompt);
   promptRef.current = prompt;
   React.useEffect(() => {
@@ -215,7 +204,6 @@ export const BehaviorPage: React.FC = () => {
 
     if (!promptChanged && !settingsChanged) return AUTOSAVE_UNCHANGED;
 
-    // The prompt lives in AGENTS.md; the rest lives in OpenChamber settings.
     const content = promptChanged ? normalizeAgentsMdContent(prompt) : saved.prompt;
     if (promptChanged) {
       const response = await runtimeFetch('/api/behavior/agents-md', {
@@ -230,8 +218,6 @@ export const BehaviorPage: React.FC = () => {
         return autosaveFailed(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
       agentsMdOnDiskRef.current = content;
-      // Normalize only the submitted draft. A newer edit must survive this
-      // response so the autosave follow-up can still write it.
       setPrompt((current) => current === prompt ? content : current);
     }
 

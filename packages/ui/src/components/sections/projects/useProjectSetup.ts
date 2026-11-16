@@ -16,19 +16,12 @@ type ProjectSetupLoad =
 
 export type ProjectSetupState = {
   load: ProjectSetupLoad;
-  /** Read the setup again; every edit ends with one, so the page shows what is on disk. */
   reload: () => Promise<void>;
   write: ProjectSetupWriters;
 };
 
-/**
- * The project's setup for the project page, read once and shared by its tabs.
- * A failed read is its own state: the page must not offer edits that would
- * write a list back over a file it could not read.
- */
 export const useProjectSetup = (projectRef: ProjectRef): ProjectSetupState => {
   const [load, setLoad] = React.useState<ProjectSetupLoad>({ state: 'loading' });
-  // Only the newest read lands, and none after unmount.
   const requestRef = React.useRef(0);
 
   const reload = React.useCallback(async () => {
@@ -50,7 +43,6 @@ export const useProjectSetup = (projectRef: ProjectRef): ProjectSetupState => {
   }, [reload]);
 
   const write = React.useMemo<ProjectSetupWriters>(() => {
-    // The run button and the menus read actions on their own; tell them.
     const notifyActions = (ok: boolean): boolean => {
       if (ok && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(PROJECT_ACTIONS_UPDATED_EVENT, { detail: { projectId: projectRef.id } }));
