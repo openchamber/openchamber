@@ -2,23 +2,6 @@ import { buildExtensionTrackerDescriptor } from './extension-descriptor.js';
 import { createExtensionTracker, isTrackerGuest } from './extension-tracker.js';
 import { extensionProviderId } from '../source-control/provider-id.js';
 
-/**
- * Which installed extensions serve a tracker right now, kept in step with the
- * extension catalog: the extension layer over the registry's built-ins. The
- * catalog is the authority, never an event's payload: every reconcile reads it,
- * attaches what is eligible and detaches what no longer is.
- *
- * A guest is eligible when it is enabled, fully approved with an effective
- * `service` grant (the catalog already drops a grant whose scope changed),
- * provides `tracker` with a parsed `contributes.tracker`, and has an id that
- * can name a provider (`ext-<guestId>`).
- *
- * Runs once at start, after approval, enable, install or replace and update
- * (`onGuestActivated`), after pause, removal or withdrawn approval
- * (`onGuestDeactivated`), and when a tracker's instance is set or cleared
- * (the descriptor's link patterns follow the connected server). Runs are
- * serialized, so two triggers never interleave an attach with a detach.
- */
 
 /**
  * @param {{
@@ -59,7 +42,6 @@ export function createExtensionTrackers({
     try {
       guests = await listGuests();
     } catch (error) {
-      // A catalog that cannot be read changes nothing: it is not an empty catalog.
       warn('[trackers] the extension catalog could not be read:', error?.message ?? error);
       return;
     }
@@ -69,15 +51,12 @@ export function createExtensionTrackers({
     }
     let changed = false;
     for (const [id, guest] of eligible) {
-      // The descriptor's link patterns follow the server the accounts live on.
       let instance = null;
       try {
         instance = (await accounts.read(id))?.instance ?? null;
       } catch (error) {
         warn(`[trackers] ${id}: the account store could not be read:`, error?.message ?? error);
       }
-      // The descriptor depends on the version, the contribution and the instance;
-      // the adapter also on where the package lives and what was granted.
       const descriptorKey = JSON.stringify([guest.name, guest.version ?? '', guest.tracker, instance]);
       const key = JSON.stringify([descriptorKey, guest.packageRoot, guest.service, guest.capabilityGrants]);
       const previous = registered.get(id);
@@ -87,7 +66,6 @@ export function createExtensionTrackers({
         try {
           descriptor = buildExtensionTrackerDescriptor({ guestId: guest.id, contribution: guest.tracker, instance });
         } catch (error) {
-          // One broken contribution leaves every other tracker as it is.
           warn(`[trackers] ${guest.id} cannot serve a tracker:`, error?.message ?? error);
           if (previous) {
             detach(id);
@@ -96,10 +74,6 @@ export function createExtensionTrackers({
           continue;
         }
       }
-      // A replacement (new version, grant change, the first server connected) keeps
-      // what the old adapter started: pending sign-ins and connects commit through
-      // the store's own identities, whichever adapter finishes them. Only the
-      // session-status runtime, which closed over the old adapter, is rebuilt.
       if (previous) sessionStatus.forget(id);
       const adapter = createExtensionTracker({
         descriptor,
@@ -134,11 +108,6 @@ export function createExtensionTrackers({
 
   return Object.freeze({
     reconcile,
-    /**
-     * After a pause, a removal or withdrawn approval. A removed extension's
-     * accounts, client, mapping and session records go with it ("remove means
-     * forget").
-     */
     deactivated: async ({ guestId, removed = false }) => {
       const id = extensionProviderId(guestId);
       if (id) {

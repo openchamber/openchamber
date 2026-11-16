@@ -14,8 +14,6 @@ const PRIORITY_FILTERS = new Set(['all', 'none', 'urgent', 'high', 'medium', 'lo
 const SESSION_STATUS_KINDS = new Set(['started', 'completed', 'failure']);
 
 const invalid = (message) => new TrackerRouteError(400, 'INVALID', message);
-// What the account store keeps (`extension-accounts.js`), checked here so an
-// over-long value is refused before the service is asked to verify it.
 const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256 });
 const bounded = (value, max, name) => {
   if (isString(value) && value.length > max) throw invalid(`${name} is too long`);
@@ -32,10 +30,6 @@ const queryValue = (req, key) => readString(req.query?.[key]);
 
 const isUserError = (error) => error?.code === 'INVALID' || error?.userError === true;
 
-/**
- * List options from the query, checked against what the descriptor offers.
- * An omitted value is the default; a value the tracker does not offer is 400.
- */
 function readListOptions(req, descriptor) {
   const state = queryValue(req, 'state') || 'open';
   if (!descriptor.stateFilters.includes(state)) throw invalid(`Unknown state filter: ${state}`);
@@ -106,7 +100,6 @@ export function registerTrackerRoutes(app, { registry }) {
     res.json({ providers: registry.descriptors() });
   });
 
-  // The request's origin is where an extension tracker's browser sign-in returns; a built-in ignores it.
   app.get('/api/tracker/:provider/auth/status', handle('read auth status', ({ req, tracker }) => tracker.auth.status({ origin: requestOrigin(req) || null })));
 
   app.post('/api/tracker/:provider/auth/start', parseJsonBody, handle('start authorization', ({ req, tracker }) => {
@@ -118,9 +111,6 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }));
 
-  // An extension tracker's own ways in: a pasted token, the OAuth client the
-  // user registered, and the browser's return from that sign-in. Each answers
-  // 404 `UNSUPPORTED` on a tracker without the method.
   const takesToken = (descriptor, tracker) => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
   app.post('/api/tracker/:provider/auth/token', parseJsonBody, handle('connect a token', ({ req, tracker }) => {
     const body = readBody(req);
@@ -141,9 +131,6 @@ export function registerTrackerRoutes(app, { registry }) {
     });
   }, takesOauth));
 
-  // Public: the tracker redirects the browser here with no UI bearer
-  // (`core-routes.js` lets it past the session guard); the implementation
-  // accepts only a `state` it issued.
   app.get('/api/tracker/:provider/oauth/callback', async (req, res) => {
     const finish = (status, title, message) => {
       res.status(status).type('html').send(renderOauthCallbackPage({ title, message }));
@@ -235,8 +222,6 @@ export function registerTrackerRoutes(app, { registry }) {
     const sessionId = readString(body.sessionId);
     if (!SESSION_STATUS_KINDS.has(kind)) throw invalid('kind must be started, completed or failure');
     if (!sessionId) throw invalid('sessionId is required');
-    // The tracker checks the rest in its own order (disconnected and turned
-    // off answer before a missing identifier).
     const identifier = readString(body.identifier);
     if (identifier.length > 128) throw invalid('identifier is too long');
     const sessionOrigin = readString(body.sessionOrigin);
@@ -246,8 +231,6 @@ export function registerTrackerRoutes(app, { registry }) {
     return tracker.sessionStatus.post(input);
   }, hasSessionStatus));
 
-  // `POST /api/tracker/:provider/read-cache/refresh` (`TrackerAPI.refreshListReads`)
-  // is answered by `provider-read-cache`'s middleware, registered before these routes.
 
   app.use('/api/tracker', (_req, res) => {
     res.status(404).json({ error: 'Not found', code: 'NOT_FOUND' });
