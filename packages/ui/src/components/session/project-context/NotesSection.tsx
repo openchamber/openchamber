@@ -160,7 +160,7 @@ const NoteView: React.FC<{
   }, []);
 
   React.useEffect(() => {
-    if (note.body === lastSavedRef.current) {
+    if (note.body === lastSavedRef.current.trim()) {
       return;
     }
     if (draft !== lastSavedRef.current) {

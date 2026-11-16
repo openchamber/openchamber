@@ -87,7 +87,8 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
     }
     if (init?.method === 'PATCH') {
       noteWrites.push(String(init.body));
-      const saved = { ...peerNote, body: 'Local autosave draft', updatedAt: 2 };
+      const { body } = z.object({ body: z.string() }).parse(JSON.parse(String(init.body)));
+      const saved = { ...peerNote, body: body.trim(), updatedAt: 2 };
       serverContext = { ...serverContext, notes: [saved] };
       return Response.json({ note: saved });
     }
@@ -294,6 +295,20 @@ test('peer refreshes do not postpone the local note autosave', async () => {
     await announce();
   }
   expect(noteWrites).toEqual([JSON.stringify({ body: 'Local autosave draft' })]);
+});
+
+test('note autosave keeps whitespace in the editor and accepts later peer changes', async () => {
+  serverContext = { ...serverContext, notes: [peerNote] };
+  await mount();
+  const editor = await openNoteEditor();
+  await editor.type('  Local draft \n');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 500)); });
+  expect(noteWrites).toEqual([JSON.stringify({ body: 'Local draft' })]);
+  expect(editor.text()).toBe('  Local draft \n');
+
+  serverContext = { ...serverContext, notes: [{ ...peerNote, body: 'Peer replacement', updatedAt: 3 }] };
+  await announce();
+  expect(editor.text()).toBe('Peer replacement');
 });
 
 test('hidden panels stop refreshing and re-read when they become visible again', async () => {
