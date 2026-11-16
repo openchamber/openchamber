@@ -59,7 +59,14 @@ as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
 question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
+oldest pending form and counts the rest in its header. While the reader is
+away from the transcript's end (the scroll-to-bottom pill shows,
+`FormDockModeContext` from `ChatContainer` reads `reading`), the dock shrinks to its
+header row and opens again when they come back. A dock whose text field has
+focus stays open, since collapsing it would drop what is being typed. The
+header toggles it by hand at any time: opened while reading, it stays open;
+collapsed while reading, it opens again at the end like an automatic
+collapse; collapsed at the end, it stays collapsed. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
@@ -120,6 +127,38 @@ side panel keeps the full dock rather than a line of its own: the line asks
 for its card through the app-wide waiting-page request, which only the main
 timeline serves, so in the side panel it would move nothing, or move the main
 chat when that shows the same session.
+
+### Why the question dock collapses while the reader scrolls up
+
+The dock floats over the transcript, and a question with described options
+took about a third of a laptop window, covering the reply the question is
+about exactly while the user went back to read it. The scroll position is the
+reading signal the app already has, so no new control was added.
+
+While the dock is collapsed for reading, the transcript's tail spacer keeps
+the room it had for the open dock (`holdReserve`, published as
+`--chat-floating-panel-reserve`). With the spacer shrinking, a scroll shorter
+than the dock clamped the reader onto the end, which hid the pill and opened
+the dock again, so the user could not scroll up less than the dock's height.
+The overlays riding above the dock (the pill, the status row) keep following
+its real height. A collapse by hand while reading counts as a collapse for
+reading for the same reason: as a collapse that stays, it would give the room
+back and clamp the reader the same way. The room therefore comes back only
+together with the dock reopening, which the frame's resize observer already
+measures, so the release needs no timer or extra effect.
+
+The state reaches the dock through a context so the memoized composer does
+not re-render on every scroll away and back. One context carries both ways
+the column shapes the dock (`dock`, `reading`, `in-chat`, from
+`resolveFormDockMode`), so the "In the chat" choice travels the same way and
+the composer takes no prop for either. The collapse follows the
+context's change during render, and the text-field focus comes from the
+dock's own focus events; a field removed while focused (the next step) does
+not count as focused. The next question, taking the slot while the reader is
+away, mounts already collapsed for reading, so it starts from the room the
+column already holds (`readFloatingPanelTailReserve`) instead of its own
+header height. Panels that do not hold room (a permission, BTW) publish their
+own height as before.
 
 ### Why answer textareas measure content in one layout pass
 
@@ -349,9 +388,10 @@ The shared frame measures its height and gap as
 `state/composerInsetReaders.ts` onto the elements that read it, never on the
 chat column (inherited from the column, every resize of the frame restyled
 the whole transcript). The floating status row, the recap hint and
-`ScrollToBottomButton` translate upward by that amount, the transcript's tail
-spacer and the end fade band grow by it (so the frame never covers the last
-rows), and the column carries `data-floating-panel` while any frame is
+`ScrollToBottomButton` translate upward by that amount, the end fade band
+grows by it and the transcript's tail spacer by its reserve twin
+`--chat-floating-panel-reserve` (equal to it except while a panel holds its
+room, see the question dock above; so the frame never covers the last rows), and the column carries `data-floating-panel` while any frame is
 mounted so the recap hint hides instead of landing over the transcript.
 Unmounting clears the offset and the marker; resizing or collapsing the frame
 updates it.
