@@ -12,6 +12,7 @@ import {
   type GuestBlockCall,
   type GuestHostSurface,
   type GuestItem,
+  type GuestMicrophoneEndReason,
   type GuestPopoverClosedEvent,
   type GuestPopoverContext,
   type GuestPopoverRequest,
@@ -83,6 +84,7 @@ import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/g
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
+import { canCaptureGuestMicrophone, markGuestListening, startGuestMicrophone, type GuestMicrophoneCapture } from '@/lib/guests/microphone';
 import { guestStorageOperation } from '@/lib/guests/storage';
 import { getGuestPopoverController, guestPopoverOwnerBlocked, positionGuestPopover, type GuestPopoverActivation, type GuestPopoverPosition } from '@/lib/guests/popovers';
 import { createGuestStatusControls, type GuestStatusControlBinding } from '@/lib/guests/status-controls';
@@ -297,6 +299,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
     // A hidden frame is nobody's panel: it neither takes kept answers nor leaves any.
     if (!headless) features.lateGenerateResults = true;
+    // A hidden frame has nobody in front of it to know it is listening.
+    if (!headless && canCaptureGuestMicrophone()) features.microphone = true;
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -616,6 +620,20 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     statusControlsRef.current = statusControls;
     const clearSubscriptions = () => { for (const unsubscribe of subscriptions.values()) unsubscribe(); subscriptions.clear(); };
+    // One microphone per frame document. The ticket retires an open still
+    // waiting on the permission prompt when the frame closes it or goes away.
+    let microphoneTicket = 0;
+    let microphoneOpening = false;
+    let microphoneCapture: GuestMicrophoneCapture | null = null;
+    let releaseListening: (() => void) | null = null;
+    const stopMicrophone = () => {
+      microphoneTicket += 1;
+      microphoneOpening = false;
+      microphoneCapture?.stop();
+      microphoneCapture = null;
+      releaseListening?.();
+      releaseListening = null;
+    };
     const generateOwner = (): GenerateOwner => ({
       runtimeKey,
       guestId: requestingGuestId,
@@ -625,7 +643,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     let stopLateGenerate: (() => void) | null = null;
     const stopLateGenerateListening = () => { stopLateGenerate?.(); stopLateGenerate = null; };
-    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopOauthPoll(); });
+    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopMicrophone(); stopOauthPoll(); });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
     };
@@ -645,6 +663,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       const activeGuest = currentGuest();
       if (!activeGuest || !isGuestActive(activeGuest)) {
         clearSubscriptions();
+        stopMicrophone();
         if ('id' in message) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
           type: 'result', id: message.id, ok: false, error: 'Extension is unavailable.', code: 'DISABLED' });
         return;
@@ -656,6 +675,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         stopLateGenerateListening();
         acknowledgeHandshake();
         clearSubscriptions();
+        stopMicrophone();
         pushHostState();
         connectFileChannel();
         registerResolver();
@@ -734,6 +754,44 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           });
           return { stopped: true as const };
         },
+        microphoneOpen: async (sampleRate) => {
+          if (!guestMay(currentGuest(), 'microphone')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
+          if (headless) throw new HostRequestError('UNSUPPORTED', 'A hidden frame cannot open the microphone.');
+          if (microphoneCapture || microphoneOpening) throw new HostRequestError('HOST_REJECTED', 'The microphone is already open in this frame.');
+          microphoneTicket += 1;
+          const ticket = microphoneTicket;
+          microphoneOpening = true;
+          // Audio keeps flowing while the panel sits behind another tab, as a
+          // call would; it stops when the frame, the grant or the extension goes.
+          const mayHear = () => ticket === microphoneTicket && !disposed && iframeRef.current === frame
+            && guestMay(currentGuest(), 'microphone');
+          const end = (reason: GuestMicrophoneEndReason) => {
+            stopMicrophone();
+            if (iframeRef.current === frame) postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION,
+              type: 'microphone-ended', payload: { reason } });
+          };
+          let capture: GuestMicrophoneCapture;
+          try {
+            capture = await startGuestMicrophone({
+              sampleRate,
+              onSamples: (samples) => {
+                if (ticket !== microphoneTicket) return;
+                if (!mayHear()) { end('revoked'); return; }
+                postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'microphone-audio', payload: { samples } });
+              },
+              onDeviceLost: () => { if (ticket === microphoneTicket) end('device-lost'); },
+            });
+          } finally {
+            if (ticket === microphoneTicket) microphoneOpening = false;
+          }
+          if (!mayHear()) {
+            capture.stop();
+            throw new HostRequestError('DISCONNECTED', 'The microphone closed while it was opening.');
+          }
+          microphoneCapture = capture;
+          releaseListening = markGuestListening(requestingGuestId);
+        },
+        microphoneClose: stopMicrophone,
         storage: (request) => guestStorageOperation(requestingGuestId, request,
           installation?.storageId ? { runtimeKey, storageId: installation.storageId, authorize: ownsFrame } : undefined),
         setStatusControls: (controls) => {
@@ -1045,6 +1103,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       statusControls.dispose();
       if (statusControlsRef.current === statusControls) statusControlsRef.current = null;
       clearSubscriptions();
+      stopMicrophone();
       stopLateGenerateListening();
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);

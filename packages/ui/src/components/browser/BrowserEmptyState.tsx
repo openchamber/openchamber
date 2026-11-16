@@ -18,6 +18,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { clearAnnouncedDevServers, useAnnouncedDevServers } from '@/lib/browser/announcedServers';
 import { browserUrlLabel } from '@/lib/browser/url';
 import { isRemoteWebLoopbackUrl, isSpaceUnreachableFromHere } from '@/lib/browser/devTunnel';
+import { isCapacitorApp } from '@/lib/platform';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
@@ -56,7 +58,7 @@ const REFRESH_INTERVAL_MS = 2_000;
  * local port for exactly this case; a browser tab has no equivalent, and its
  * `localhost` is its own.
  */
-const isUnreachableFromHere = (directory: string): boolean => isRemoteWebLoopbackUrl('http://localhost', directory);
+const isUnreachableFromHere = (directory: string): boolean => !isCapacitorApp() && isRemoteWebLoopbackUrl('http://localhost', directory);
 
 export const BrowserEmptyState: React.FC<{
   onOpen: (url: string) => void;
@@ -162,10 +164,10 @@ export const BrowserEmptyState: React.FC<{
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size={isMobileSurfaceRuntime() ? 'default' : 'sm'}
                   // Not `disabled`: that takes the pointer away, and with it the
                   // tooltips of the two marks that say why the row does not open.
-                  className={cn('min-w-0 flex-1 justify-start gap-2', remoteOnly && 'cursor-default opacity-60')}
+                  className={cn('min-w-0 flex-1 justify-start gap-2', isMobileSurfaceRuntime() && 'min-h-11', remoteOnly && 'cursor-default opacity-60')}
                   aria-disabled={remoteOnly || undefined}
                   onClick={() => {
                     if (remoteOnly) return;
@@ -191,6 +193,11 @@ export const BrowserEmptyState: React.FC<{
                     {browserUrlLabel(candidate.url) || candidate.url}
                     <span className="typography-micro text-muted-foreground">{pathLabel(candidate.url)}</span>
                   </span>
+                  {candidate.command ? (
+                    <span className="min-w-0 truncate typography-micro text-muted-foreground" dir="ltr" title={candidate.command}>
+                      {candidate.command}
+                    </span>
+                  ) : null}
                   {spaceUnreachable ? (
                     <span
                       className="ms-auto shrink-0 text-muted-foreground"
@@ -217,7 +224,7 @@ export const BrowserEmptyState: React.FC<{
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
+                        className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100 pointer-coarse:size-11 pointer-coarse:opacity-100"
                         onClick={() => hideDevServerPort(candidate.port)}
                         aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
                       >

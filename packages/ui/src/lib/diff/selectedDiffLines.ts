@@ -1,4 +1,5 @@
 import type { FileDiffMetadata } from '@pierre/diffs';
+import type { CommentLineSource } from '@/lib/commentAnchor';
 
 type DiffLineSide = 'additions' | 'deletions';
 
@@ -40,4 +41,30 @@ export const getDiffLinesText = (
     if (line !== undefined) selected.push(stripLineEnding(line));
   }
   return selected.join('\n');
+};
+
+/**
+ * One side of a diff as the lines a comment can be found on. A diff parsed
+ * from a patch holds its hunks only, so the source says it is partial.
+ */
+export const diffLineSource = (fileDiff: FileDiffMetadata, side: DiffLineSide): CommentLineSource => {
+  const lines = side === 'additions' ? fileDiff.additionLines : fileDiff.deletionLines;
+  const lineAt = (lineNumber: number): string | undefined => {
+    const index = lineIndexFor(fileDiff, side, lineNumber);
+    const line = index === null ? undefined : lines[index];
+    return line === undefined ? undefined : stripLineEnding(line);
+  };
+  // A side with no lines is a file absent there: it cannot say a comment's code is gone.
+  if (!fileDiff.isPartial) return { first: 1, last: lines.length, lineAt, partial: lines.length === 0 };
+
+  let first = Infinity;
+  let last = 0;
+  for (const hunk of fileDiff.hunks) {
+    const start = side === 'additions' ? hunk.additionStart : hunk.deletionStart;
+    const count = side === 'additions' ? hunk.additionCount : hunk.deletionCount;
+    if (count === 0) continue;
+    first = Math.min(first, start);
+    last = Math.max(last, start + count - 1);
+  }
+  return { first: Number.isFinite(first) ? first : 1, last, lineAt, partial: true };
 };

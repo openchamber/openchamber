@@ -1,7 +1,8 @@
 /**
  * `/api/routing` — configuration, the Jev key, the classification provider
- * pick (`/api/routing/classifier`) and the custom endpoint
- * (`/api/routing/classifier/custom`). Normal authenticated
+ * pick (`/api/routing/classifier`), the custom endpoint
+ * (`/api/routing/classifier/custom`) and the Gemini key saved for Jev
+ * (`/api/routing/classifier/gemini`). Normal authenticated
  * OpenChamber routes: do not add them to browser URL-token allowlists.
  *
  * The send-path rewrite, registered ahead of the generic OpenCode proxy. In
@@ -74,6 +75,22 @@ export function registerRoutingRoutes(app, runtime) {
   app.put('/api/routing/classifier', express.json({ limit: '4kb' }), async (req, res) => {
     try {
       res.json(await runtime.setClassifierSource(req.body?.source));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put('/api/routing/classifier/gemini', express.json({ limit: '16kb' }), async (req, res) => {
+    try {
+      res.json(await runtime.setGeminiKey(req.body?.key));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.delete('/api/routing/classifier/gemini', async (_req, res) => {
+    try {
+      res.json(await runtime.clearGeminiKey());
     } catch (error) {
       sendError(res, error);
     }

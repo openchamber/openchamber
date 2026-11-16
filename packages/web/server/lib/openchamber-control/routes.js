@@ -1,7 +1,13 @@
 import express from 'express';
+import { OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
 import { asControlError } from './error.js';
 
-export const registerOpenChamberControlRoutes = (app, { controlService }) => {
+// Terminal output reaches an agent only through the managed `openchamber_terminal`
+// tool, whose callback authenticates each OpenCode child. Any client holding the
+// session cookie can reach this route, so it never returns terminal output.
+const AGENT_TOOL_ONLY_ACTIONS = new Set(OPENCHAMBER_TERMINAL_ACTIONS);
+
+export const registerOpenChamberControlRoutes = (app, { controlService, laterPages = null }) => {
   app.post('/api/openchamber/control', express.json({ limit: '1mb' }), async (req, res) => {
     const controller = new AbortController();
     const abortOnDisconnect = () => {
@@ -11,6 +17,9 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     res.once('close', abortOnDisconnect);
     try {
       const action = typeof req.body?.action === 'string' ? req.body.action : '';
+      if (AGENT_TOOL_ONLY_ACTIONS.has(action)) {
+        return res.status(403).json({ error: `${action} is available only to agents through the openchamber_terminal tool` });
+      }
       const requestInput = req.body?.input;
       const input = requestInput && typeof requestInput === 'object' && !Array.isArray(requestInput)
         ? requestInput
@@ -35,12 +44,25 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
   });
 
   // The user answered a page an agent is waiting on (render.page with
-  // awaitAnswer). The agent's call holds the matching request open.
-  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), (req, res) => {
+  // awaitAnswer), whose call holds the matching request open, or one kept
+  // open for a later answer (answerLater).
+  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), async (req, res) => {
     try {
-      return res.json(controlService.answerPage(req.body ?? {}));
+      return res.json(await controlService.answerPage(req.body ?? {}));
     } catch (error) {
       const controlError = asControlError(error, 'Could not deliver the answer');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
+
+  // The pages kept open for a later answer, and the answers they took.
+  app.get('/api/openchamber/render/later', async (_req, res) => {
+    if (!laterPages) return res.status(503).json({ error: 'This server cannot keep pages open for a later answer' });
+    try {
+      await laterPages.load();
+      return res.json(laterPages.snapshot());
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not read the pages');
       return res.status(controlError.statusCode).json({ error: controlError.message });
     }
   });

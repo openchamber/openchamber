@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createHostProviders, headerOfPackage, isLoopbackUrl, windowUpstreamOf } from './host-providers.js';
+import { createHostProviders, headerOfPackage, headerOfProvider, isLoopbackUrl, windowUpstreamOf } from './host-providers.js';
 
 const OLLAMA = {
   name: 'Ollama (local)',
@@ -78,8 +78,37 @@ describe('the host\'s custom providers', () => {
     expect(headerOfPackage('aisdk:@ai-sdk/openai-compatible')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/openai')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/anthropic')).toBe('x-api-key');
+    for (const packageName of [
+      '@opencode/ai/providers/openai-compatible',
+      '@opencode/ai/providers/openai-compatible/responses',
+      '@opencode/ai/providers/openai-compatible-responses',
+      '@opencode/ai/providers/openai',
+      '@opencode/ai/providers/openai/chat',
+      '@opencode/ai/providers/openai/responses',
+    ]) expect(headerOfPackage(packageName)).toBe('authorization');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic-compatible')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/amazon-bedrock')).toBeNull();
     expect(headerOfPackage('aisdk:@ai-sdk/amazon-bedrock')).toBeNull();
     expect(headerOfPackage(undefined)).toBeNull();
+  });
+
+  it('refuses a provider whose model needs its key in another header than the provider', async () => {
+    const mixed = {
+      name: 'Mixed',
+      package: '@opencode/ai/providers/openai-compatible',
+      settings: { baseURL: 'https://gw.example.dev/v1' },
+      models: {
+        'gpt-5.5': { modelID: 'gpt-5.5', name: 'GPT', package: '@opencode/ai/providers/openai/responses' },
+        claude: { modelID: 'claude', name: 'Claude', package: '@opencode/ai/providers/anthropic-compatible' },
+      },
+    };
+    const providers = createHostProviders({ readLayers: layers({ user: { providers: { mixed } } }), hostEnvironment: {} });
+    const definition = await providers.read('mixed', '/p');
+    expect(headerOfProvider(definition)).toBeNull();
+    expect((await providers.list('/p'))[0].supported).toBe(false);
+    const { claude: _claude, ...sameHeader } = mixed.models;
+    expect(headerOfProvider({ package: mixed.package, models: sameHeader })).toBe('authorization');
   });
 
   it('sends "this machine" to the Docker host and leaves every other address as written', () => {

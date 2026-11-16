@@ -100,6 +100,8 @@ const personalSchema = z.object({
   draftStarters: starterRefsSchema,
   hiddenSharedActionIds: z.array(z.string()),
   sharedTrust: z.object({ hash: z.string(), trustedAt: z.number() }).nullable(),
+  /** Notes and todos live in the repository's `.openchamber/notes-todos.json` on this machine. */
+  notesTodosInRepository: z.boolean().default(false),
 });
 
 const projectSetupSchema = z.object({
@@ -131,6 +133,7 @@ export type ProjectSetupPatch = Partial<{
   hiddenSharedActionIds: string[];
   /** The trust answer for the shared commands with this hash; `null` forgets it. */
   sharedTrustHash: string | null;
+  notesTodosInRepository: boolean;
 }>;
 
 const EMPTY_PROJECT_SETUP: ProjectSetup = {
@@ -162,6 +165,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     draftStarters: [],
     hiddenSharedActionIds: [],
     sharedTrust: null,
+    notesTodosInRepository: false,
   },
 };
 

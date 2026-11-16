@@ -7,7 +7,7 @@ const PROSE_BLOCKS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'bl
 // containers whose blocks resolve on their own.
 const SKIPPED = new Set(['code', 'pre', 'ul', 'ol', 'blockquote', 'table', 'details']);
 // Raw HTML such as `<p>a</p><p>b</p>` has no whitespace between blocks.
-const WORD_BREAKS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'div']);
+const WORD_BREAKS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'div', 'td', 'th']);
 
 function ownText(node: ElementContent): string {
   if (node.type === 'text') return node.value;
@@ -18,7 +18,7 @@ function ownText(node: ElementContent): string {
 
 function annotate(node: Element): TextDirection | undefined {
   const childDirections = node.children.map((child) => (child.type === 'element' ? annotate(child) : undefined));
-  if (PROSE_BLOCKS.has(node.tagName)) {
+  if (PROSE_BLOCKS.has(node.tagName) || node.tagName === 'table') {
     const dir = proseTextDirection(node.children.map(ownText).join(''));
     if (dir) node.properties = { ...node.properties, dir };
     return dir;
@@ -34,7 +34,7 @@ function annotate(node: Element): TextDirection | undefined {
 }
 
 /**
- * Gives every paragraph, heading, list item and quote the direction most of
+ * Gives every paragraph, heading, list item, quote and table the direction most of
  * its own words run, so Arabic prose that opens with an English term reads
  * right to left, and English and Arabic siblings each keep their own
  * direction. A nested list or quote resolves on its own, and code never

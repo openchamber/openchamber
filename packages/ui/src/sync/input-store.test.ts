@@ -302,6 +302,22 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(["restored.txt"])
   })
 
+  testWithMockFileReader("a selection added again comes back as the same attachment, whatever its chip is named", async () => {
+    useInputStore.getState().clearAttachedFiles()
+    const file = new File(["hello"], "app/[slug]/page.tsx:12", { type: "text/plain" })
+    const first = useInputStore.getState().addVSCodeSelectionAttachment("/repo/app/[slug]/page.tsx", file)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+    await first
+    const [attached] = useInputStore.getState().attachedFiles
+    expect(attached?.filename).toBe("app/(slug)/page.tsx:12")
+
+    await useInputStore.getState().addVSCodeSelectionAttachment("/repo/app/[slug]/page.tsx", file)
+    const again = useInputStore.getState().attachedFiles
+    expect(again).toHaveLength(1)
+    expect(again[0]?.filename).toBe(attached?.filename)
+    expect(again[0]?.id).not.toBe(attached?.id)
+  })
+
   testWithMockFileReader("does not attach a VS Code selection that finishes reading after attachments are cleared", async () => {
     const addPromise = useInputStore.getState().addVSCodeSelectionAttachment(
       "/workspace/hello.txt",

@@ -9,12 +9,13 @@ import { stopExtensionWaits } from '@/sync/extension-waits-sync';
 
 const NO_WAITS: readonly ExtensionWait[] = [];
 
-/** "Timer (10 s)": the wait's title with the label its extension gave it. */
+/** "Timer (10 s)": the wait's title with the label its extension, or the host for a timer, gave it. */
 const subjectOf = (wait: ExtensionWait): string => (wait.label ? `${wait.title} (${wait.label})` : wait.title);
 
 /**
- * The agent ended its turn to wait on something an extension follows; the
- * server wakes it when the extension says it fired. The row names the wait
+ * The agent ended its turn to wait on a timer or on something an extension
+ * follows; the server wakes it when the time is up or the extension says it
+ * fired. The row names the wait
  * (the one waking first, else the oldest) and how many more there are, and
  * lets the user stop them all, after which nothing wakes the session.
  */

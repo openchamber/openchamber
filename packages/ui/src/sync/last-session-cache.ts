@@ -22,6 +22,16 @@ type PersistedEnvelope = {
 
 const emptyEnvelope = (): PersistedEnvelope => ({ version: 1, runtimes: {} })
 
+// The desktop Mini Chat shares this storage with the main window, and what it
+// has open is not what the main window reopens on launch: it leaves the
+// pointer as the main window wrote it.
+let pointerOwned = true
+
+/** Called once by a window that must not move the pointer, before it selects anything. */
+export function leaveLastActiveSessionToMainWindow(): void {
+  pointerOwned = false
+}
+
 const readEnvelope = (storage: Storage): PersistedEnvelope => {
   try {
     const raw = storage.getItem(STORAGE_KEY)
@@ -61,7 +71,7 @@ export function persistLastActiveSession(
   entry: PersistedLastSession,
   storage: Storage = getDeferredSafeStorage(),
 ): void {
-  if (!runtimeKey || !entry.sessionId) return
+  if (!pointerOwned || !runtimeKey || !entry.sessionId) return
   const envelope = readEnvelope(storage)
   // Monotonic vs the stored entries: same-millisecond writes must not tie,
   // or retention trimming would evict an arbitrary runtime.
@@ -83,7 +93,7 @@ export function clearLastActiveSession(
   runtimeKey: string,
   storage: Storage = getDeferredSafeStorage(),
 ): void {
-  if (!runtimeKey) return
+  if (!pointerOwned || !runtimeKey) return
   const envelope = readEnvelope(storage)
   if (!envelope.runtimes[runtimeKey]) return
   delete envelope.runtimes[runtimeKey]

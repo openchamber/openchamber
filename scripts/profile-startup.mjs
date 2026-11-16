@@ -63,6 +63,9 @@ Options:
                            (default). warm: one profile reused by every launch
   --chrome <path>          Web only. Chrome/Chromium executable
   --headed                 Web only. Show the browser (default: headless)
+  --transcript             The home restores a session on launch: also record
+                           when its messages are rendered and readable, and
+                           wait for that before a launch counts as done
   --model-label <text>     Record modelPickerShown: when the composer footer
                            first shows this model name
   --app <path>             Packaged app (.app bundle on macOS, executable elsewhere).
@@ -115,6 +118,7 @@ const parseArgs = (argv) => {
     chrome: null,
     headed: false,
     modelLabel: null,
+    transcript: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
@@ -142,6 +146,7 @@ const parseArgs = (argv) => {
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--headed") options.headed = true
     else if (value === "--model-label") options.modelLabel = argv[++index]
+    else if (value === "--transcript") options.transcript = true
     else throw new Error(`Unknown option: ${value}`)
   }
   if (!Number.isInteger(options.runs) || options.runs < 1) throw new Error("--runs must be a positive integer")
@@ -293,7 +298,7 @@ const PROBE = `(() => ({
 }))()`
 
 // Recorder marks that are moments a user could feel, in the order reported.
-const RECORDER_MARKS = ["splashGone", "overlayGone", "composerHittable", "composerEditable", "usable", "modelPickerReady", "modelPickerShown", "sessionRows"]
+const RECORDER_MARKS = ["splashGone", "overlayGone", "composerHittable", "composerEditable", "usable", "modelPickerReady", "modelPickerShown", "sessionRows", "transcriptPresent", "transcriptShown"]
 
 // First occurrence of every startup trace mark, shifted onto the run's clock.
 const firstTraceMarks = (trace, shift) => {
@@ -469,6 +474,9 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   const window = []
   let error = null
   let recorder = null
+  // One navigation start per application document: more than one means the
+  // window loaded the application again during startup.
+  const origins = new Set()
 
   try {
     while (Date.now() < deadline) {
@@ -484,10 +492,10 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
         await client.send("Performance.enable")
         // Applies to the next document in this target, which is the
         // application once the splash navigates; a launch whose application
-        // document was already running falls back to the polled fields.
+        // document was already running gets the recorder from the loop below.
         try {
           await client.send("Page.enable")
-          await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+          await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
         } catch {
         }
         seen.rendererTarget = Date.now() - spawnAt
@@ -514,11 +522,21 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
       if (isApplication && probe.firstPaint !== null && seen.applicationFirstPaint === undefined) {
         seen.applicationFirstPaint = Math.round(probe.origin + probe.firstPaint - spawnAt)
       }
+      if (isApplication) origins.add(probe.origin)
+      // The application navigates before the debugging port answers, so the
+      // new-document script misses it: install the recorder into the running
+      // document. Marks before this moment come from the polled fields.
+      if (isApplication && !probe.recorder) {
+        try {
+          await sendBounded(client, "Runtime.evaluate", { expression: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
+        } catch {
+        }
+      }
       if (isApplication && probe.recorder) {
         recorder = probe.recorder
         if (recorder.marks.reactMounted !== undefined) seen.reactMounted = Math.round(probe.origin + recorder.marks.reactMounted - spawnAt)
       }
-      const usable = recorder?.marks.usable !== undefined
+      const usable = recorder?.marks.usable !== undefined && (!options.transcript || recorder.marks.transcriptShown !== undefined)
 
       let metrics = []
       try {
@@ -589,6 +607,7 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
     finalUrl: last?.url ?? null,
     sessionRows: last?.sessionRows ?? null,
     recorderInstalled: recorder !== null,
+    applicationDocuments: origins.size,
     overlaySeen: recorder?.seen.overlay ?? null,
     targetId,
   }
@@ -620,7 +639,7 @@ const launchWebOnce = async ({ run, options, chrome, profileDir }) => {
     ])
     const recorderNetwork = createNetworkRecorder(client)
     await client.send("Emulation.setDeviceMetricsOverride", { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, deviceScaleFactor: 1, mobile: false })
-    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
     const navigatedAt = Date.now()
     await client.send("Page.navigate", { url: options.url })
     const deadline = navigatedAt + options.timeoutMs
@@ -756,6 +775,8 @@ const MILESTONES = [
   ["overlayGone", "startup overlay gone"],
   ["usable", "usable"],
   ["sessionRows", "session rows visible"],
+  ["transcriptPresent", "restored session rendered"],
+  ["transcriptShown", "restored session readable"],
   ["rendererIdle", "renderer idle"],
   ["screenPainted", "screen: first change"],
   ["screenSettled", "screen: settled"],

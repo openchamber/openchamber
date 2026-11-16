@@ -1,0 +1,189 @@
+{
+  "zone": "sync",
+  "name": "Session sync and the sidebar",
+  "sources": ["packages/ui/src/sync/sync-context.tsx", "packages/ui/src/sync/session-actions.ts", "packages/ui/src/components/session/sidebar/", "packages/ui/src/components/session/SessionSidebar.tsx"],
+  "features": [
+    {
+      "id": "list",
+      "name": "Sessions in the sidebar",
+      "what": "The sidebar lists the project's sessions; a click opens one, and the open one is highlighted.",
+      "reach": "The left sidebar, under In work and under the project.",
+      "proof": "Every session has a row with its title; a click shows that session's chat, highlights its row and puts its id in the URL.",
+      "scenarios": [
+        {
+          "id": "switch",
+          "kind": "path",
+          "title": "A click on a row opens that session's chat",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync first"},
+            {"do": "session.send", "session": "a", "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."},
+            {"do": "session.create", "as": "b", "title": "Sync second"},
+            {"do": "session.send", "session": "b", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "a"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "Sync first"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Sync second"},
+            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"},
+            {"do": "click", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "gone", "on": "chat.answer", "text": "The palette shortcut is now registered"},
+            {"do": "url", "contains": "{b}"},
+            {"do": "click", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"}
+          ]
+        },
+        {
+          "id": "new",
+          "kind": "path",
+          "title": "New session starts a second session beside the open one, and it gets a row",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync already open"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "gone", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Чому лічильник непрочитаних лишається, коли розмову вже відкрито?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "markRead"},
+            {"do": "see", "on": "sidebar.anyRow", "count": 2},
+            {"do": "remember", "on": "sidebar.anyActiveRow", "attr": "data-session-row", "as": "created"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a", "count": 0, "timeout": 1},
+            {"do": "url", "contains": "{created}"},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.answer", "text": "markRead"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "Sync already open"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "name": "Live updates from other clients",
+      "what": "Sessions and messages created elsewhere (another window, the CLI, a phone) appear without a reload, also after the server was down for a while.",
+      "reach": "Keep the app open while another client works in the project.",
+      "proof": "A session created elsewhere gets a row; a prompt sent elsewhere into the open session shows with its answer; both still arrive after the server restarted under an open page.",
+      "scenarios": [
+        {
+          "id": "new-session",
+          "kind": "path",
+          "title": "A session created by another client appears in the sidebar",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync existing"},
+            {"do": "open", "session": "a"},
+            {"do": "session.create", "as": "b", "title": "Made by another client"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Made by another client"}
+          ]
+        },
+        {
+          "id": "message",
+          "kind": "path",
+          "title": "A prompt sent by another client into the open session shows with its answer",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync live message"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "a", "prompt": "Як перенести налаштування на нову схему так, щоб старі ключі не загубились?"},
+            {"do": "see", "on": "chat.userBubble", "text": "Як перенести налаштування"},
+            {"do": "see", "on": "chat.answer", "text": "Читаємо стару схему один раз"}
+          ]
+        },
+        {
+          "id": "server-restart",
+          "kind": "break",
+          "title": "After the server goes down and comes back, the open app picks up new sessions and messages without a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync server restart"},
+            {"do": "open", "session": "a"},
+            {"do": "server.stop"},
+            {"do": "screenshot", "name": "server-down"},
+            {"do": "server.start"},
+            {"do": "session.create", "as": "b", "title": "Made after the restart"},
+            {"do": "see", "on": "sidebar.row", "session": "b", "text": "Made after the restart", "timeout": 40},
+            {"do": "session.send", "session": "a", "prompt": "Теми листів з кирилицею приходять як «ÐŸÑ€Ð¸Ð²Ñ–Ñ‚». Де ламається кодування?"},
+            {"do": "see", "on": "chat.answer", "text": "Заголовок", "timeout": 40}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "manage",
+      "name": "Renaming, finishing, archiving and deleting",
+      "what": "The session menu renames and deletes a session; a row's buttons mark it done or archive it.",
+      "reach": "The ... beside the session title above the chat, or the buttons a sidebar row shows on hover.",
+      "proof": "The new title shows in the row and stays after a reload; a done session leaves In work; archive and delete ask to confirm, then the session leaves the sidebar and stays gone after a reload.",
+      "scenarios": [
+        {
+          "id": "rename",
+          "kind": "path",
+          "title": "Rename from the session menu updates the row and survives a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Before rename"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "header.actions"},
+            {"do": "click", "on": "menu.item", "text": "Rename"},
+            {"do": "see", "on": "header.renameInput"},
+            {"do": "click", "on": "header.renameInput"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "type", "text": "After rename"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "header.renameInput"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "After rename"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "text": "After rename"}
+          ]
+        },
+        {
+          "id": "done",
+          "kind": "path",
+          "title": "Mark done moves a session out of In work",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync done"},
+            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "session.create", "as": "b", "title": "Sync keep open"},
+            {"do": "open", "session": "b"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMarkDone", "session": "a"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "a", "scope": "activity:work"},
+            {"do": "see", "on": "sidebar.row", "session": "a"}
+          ]
+        },
+        {
+          "id": "archive",
+          "kind": "path",
+          "title": "Archive asks to confirm, removes the row, and it stays gone after a reload",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync archive me"},
+            {"do": "session.create", "as": "b", "title": "Sync stay"},
+            {"do": "open", "session": "b"},
+            {"do": "hover", "on": "sidebar.row", "session": "a"},
+            {"do": "click", "on": "sidebar.rowArchive", "session": "a"},
+            {"do": "see", "on": "dialog", "text": "Archive session?"},
+            {"do": "click", "on": "dialog.button", "text": "Archive", "exact": true},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "delete",
+          "kind": "path",
+          "title": "Delete from the session menu, after confirming, removes the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Sync delete me"},
+            {"do": "session.create", "as": "b", "title": "Sync survivor"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "header.actions"},
+            {"do": "click", "on": "menu.item", "text": "Delete"},
+            {"do": "screenshot", "name": "confirm"},
+            {"do": "click", "on": "dialog.button", "text": "Delete"},
+            {"do": "gone", "on": "sidebar.row", "session": "a"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.row", "session": "a", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    }
+  ]
+}

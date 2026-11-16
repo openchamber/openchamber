@@ -181,7 +181,7 @@ test('black canvases keep a black sidebar and readable neutral text', () => {
     'editor.background': '#000000', 'editor.foreground': '#ffffff', 'sideBar.background': '#000000',
   } });
   expect(colors.surface.muted).toBe('#000000');
-  expect(contrastRatio(colors.surface.foreground, colors.surface.background)).toBeLessThanOrEqual(13.6);
+  expect(contrastRatio(colors.surface.foreground, colors.surface.background)).toBeLessThanOrEqual(15.4);
   expect(contrastRatio(colors.surface.mutedForeground, colors.surface.elevated)).toBeGreaterThanOrEqual(4.5);
 });
 

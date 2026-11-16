@@ -270,40 +270,57 @@ export const createMemoryDreaming = (deps) => {
     return overflows || changedSince(entries, state.lastRunAt) >= MIN_CHANGED_ENTRIES;
   };
 
+  /**
+   * One scope's entries, or null when its store cannot be read. A broken store
+   * stays out of the pass, its bytes untouched for recovery, and the rest of
+   * the scopes still dream.
+   */
+  const readScopeEntries = async (target, label) => {
+    try {
+      return (await agentMemoryRuntime.read(target)).entries;
+    } catch (caught) {
+      log(`skipped ${label}: ${caught instanceof Error ? caught.message : String(caught)}`);
+      return null;
+    }
+  };
+
   /** The first project whose memory is due, with the global memory when that is due too. */
   const findDuePass = async (settings) => {
     const projects = Array.isArray(settings?.projects) ? settings.projects : [];
-    const [globalMemory, globalState] = await Promise.all([
-      agentMemoryRuntime.read({ scope: 'global' }),
+    const [globalEntries, globalState] = await Promise.all([
+      readScopeEntries({ scope: 'global' }, 'global memory'),
       agentMemoryRuntime.readDreamState({ scope: 'global' }),
     ]);
+    // An unreadable global store is never due, and sessions get none of its titles.
+    const global = globalEntries ?? [];
     const candidates = [];
     for (const project of projects) {
       const directory = asNonEmptyString(project?.path);
       if (!directory || !(await isDirectoryTrusted(directory))) continue;
       const projectId = await resolveProjectId(directory).catch(() => '');
       if (!projectId) continue;
-      const [memory, state] = await Promise.all([
-        agentMemoryRuntime.read({ scope: 'project', projectId }),
+      const [entries, state] = await Promise.all([
+        readScopeEntries({ scope: 'project', projectId }, `project memory of ${directory}`),
         agentMemoryRuntime.readDreamState({ scope: 'project', projectId }),
       ]);
-      candidates.push({ project, directory, projectId, entries: memory.entries, state });
+      candidates.push({ project, directory, projectId, entries, state });
     }
     // The project dreamed longest ago goes first, so none waits on the others.
     candidates.sort((left, right) => (left.state.lastRunAt ?? 0) - (right.state.lastRunAt ?? 0));
 
-    const globalOverflows = measureIndex({ global: globalMemory.entries, project: [] }).omitted > 0;
-    const globalDue = scopeIsDue(globalState, globalMemory.entries, globalOverflows);
+    const globalOverflows = measureIndex({ global, project: [] }).omitted > 0;
+    const globalDue = globalEntries !== null && scopeIsDue(globalState, global, globalOverflows);
     for (const candidate of candidates) {
-      const overflows = measureIndex({ global: globalMemory.entries, project: candidate.entries }).omitted > 0;
+      if (candidate.entries === null) continue;
+      const overflows = measureIndex({ global, project: candidate.entries }).omitted > 0;
       if (scopeIsDue(candidate.state, candidate.entries, overflows)) {
-        return { ...candidate, includeProject: true, includeGlobal: globalDue, global: globalMemory.entries };
+        return { ...candidate, includeProject: true, includeGlobal: globalDue, global };
       }
     }
     if (globalDue && candidates.length > 0) {
       // The user's memory alone: it runs in the project used last, which needs no location of its own.
       const active = candidates.find((candidate) => candidate.project?.id === settings?.activeProjectId) ?? candidates[candidates.length - 1];
-      return { ...active, includeProject: false, includeGlobal: true, global: globalMemory.entries };
+      return { ...active, entries: active.entries ?? [], includeProject: false, includeGlobal: true, global };
     }
     return null;
   };

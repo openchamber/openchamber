@@ -16,8 +16,12 @@ import { type RepositoryUrlMatcher, useRepositoryUrlMatcher } from '@/lib/source
 import { type TrackerUrlMatcher, useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
-import { isDesktopShell } from '@/lib/desktop';
+import { isBrowserClientRuntime, isDesktopShell } from '@/lib/desktop';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
+import { getRelativePathLabel } from './contextPanelPaths';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { toast } from '@/components/ui';
 
 // Heavy views stay on-demand (same as MainLayout): importing GitView or the
 // plan statically pulls their stacks into the eager startup graph even when
@@ -26,10 +30,11 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
+import { SubagentsPanel } from '@/components/chat/subagents/SubagentsPanel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
-import { cn } from '@/lib/utils';
+import { cn, getRevealLabelKey } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
@@ -51,10 +56,12 @@ import { GuestIcon } from './GuestRailIcon';
 import { useGuestsStore } from '@/lib/guests/store';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
+import { CONTEXT_SURFACES } from '@/lib/surfaces/registry';
 import { beginLayoutAnimation, cancelWhenLayoutSettled, holdLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
+import { sidebarPendingWidth } from './sidebarPendingWidth';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
@@ -64,7 +71,7 @@ import { useClosingZoneTab } from './useClosingZoneTab';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { beginZoneDrag, cancelZoneDrag, finishZoneDrag, startZoneDragGesture, updateZoneDrag } from './zoneDrag';
 import { setZoneBody, setZoneHeaderSlot } from './zoneHosts';
-import { useOpenWhenSettled } from './useOpenUntilSettled';
+import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
 import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { REPOSITORY_KIND_ICONS } from '@/components/references/referencePickerItems';
@@ -112,38 +119,15 @@ const maxPanelWidth = (availableWidth: number | null): number => {
   return Math.max(CONTEXT_PANEL_MIN_WIDTH, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
 };
 
-const getRelativePathLabel = (filePath: string | null, directory: string): string => {
-  if (!filePath) {
-    return '';
-  }
-  const normalizedFile = filePath.replace(/\\/g, '/');
-  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '');
-  if (normalizedDir && normalizedFile.startsWith(normalizedDir + '/')) {
-    return normalizedFile.slice(normalizedDir.length + 1);
-  }
-  return normalizedFile;
-};
-
 const getModeLabel = (
   mode: ContextPanelMode,
   t: TranslateFn
 ): string => {
-  if (mode === 'chat') return t('contextPanel.mode.chat');
-  if (mode === 'file') return t('contextPanel.mode.files');
-  if (mode === 'diff') return t('contextPanel.mode.diff');
-  if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
-  if (mode === 'browser') return t('contextPanel.mode.browser');
-  if (mode === 'git') return t('layout.rightSidebar.git');
-  if (mode === 'pr') return t('contextPanel.mode.pr');
-  if (mode === 'notes') return t('contextRail.surface.notes');
-  if (mode === 'terminal') return t('layout.mainTab.terminal');
-  if (mode === 'workflows') return t('contextPanel.mode.workflows');
-  if (mode === 'pages') return t('contextPanel.mode.pages');
   if (isPluginContextPanelMode(mode)) {
     const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
     return guest?.name ?? t('contextRail.surface.plugin');
   }
-  return t('contextPanel.mode.context');
+  return t(CONTEXT_SURFACES.find((surface) => surface.mode === mode)?.labelKey ?? 'contextPanel.mode.context');
 };
 
 const getFileNameFromPath = (path: string | null): string | null => {
@@ -288,36 +272,12 @@ const getTabIcon = (
     return <DiffViewIcon className="h-3.5 w-3.5" />;
   }
 
-  if (tab.mode === 'walkthrough') {
-    return <Icon name="route" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'git') {
-    return <Icon name="git-branch" className="h-3.5 w-3.5" />;
-  }
-
   if (tab.mode === 'pr') {
     return <TrackerTabIcon url={tab.targetPath} active={active} visible={visible} />;
   }
 
   if (tab.mode === 'notes') {
     return <Icon name="sticky-note" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'terminal') {
-    return <Icon name="terminal-box" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'context') {
-    return <Icon name="pie-chart" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'workflows') {
-    return <Icon name="flow-chart" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'pages') {
-    return <Icon name="pages" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {
@@ -340,7 +300,8 @@ const getTabIcon = (
       : <Icon name="global" className="h-3.5 w-3.5" />;
   }
 
-  return undefined;
+  const surface = CONTEXT_SURFACES.find((entry) => entry.mode === tab.mode);
+  return surface ? <Icon name={surface.icon} className="h-3.5 w-3.5" /> : undefined;
 };
 
 
@@ -461,6 +422,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
   const { t, direction } = useI18n();
+  const { files, runtime } = useRuntimeAPIs();
   const isRtl = direction === 'rtl';
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(effectiveDirectory || null));
@@ -600,10 +562,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     // to, so the zone moves once, together with the sidebar, instead of again
     // after it. Settled, the two widths are equal and this adds nothing. A
     // closed zone shows nothing that could move, so it forces no layout read.
-    if (measured !== null && !isVertical && isOpenRef.current) {
-      const sidebar = document.querySelector<HTMLElement>('[data-left-sidebar]');
-      if (sidebar) measured += Math.round(sidebar.getBoundingClientRect().width - (Number.parseFloat(sidebar.style.width) || 0));
-    }
+    if (measured !== null && !isVertical && isOpenRef.current) measured += sidebarPendingWidth();
     setMeasuredArea(measured !== null && areaDecidesRef.current(measured) ? measured : null);
   }, [isVertical]);
   // What the zone shares with the chat: the row less the other side.
@@ -978,6 +937,16 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         return null;
       }
       const { id, index, allIds, close } = args;
+      const filePath = tabs.find((tab) => tab.id === id && tab.mode === 'file')?.targetPath;
+      const copyPath = (value: string, relative: boolean) => {
+        void copyTextToClipboard(value).then((result) => {
+          if (result.ok) {
+            toast.success(t(relative ? 'filesView.toast.relativePathCopied' : 'sidebarFilesTree.toast.pathCopied'));
+          } else {
+            toast.error(t('sidebarFilesTree.toast.copyFailed'));
+          }
+        });
+      };
       const closeOthers = () => closeContextPanelTabs(directoryKey, allIds.filter((tabId) => tabId !== id));
       // "Left" and "right" name the screen sides; in RTL the earlier tabs are on the right.
       const before = allIds.slice(0, index);
@@ -990,6 +959,24 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       const nothingToRight = isRtl ? index === 0 : index === allIds.length - 1;
       return (
         <>
+          {filePath && (
+            <>
+              <ContextMenuItem onClick={() => copyPath(filePath, false)}>
+                <Icon name="link" className="me-2 size-4" /> {t('sidebarFilesTree.menu.copyPath')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => copyPath(getRelativePathLabel(filePath, effectiveDirectory), true)}>
+                <Icon name="file-copy-2" className="me-2 size-4" /> {t('filesView.tree.menu.copyRelativePath')}
+              </ContextMenuItem>
+              {files.revealPath && !isBrowserClientRuntime(runtime.platform) && (
+                <ContextMenuItem onClick={() => {
+                  void files.revealPath?.(filePath).catch(() => toast.error(t('sidebarFilesTree.toast.revealFailed')));
+                }}>
+                  <Icon name="folder-received" className="me-2 size-4" /> {t(getRevealLabelKey())}
+                </ContextMenuItem>
+              )}
+              <ContextMenuSeparator />
+            </>
+          )}
           <ContextMenuItem onClick={close}>
             <Icon name="close" className="me-2 size-4" />
             {t('contextPanel.tab.menu.close')}
@@ -1022,7 +1009,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         </>
       );
     },
-    [activeTab, closeContextPanelTabs, directoryKey, isRtl, t],
+    [activeTab, closeContextPanelTabs, directoryKey, effectiveDirectory, files, isRtl, runtime.platform, t, tabs],
   );
 
   // A tab dragged out of the strip moves its whole surface to a zone.
@@ -1110,6 +1097,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             if (directoryKey) pinContextPanelTab(directoryKey, tabID);
           }}
           layoutMode="scrollable"
+          scrollWithWheel={isFileTabActive}
           variant="default"
           tabContextMenu={renderTabContextMenu}
           onTabDragOut={handleTabDragOut}
@@ -1274,6 +1262,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // common on macOS); removing it costs a few ms. After the layout effect
   // above, which begins the animation.
   const contentHidden = !isZoneExposed(isOpen, useOpenWhenSettled(isOpen), activeTab?.mode);
+  const contentShown = useOpenUntilSettled(isOpen);
   const panelStyle: React.CSSProperties = {
     [geometry.sizeVariable]: `${size}px`,
     ...(isVertical
@@ -1297,6 +1286,11 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       data-context-zone={zone}
       data-right-slot={zone === 'right' ? '' : undefined}
       data-context-panel-open={isOpen ? 'true' : 'false'}
+      // The size the zone is at or animating to, for a surface that must know
+      // it before the animation gets there (the browser page, `useSteadyStage`).
+      // An attribute and not a custom property: nothing selects on it, so
+      // changing it restyles nothing.
+      data-zone-size={size}
       tabIndex={-1}
       className={cn(
         // `overflow-clip` on both axes, never `hidden`: a `hidden` axis makes
@@ -1387,7 +1381,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
-        {activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
+        {activeTab?.mode === 'subagents' ? (contentShown ? <SubagentsPanel directory={effectiveDirectory || null} /> : null)
+          : activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>
       </div>

@@ -22,6 +22,7 @@
  *   which is the same signal v1 gave once per turn.
  */
 import { isRecord } from '../shared/guards.js';
+import { sessionParentId } from '../session-lineage.js';
 
 const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -94,7 +95,7 @@ export function translateWireEvent(payload) {
         sessionID,
         info: compact({
           id: sessionID,
-          parentID: trimmed(data.parentID) || undefined,
+          parentID: sessionParentId(data) || undefined,
           projectID: trimmed(data.projectID) || undefined,
           directory: trimmed(location.directory) || directory || undefined,
           title: typeof data.title === 'string' ? data.title : undefined,

@@ -42,8 +42,7 @@ const documentSchema = z.object({
 
 
 /**
- * Pages other people shared by link and PIN, opened in this app (decision
- * 0013). The UI hands the link over once; the key stays in this server's
+ * Pages other people shared by link and PIN, opened in this app. The UI hands the link over once; the key stays in this server's
  * store and every relay call goes from here, since the relay sends no CORS
  * headers and the enterprise policy has to hold where the request leaves.
  * The opening counts as the recipient's, as in the browser viewer, and the

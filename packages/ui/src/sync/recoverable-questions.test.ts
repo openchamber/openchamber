@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { FormRequest, ToolPart } from "@/lib/opencode/model"
+import type { FormRequest, Message, Metadata, Part, ToolPart } from "@/lib/opencode/model"
 import {
   applyRecoverableQuestionEvents,
   classifyQuestionToolError,
+  DEFERRED_QUESTION_NOTE,
+  deferredAnswerMetadata,
   deriveRecoveredQuestions,
+  formReleaseKey,
+  formToolLink,
+  formTurnHold,
+  isWaitingQuestionCall,
+  noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
+  noteDeferredAnswersLoaded,
   noteQuestionFormSnapshot,
   questionToolLink,
   resetRecoverableQuestions,
@@ -247,7 +255,7 @@ describe("settlement beats recovery", () => {
 
   test("an explicit reply this client sent is final", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    noteLocalFormReplied("frm_1")
+    noteLocalFormReplied("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
 
@@ -282,7 +290,7 @@ describe("settlement beats recovery", () => {
 
   test("a local dismissal closes the card for good", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
-    noteLocalFormCancelled("frm_1")
+    noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
 
@@ -349,7 +357,7 @@ describe("lifecycle", () => {
       const link = { messageID: `msg_${index}`, partID: `tool_${index}` }
       form.metadata = { kind: "question", tool: { messageID: link.messageID, id: link.partID } }
       applyRecoverableQuestionEvents("/repo", [formCreated(form), toolSucceeded(link)])
-      noteLocalFormReplied(form.id)
+      noteLocalFormReplied("ses_ask", form.id)
     }
     const state = recoveryView()
     expect(state.seen.size).toBe(100)
@@ -367,8 +375,8 @@ describe("lifecycle", () => {
 
   test("unobserved and evicted replies do not accumulate outcomes", () => {
     for (let index = 0; index < 160; index += 1) {
-      noteLocalFormReplied(`frm_${index}`)
-      noteLocalFormCancelled(`cancel_${index}`)
+      noteLocalFormReplied("ses_ask", `frm_${index}`)
+      noteLocalFormCancelled("ses_ask", `cancel_${index}`)
       applyRecoverableQuestionEvents("/repo", [formSettled(`remote_${index}`, "replied")])
     }
     expect(recoveryView().outcomes.size).toBe(0)
@@ -377,7 +385,7 @@ describe("lifecycle", () => {
   test("a repeated snapshot cannot reopen a dismissed captured question", () => {
     const form = questionForm("frm_1")
     noteQuestionFormSnapshot("/repo", [form])
-    noteLocalFormCancelled(form.id)
+    noteLocalFormCancelled("ses_ask", form.id)
     noteQuestionFormSnapshot("/repo", [form])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
@@ -385,7 +393,7 @@ describe("lifecycle", () => {
   test("dismissing a recovered card leaves a tombstone", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
-    noteLocalFormCancelled("frm_1")
+    noteLocalFormCancelled("ses_ask", "frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
     expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("dismissed")
   })
@@ -431,7 +439,7 @@ describe("answer submissions", () => {
     let sends = 0
     const send = async () => {
       sends += 1
-      noteLocalFormReplied("frm_1")
+      noteLocalFormReplied("ses_ask", "frm_1")
     }
     await submitRecoveredAnswer("frm_1", send)
     await submitRecoveredAnswer("frm_1", send)
@@ -483,5 +491,171 @@ describe("answer submissions", () => {
     // No tombstone: the card and its draft stay for a retry.
     expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
+  })
+})
+
+describe("whether a form holds its turn (#5391)", () => {
+  const parts = (part: ToolPart) => ({ msg_ask: [part] })
+  // A plugin form (a deferred question) links the tool call that posted it, like the question tool does.
+  const pluginForm = (): FormRequest => ({ ...questionForm("frm_plugin"), metadata: { tool: { messageID: "msg_ask", id: "tool_ask" } } })
+
+  test("links any session form with a well-formed tool link, whatever its kind", () => {
+    expect(formToolLink(pluginForm())).toEqual({ messageID: "msg_ask", toolID: "tool_ask" })
+    expect(formToolLink(questionForm("frm_1"))).toEqual({ messageID: "msg_ask", toolID: "tool_ask" })
+    expect(formToolLink({ ...pluginForm(), sessionID: "global" })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: { tool: { messageID: "msg_ask" } } })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: { tool: ["msg_ask", "tool_ask"] } })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: undefined })).toBeNull()
+    // The question link still requires the question kind.
+    expect(questionToolLink(pluginForm())).toBeNull()
+  })
+
+  test("a finished tool call releases its form, completed or failed", () => {
+    expect(formTurnHold(pluginForm(), parts(completedTool()))).toBe("released")
+    expect(formTurnHold(pluginForm(), parts(failedTool("boom", "tool.execution")))).toBe("released")
+  })
+
+  test("a pending or running tool call holds its form", () => {
+    expect(formTurnHold(pluginForm(), parts(runningTool()))).toBe("holds")
+    expect(formTurnHold(pluginForm(), parts(toolPart({ status: "pending", input: {}, raw: "" })))).toBe("holds")
+  })
+
+  test("a form without a usable link holds, as every form did before", () => {
+    expect(formTurnHold({ ...pluginForm(), metadata: undefined }, parts(completedTool()))).toBe("holds")
+    expect(formTurnHold({ ...pluginForm(), sessionID: "global" }, parts(completedTool()))).toBe("holds")
+    const textPart: Part = { id: "tool_ask", sessionID: "ses_ask", messageID: "msg_ask", type: "text", text: "hi" }
+    expect(formTurnHold(pluginForm(), { msg_ask: [textPart] })).toBe("holds")
+  })
+
+  test("an unloaded message or part is unknown until a server read settles it", () => {
+    expect(formTurnHold(pluginForm(), {})).toBe("unknown")
+    expect(formTurnHold(pluginForm(), { msg_ask: [] })).toBe("unknown")
+    const key = formReleaseKey(pluginForm(), { messageID: "msg_ask", toolID: "tool_ask" })
+    noteFormToolReleased(key, new Set([key]))
+    const releasedForms = () => useRecoverableQuestionsStore.getState().releasedForms
+    expect(formTurnHold(pluginForm(), {}, releasedForms())).toBe("released")
+    // Only the form the read was about: another id, or the same id reused in another session or for another call.
+    expect(formTurnHold({ ...pluginForm(), id: "frm_other" }, {}, releasedForms())).toBe("unknown")
+    expect(formTurnHold({ ...pluginForm(), sessionID: "ses_other" }, {}, releasedForms())).toBe("unknown")
+    expect(formTurnHold({ ...pluginForm(), metadata: { tool: { messageID: "msg_ask", id: "tool_later" } } }, {}, releasedForms())).toBe("unknown")
+  })
+
+  test("a released entry lasts while its form is open, and goes when it is not, settles, or the runtime switches", () => {
+    const keyOf = (id: string) => formReleaseKey({ ...pluginForm(), id }, { messageID: "msg_ask", toolID: "tool_ask" })
+    const releasedForms = () => useRecoverableQuestionsStore.getState().releasedForms
+    // Any number of later reads keep an entry whose form is still open.
+    for (let index = 0; index <= 150; index += 1) noteFormToolReleased(keyOf(`frm_${index}`), new Set([keyOf("frm_0"), keyOf(`frm_${index}`)]))
+    expect([...releasedForms()]).toEqual([keyOf("frm_0"), keyOf("frm_150")])
+    // A form no longer open loses its entry at the next read.
+    noteFormToolReleased(keyOf("frm_new"), new Set([keyOf("frm_new")]))
+    expect([...releasedForms()]).toEqual([keyOf("frm_new")])
+    // Settling forgets it at once, either way.
+    applyRecoverableQuestionEvents("/repo", [{ type: "form.settled", properties: { sessionID: "ses_ask", formID: "frm_new", disposition: "cancelled" } }])
+    expect(releasedForms().size).toBe(0)
+    noteFormToolReleased(keyOf("frm_new"), new Set())
+    resetRecoverableQuestions()
+    expect(releasedForms().size).toBe(0)
+  })
+})
+
+describe("a question deferred on send (#5391)", () => {
+  const deferredPart = () => failedTool(DEFERRED_QUESTION_NOTE, "tool.execution")
+  const userMessage = (sessionID: string, metadata?: Metadata, role: "user" | "synthetic" = "user"): SyncEvent => ({
+    type: "message.updated",
+    properties: {
+      info: role === "user"
+        ? { id: "msg_answer", sessionID, role, time: { created: 3 }, metadata }
+        : { id: "msg_answer", sessionID, role, time: { created: 3 }, text: "context", metadata },
+    },
+  })
+
+  test("only a waiting question tool call is deferrable", () => {
+    const form = questionForm("frm_1")
+    expect(isWaitingQuestionCall(form, { msg_ask: [runningTool()] })).toBe(true)
+    expect(isWaitingQuestionCall(form, { msg_ask: [toolPart({ status: "pending", input: {}, raw: "" })] })).toBe(true)
+    expect(isWaitingQuestionCall(form, { msg_ask: [completedTool()] })).toBe(false)
+    expect(isWaitingQuestionCall(form, { msg_ask: [deferredPart()] })).toBe(false)
+    expect(isWaitingQuestionCall(form, { msg_ask: [{ ...runningTool(), tool: "ask_later" }] })).toBe(false)
+    expect(isWaitingQuestionCall(form, {})).toBe(false)
+    expect(isWaitingQuestionCall({ ...form, metadata: { tool: { messageID: "msg_ask", id: "tool_ask" } } }, { msg_ask: [runningTool()] })).toBe(false)
+  })
+
+  test("the note classifies as deferred; other tool errors stay dismissed", () => {
+    expect(classifyQuestionToolError(DEFERRED_QUESTION_NOTE, "tool.execution", false)).toBe("deferred")
+    expect(classifyQuestionToolError(`${DEFERRED_QUESTION_NOTE} `, "tool.execution", false)).toBe("dismissed")
+    expect(classifyQuestionToolError(DEFERRED_QUESTION_NOTE, undefined, true)).toBe("unresolved")
+  })
+
+  test("yields an answerable card, from the stored part or the live transition", () => {
+    noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+    const fromPart = deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions)
+    expect(fromPart.map((entry) => [entry.form.id, entry.evidence])).toEqual([["frm_1", "deferred-on-send"]])
+
+    applyRecoverableQuestionEvents("/repo", [toolFailed(DEFERRED_QUESTION_NOTE, "tool.execution")])
+    const fromEvent = deriveRecoveredQuestions(viewWith(runningTool()), recoveryView(), allSessions)
+    expect(fromEvent.map((entry) => entry.evidence)).toEqual(["deferred-on-send"])
+  })
+
+  test("a pending form still wins over the card", () => {
+    noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+    expect(deriveRecoveredQuestions(viewWith(deferredPart(), [questionForm("frm_1")]), recoveryView(), allSessions)).toEqual([])
+  })
+
+  test("a reply event, a local dismissal and the answer marker each close it", () => {
+    const closedBy = (close: () => void): number => {
+      resetRecoverableQuestions()
+      noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+      close()
+      return deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions).length
+    }
+    expect(closedBy(() => {})).toBe(1)
+    expect(closedBy(() => applyRecoverableQuestionEvents("/repo", [formSettled("frm_1", "replied")]))).toBe(0)
+    expect(closedBy(() => noteLocalFormCancelled("ses_ask", "frm_1"))).toBe(0)
+    expect(closedBy(() => applyRecoverableQuestionEvents("/repo", [userMessage("ses_ask", deferredAnswerMetadata("frm_1"))]))).toBe(0)
+  })
+
+  test("the marker closes only its own question in its own session", () => {
+    const open = (event: SyncEvent): number => {
+      resetRecoverableQuestions()
+      noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+      applyRecoverableQuestionEvents("/repo", [event])
+      return deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions).length
+    }
+    expect(open(userMessage("ses_other", deferredAnswerMetadata("frm_1")))).toBe(1)
+    expect(open(userMessage("ses_ask", deferredAnswerMetadata("frm_2")))).toBe(1)
+    expect(open(userMessage("ses_ask", deferredAnswerMetadata("frm_1"), "synthetic"))).toBe(1)
+    expect(open(userMessage("ses_ask", { openchamber: { deferredAnswer: "frm_1" } }))).toBe(1)
+    expect(open(userMessage("ses_ask"))).toBe(1)
+  })
+
+  // A page that missed the live event loads the answer with history or the inbox instead, and may later
+  // evict or trim it out of the loaded window: the card must stay closed and Submit must send nothing.
+  test("a loaded answer with the marker closes the card for good, in its own session only", async () => {
+    noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+    const answer = (sessionID: string, metadata: Metadata): Message => ({ id: "msg_answer", sessionID, role: "user", time: { created: 3 }, metadata })
+    const cards = () => deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions).length
+    expect(cards()).toBe(1)
+
+    noteDeferredAnswersLoaded({ ses_ask: [answer("ses_ask", deferredAnswerMetadata("frm_2"))] })
+    noteDeferredAnswersLoaded({ ses_other: [answer("ses_other", deferredAnswerMetadata("frm_1"))] })
+    expect(cards()).toBe(1)
+
+    noteDeferredAnswersLoaded({ ses_ask: [answer("ses_ask", deferredAnswerMetadata("frm_1"))] })
+    // Evicted: the loaded window no longer holds the answer.
+    noteDeferredAnswersLoaded({})
+    expect(cards()).toBe(0)
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("answered")
+    let sends = 0
+    await submitRecoveredAnswer("frm_1", async () => { sends += 1 })
+    expect(sends).toBe(0)
+  })
+
+  test("a settlement of the same form id in another session leaves the card open", () => {
+    noteQuestionFormSnapshot("/repo", [questionForm("frm_1")])
+    applyRecoverableQuestionEvents("/repo", [{ type: "form.settled", properties: { sessionID: "ses_other", formID: "frm_1", disposition: "replied" } }])
+    noteLocalFormReplied("ses_other", "frm_1")
+    noteLocalFormCancelled("ses_other", "frm_1")
+    expect(deriveRecoveredQuestions(viewWith(deferredPart()), recoveryView(), allSessions)).toHaveLength(1)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
   })
 })

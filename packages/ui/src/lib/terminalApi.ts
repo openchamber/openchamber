@@ -11,7 +11,8 @@ import { z } from 'zod';
 
 type ClientMessage =
   | { t: 'hello' | 'ping'; v: 3 }
-  | { t: 'attach' | 'detach'; v: 3; s: string }
+  | { t: 'attach'; v: 3; s: string; z?: 1 }
+  | { t: 'detach'; v: 3; s: string }
   | { t: 'write'; v: 3; s: string; d: string };
 type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type ProjectionHistory = {
@@ -34,6 +35,12 @@ type TerminalProjection = {
   ptyBackend?: string;
 };
 const TAG = 1;
+/** A frame whose JSON is gzipped: the snapshot answering an attach sent with `z: 1`. */
+const GZIP_TAG = 2;
+// WebViews older than DecompressionStream keep receiving plain snapshots.
+const canGunzip = typeof DecompressionStream === 'function';
+const gunzip = (frame: ArrayBuffer): Promise<ArrayBuffer> =>
+  new Response(new Blob([new Uint8Array(frame, 1)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 const MAX_PROJECTION_BYTES = 512 * 1024;
 const PROJECTION_PART_BYTES = 8 * 1024;
 const SOCKET_CONNECTING = 0;
@@ -275,6 +282,9 @@ export class TerminalTransport {
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
   private disposed = false;
+  /** The frame being gunzipped and those that arrived behind it. */
+  private inflating: Promise<void> | null = null;
+  private gunzipFailed = false;
 
   constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies(null)) {}
 
@@ -294,7 +304,7 @@ export class TerminalTransport {
     this.ensureConnected().then(() => {
       const current = this.subscribers.get(sessionId);
       if (first && socketWasOpen && current === set && current.size > 0) {
-        this.send({ t: 'attach', v: 3, s: sessionId });
+        this.attach(sessionId);
       }
     }).catch((error) => {
       if (!set.has(subscriber)) return;
@@ -413,11 +423,11 @@ export class TerminalTransport {
             opened = true;
             this.failures = 0;
             this.send({ t: 'hello', v: 3 });
-            for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
+            for (const sessionId of this.subscribers.keys()) this.attach(sessionId);
             this.startKeepalive();
             finish();
           };
-          socket.onmessage = (event) => void this.handleMessage(event.data);
+          socket.onmessage = (event) => this.receive(socket, event.data);
           socket.onerror = () => {
             const current = isCurrentSocket();
             if (current) invalidatePreOpenAuth();
@@ -451,6 +461,26 @@ export class TerminalTransport {
         this.opening = null;
       }
     }
+  }
+
+  private attach(sessionId: string): void {
+    this.send({ t: 'attach', v: 3, s: sessionId, ...(canGunzip && !this.gunzipFailed ? { z: 1 as const } : {}) });
+  }
+
+  /** Frames are handled in arrival order, so one being gunzipped holds back those behind it. */
+  private receive(socket: RelayTunnelWebSocket, raw: RelayTunnelSocketMessageEvent['data']): void {
+    const gzipped = raw instanceof ArrayBuffer && raw.byteLength > 1 && new Uint8Array(raw, 0, 1)[0] === GZIP_TAG;
+    if (!gzipped && !this.inflating) { this.handleMessage(raw); return; }
+    const next = (this.inflating ?? Promise.resolve())
+      .then(() => (gzipped ? gunzip(raw) : raw))
+      .then((data) => { if (this.socket === socket) this.handleMessage(data); })
+      .catch(() => {
+        // The snapshot is lost. Reconnect and attach again without asking for gzip.
+        this.gunzipFailed = true;
+        if (this.socket === socket) socket.close();
+      })
+      .finally(() => { if (this.inflating === next) this.inflating = null; });
+    this.inflating = next;
   }
 
   private handleMessage(raw: RelayTunnelSocketMessageEvent['data']): void {

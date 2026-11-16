@@ -26,6 +26,26 @@ import { z } from 'zod';
 
 const ISOLATED_WORLD = 'openchamber-agent';
 
+/**
+ * The annotation overlay runs in a world of its own, one per session, and
+ * reaches the app through a binding only that world has
+ * (`ANNOTATION_BINDING` in `annotationOverlay.ts`): the page cannot call it,
+ * so it cannot start the app's microphone. The app answers by calling the
+ * overlay's receiver in the same world.
+ */
+const ANNOTATION_WORLD = 'openchamber-annotation';
+const ANNOTATION_BINDING = '__openchamberAnnotationSend';
+const ANNOTATION_RECEIVER = '__openchamberAnnotationReceive';
+/** Messages the overlay sent that the app has not read yet; a few clicks' worth. */
+const MAX_ANNOTATION_MESSAGES = 20;
+/** How long one read of the overlay's messages waits, below the IPC's patience. */
+const MAX_ANNOTATION_WAIT_MS = 25_000;
+
+const annotationSendSchema = z.object({ message: z.record(z.string(), z.json()) }).passthrough();
+const annotationWaitSchema = z.object({ sessionId: z.number(), timeoutMs: z.number().optional() }).passthrough();
+const annotateSchema = z.object({ expression: z.string().min(1), sessionId: z.number() }).passthrough();
+const annotationCancelSchema = z.object({ sessionId: z.number() }).passthrough();
+
 const dialogAnswerSchema = z.object({ accept: z.boolean().optional(), promptText: z.string().optional() }).passthrough();
 const emulationSchema = z.object({ colorScheme: z.enum(['light', 'dark', 'system']).optional() }).passthrough();
 
@@ -141,8 +161,18 @@ export const createBrowserPanelDriver = () => {
    *   accept: boolean,
    *   answered: object[],
    *   ready: Promise<void>,
+   *   annotation: null | AnnotationChannel,
+   *   annotationEnded: Promise<void>,
+   *   annotationCancelledUpTo: number,
    * }} DriverState
+   * @typedef {{
+   *   sessionId: number,
+   *   contextId: number | null,
+   *   messages: string[],
+   *   waiters: Set<(message: string | null) => void>,
+   * }} AnnotationChannel
    */
+  let annotationSessions = 0;
 
   const send = (state, method, params = {}, sessionId = undefined) => (
     state.contents.debugger.sendCommand(method, params, sessionId)
@@ -198,6 +228,108 @@ export const createBrowserPanelDriver = () => {
       state.dialog = null;
       return;
     }
+    if (method === 'Runtime.bindingCalled') {
+      const annotation = state.annotation;
+      // Only the overlay's own world, in the top page, holds the binding.
+      if (!annotation || fromSession || params.name !== ANNOTATION_BINDING) return;
+      if (params.executionContextId !== annotation.contextId) return;
+      deliverAnnotationMessage(annotation, String(params.payload ?? ''));
+    }
+  };
+
+  const deliverAnnotationMessage = (annotation, message) => {
+    const [waiter] = annotation.waiters;
+    if (waiter) {
+      waiter(message);
+      return;
+    }
+    if (annotation.messages.length < MAX_ANNOTATION_MESSAGES) annotation.messages.push(message);
+  };
+
+  /**
+   * Runs the annotation overlay and answers with what it resolved to, or
+   * null when the page navigated from under it or the app cancelled the
+   * session before the overlay showed. Throws only when it could not start,
+   * so the app can run it the old way, without a microphone.
+   *
+   * Sessions are numbered by the app, rising; a cancel names the session, and
+   * may arrive before the session reaches here.
+   */
+  const annotate = async (state, expression, sessionId) => {
+    const cancelled = () => sessionId <= state.annotationCancelledUpTo;
+    // The last session's cleanup still runs after its overlay is gone.
+    await state.annotationEnded;
+    if (cancelled()) return { value: null };
+    /** @type {AnnotationChannel} */
+    const annotation = { sessionId, contextId: null, messages: [], waiters: new Set() };
+    state.annotation = annotation;
+    let ended = () => {};
+    state.annotationEnded = new Promise((resolve) => { ended = resolve; });
+    try {
+      const [top] = await listFrames(state);
+      annotationSessions += 1;
+      const worldName = `${ANNOTATION_WORLD}-${annotationSessions}`;
+      // Binding calls arrive as Runtime events, so the domain is on for the session only.
+      await send(state, 'Runtime.enable');
+      await send(state, 'Runtime.addBinding', { name: ANNOTATION_BINDING, executionContextName: worldName });
+      const world = await send(state, 'Page.createIsolatedWorld', { frameId: top.frameId, worldName });
+      annotation.contextId = world.executionContextId;
+      if (cancelled()) return { value: null };
+      let reply;
+      try {
+        reply = await send(state, 'Runtime.evaluate', {
+          expression,
+          contextId: world.executionContextId,
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+        });
+      } catch {
+        // The page navigated or closed, and the overlay went with it.
+        return { value: null };
+      }
+      if (reply.exceptionDetails) {
+        const description = reply.exceptionDetails.exception?.description || reply.exceptionDetails.text || 'Script failed';
+        throw new Error(String(description).split('\n')[0]);
+      }
+      return { value: reply.result.value ?? null };
+    } finally {
+      state.annotation = null;
+      for (const waiter of [...annotation.waiters]) waiter(null);
+      await send(state, 'Runtime.removeBinding', { name: ANNOTATION_BINDING }).catch(() => {});
+      await send(state, 'Runtime.disable').catch(() => {});
+      ended();
+    }
+  };
+
+  /** The overlay's next message in session `sessionId`; `ended` while that session is not the running one. */
+  const nextAnnotationMessage = (state, sessionId, timeoutMs) => {
+    const annotation = state.annotation;
+    if (annotation?.sessionId !== sessionId) return Promise.resolve({ ended: true });
+    if (annotation.messages.length > 0) return Promise.resolve({ message: annotation.messages.shift() });
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        annotation.waiters.delete(waiter);
+        resolve({ message: null });
+      }, Math.min(MAX_ANNOTATION_WAIT_MS, Math.max(0, timeoutMs)));
+      const waiter = (message) => {
+        clearTimeout(timer);
+        annotation.waiters.delete(waiter);
+        resolve(message === null ? { ended: true } : { message });
+      };
+      annotation.waiters.add(waiter);
+    });
+  };
+
+  const sendAnnotationMessage = async (state, message) => {
+    const annotation = state.annotation;
+    if (!annotation?.contextId) return { delivered: false };
+    const reply = await send(state, 'Runtime.evaluate', {
+      expression: `(function (message) { var receive = window[${JSON.stringify(ANNOTATION_RECEIVER)}]; if (typeof receive === 'function') receive(message); })(${JSON.stringify(message)})`,
+      contextId: annotation.contextId,
+      returnByValue: true,
+    }).catch(() => null);
+    return { delivered: Boolean(reply && !reply.exceptionDetails) };
   };
 
   /** Kept small: an action reports these, and a page can loop on alerts. */
@@ -221,7 +353,7 @@ export const createBrowserPanelDriver = () => {
     const created = (async () => {
       if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
       /** @type {DriverState} */
-      const state = { contents, sessions: new Map(), dialog: null, dialogListeners: new Set(), autoAnswer: false, accept: false, answered: [], ready: Promise.resolve() };
+      const state = { contents, sessions: new Map(), dialog: null, dialogListeners: new Set(), autoAnswer: false, accept: false, answered: [], ready: Promise.resolve(), annotation: null, annotationEnded: Promise.resolve(), annotationCancelledUpTo: 0 };
       const listener = onMessage(state);
       contents.debugger.on('message', listener);
       contents.debugger.once('detach', () => {
@@ -395,7 +527,7 @@ export const createBrowserPanelDriver = () => {
    * be a panel page by the caller.
    */
   /** Operations that only answer or read dialog state, or set emulation. */
-  const NEEDS_NO_PAGE = new Set(['dialog', 'dialogPolicy', 'armDialog', 'takeAnsweredDialogs', 'answerDialog', 'emulate']);
+  const NEEDS_NO_PAGE = new Set(['dialog', 'dialogPolicy', 'armDialog', 'takeAnsweredDialogs', 'answerDialog', 'emulate', 'annotationMessage', 'annotationSend', 'annotationCancel']);
 
   const run = async (contents, op, args) => {
     const state = await stateFor(contents);
@@ -407,6 +539,21 @@ export const createBrowserPanelDriver = () => {
         const frame = await frameById(state, String(args.frameId ?? ''));
         return watchingDialog(state, () => evaluateInFrame(state, frame, String(args.expression ?? '')));
       }
+      case 'annotate': {
+        const { expression, sessionId } = annotateSchema.parse(args);
+        return annotate(state, expression, sessionId);
+      }
+      case 'annotationMessage': {
+        const { sessionId, timeoutMs } = annotationWaitSchema.parse(args);
+        return nextAnnotationMessage(state, sessionId, timeoutMs ?? MAX_ANNOTATION_WAIT_MS);
+      }
+      case 'annotationCancel': {
+        const { sessionId } = annotationCancelSchema.parse(args);
+        state.annotationCancelledUpTo = Math.max(state.annotationCancelledUpTo, sessionId);
+        return { cancelled: true };
+      }
+      case 'annotationSend':
+        return sendAnnotationMessage(state, annotationSendSchema.parse(args).message);
       case 'frameOrigin': {
         const frame = await frameById(state, String(args.frameId ?? ''));
         return frameOrigin(state, frame, 'top');

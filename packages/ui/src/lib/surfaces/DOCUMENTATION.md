@@ -17,6 +17,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   surfaces through `extras` on `sortContextSurfaces` /
   `getVisibleContextRailSurfaces`. Do not copy guest types out of
   `@openchamber/sdk`.
+- The rail's icons scroll when the window is too short for them, without a
+  scrollbar, with the scroll fades drawn as bands in the rail's background
+  colour (`ScrollShadow` with `surface`), never a mask, which would keep a
+  GPU texture the height of the rail. Its configure button stays under the
+  scroller, always in reach.
 - `availability: 'always'` surfaces are always present on the rail.
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
@@ -135,6 +140,9 @@ keep the full height). The chat is always the centre and cannot move.
   the sidebar has folded, so it grows in one move with it.
 - Another window's move is adopted through the `storage` event
   (`zoneSync.ts`); each window keeps its own open zones.
+- A surface moves between zones whole; its tabs never split across zones.
+  Showing a reference page beside a form by dragging one `pages` tab to
+  another zone was weighed and rejected as not worth building.
 
 ### Why an expanded zone stays in the layout and not over the chat
 
@@ -276,7 +284,7 @@ memory's tab goes with its tool.
 ## Shared pages
 
 The `pages` surface holds pages other people shared with the user by link
-(`components/chat/sharePages/received/`, decisions 0013 and 0018). It is on
+(`components/chat/sharePages/received/`). It is on
 the rail while the server holds any received page (`receivedPagesShown`, the
 list fed by `receivedPagesStore.ts`), or a tab of it is open. Opened with no
 tab, it shows the list tab (no `targetPath`): every received page, newest

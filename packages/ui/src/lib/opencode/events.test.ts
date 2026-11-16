@@ -40,6 +40,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.created of a workflow agent names the session that ran it as the parent", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.created",
+      durable,
+      data: {
+        sessionID: "ses_agent",
+        projectID: "proj_1",
+        location: { directory: "/repo" },
+        slug: "agent",
+        version: "2.3.0",
+        metadata: { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } },
+      },
+    })
+    expect(event?.type === "session.created" && event.properties.info.parentID).toBe("ses_parent")
+  })
+
   test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
     const forked = translateWireEvent({
       ...base,
@@ -143,6 +160,23 @@ describe("translateWireEvent", () => {
     expect(events[1]).toMatchObject({
       type: "message.parts.replaced",
       properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }] },
+    })
+  })
+
+  test("skills attached to a prompt entering the inbox reach the live user message", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_u",
+        item: { type: "user", delivery: "steer", payload: { text: "Follow $demo", skills: [{ id: "demo", name: "Demo" }] } },
+      },
+    })
+    expect(events[0]).toEqual({
+      type: "message.updated",
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }] } },
     })
   })
 

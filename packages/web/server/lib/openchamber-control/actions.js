@@ -24,8 +24,8 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'session.unlink', title: 'Remove a link from a session', description: 'Remove a link from sessionId (default: this session), named by the url or identifier it was linked with' },
   { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. A message arrives in this session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. One wake ends that watch: watch again to keep waiting. Each pull request is its own watch, so a session can wait on several. Never wait with a sleep loop' },
   { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting on the pull request at url, or on every one without url' },
-  { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources extensions offer to wait on, with the args each takes" },
-  { action: 'wait.start', title: 'Wait on an extension', description: 'Requires source from wait.list, and args as its params say. A message arrives in this session when the extension reports the wait fired, or that it can no longer follow it; one wake ends the wait. End your turn while you wait. Never wait with a sleep loop' },
+  { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources to wait on (the built-in timer and what extensions offer), with the args each takes" },
+  { action: 'wait.start', title: 'Wait on a timer or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440), or a source from wait.list with args as its params say. A message arrives in this session when the timer runs out, or when the extension reports the wait fired or that it can no longer follow it; one wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
   { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId, or every wait of this session without it' },
   { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
@@ -202,6 +202,21 @@ export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
 );
 
 /**
+ * The terminal panel, read-only. It is its own tool because a terminal holds
+ * whatever the user typed into it, secrets included: off until the user turns
+ * it on, and then only listing and reading, never typing, starting or
+ * stopping.
+ */
+export const OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'terminal.list', title: 'List terminals', description: "This folder's terminal panels: sessionId, cwd, status, createdAt, mode and purpose, without their output; directory lists another folder's" },
+  { action: 'terminal.read', title: 'Read a terminal', description: 'The output a terminal from terminal.list printed, as plain text end-aligned to a line; maxBytes caps it, truncated says older output was dropped and retainedBytes how much this server still holds' },
+]);
+
+export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
+  OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
  * Workflows are their own tool: fanning a large task out to many agents is a
  * distinct intent with its own scripting guidance, and the tool is off until
  * the user turns it on, so it has to disappear completely.
@@ -259,6 +274,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
+  openchamber_terminal: OPENCHAMBER_TERMINAL_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
@@ -313,6 +329,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_TERMINAL_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

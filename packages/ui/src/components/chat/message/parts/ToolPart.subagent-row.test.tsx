@@ -1,7 +1,5 @@
 import { act } from 'react';
 import { expect, spyOn, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
@@ -14,17 +12,6 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'tool-guest-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { default: ToolPart } = await import('./ToolPart');
 

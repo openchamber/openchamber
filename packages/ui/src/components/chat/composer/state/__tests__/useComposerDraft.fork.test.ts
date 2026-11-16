@@ -97,7 +97,8 @@ describe('fork composer restoration', () => {
                 expect(useInputStore.getState().pendingComposerRestore).not.toBeNull();
 
                 composer.render(fork);
-                expect(composer.result.text).toBe('replay prompt');
+                // Each restored file gets its chip: a send takes only the files its text cites.
+                expect(composer.result.text).toBe('replay prompt [replay.txt]');
                 expect(composer.result.mentions.size).toBe(0);
                 expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(['replay.txt']);
                 expect(useInputStore.getState().pendingComposerRestore).toBeNull();
@@ -108,7 +109,7 @@ describe('fork composer restoration', () => {
                 composer.render(source);
                 expect(composer.result.text).toBe('source draft @source.ts');
                 expect(useInputStore.getState().attachedFiles).toBe(sourceFiles);
-                expect(readChatDraft(fork).text).toBe('replay prompt');
+                expect(readChatDraft(fork).text).toBe('replay prompt [replay.txt]');
             } finally {
                 composer.teardown();
             }
@@ -154,7 +155,7 @@ describe('fork composer restoration', () => {
         }
     });
 
-    test('restores file-only and empty prompts without keeping destination text or files', () => {
+    test('restores file-only and empty prompts without keeping destination text or files, a file as its chip', () => {
         const composer = renderComposer();
         try {
             writeChatDraft(fork, 'stale destination text', []);
@@ -162,7 +163,7 @@ describe('fork composer restoration', () => {
                 useInputStore.setState({ pendingComposerRestore: { target: fork, text: '', files: [replayFile] } });
             });
             composer.render(fork);
-            expect(composer.result.text).toBe('');
+            expect(composer.result.text).toBe('[replay.txt]');
             expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(['replay.txt']);
             act(() => {
                 useInputStore.setState({ pendingComposerRestore: { target: fork, text: '', files: [] } });

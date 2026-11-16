@@ -10,6 +10,16 @@ import { z } from 'zod';
 
 const DEFAULT_LIMIT = 5000;
 
+const workflowAgentLinkSchema = z.object({
+  metadata: z.object({ openchamber: z.object({ kind: z.literal('workflow-agent'), parentID: z.string().min(1) }) }),
+});
+
+export const sessionParentId = (record) => {
+  if (typeof record?.parentID === 'string' && record.parentID) return record.parentID;
+  const link = workflowAgentLinkSchema.safeParse(record);
+  return link.success ? link.data.metadata.openchamber.parentID : null;
+};
+
 const createdSchema = z.object({
   type: z.literal('session.created'),
   properties: z.object({

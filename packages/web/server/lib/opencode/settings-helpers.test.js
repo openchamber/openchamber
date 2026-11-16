@@ -293,6 +293,8 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ wideChatLayoutEnabled: true });
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ wideChatLayoutEnabled: false });
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wider' })).toEqual({ chatWidth: 'wider' });
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wide' })).toEqual({});
   });
 
   it('accepts only booleans for collapsible user messages', () => {
@@ -953,19 +955,19 @@ describe('settings registry gate', () => {
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
-    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
-    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false,
+    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false, terminalOpenOnProjectAction: false,
     openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttCorrectTranscript: true,
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
     sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
-    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarProjectSortOrder: 'manual',
+    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarSessionBatchSize: 12, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
-    stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,

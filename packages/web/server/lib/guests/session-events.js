@@ -14,6 +14,7 @@ import { sessionEventResultSchema } from '@openchamber/sdk/schemas';
 
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { sessionParentId } from '../session-lineage.js';
 
 /**
  * Session events for extension services (`contributes.sessionEvents`): the
@@ -88,7 +89,6 @@ const directoryOf = (payload, directory) => {
   return isText(directory) && directory !== 'global' ? directory : null;
 };
 
-const parentIdOf = (record) => (isText(record?.parentID) ? record.parentID : null);
 const titleOf = (record) => (isText(record?.title) ? record.title : null);
 const recordDirectoryOf = (record) => (isText(record?.location?.directory) ? record.location.directory : null);
 
@@ -123,16 +123,17 @@ const formFieldOf = (field) => {
   const when = (Array.isArray(field.when) ? field.when : [])
     .filter((clause) => isText(clause?.key) && (clause.op === 'eq' || clause.op === 'neq') && ['string', 'number', 'boolean'].includes(typeof clause.value))
     .map((clause) => ({ key: clause.key, op: clause.op, value: clause.value }));
-  return {
+  const result = {
     key: field.key,
     type: field.type,
     title: typeof field.title === 'string' ? field.title : '',
     description: typeof field.description === 'string' ? field.description : null,
     required: field.required === true,
-    ...(options.length > 0 ? { options } : {}),
-    ...(field.type === 'multiselect' && field.custom === true ? { custom: true } : {}),
-    ...(when.length > 0 ? { when } : {}),
   };
+  if (options.length > 0) result.options = options;
+  if (field.type === 'multiselect' && field.custom === true) result.custom = true;
+  if (when.length > 0) result.when = when;
+  return result;
 };
 
 const formAskOf = (form) => ({
@@ -349,12 +350,12 @@ export const createExtensionSessionEvents = ({
       record = await loading.pending;
       // A move or deletion during the read invalidates this cache entry too.
       if (parentCache.get(sessionId) === loading) {
-        if (record) parentCache.set(sessionId, { at: now(), parentId: parentIdOf(record), directory: recordDirectoryOf(record) });
+        if (record) parentCache.set(sessionId, { at: now(), parentId: sessionParentId(record), directory: recordDirectoryOf(record) });
         else parentCache.delete(sessionId);
       }
     }
     if (stopped) return [];
-    const parentId = record ? parentIdOf(record) : parentCache.get(sessionId)?.parentId ?? null;
+    const parentId = record ? sessionParentId(record) : parentCache.get(sessionId)?.parentId ?? null;
     const linked = linkedItemsOf(await readMetadata(sessionId));
     if (stopped) return [];
     const event = {

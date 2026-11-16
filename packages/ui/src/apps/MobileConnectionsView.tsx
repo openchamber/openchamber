@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 
 import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { MobileConnectionHeaders } from './MobileConnectionHeaders';
+import { MobileConnectionHeartbeat } from './MobileConnectionHeartbeat';
 import { useDebugPanelLongPress } from './mobileConnectionDebug';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import {
@@ -348,20 +349,26 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
       )}
       <h2 dir="auto" className="oc-ui-start-align truncate pe-8 typography-ui-header font-semibold text-foreground">{leadConnection.label}</h2>
       <p dir="ltr" className="oc-ui-start-align truncate pe-8 typography-meta text-muted-foreground">{addressOf(leadConnection)}</p>
-      <div className="flex h-9 items-center pt-3">
-        {/* Live already: what would be the button says so, in the button's place. */}
-        {liveConnection ? (
-          <span className="flex items-center gap-2 typography-meta text-foreground">
-            <span className="size-1.5 rounded-full bg-[var(--status-success)]" aria-hidden />
-            {isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect')}
-          </span>
-        ) : (
+      {/* Live already: what would be the button says so, in the button's place, beside the server's heartbeat. */}
+      {liveConnection ? (
+        <MobileConnectionHeartbeat
+          status={(
+            <span className="flex min-w-0 items-center gap-2 typography-meta text-foreground">
+              <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-success)]" aria-hidden />
+              <span className="truncate">
+                {isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect')}
+              </span>
+            </span>
+          )}
+        />
+      ) : (
+        <div className="flex h-9 items-center pt-3">
           <Button type="button" disabled={isBusy} onClick={() => connectTo(leadConnection)}>
             {connectingId === leadConnection.id ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
             {connectingId === leadConnection.id ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   ) : null;
 

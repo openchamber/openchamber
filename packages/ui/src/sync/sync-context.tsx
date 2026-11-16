@@ -46,7 +46,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
-import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteDeferredAnswersLoaded, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
 import { subscribeSessionAdmission } from "./session-admission"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
@@ -78,6 +78,7 @@ import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeAutoReviewSync } from "./auto-review-sync"
 import { subscribePrWatchSync } from "./pr-watch-sync"
 import { subscribeExtensionWaitsSync } from "./extension-waits-sync"
+import { subscribeLaterPagesSync } from "./later-pages-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionTodosSync } from "./session-todos-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
@@ -160,6 +161,7 @@ import {
   getImperativeSessionMessageLoader,
   setImperativeSessionMessageLoader,
   type SessionMessageLoadState,
+  type SessionMessageTarget,
 } from "./session-message-loader"
 import { openCodeStartupSignal } from "./opencode-startup-gate"
 import { claimFirstServerConnect, notifyFirstServerConnect } from "./first-server-connect"
@@ -1683,7 +1685,9 @@ async function resyncDirectoryAfterReconnect(
   let succeeded = statuses !== null
   if (isStale()) return
 
-  await Promise.all(candidateSessionIds.map(async (sessionId) => {
+  // After a complete replay the records and transcripts are current: only what
+  // the server announces live, statuses and pending requests, is read again.
+  if (reason !== "stream-replayed") await Promise.all(candidateSessionIds.map(async (sessionId) => {
     syncDebug.recovery.materializing({ reason, directory, sessionID: sessionId })
     const loader = getImperativeSessionMessageLoader()
     const [session] = await Promise.all([
@@ -2911,6 +2915,34 @@ const followCurrentChatToArchive = (goneIds: ReadonlySet<string>): boolean => {
   return true
 }
 
+type SyncStores = { childStores: ChildStoreManager; messageLoader: SessionMessageLoader }
+
+const createSyncStores = (): SyncStores => {
+  // The cached list of an isolated space's directory seeds a store only while this window knows
+  // the space: a deleted space's chats are on the Archive page, under the archive's own directory,
+  // and the space's prefix answers 404. Given here so a store a consumer makes during the first
+  // render, before `configure` runs, is gated too.
+  const childStores = new ChildStoreManager({ seedsSessions: isDirectoryOfKnownSpace })
+  return {
+    childStores,
+    messageLoader: new SessionMessageLoader(childStores, { sdk: opencodeClient, runtimeKey: getRuntimeKey() }, openCodeStartupSignal),
+  }
+}
+
+let syncStoresMadeBeforeMount: SyncStores | null = null
+
+/**
+ * Starts reading a session's transcript before `SyncProvider` mounts, for an
+ * entry that knows its session before React renders (the desktop Mini Chat,
+ * from its window URL). The provider adopts the stores made here, so the read
+ * is the loader's own prefetch: it lands in the directory store the timeline
+ * reads, the open that follows joins it, and a failed one is read again then.
+ */
+export function prefetchSessionBeforeMount(target: SessionMessageTarget): void {
+  syncStoresMadeBeforeMount ??= createSyncStores()
+  void syncStoresMadeBeforeMount.messageLoader.prefetch(target)
+}
+
 export function SyncProvider(props: {
   sdk: OpenCodeClient
   directory: string
@@ -2923,22 +2955,23 @@ export function SyncProvider(props: {
   // 403. With the origin allowlisted, mobile uses the same transport
   // selection as everywhere else ('auto' falls back to SSE on WS failure).
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  const childStoresRef = useRef<ChildStoreManager | null>(null)
-  // The cached list of an isolated space's directory seeds a store only while this window knows
-  // the space: a deleted space's chats are on the Archive page, under the archive's own directory,
-  // and the space's prefix answers 404. Given here so a store a consumer makes during the first
-  // render, before `configure` runs, is gated too.
-  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager({ seedsSessions: isDirectoryOfKnownSpace })
-  const childStores = childStoresRef.current
+  const syncStoresRef = useRef<SyncStores | null>(null)
+  if (!syncStoresRef.current) syncStoresRef.current = syncStoresMadeBeforeMount ?? createSyncStores()
+  const { childStores, messageLoader } = syncStoresRef.current
+  // Handed over once mounted, so a provider mounted later starts from its own.
+  useEffect(() => {
+    if (syncStoresMadeBeforeMount === syncStoresRef.current) syncStoresMadeBeforeMount = null
+  }, [])
+  // A deferred question's marked answer that arrives by a history or inbox read closes its card
+  // for good, so the card stays closed once that message leaves the loaded window (#5391).
+  useEffect(() => {
+    const noteLoadedAnswers = () => {
+      for (const store of childStores.children.values()) noteDeferredAnswersLoaded(store.getState().message)
+    }
+    noteLoadedAnswers()
+    return childStores.subscribeAllSelected((state) => state.message, noteLoadedAnswers)
+  }, [childStores])
   const runtimeKey = getRuntimeKey()
-  const messageLoaderRef = useRef<SessionMessageLoader | null>(null)
-  if (!messageLoaderRef.current) {
-    messageLoaderRef.current = new SessionMessageLoader(childStores, {
-      sdk: opencodeClient,
-      runtimeKey,
-    }, openCodeStartupSignal)
-  }
-  const messageLoader = messageLoaderRef.current
   const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: opencodeClient, runtimeKey })
   // Asked while the rest of the bootstrap loads, so the first session page
@@ -3031,15 +3064,25 @@ export function SyncProvider(props: {
     childDiscoveryBackoffByDirectoryRef.current = new Map()
   }, [childStores, props.sdk, runtimeKey])
 
+  /** Directories whose running resync follows a replay, with the gap repair asked for meanwhile. */
+  const replayResyncDirectoriesRef = useRef(new Map<string, SessionMaterializationReason | null>())
+  const triggerDirectoryResyncRef = useRef<(directory: string, reason: SessionMaterializationReason) => void>(() => undefined)
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
     const store = childStores.children.get(directory)
     if (!store) return
     const staleResyncBackoff = staleResyncBackoffByDirectoryRef.current
     if (reason === "stale-status-resync" && Date.now() < (staleResyncBackoff.get(directory)?.retryAt ?? 0)) return
     const resyncing = resyncingDirectoriesRef.current
-    if (resyncing.has(directory)) return
+    const replayResyncs = replayResyncDirectoriesRef.current
+    if (resyncing.has(directory)) {
+      // A repair after a replay reads no transcripts, so a gap found while it
+      // runs still needs its own.
+      if (replayResyncs.has(directory) && reason !== "stream-replayed") replayResyncs.set(directory, reason)
+      return
+    }
+    if (reason === "stream-replayed") replayResyncs.set(directory, null)
 
-    lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
+    if (reason !== "stream-replayed") lastFullResyncAtByDirectoryRef.current.set(directory, Date.now())
     resyncing.add(directory)
     const sdk = opencodeClient.getSdkClient()
     const expectedRuntimeKey = getRuntimeKey()
@@ -3057,8 +3100,14 @@ export function SyncProvider(props: {
       })
       .finally(() => {
         resyncing.delete(directory)
+        const queued = replayResyncs.get(directory)
+        replayResyncs.delete(directory)
+        if (queued && !isStale()) triggerDirectoryResyncRef.current(directory, queued)
       })
   }, [childStores, routingIndex])
+  useEffect(() => {
+    triggerDirectoryResyncRef.current = triggerDirectoryResync
+  }, [triggerDirectoryResync])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -3329,6 +3378,7 @@ export function SyncProvider(props: {
     const unsubscribeAutoReviewEvents = subscribeAutoReviewSync(runtimeKey)
     const unsubscribePrWatchEvents = subscribePrWatchSync(runtimeKey)
     const unsubscribeExtensionWaitEvents = subscribeExtensionWaitsSync(runtimeKey)
+    const unsubscribeLaterPageEvents = subscribeLaterPagesSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
     const unsubscribeSessionTodos = subscribeSessionTodosSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
@@ -3437,7 +3487,7 @@ export function SyncProvider(props: {
         if (runtimeKey !== getRuntimeKey()) return
         void usePermissionStore.getState().refreshSpaceModes(spaceId)
       },
-      onReconnect: ({ replayReset }) => {
+      onReconnect: ({ replayReset, replayed }) => {
         // The first connection and every one after a gap: spaces being made or whose making failed
         // are known only to the journey list, and a step announced during the gap was missed.
         if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
@@ -3464,6 +3514,13 @@ export function SyncProvider(props: {
         if (!replayReset && isRecentBoot()) {
           return
         }
+        if (replayed) {
+          // Every event of the gap arrived, so transcripts and session records
+          // are not read again.
+          for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, "stream-replayed")
+          void reconcileActivityAfterGap(childStores)
+          return
+        }
         resyncAfterStreamGap("stream-reconnect")
       },
       onDisconnect: (reason) => {
@@ -3479,13 +3536,10 @@ export function SyncProvider(props: {
       },
       onTransportSwitch: () => {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
-        // Transport changes are gap-prone in real networks. Treat them like a
-        // reconnect and refresh active session snapshots from HTTP.
-        useConfigStore.setState({
-          isConnected: true,
-          hasEverConnected: true,
-          connectionPhase: "connected",
-        })
+        // Transport changes are gap-prone in real networks: refresh active
+        // session snapshots from HTTP. The switch follows a WebSocket that failed
+        // to open or dropped right after ready, so it proves no connection;
+        // onReconnect marks one when the next transport delivers.
         resyncAfterStreamGap("transport-switch")
       },
     })
@@ -3500,6 +3554,7 @@ export function SyncProvider(props: {
       unsubscribeAutoReviewEvents()
       unsubscribePrWatchEvents()
       unsubscribeExtensionWaitEvents()
+      unsubscribeLaterPageEvents()
       unsubscribeSessionWarming()
       unsubscribeSessionTodos()
       unsubscribeFolderEvents()
@@ -4026,14 +4081,6 @@ export function useSessionPermissions(sessionID: string, directory?: string, opt
     return subscribeDirectoryPermission(store, sessionID, notify)
   }, [sessionID, store])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-/** Get pending forms for a specific session */
-export function useSessionForms(sessionID: string, directory?: string) {
-  return useDirectorySync(
-    useCallback((state: State) => state.form[sessionID] ?? EMPTY_FORM_REQUESTS, [sessionID]),
-    directory,
-  )
 }
 
 type SessionBlockingRequests = {

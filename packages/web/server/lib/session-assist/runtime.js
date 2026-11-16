@@ -7,6 +7,7 @@ import path from 'path';
 import { OpenCode } from '@opencode/client';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { isString } from '../shared/guards.js';
+import { sessionParentId } from '../session-lineage.js';
 import { loadAssistContext, newestContentId } from './context.js';
 import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
 
@@ -219,8 +220,8 @@ export const createSessionAssistRuntime = ({
     checkCurrent();
     // Reverted history is not the active conversation. A new prompt clears
     // the revert boundary before its next idle event.
-    if (session?.id === sessionId) lineage?.remember(sessionId, session.parentID ?? null);
-    if (session?.id !== sessionId || session.parentID || session.revert?.messageID) return;
+    if (session?.id === sessionId) lineage?.remember(sessionId, sessionParentId(session));
+    if (session?.id !== sessionId || sessionParentId(session) || session.revert?.messageID) return;
     // An archived session is put away: no recap or suggestion is generated for it.
     if (await isSessionArchived(sessionId)) return;
     const context = await loadAssistContext({

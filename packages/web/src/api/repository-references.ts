@@ -103,6 +103,10 @@ const referenceCommentFields = {
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+  // A conversation comment's id and what this account may do with it; hosts that do not say leave them out.
+  id: z.string().min(1).optional(),
+  canUpdate: z.boolean().optional(),
+  canDelete: z.boolean().optional(),
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
@@ -119,6 +123,9 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
     connected: z.literal(true),
     detail: z.object({
       number: z.number(),
+      // The whole description and the permission to replace it, where the host sends them.
+      body: z.string().optional(),
+      viewerCanUpdate: z.boolean().optional(),
       // A thread's replies are comments without threads of their own.
       comments: z.array(z.object({
         ...referenceCommentFields,
@@ -234,6 +241,7 @@ export const fetchRepositoryReferences = async (
   query.set('kind', options.kind);
   if (options.state) query.set('state', options.state);
   if (options.people) query.set('people', options.people);
+  for (const label of options.labels ?? []) query.append('label', label);
   if (options.query?.trim()) query.set('query', options.query.trim());
   if (options.cursor) query.set('cursor', options.cursor);
   const response = await fetch(providerPath(context, '/references'), { query, headers: { Accept: 'application/json' } });

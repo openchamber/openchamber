@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseMetadata } from '@/lib/metadataParse';
 import type { Metadata, Session } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -17,9 +18,32 @@ export const getPinnedSessionKey = (runtimeKey: string, directory: string, sessi
   return JSON.stringify([runtimeKey, normalizedDirectory, sessionId]);
 };
 
+// Sidebar ordering asks this for every session on each rebuild; the key is
+// built once per runtime, directory and session instead of on every ask.
+const pinnedKeyCache = new Map<string, Map<string, Map<string, string | null>>>();
+
+const cachedPinnedSessionKey = (runtimeKey: string, directory: string, sessionId: string): string | null => {
+  let byDirectory = pinnedKeyCache.get(runtimeKey);
+  if (!byDirectory) {
+    byDirectory = new Map();
+    pinnedKeyCache.set(runtimeKey, byDirectory);
+  }
+  let bySession = byDirectory.get(directory);
+  if (!bySession) {
+    bySession = new Map();
+    byDirectory.set(directory, bySession);
+  }
+  let key = bySession.get(sessionId);
+  if (key === undefined) {
+    key = getPinnedSessionKey(runtimeKey, directory, sessionId);
+    bySession.set(sessionId, key);
+  }
+  return key;
+};
+
 export const isSessionPinned = (ids: ReadonlySet<string>, directory: string | null | undefined, sessionId: string): boolean => {
-  if (!directory) return false;
-  const key = getPinnedSessionKey(getRuntimeKey(), directory, sessionId);
+  if (!directory || ids.size === 0) return false;
+  const key = cachedPinnedSessionKey(getRuntimeKey(), directory, sessionId);
   return key ? ids.has(key) : false;
 };
 
@@ -27,7 +51,7 @@ export const isSessionPinned = (ids: ReadonlySet<string>, directory: string | nu
 const pinnedSchema = z.object({ openchamber: z.object({ pinned: z.object({ at: z.number(), list: z.string().min(1).optional() }) }) });
 
 export const isSessionPinnedInMetadata = (session: Session | null | undefined): boolean => (
-  pinnedSchema.safeParse(session?.metadata).success
+  parseMetadata(pinnedSchema, session?.metadata).success
 );
 
 /** The same, for a metadata record about to be written. */
@@ -35,7 +59,7 @@ export const isPinnedMetadata = (metadata: Metadata): boolean => pinnedSchema.sa
 
 /** The pin list a pinned session is filed in, `DEFAULT_PIN_LIST` for Pinned, or null when not pinned. */
 export const getSessionPinList = (session: Session | null | undefined): string | null => {
-  const parsed = pinnedSchema.safeParse(session?.metadata);
+  const parsed = parseMetadata(pinnedSchema, session?.metadata);
   if (!parsed.success) return null;
   return parsed.data.openchamber.pinned.list ?? DEFAULT_PIN_LIST;
 };

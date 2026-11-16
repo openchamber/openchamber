@@ -29,6 +29,7 @@ import {
   writeProjectTodo,
   type ProjectNote,
   type ProjectNoteSource,
+  type ProjectNotesTodosStore,
   type ProjectPlanLink,
   type ProjectRef,
   type ProjectTodoChange,
@@ -41,6 +42,8 @@ interface ProjectContextEntry {
   plans: ProjectPlanLink[];
   /** The team's shared plans folder, when the project has one; sharing a plan needs it. */
   sharedPlansDir: string | null;
+  /** The store `todos` was read from; a whole-list save sends it so a switch since then refuses the write. */
+  notesTodosStore: ProjectNotesTodosStore | null;
   /** True once an authoritative load has succeeded at least once. */
   loaded: boolean;
   loading: boolean;
@@ -95,6 +98,7 @@ export const EMPTY_PROJECT_CONTEXT_ENTRY: ProjectContextEntry = {
   todos: [],
   plans: [],
   sharedPlansDir: null,
+  notesTodosStore: null,
   loaded: false,
   loading: false,
   error: null,
@@ -211,11 +215,13 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
               continue;
             }
             const committed = currentEntry(projectId);
+            const keepTodos = flags.todos || flags.revisions.todos !== revisions.todos;
 
             // Completed writes still outrank a snapshot requested before them.
             patchEntry(projectId, {
               notes: flags.notes || flags.revisions.notes !== revisions.notes ? committed.notes : data.notes,
-              todos: flags.todos || flags.revisions.todos !== revisions.todos ? committed.todos : data.todos,
+              todos: keepTodos ? committed.todos : data.todos,
+              notesTodosStore: keepTodos ? committed.notesTodosStore : data.notesTodosStore,
               plans: flags.plans || flags.revisions.plans !== revisions.plans ? committed.plans : data.plans,
               sharedPlansDir: data.sharedPlansDir,
               loaded: true,
@@ -251,7 +257,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       const projectId = resolveProjectContextId(project);
       if (!projectId) return false;
 
-      const previous = currentEntry(projectId).todos;
+      const { todos: previous, notesTodosStore } = currentEntry(projectId);
       patchEntry(projectId, { todos, error: null });
 
       const flags = flagsFor(projectId);
@@ -260,10 +266,10 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
 
       try {
         const committed = await enqueueWrite(projectId, 'todos', () => (
-          change ? writeProjectTodo(project, change) : saveProjectTodos(project, todos)
+          change ? writeProjectTodo(project, change) : saveProjectTodos(project, todos, notesTodosStore)
         ));
         if (committed) {
-          patchEntry(projectId, { todos: committed.todos, loaded: true });
+          patchEntry(projectId, { todos: committed.todos, notesTodosStore: committed.notesTodosStore, loaded: true });
         } else {
           // Someone, usually an agent, removed the todo first: nothing failed,
           // the list on screen is just behind.
@@ -275,6 +281,9 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
           todos: previous,
           error: errorMessage(error, 'Failed to save project todos'),
         });
+        // A whole list is refused when the project switched stores since it
+        // was read; show the selected store instead of the stale list.
+        if (!change) refreshAfterWrite = true;
         return false;
       } finally {
         flags.todos = false;

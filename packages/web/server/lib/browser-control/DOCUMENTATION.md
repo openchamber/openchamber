@@ -205,7 +205,8 @@ itself; it can only ask and wait.
   answered no). The sheet then only flashes; otherwise it held the user's
   whole window until the agent's next step, seconds later. Hiding the sheet
   and keeping the dialog for the agent is not possible: Electron's only switch
-  (`disableDialogs`) answers no at once, before the debugger can answer. In
+  (`disableDialogs`) answers no at once, before the debugger can answer, so
+  the agent could never confirm a dialog, such as a deletion it is testing. In
   the user's own tabs the driver tracks the open dialog instead; an action
   that opens one answers with it at once, a snapshot reports it instead of
   reading the page, and every other action refuses until `browser.dialog`
@@ -233,6 +234,51 @@ itself; it can only ask and wait.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
+
+## Annotation overlay
+
+The user's annotation (`annotationOverlay.ts`, driven by `annotationSession.ts`
+and `BrowserPane`) runs through the same desktop driver, in an isolated world
+of its own per session (`annotate` in `browser-panel-driver.mjs`). Its comment
+box takes dictation: the overlay asks the app for the microphone through a
+`Runtime.addBinding` function scoped to that world's name, and the app answers
+through `annotationSend`; `annotationMessage` is the app's long poll for the
+overlay's requests. A desktop app without the driver, or a page the debugger
+cannot attach to, runs the overlay in the page's own world, without a
+microphone. Annotation of a page shown in a frame (`useFrameAnnotation`) has
+no isolated world and no microphone either.
+
+### Why an isolated world and not `webview.executeJavaScript`
+
+In the page's own world every script of the page can call whatever the overlay
+calls, so a page could start the app's microphone and read the transcript
+from the comment box. A binding exposed to an isolated world is a function the
+page has no reference to and no way to call. `Runtime` is enabled only while a
+session runs, since it streams every console call of the page, and each
+session's world has a new name so a binding removed at the end cannot linger
+in a world the next session reuses. A `postMessage` or console channel from
+the page's world was rejected for the same reason: any page script can forge
+it. Polling the isolated world for the overlay's requests would avoid
+enabling `Runtime`, but adds latency to every button and polls for the whole
+session. The mic sits in the comment box, where the user types; a mic button
+in the app's toolbar would be safe too, but away from the comment and without
+the dictation shortcut inside the page.
+
+### Why a PDF gets an input layer
+
+Chromium draws a PDF in a viewer frame of its own: pointer and key input over
+it never reaches the document the overlay lives in, so marks could not be
+drawn. A transparent layer over the viewer takes the input for the session.
+The wheel still scrolls the PDF: Chromium routes it to the viewer past the
+layer. A PDF has no elements to pick, so the overlay offers Region and Draw
+only.
+
+### Why a stroke is drawn as short paths
+
+Rewriting one path's `d` on every pointer move costs time with the stroke's
+length, and a long stroke stalled the pointer. The stroke is a group of paths
+of at most 64 points, each starting where the last ended, so a move rewrites
+only the last one.
 
 ## Running the panel's code
 
@@ -295,3 +341,36 @@ what the actions alone do not show (frame rate, animations).
 - Clipboard contents never cross this broker. A page writes directly to the host
   clipboard and native paste reads from it, so neither request nor result payloads
   contain the copied value.
+
+## Decisions
+
+### Why the agent has no `evaluate` action
+
+The agent reads and acts on a page only through the listed actions. Other
+browser tools give the agent an `evaluate` that runs any JavaScript in the
+page, which is the fastest way to read app state off screen (storage, a
+store) or call the app's functions. Here a page can run with the user's
+logins, and code the agent writes there could read tokens in storage and send
+requests as the user to any address of that site; a mistake or a prompt the
+page injected would do the same. The driver's internal `evaluate` op runs
+only expressions the app builds (`pageActions.ts`, inputs embedded with
+`JSON.stringify`), so agent text never becomes script. The product docs
+promise this (`desktop-browser.mdx`).
+
+### Why uploads come from the session folder and OpenCode's temp folder
+
+A file the agent uploads lands on a live site under the user's account.
+Reading any file the process can read would let one wrong path send
+`~/.ssh` or a credentials file. The session folder alone was too narrow:
+agents write generated files (screenshots, exports) to `$TMPDIR/opencode`,
+and uploading those is a normal test step. The check runs on the server on
+the resolved real path, so a symlink out of those folders is refused.
+
+### Why agent tabs get their own profile by default
+
+A page can steer the agent, and with the user's logins the agent would act as
+the user on every site. Sharing by default with isolation as an option was
+rejected: few would turn it on, so the safe setup would stay the rare one. A
+profile cleared after every session was rejected too: the agent would sign in
+to a dev server again every time. The setting `agentBrowserSharesLogins`
+covers whoever prefers convenience.

@@ -108,7 +108,33 @@ const submittedAnswerCandidates = (raw, schema) => {
  * and the full results. It always travels as JSON, which leaves out the fields
  * a run or an agent does not have yet.
  */
-const summarizeRun = (run) => ({
+/**
+ * What the store keeps in memory of a run nothing works on any more (finished,
+ * report delivered): enough for `summarizeRun` to give the same summary, the
+ * rest read from its file when asked for. Prompts, the script and agents'
+ * full answers were most of a server's workflow memory (10 MB for 38 runs).
+ * A result keeps one character past the preview limit, so `truncate` still
+ * adds its ellipsis exactly when the full text would have.
+ */
+// A slice of a long string keeps the whole string alive in V8; the preview is
+// copied out so the full answer can go.
+const preview = (value) => JSON.parse(JSON.stringify(asText(value).slice(0, PREVIEW_CHAR_LIMIT + 1)));
+
+export const lightenWorkflowRun = (run) => ({
+  ...run,
+  script: '',
+  args: undefined,
+  agents: run.agents.map((agent) => ({
+    ...agent,
+    prompt: '',
+    schema: undefined,
+    result: agent.state === 'completed' ? preview(agent.result) : undefined,
+  })),
+  logs: run.logs.slice(-20),
+  result: run.result === undefined ? undefined : preview(run.result),
+});
+
+export const summarizeRun = (run) => ({
   id: run.id,
   parentSessionId: run.parentSessionId,
   directory: run.directory,
@@ -341,7 +367,10 @@ export const createWorkflowRuntime = ({
           continue;
         }
       }
-      if (run.report !== report) return;
+      // Another delivery of the same report may have finished first and saved
+      // its marker; this object may since have been replaced by a resume, so
+      // saving it again would put the old terminal state back.
+      if (run.report !== report || report.delivered) return;
       report.delivered = true;
       await persist(run, { immediate: true }).catch((error) => {
         console.warn(`[workflows] report ${report.messageId} of ${run.id} was delivered but its marker was not saved:`, error.message);

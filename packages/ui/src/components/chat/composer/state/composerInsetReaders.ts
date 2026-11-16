@@ -54,6 +54,9 @@ const createReaderChannel = <TValue>(attribute: string, apply: (reader: HTMLElem
                 readers.delete(reader);
             };
         },
+        read(column: HTMLElement): TValue | undefined {
+            return publishedByColumn.get(column);
+        },
         publish(column: HTMLElement, value: TValue) {
             column.setAttribute(attribute, '');
             publishedByColumn.set(column, value);
@@ -72,8 +75,14 @@ const composerInsets = createReaderChannel<ComposerInsets>('data-composer-inset-
     setPx(reader, '--chat-composer-tail-inset', insets?.tailInset ?? null);
 });
 
-const floatingPanelClearance = createReaderChannel<number>('data-floating-panel-clearance-column', (reader, px) => {
-    setPx(reader, '--chat-floating-panel-clearance', px);
+interface FloatingPanelClearance {
+    readonly clearance: number;
+    readonly tailReserve: number;
+}
+
+const floatingPanelClearance = createReaderChannel<FloatingPanelClearance>('data-floating-panel-clearance-column', (reader, value) => {
+    setPx(reader, '--chat-floating-panel-clearance', value?.clearance ?? null);
+    setPx(reader, '--chat-floating-panel-reserve', value?.tailReserve ?? null);
 });
 
 /**
@@ -111,9 +120,11 @@ export const withdrawComposerInsets = (column: HTMLElement): void => {
 };
 
 /** A panel docked above the column's composer measured this clearance, px. */
-export const publishFloatingPanelClearance = (column: HTMLElement, clearance: number): void => {
-    floatingPanelClearance.publish(column, clearance);
+export const publishFloatingPanelClearance = (column: HTMLElement, value: FloatingPanelClearance): void => {
+    floatingPanelClearance.publish(column, value);
 };
+
+export const readFloatingPanelTailReserve = (column: HTMLElement): number => floatingPanelClearance.read(column)?.tailReserve ?? 0;
 
 /** No panel is docked above the column's composer any more. */
 export const withdrawFloatingPanelClearance = (column: HTMLElement): void => {

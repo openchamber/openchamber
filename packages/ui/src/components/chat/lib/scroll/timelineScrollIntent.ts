@@ -98,6 +98,14 @@ export function dispatchPageWaiting(block: HTMLElement | null): void {
     block?.dispatchEvent(new CustomEvent(PAGE_WAITING_EVENT, { bubbles: true }));
 }
 
+/** The waiting block named `pageId` inside `container`, or its first one when no id is given. */
+export function findWaitingPage(container: ParentNode, pageId: string | null): HTMLElement | null {
+    for (const block of container.querySelectorAll<HTMLElement>('[data-waiting-page]')) {
+        if (pageId === null || block.dataset.waitingPage === pageId) return block;
+    }
+    return null;
+}
+
 /** Listens for waiting pages inside `container`. */
 export function onPageWaiting(container: HTMLElement, listener: (block: HTMLElement, pageId: string) => void): () => void {
     const handle = (event: Event) => {

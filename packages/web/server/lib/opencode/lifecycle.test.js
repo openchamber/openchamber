@@ -283,6 +283,125 @@ describe('OpenCode lifecycle', () => {
     expect(runtime.testState.openCodeBaseUrl).toBe('http://seamus:4095');
   });
 
+  it('re-probes an external server that missed the startup readiness window', async () => {
+    vi.useFakeTimers();
+    let healthy = false;
+    globalThis.fetch = vi.fn(async () => {
+      if (!healthy) throw new Error('fetch failed');
+      return { ok: true, json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+    });
+    const runtime = createRuntime({ reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })) }, {}, {
+      ENV_CONFIGURED_OPENCODE_PORT: null,
+      ENV_CONFIGURED_OPENCODE_HOST: { origin: 'http://seamus:4095', port: 4095 },
+      ENV_EFFECTIVE_PORT: 4095,
+      ENV_SKIP_OPENCODE_START: true,
+    });
+
+    try {
+      const bootstrap = runtime.bootstrapOpenCodeAtStartup();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await bootstrap;
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+
+      healthy = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runtime.testState.isOpenCodeReady).toBe(true);
+      expect(runtime.testState.lastOpenCodeError).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  const externalLateStartRuntime = (overrides = {}) => createRuntime(
+    { reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })), ...overrides },
+    {},
+    {
+      ENV_CONFIGURED_OPENCODE_PORT: null,
+      ENV_CONFIGURED_OPENCODE_HOST: { origin: 'http://seamus:4095', port: 4095 },
+      ENV_EFFECTIVE_PORT: 4095,
+      ENV_SKIP_OPENCODE_START: true,
+    },
+  );
+  const supportedInfo = { version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } };
+
+  it('bounds an external re-probe whose body stalls, then recovers on a later one', async () => {
+    vi.useFakeTimers();
+    let mode = 'down';
+    const probesAfterStartup = [];
+    globalThis.fetch = vi.fn(async () => {
+      if (mode === 'down') throw new Error('fetch failed');
+      probesAfterStartup.push(mode);
+      if (mode === 'gone') throw new Error('fetch failed');
+      if (mode === 'stall') {
+        // Headers now, the body only long after the probe's timeout.
+        return { ok: true, json: () => new Promise((resolve) => setTimeout(() => resolve(supportedInfo), 7_000)) };
+      }
+      return { ok: true, json: async () => supportedInfo };
+    });
+    const runtime = externalLateStartRuntime();
+
+    try {
+      const bootstrap = runtime.bootstrapOpenCodeAtStartup();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await bootstrap;
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+
+      mode = 'stall';
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(probesAfterStartup).toEqual(['stall']);
+      mode = 'gone';
+      // The stalled probe has given up by now; its late body must not count.
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(probesAfterStartup).toEqual(['stall', 'gone']);
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+
+      mode = 'healthy';
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(probesAfterStartup).toEqual(['stall', 'gone', 'healthy']);
+      expect(runtime.testState.isOpenCodeReady).toBe(true);
+      expect(runtime.testState.lastOpenCodeError).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops an external re-probe answer that arrives after shutdown began', async () => {
+    vi.useFakeTimers();
+    let mode = 'down';
+    let respond = null;
+    globalThis.fetch = vi.fn(async () => {
+      if (mode === 'down') throw new Error('fetch failed');
+      return new Promise((resolve) => {
+        respond = () => resolve({ ok: true, json: async () => supportedInfo });
+      });
+    });
+    const syncToHmrState = vi.fn();
+    const runtime = externalLateStartRuntime({ syncToHmrState });
+
+    try {
+      const bootstrap = runtime.bootstrapOpenCodeAtStartup();
+      await vi.advanceTimersByTimeAsync(25_000);
+      await bootstrap;
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+
+      mode = 'deferred';
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(respond).toBeTypeOf('function');
+      const hmrSyncsBefore = syncToHmrState.mock.calls.length;
+
+      runtime.testState.isShuttingDown = true;
+      respond();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(runtime.testState.isOpenCodeReady).toBe(false);
+      expect(syncToHmrState.mock.calls.length).toBe(hmrSyncsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('attaches to an OPENCODE_HOST running OpenCode v1 instead of starting a managed server', async () => {
     const requested = [];
     globalThis.fetch = vi.fn(async (url) => {

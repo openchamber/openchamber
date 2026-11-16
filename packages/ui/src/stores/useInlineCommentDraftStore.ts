@@ -25,6 +25,18 @@ export interface InlineCommentDraft {
   endLine: number;
   side?: 'original' | 'modified';
   code: string;
+  /**
+   * The lines just before and after a line comment when it was written. With
+   * `code` they find the comment's lines again after the file changed
+   * (`lib/commentAnchor.ts`); absent at a file's edge and on other sources.
+   */
+  contextBefore?: string;
+  contextAfter?: string;
+  /**
+   * Set while the file no longer holds `code`: the text now at the comment's
+   * lines. The card marks it and the agent receives both.
+   */
+  changedCode?: string;
   language: string;
   text: string;
   /** Owning terminal session; set only for `source: 'terminal'`. */
@@ -35,6 +47,12 @@ export interface InlineCommentDraft {
   provider?: SourceControlProvider;
   /** The diff a `diff` comment was written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
+  /**
+   * A browser annotation's screenshot: the name of its file among the
+   * composer's attachments. It is sent with the annotation and leaves with it;
+   * the file itself stays in memory, like every attachment.
+   */
+  screenshot?: string;
   createdAt: number;
 }
 
@@ -154,10 +172,14 @@ const persistedDraftSchema = z.object({
   endLine: z.number(),
   side: z.enum(['original', 'modified']).optional(),
   code: z.string(),
+  contextBefore: z.string().optional(),
+  contextAfter: z.string().optional(),
+  changedCode: z.string().optional(),
   language: z.string(),
   text: z.string(),
   terminalId: z.string().optional(),
   anchor: chatQuoteAnchorSchema.optional(),
+  screenshot: z.string().optional(),
   provider: sourceControlProviderIdSchema.optional(),
   origin: diffCommentOriginSchema.optional(),
   createdAt: z.number(),

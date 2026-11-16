@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -583,6 +584,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': 'إخفاء لدي',
   'settings.projects.shared.replaceMode': 'استخدام أوامر الإعداد الخاصة بي فقط، وتخطي أوامر المستودع',
   'settings.projects.shared.toast.shareFailed': 'تعذّر تحديث إعدادات المستودع',
+  'settings.projects.notesTodos.title': 'الملاحظات والمهام',
+  'settings.projects.notesTodos.inRepository': 'الاحتفاظ بالملاحظات والمهام في المستودع',
+  'settings.projects.notesTodos.inRepositoryDescription': 'يقرأ هذا الجهاز الملاحظات والمهام ويحفظها في .openchamber/notes-todos.json، ليتمكن Git من مزامنتها. التشغيل ينقل ملاحظاتك ومهامك إلى الملف، والإيقاف ينسخ عناصر الملف مرة أخرى إلى هذا الجهاز.',
+  'settings.projects.notesTodos.toast.saveFailed': 'تعذّر تغيير مكان حفظ الملاحظات والمهام',
   'settings.projects.actions.state.loading': 'جارٍ التحميل…',
   'settings.projects.actions.state.noDesktopSshForwards': 'لا توجد عمليات تمرير SSH محلية مفعّلة.',
   'settings.projects.actions.field.selectIconAria': 'اختيار أيقونة',
@@ -1258,6 +1263,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'أداة إشعارات الوكيل',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'أداة إشعارات الوكيل',
   'settings.openchamber.tools.field.agentNotifyToolSummary': 'السماح للوكلاء بتنبيهك عند انتهاء العمل أو عند تعثرهم.',
+  'settings.openchamber.tools.field.agentTerminalTool': 'لوحة الطرفية',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'يتيح للوكيل سرد طرفيات هذا المجلد وقراءة ما طبعته. تحتفظ الطرفية بكل ما كُتب فيها، بما في ذلك الأسرار، لذا تبقى مطفأة حتى تشغّلها.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "أداة معرفة المشروع",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "أداة معرفة المشروع",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "السماح للوكلاء بقراءة ملاحظات المشروع ومهامه وخططه وتحديثها.",
@@ -2422,6 +2429,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'إظهار Esc وCtrl والأسهم في عرض الطرفية',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'إغلاق علامة التبويب عند خروج الصدفة',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'ينطبق على الطرفيات وإجراءات المشروع. عند إيقافه، تحتفظ علامة التبويب بمخرجاتها، مثل سجل خادم التطوير بعد توقفه.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'فتح الطرفية عند بدء إجراء المشروع',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'عند إيقافه، يعمل الإجراء دون تبديل اللوحة الجانبية. تبقى مخرجاته في علامة تبويب الإجراء في الطرفية.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'اختصارات لوحة المفاتيح في محرر الملفات',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'افتراضي',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2466,8 +2475,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'الحفظ التلقائي للملفات',
   'settings.openchamber.visual.field.autoSaveEnabled': 'الحفظ التلقائي للملفات',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'حفظ تعديلات الملفات تلقائيًا بعد التوقف عن الكتابة. عطّله ليصبح الحفظ يدويًا.',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'تخطيط محادثة عريض',
-  'settings.openchamber.visual.field.wideChatLayout': 'تخطيط محادثة عريض',
+  'settings.openchamber.visual.field.chatWidth': 'عرض المحادثة',
+  'settings.openchamber.visual.field.chatWidthInfo': 'يُبقي الخياران افتراضي وأعرض الرسائل في عمود في المنتصف. يستخدم كامل المحادثة كلها للرسائل، ويبقى حقل الرسالة بعرض خيار أعرض.',
+  'settings.openchamber.visual.option.chatWidth.default.label': 'افتراضي',
+  'settings.openchamber.visual.option.chatWidth.wider.label': 'أعرض',
+  'settings.openchamber.visual.option.chatWidth.full.label': 'كامل',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'التفاف أسطر كتل الشيفرة',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'التفاف أسطر كتل الشيفرة',
   'settings.openchamber.visual.field.tableCellWrap': 'التفاف خلايا الجداول',
@@ -2766,5 +2778,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ar,
   ...extensionsSettingsI18n.ar,
   ...settingsLayoutI18n.ar,
+  ...mobileAppSettingsI18n.ar,
   'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "البحث في سجل المطالبات",
 } as const;

@@ -31,6 +31,12 @@ import { filterKnownTokens, scanPrefixTokens } from './prefixTokens';
  * authoritative: a token is only a reference if it resolves against one of
  * them, so unknown `/tokens` and `@words` stay plain prose.
  */
+/** What a composer chip opens. */
+export type ComposerChipTarget =
+    | { kind: 'attachment'; filename: string }
+    | { kind: 'path'; path: string }
+    | { kind: 'link'; url: string };
+
 export interface ComposerLanguageContext {
     /** Shell mode (`!cmd`) is not the prompt language — nothing is tokenized. */
     inputMode: 'normal' | 'shell';
@@ -57,6 +63,18 @@ export interface ComposerLanguageContext {
      * chip appears with the text instead of a frame later.
      */
     pendingAttachmentFilenames?: ReadonlySet<string>;
+    /**
+     * Names this draft had attached whose files are gone (the files lived in
+     * memory and the app reloaded): a citation of one draws as an unavailable
+     * chip with `title` as its tooltip, so the user sees why it will not be sent.
+     */
+    missingAttachments?: { names: readonly string[]; title: string };
+    /**
+     * Opens what a chip stands for: an attachment by its cited name, a file by
+     * its path, an issue, change request or tracker item by its link. A click
+     * on such a chip calls it; without it the chip only takes the caret.
+     */
+    onChipOpen?: (target: ComposerChipTarget) => void;
     /** Lowercased skill names invocable with `$`; a completed `$skill` token renders as a chip. Empty when absent. */
     knownSkillNames?: ReadonlySet<string>;
     /** Theme variant for the file-type icons on citation chips; dark when absent. */

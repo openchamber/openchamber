@@ -17,6 +17,7 @@ import type { DirectoryOwner } from './sessions/sessionOwnership';
 import type { ConversationResult } from '@/hooks/useConversationSearch';
 import { conversationContextFromLocation, type ConversationResultContext, type ConversationResultProject } from '@/components/search/conversationResultContext';
 import type { SidebarSessionLocation } from './recent/sessionLocation';
+import { SIDEBAR_SESSION_BATCH_DEFAULT } from '@/lib/sidebarSections';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -253,6 +254,12 @@ export type SessionSidebarRowModelArgs = {
    * caption to land on.
    */
   projectsCaptionAtTop?: boolean;
+  /**
+   * How many works a list shows before Show more, and how many more each
+   * Show more adds: in projects, worktrees, Pinned and the user's sections.
+   * Unset, a project shows 7 (10 in VS Code); Chats, In work and the list by
+   * time keep their own reveal.
+   */
   sessionBatchSize?: number;
   /** Active multi-runs; their member sessions collapse into one run row per container. */
   runIndex?: MultiRunIndex;
@@ -325,8 +332,9 @@ const estimateSessionRow = (context: SessionSidebarRenderContext): number => (
 const CHATS_INITIAL_LIMIT = 3;
 const CHATS_INCREMENT = 7;
 // Project and worktree lists reveal 7 sessions per page.
-const SESSIONS_INITIAL_LIMIT = 7;
-const SESSIONS_INCREMENT = 7;
+const EMPTY_WORK_ENTRIES: readonly SessionSidebarWorkEntry[] = Object.freeze([]);
+const SESSIONS_INITIAL_LIMIT = SIDEBAR_SESSION_BATCH_DEFAULT;
+const SESSIONS_INCREMENT = SIDEBAR_SESSION_BATCH_DEFAULT;
 
 // A search row: its title line, and the excerpt line when it has one.
 const SEARCH_ROW_ESTIMATE = 32;
@@ -1088,21 +1096,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // row would push every zone below down and then back up once the list
     // turns out empty, which it often is.
     const chatsLoading = args.chatGroup.sessions.length === 0 && args.groupStatusByKey.get('activity:chats')?.state === 'loading';
-    const headerIndex = rows.length;
+    // An empty Chats section keeps its caption: its "+" is where a chat is
+    // started, and a section that vanished with its last chat read as broken.
     const collapsed = appendActivityHeader('chats', undefined, chatsLoading);
-    // A caption over nothing says nothing (maintainer, 2026-11-12): an open
-    // section that drew no row under its caption takes no row at all. A load
-    // or an error still shows, through the header's spinner or the error row
-    // under it. Creating a chat stays reachable through New session while the
-    // caption, and its hover "+", are away.
-    const dropEmptyHeader = () => {
-      if (rows.length !== headerIndex + 1 || chatsLoading) return;
-      rows.pop();
-      if (stickyHeaders[stickyHeaders.length - 1]?.rowIndex === headerIndex) stickyHeaders.pop();
-    };
-    // A collapsed section keeps its caption even with no chats: what it hides
-    // may be an empty folder (a drop target) or a failed load with Retry, and
-    // the caption is the only way to open it again.
     if (collapsed) return;
     // Chats are one-line rows with the tree's state slot, on a short page
     // that pinned chats do not spend.
@@ -1113,7 +1109,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (args.archivedChatGroup) {
       appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
     }
-    dropEmptyHeader();
   };
 
   // Pinned, In work and the list by time mix every project's works: one-line
@@ -1147,14 +1142,42 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     });
   };
 
+  // Pinned and the user's sections reveal as many works as a project does.
+  const zoneBatchSize = args.sessionBatchSize ?? (args.hideDirectoryControls ? 10 : SESSIONS_INITIAL_LIMIT);
+  /**
+   * The works a zone shows before Show more. A run spends one slot whatever
+   * its lane count (its members already sit together), and so does a worktree.
+   */
+  const limitZoneEntries = (entries: readonly SessionSidebarWorkEntry[], containerKey: string) => {
+    const requested = Math.max(zoneBatchSize, args.visibleCountByContainer.get(containerKey) ?? zoneBatchSize);
+    let slots = 0;
+    let lastRunKey: string | undefined;
+    let cut = entries.length;
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const runKey = entry.kind === 'session' ? runIndex.runKeyBySessionId.get(entry.item.node.session.id) : undefined;
+      if (runKey !== undefined && runKey === lastRunKey) continue;
+      lastRunKey = runKey;
+      if (slots === requested) {
+        cut = index;
+        break;
+      }
+      slots += 1;
+    }
+    return { shown: entries.slice(0, cut), hidden: entries.slice(cut), requested, shownCount: slots };
+  };
+
   /**
    * Works in a zone, in order. Consecutive session works go through one call,
    * so the lanes of a multi-run among them still collapse into one run row; a
    * worktree work is its group row with its sessions under it, naming its
    * project and kept out of the drag sort.
    */
-  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, zoneScopeKey: string | undefined): void => {
-    const entries = gatherRunMembers(allEntries);
+  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, zoneScopeKey: string | undefined, limited = false): void => {
+    const gathered = gatherRunMembers(allEntries);
+    const { shown: entries, hidden, requested, shownCount } = limited && !search
+      ? limitZoneEntries(gathered, containerKey)
+      : { shown: gathered, hidden: EMPTY_WORK_ENTRIES, requested: 0, shownCount: 0 };
     let pending: SessionSidebarActivityItem[] = [];
     const flush = (): void => {
       if (pending.length === 0) return;
@@ -1177,6 +1200,24 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       });
     }
     flush();
+    if (!limited || search) return;
+    const more = hidden.length > 0;
+    const fewer = requested > zoneBatchSize && shownCount > zoneBatchSize;
+    if (!more && !fewer) return;
+    const hiddenNodes = hidden.flatMap((entry) => (
+      entry.kind === 'session' ? [entry.item.node]
+        : entry.kind === 'group' ? entry.group.sessions.filter((node) => !isMovedToZone(node.session.id))
+          : []
+    ));
+    // What Show more holds back still selects with Ctrl/Cmd+A, a worktree's
+    // sessions included, as a folded worktree in a zone does.
+    if (zoneScopeKey && hiddenNodes.length > 0) {
+      const indexed = indexNodes(hiddenNodes);
+      const selectionPoolOffset = selectionDescendantIds.length;
+      selectionDescendantIds.push(...indexed.preorderIds);
+      appendFoldedSelection(hiddenNodes, indexed, selectionPoolOffset, zoneScopeKey, false);
+    }
+    push({ kind: 'show-control', key: `${containerKey}:show`, estimateSize: STATUS_ESTIMATE, more, fewer, hiddenNodes, containerKey, currentCount: shownCount, requestedCount: requested, increment: zoneBatchSize, depth: 0, flat: false, detailed: args.detailedZoneRows === true });
   };
 
   // The app's pages, which are not works: they take no part in selection,
@@ -1200,8 +1241,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (pinnedItems.length === 0 && pinnedWorktrees.length === 0) return;
     const collapsed = appendActivityHeader('pinned');
     if (collapsed) return;
-    appendActivityItems(pinnedItems, PINNED_ZONE_KEY, zoneRenderContext, PINNED_ZONE_KEY);
-    appendWorkEntries(pinnedWorktrees, PINNED_ZONE_KEY, PINNED_ZONE_KEY);
+    // Pinned sessions, then pinned worktrees, under one reveal limit.
+    const entries: readonly SessionSidebarWorkEntry[] = [...pinnedItems.map((item) => ({ kind: 'session' as const, item })), ...pinnedWorktrees];
+    appendWorkEntries(entries, PINNED_ZONE_KEY, PINNED_ZONE_KEY, true);
   };
   const appendWork = (): void => {
     const workEntries = args.workEntries ?? [];
@@ -1221,7 +1263,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       push({ kind: 'empty', key: `activity:${activityKey}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'section' });
       return;
     }
-    appendWorkEntries(entries, `activity:${activityKey}`, `activity:${activityKey}`);
+    appendWorkEntries(entries, `activity:${activityKey}`, `activity:${activityKey}`, true);
   };
 
   const selectedSection = args.singleProjectMode

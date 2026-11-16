@@ -1,3 +1,4 @@
+import { isCapacitorApp } from '@/lib/platform';
 import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
 
 /**
@@ -13,11 +14,20 @@ import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/sur
  * extension that is not available now stays in the stored order (it comes
  * back in its place) and is left out of what the drawer shows.
  */
-const BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'notes'] as const;
+const ALL_BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'preview', 'notes'] as const;
 
-export type BuiltInMobileWorkspaceTab = (typeof BUILT_IN_MOBILE_WORKSPACE_TABS)[number];
+export type BuiltInMobileWorkspaceTab = (typeof ALL_BUILT_IN_MOBILE_WORKSPACE_TABS)[number];
+
 /**
- * `pages`: the pages other people shared (decision 0018), a tab only while the
+ * The dev-server preview exists only in the native app: its tunnel is the one
+ * way a phone reaches the host's `localhost`, and a browser tab has none. On
+ * hosted mobile the id is unknown, like any other id this build does not offer.
+ */
+const builtInMobileWorkspaceTabs = (): readonly BuiltInMobileWorkspaceTab[] => (
+  isCapacitorApp() ? ALL_BUILT_IN_MOBILE_WORKSPACE_TABS : ALL_BUILT_IN_MOBILE_WORKSPACE_TABS.filter((id) => id !== 'preview')
+);
+/**
+ * `pages`: the pages other people shared, a tab only while the
  * server holds any. Not one the user orders or hides: it is never stored.
  */
 export type MobileWorkspaceTab = OrderedMobileWorkspaceTab | 'pages';
@@ -26,7 +36,7 @@ export type MobileWorkspaceTab = OrderedMobileWorkspaceTab | 'pages';
 type OrderedMobileWorkspaceTab = BuiltInMobileWorkspaceTab | PluginContextPanelMode;
 
 const isBuiltInMobileWorkspaceTab = (id: string): id is BuiltInMobileWorkspaceTab =>
-  (BUILT_IN_MOBILE_WORKSPACE_TABS as readonly string[]).includes(id);
+  (builtInMobileWorkspaceTabs() as readonly string[]).includes(id);
 
 const NO_EXTENSION_TABS: readonly PluginContextPanelMode[] = [];
 
@@ -44,9 +54,10 @@ export const orderMobileWorkspaceTabs = (
   const known = (id: string): id is OrderedMobileWorkspaceTab => isBuiltInMobileWorkspaceTab(id)
     || (isPluginContextPanelMode(id) && extensions.includes(id));
   const ordered = order.filter(known).filter((id, index, all) => all.indexOf(id) === index);
-  BUILT_IN_MOBILE_WORKSPACE_TABS.forEach((id, index) => {
+  const builtIns = builtInMobileWorkspaceTabs();
+  builtIns.forEach((id, index) => {
     if (ordered.includes(id)) return;
-    const followers = BUILT_IN_MOBILE_WORKSPACE_TABS.slice(index + 1)
+    const followers = builtIns.slice(index + 1)
       .map((next) => ordered.indexOf(next))
       .filter((position) => position >= 0);
     ordered.splice(followers.length > 0 ? Math.min(...followers) : ordered.length, 0, id);

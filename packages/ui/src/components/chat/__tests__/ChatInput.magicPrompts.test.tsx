@@ -101,7 +101,6 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => responseFor
 plugin({
   name: 'composer-magic-prompts-vite-modules',
   setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
     build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
       const directory = resolve(dirname(path), '../assets/provider-logos');
       const logos = Object.fromEntries(readdirSync(directory).filter((name) => name.endsWith('.svg')).map((name) => [
@@ -315,7 +314,8 @@ for (const queue of [false, true]) {
     // Capture the queue payload without writing to the running server.
     const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockResolvedValue(undefined);
     try {
-      await submitInComposer('Read @src/a.ts', { attachment: selection, queue }, undefined, () => {
+      // The selection's chip is in the text: a message takes only the files it cites.
+      await submitInComposer('Read @src/a.ts [a.ts:2-2]', { attachment: selection, queue }, undefined, () => {
         if (queue) useSelectionStore.getState().pickSessionModel('ses_feature', 'provider', 'model');
       });
       const attachments = queue ? add.mock.calls[0]?.[1].attachments : sent[0]?.attachments;

@@ -19,7 +19,8 @@ import { repositoryBindingOwner } from '@/lib/source-control/repository-binding'
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import type { SourceControlReadContext } from '@/lib/api/types';
-import { limitSourceControlDiscoveryCandidates, sourceControlDiscoverySignature } from '../sourceControlDiscovery';
+import { limitSourceControlDiscoveryCandidates, readWithConcurrency, RELAY_BINDING_READ_CONCURRENCY, sourceControlDiscoverySignature } from '../sourceControlDiscovery';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { reconcileRegisteredContextDirectories, type RegisteredContextDirectories } from './registeredContextDirectories';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getLinkedSidebarChanges, getLinkedSidebarIssues, type RepositoryThreadRef } from '@/lib/linkedIssues';
@@ -630,6 +631,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   }, [collection.orderedSessions, collection.pinnedSessionIds, isPinnedWork, sessionRootIndex, sessionWorkEnabled, workIndex]);
   useClosePinnedWork(pinnedSessionsInWork);
   // What each section could list, before the sections above it take theirs.
+  const { getTimeOrderedSessions } = collection;
   const sectionCandidates = React.useMemo(() => {
     const sessionRef = (session: Session): SidebarWorkRef => {
       const ref = workIndex.bySessionId.get(session.id);
@@ -680,10 +682,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     }
     // The user's sections choose among every work, most recent first, the
     // spaces nobody has chatted in yet leading and the worktrees nobody has
-    // started a session in closing the list, as in a project's list.
+    // started a session in closing the list, as in a project's list. A pin
+    // lifts nothing here: a section lists by time.
     let all: SidebarWorkRef[] = [];
     if (customTimeSections) {
-      all = orderSidebarWorks(collection.orderedSessions, workIndex, (session) => (
+      all = orderSidebarWorks(getTimeOrderedSessions(), workIndex, (session) => (
         !session.time?.archived && !isChatDirectoryPath(session.directory)
       ), worktreeArchiveAnchors);
       const seen = new Set(all.map((ref) => ref.key));
@@ -692,7 +695,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       all = [...unstarted.filter(leads), ...all, ...unstarted.filter((ref) => !leads(ref))];
     }
     return { pinned: [...pinnedSessions.map(sessionRef), ...pinnedWorktrees], work: listed, all };
-  }, [collection.orderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
+  }, [collection.orderedSessions, getTimeOrderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
   const projectIds = React.useMemo(() => new Set(projectSections.map((section) => section.project.id)), [projectSections]);
   // Which root folder holds each session and worktree: the Folder condition and
   // the list by time read it.
@@ -991,6 +994,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       if (cancelled || !isCurrent()) return;
       const now = Date.now();
       const contextsByDirectory = new Map<string, Promise<SourceControlReadContext[] | null>>();
+      const readBinding = (directory: string) => repositoryBindingOwner.read(repositoryBindingOwner.scope(directory), sourceControl);
+      // One gate slot at a time, twenty worktrees took seconds of round trips
+      // over the relay before their branch markers could tint. There the
+      // bindings are read together in one slot; see `readWithConcurrency`.
+      const relayBindings = isRelayModeActive()
+        ? runBackgroundNetworkTask(() => readWithConcurrency(
+          candidates.filter((candidate) => !changedDirectory || candidate.directory === changedDirectory).map((candidate) => candidate.directory),
+          RELAY_BINDING_READ_CONCURRENCY,
+          readBinding,
+        ))
+        : null;
       const loadContexts = (directory: string): Promise<SourceControlReadContext[] | null> => {
         const pending = contextsByDirectory.get(directory);
         if (pending) return pending;
@@ -999,8 +1013,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
           directory,
           sourceControlContextsOwnerId,
         );
-        const scope = repositoryBindingOwner.scope(directory);
-        const loading = runBackgroundNetworkTask(() => repositoryBindingOwner.read(scope, sourceControl)).then((load) => {
+        // After the shared read each binding is answered from the owner.
+        const loading = (relayBindings
+          ? relayBindings.then(() => readBinding(directory))
+          : runBackgroundNetworkTask(() => readBinding(directory))
+        ).then((load) => {
           if (!load || cancelled || !isCurrent()) return null;
           const primaryContext = load.contexts[0];
           const contexts = primaryContext && getSourceControlReadContextAuthState(
@@ -1164,6 +1181,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       selectedSingleProjectId = projectSections[0]?.project.id ?? null;
     }
   }
+  // The user's number when set; otherwise a single project's flat list shows
+  // 20 and the rest keep the row model's defaults.
+  const userSessionBatchSize = useSessionDisplayStore((state) => state.sessionBatchSize);
+  const sessionBatchSize = userSessionBatchSize ?? (singleProjectMode && !view.useGroupedSections ? 20 : undefined);
   const groupProps = React.useMemo(() => ({
     collapsedGroups: projectView.collapsedGroups,
     hideDirectoryControls: view.hideDirectoryControls,
@@ -1176,7 +1197,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     editingId,
     editingRowKey,
     editTitle,
-    sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
+    sessionBatchSize,
     setEditingId,
     setEditingRowKey,
     setEditTitle,
@@ -1210,8 +1231,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.hideDirectoryControls,
     view.activeProjectId,
     view.mobileVariant,
-    view.useGroupedSections,
-    singleProjectMode,
+    sessionBatchSize,
   ]);
   const groupActions = React.useMemo(() => ({
     showMoreGroupSessions,
@@ -1313,10 +1333,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     projectsCaption: !view.hideDirectoryControls,
     projectsCaptionAtTop: blockDrag === 'section',
-    sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
+    sessionBatchSize,
     runIndex,
     blocks: sidebarBlocks,
-  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
+  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
   React.useEffect(() => {
     onSearchMatchCountChange(searchTotalCount);
   }, [searchTotalCount, onSearchMatchCountChange]);

@@ -1,6 +1,7 @@
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
+import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
@@ -218,7 +219,8 @@ export type HostResultPayload =
   | FileWriteResult
   | FileListResult
   | FileStatResult
-  | GenerateResult;
+  | GenerateResult
+  | MicrophoneOpenResult;
 
 export const isStartSessionResult = (
   value: HostResultPayload | undefined,
@@ -259,6 +261,8 @@ export type HostReadyContext = {
     popovers?: true;
     /** The host keeps `generate` answers that arrive after their frame is gone (`onLateGenerateResult`). */
     lateGenerateResults?: true;
+    /** The host captures the microphone for a frame with the `microphone` grant (`openMicrophone`). */
+    microphone?: true;
   };
   /**
    * The device the frame is drawn on, re-sent with `ready` when it changes
@@ -744,9 +748,16 @@ export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
 
 export type HostShellsMessage = Envelope & { type: 'shells'; payload: { subscriptionId: string; snapshot: GuestRunningShellsSnapshot } };
 
+/** Mono microphone samples at the rate the frame asked for, about 21 ms a push at 48 kHz. */
+export type HostMicrophoneAudioMessage = Envelope & { type: 'microphone-audio'; payload: { samples: Float32Array<ArrayBuffer> } };
+/** The host stopped capturing on its own; no audio follows until the frame opens the microphone again. */
+export type HostMicrophoneEndedMessage = Envelope & { type: 'microphone-ended'; payload: { reason: GuestMicrophoneEndReason } };
+
 export type HostMessage =
   | (Envelope & { type: 'workspace'; payload: GuestWorkspaceUpdate })
   | HostShellsMessage
+  | HostMicrophoneAudioMessage
+  | HostMicrophoneEndedMessage
   | HostReadyMessage
   | HostDirectoryMessage
   | HostSessionMessage
@@ -817,6 +828,8 @@ export type GuestShellsSubscribeMessage = GuestCall<'shells-subscribe', GuestShe
 export type GuestShellsUnsubscribeMessage = GuestCall<'shells-unsubscribe', { subscriptionId: string }>;
 export type GuestShellOutputMessage = GuestCall<'shell-output', GuestShellOutputRequest>;
 export type GuestShellStopMessage = GuestCall<'shell-stop', { shellId: string }>;
+export type GuestMicrophoneOpenMessage = GuestCall<'microphone-open', MicrophoneOpenRequest>;
+export type GuestMicrophoneCloseMessage = GuestCall<'microphone-close'>;
 
 export type GuestMessage =
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
@@ -826,6 +839,8 @@ export type GuestMessage =
   | GuestShellsUnsubscribeMessage
   | GuestShellOutputMessage
   | GuestShellStopMessage
+  | GuestMicrophoneOpenMessage
+  | GuestMicrophoneCloseMessage
   | GuestCall<'storage', GuestStorageRequest>
   | GuestCall<'open-session', { sessionId: string }>
   | GuestHelloMessage
@@ -906,6 +921,7 @@ const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'status-control-event', 'popover-closed',
   'file-open', 'file-snapshot', 'file-saved',
   'generate-late',
+  'microphone-audio', 'microphone-ended',
 ]);
 
 /** What a postMessage payload may carry before it is read as a host message. */

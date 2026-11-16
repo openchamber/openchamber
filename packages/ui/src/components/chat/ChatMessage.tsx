@@ -46,6 +46,9 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useChatColumnActions } from './chatColumnSession';
+import { MessageSelectionMark } from './messageSelection/MessageSelectionMark';
+import { MESSAGE_SELECT_UNIT_ATTRIBUTE } from './messageSelection/useMessageSelectionClicks';
+import { useMessageSelectionEntry } from './messageSelection/useMessageSelectionEntry';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -549,6 +552,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }));
     }, [guestActionEntries, isUser, sessionId, t]);
 
+    const { onSelectMessages, promptUnitKey } = useMessageSelectionEntry({
+        sessionId, messageId: message.info.id, isUser, turnId: turnGroupingContext?.turnId, hasTextContent,
+    });
+
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
@@ -631,7 +638,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                             >
                                 {/* In a sticky turn header (TurnItem) the desktop row keeps
                                     the whole 44px gap to the reply, under the header's fade. */}
-                                <div className={cn('relative flex flex-col items-end', !isMobile ? 'group/user-shell in-data-[turn-sticky-header]:pb-3' : undefined)}>
+                                <div
+                                    className={cn('relative flex flex-col items-end', !isMobile ? 'group/user-shell in-data-[turn-sticky-header]:pb-3' : undefined)}
+                                    {...(promptUnitKey ? { [MESSAGE_SELECT_UNIT_ATTRIBUTE]: promptUnitKey } : {})}
+                                >
+                                    <MessageSelectionMark sessionId={sessionId} unitKey={promptUnitKey} kind="prompt" />
                                     {/* peek: the action row is suppressed, so reserve only its
                                         gap to the next message, OUTSIDE the bubble background. */}
                                     <div className={cn('max-w-[85%]', chatSurfaceMode === 'peek' ? 'pb-3' : undefined)}>
@@ -667,6 +678,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onCopyLink={handleCopyLink}
                                                 copiedMessage={copiedMessage}
                                                 onSaveAsSnippet={handleSaveAsSnippet}
+                                                onSelectMessages={onSelectMessages}
                                                 showReasoningTraces={showReasoningTraces}
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
@@ -704,6 +716,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         onCopyLink={handleCopyLink}
                                         copiedMessage={copiedMessage}
                                         onSaveAsSnippet={handleSaveAsSnippet}
+                                        onSelectMessages={onSelectMessages}
                                         showReasoningTraces={showReasoningTraces}
                                         agentMention={agentMention}
                                         onRevert={handleRevert}
@@ -760,6 +773,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
                                 extraActions={guestMessageActions}
+                                onSelectMessages={onSelectMessages}
                             />
 
                         </div>

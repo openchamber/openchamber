@@ -33,6 +33,8 @@ import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
+import { sessionParentId } from '../session-lineage.js';
+import { listArchivedSubsessions } from './archived-subsessions.js';
 import { createStartDirectoryResolver } from './worktree-start-directory.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
@@ -1369,31 +1371,6 @@ export const createOpenChamberSessionService = (dependencies) => {
     return result;
   };
 
-  /** Archived subsessions under a session, each parent before its children. */
-  const listArchivedSubsessions = async (client, rootID) => {
-    const seen = new Set([rootID]);
-    const seenCursors = new Set();
-    const parents = [rootID];
-    while (parents.length > 0) {
-      const parentID = parents.shift();
-      let cursor;
-      do {
-        const page = await client.session.list(cursor ? { cursor } : { parentID, archived: true });
-        for (const child of page?.data ?? []) {
-          if (!child?.id || !child.time?.archived || seen.has(child.id)) continue;
-          seen.add(child.id);
-          parents.push(child.id);
-        }
-        // A repeated cursor would spin the walk and hold the send open.
-        cursor = page?.data?.length ? page.cursor?.next : undefined;
-        if (cursor && seenCursors.has(cursor)) cursor = undefined;
-        if (cursor) seenCursors.add(cursor);
-      } while (cursor);
-    }
-    seen.delete(rootID);
-    return [...seen];
-  };
-
   /**
    * A prompt sent to an archived top-level session brings it back with its
    * archived subsessions, as a send from the composer does
@@ -1403,7 +1380,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   const restoreAfterSend = async (client, sessionID) => {
     try {
       const session = await client.session.get({ sessionID });
-      if (session?.parentID) return;
+      if (sessionParentId(session)) return;
       const archivedAt = await sessionArchive.archivedAt(sessionID);
       if (!archivedAt) return;
       // Read before the root changes state, as the composer's tree restore does.

@@ -10,7 +10,7 @@ import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { FilePart, Metadata, Part, ToolInput, ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@/lib/opencode/model';
 import { toolDisplayStyles } from '@/lib/typography';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
@@ -814,7 +814,7 @@ const JsonToolOutput: React.FC<{
             {jsonViewMode === 'summary' ? (
                 textOutput !== null ? (
                     <div className="typography-code pe-12 text-muted-foreground">
-                        <WorkerHighlightedCode
+                        <HighlightedCode
                             language="text"
                             code={textOutput}
                             style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -833,7 +833,7 @@ const JsonToolOutput: React.FC<{
                 />
             ) : (
                 <div className="typography-code pe-12 text-muted-foreground">
-                    <WorkerHighlightedCode
+                    <HighlightedCode
                         language="json"
                         code={renderedOutput}
                         style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -856,7 +856,7 @@ const CommandOutput: React.FC<{ output: string; language: string }> = ({ output,
             <CopyToolOutputButton output={output} />
         </div>
         <div className="pe-8">
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={language}
                 code={output}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -917,7 +917,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     if (forcedMode === 'text' || forcedMode === 'code') {
         return (
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={forcedMode === 'code' && presentation?.language ? presentation.language : 'text'}
                 code={renderedOutput}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -935,7 +935,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     return (
         <div>
-            <WorkerHighlightedCode
+            <HighlightedCode
                 language={outputLanguage}
                 code={renderedOutput}
                 style={TOOL_COLLAPSED_CUSTOM_STYLE}
@@ -1671,7 +1671,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     {isExecute ? (
                         <div className="space-y-2">
                             {executeCode ? renderScrollableBlock(
-                                <WorkerHighlightedCode
+                                <HighlightedCode
                                     language="javascript"
                                     code={executeCode}
                                     style={TOOL_COLLAPSED_CUSTOM_STYLE}

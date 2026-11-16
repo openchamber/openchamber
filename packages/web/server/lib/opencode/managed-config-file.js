@@ -121,12 +121,13 @@ export const createManagedConfigRuntime = ({
     const includeImage = settings?.agentImageToolEnabled === true;
     const includeSecret = settings?.agentSecretToolEnabled !== false;
     const includeUsage = settings?.agentUsageToolEnabled === true;
+    const includeTerminal = settings?.agentTerminalToolEnabled === true;
     const includeWorkflow = settings?.agentWorkflowToolEnabled === true;
 
     const directories = [];
     let permissions = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeUsage || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeUsage || includeTerminal || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the

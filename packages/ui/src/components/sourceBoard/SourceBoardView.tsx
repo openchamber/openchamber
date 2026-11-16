@@ -26,6 +26,7 @@ import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
 import { IDLE_PULL_STATUS, readyValue, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import {
     canChangeDiscussionState,
     DEFAULT_REPOSITORY_FILTER,
@@ -40,6 +41,7 @@ import {
     type ReferencePickerSelection,
 } from '@/components/references/referencePickerItems';
 import { itemDirectory } from '@/components/references/acrossRepositories';
+import { usePreviewReturnScroll } from '@/components/references/usePreviewReturnScroll';
 import { forgetRepositoryPullStatus, forgetRepositoryPullStatuses, useRepositoryAcrossReferenceList, useTrackerItemDetail, useRepositoryHostProvider, useRepositoryReadContext, useRepositoryReferenceList } from '@/components/references/referenceSources';
 import { openExternalUrl } from '@/lib/url';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -81,6 +83,8 @@ import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository,
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
+import { updateRepositoryItemText } from './updateItemText';
+import { deleteRepositoryComment, updateRepositoryComment } from './updateItemComment';
 import { useBoardRevalidation } from './useBoardRevalidation';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
@@ -662,7 +666,28 @@ const SourceBoardBody: React.FC<{
         () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
         [refreshRepositoryDetail, retryList],
     );
+    // An edit of the previewed item's title and description: the host's own
+    // edit, then the item and the list read again.
+    const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
+    const saveText = writableReference ? async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
+        await refreshRepositoryItem();
+    } : undefined;
     const threadActions = useThreadActions(previewItem?.source === 'repository' ? previewItem.reference : null, context, refreshRepositoryItem);
+    // Editing or removing one of the item's conversation comments: the host's
+    // own change, then the item and the list read again.
+    const commentActions: ReferenceCommentActions | undefined = writableReference && previewItem?.source === 'repository' && previewItem.reference.linked !== true ? {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id }, body);
+            await refreshRepositoryItem();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id });
+            await refreshRepositoryItem();
+        },
+    } : undefined;
     // The preview's refresh button, for a change made on the host's own site,
     // which the server's short-lived answers would otherwise hide for up to
     // half a minute: the shown item alone, its state and checks included.
@@ -738,7 +763,9 @@ const SourceBoardBody: React.FC<{
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
+            onSaveText={saveText}
             threadActions={threadActions}
+            commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
                 <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
@@ -747,7 +774,13 @@ const SourceBoardBody: React.FC<{
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
                 : undefined}
             labelsControl={previewItem?.source === 'repository' && context ? (
-                <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
+                <SourceBoardLabels
+                    key={referencePickerItemKey(previewItem)}
+                    reference={previewItem.reference}
+                    context={context}
+                    onWritten={browser.labelsWritten}
+                    onChanged={refreshRepositoryItem}
+                />
             ) : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
@@ -919,6 +952,10 @@ const SourceBoardBody: React.FC<{
     const listWidth = useSourceBoardStore((state) => state.listWidth);
     const splitRef = React.useRef<HTMLDivElement>(null);
     const listRef = React.useRef<HTMLDivElement>(null);
+    // The phone's list and preview share one scroller: the list's offset is kept
+    // while an item takes its place, and every preview starts at its top.
+    const inPreview = isMobile && Boolean(browser.mobilePreviewKey && previewItem);
+    const mobileScrollRef = usePreviewReturnScroll(inPreview ? browser.mobilePreviewKey : null);
     const [resizing, setResizing] = React.useState(false);
     const clampWidth = (width: number) => {
         const max = Math.max(LIST_MIN_WIDTH, (splitRef.current?.clientWidth ?? 0) * LIST_MAX_FRACTION);
@@ -952,7 +989,6 @@ const SourceBoardBody: React.FC<{
     };
 
     if (isMobile) {
-        const inPreview = Boolean(browser.mobilePreviewKey && previewItem);
         return (
             <>
                 {inPreview ? (
@@ -971,7 +1007,7 @@ const SourceBoardBody: React.FC<{
                 {pinnedDiscoveryError && !inPreview ? pinnedDiscoveryError : null}
                 {/* A crash below keeps the header, the only way to close the page on iOS. */}
                 <ErrorBoundary>
-                    <ScrollableOverlay outerClassName="min-h-0 flex-1" className={inPreview ? 'px-4 py-3' : undefined} disableHorizontal>
+                    <ScrollableOverlay ref={mobileScrollRef} outerClassName="min-h-0 flex-1" className={inPreview ? 'px-4 py-3' : undefined} disableHorizontal>
                         {inPreview ? preview : list}
                     </ScrollableOverlay>
                 </ErrorBoundary>

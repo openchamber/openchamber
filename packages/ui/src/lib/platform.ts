@@ -10,6 +10,11 @@ export const isCapacitorApp = (): boolean => {
   return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
 };
 
+/** True in the native app when it can hold the screen on: the iOS plugin, or the WebView's Screen Wake Lock API. */
+export const canKeepScreenAwake = (): boolean => (
+  isCapacitorApp() && (getClientPlatform() === 'ios' || 'wakeLock' in navigator)
+);
+
 /**
  * True when running inside the native Capacitor shell on an iPad.
  * Capacitor reports 'ios' for both iPhone and iPad; iPadOS WKWebView

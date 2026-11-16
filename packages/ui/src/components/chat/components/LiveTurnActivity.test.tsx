@@ -31,11 +31,8 @@ import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 
 plugin({
-    name: 'live-activity-worker-url',
+    name: 'live-activity-provider-logos',
     setup(build) {
-        build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-            contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`, loader: 'js',
-        }));
         // Expand Vite's eager asset glob into the same real file URL map for
         // Bun. This is a loader transform, not a replacement of the logo hook.
         build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
@@ -48,8 +45,8 @@ plugin({
     },
 });
 
-// Loaded after the plugin: its markdown imports reach the worker URL import
-// that Bun cannot resolve on its own.
+// Loaded after the plugin: its imports reach the logo glob that Bun cannot
+// expand on its own.
 const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };

@@ -1,6 +1,7 @@
 import React from 'react';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { sidebarPendingWidth } from '@/components/layout/sidebarPendingWidth';
 import {
   CONTEXT_ZONE_DEFAULT_WIDTH,
   isZoneShown,
@@ -161,8 +162,15 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
   const areaWidthRef = React.useRef<number | null>(null);
   const contextPanelWidthRef = React.useRef(contextPanelWidth);
   contextPanelWidthRef.current = contextPanelWidth;
-  const applyAreaWidth = React.useCallback((width: number) => {
-    areaWidthRef.current = width;
+  const applyAreaWidth = React.useCallback((measured: number) => {
+    areaWidthRef.current = measured;
+    // The session sidebar beside the area may still be on its way to the
+    // width it was set to (collapsing an expanded context panel unfolds it):
+    // the area is taken as it will be once the sidebar arrives. Decided from
+    // the width measured mid-animation, the card took its column beside the
+    // panel on collapse and gave it back when the unfolding sidebar crossed
+    // the threshold, so the slot animated twice.
+    const width = measured + sidebarPendingWidth();
     setWideEnough(width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
     setWideEnoughBesidePanel(width >= WORK_STATUS_REQUIRED_ROW_WIDTH + contextPanelWidthRef.current);
   }, []);
@@ -181,12 +189,15 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
     return () => observer.disconnect();
   }, [applyAreaWidth, rowNode]);
 
-  // A resized context panel or another surface in it moves the threshold, not
-  // the area: re-decided from the last reading, before paint, so the slot
-  // animates once to the final width.
+  // A resized context panel or another surface in it moves the threshold, and
+  // a sidebar told to fold or unfold moves the width the area settles at:
+  // re-decided from the last reading, before paint, so the slot animates once
+  // to the final width. The sidebar is followed only while the card is
+  // switched on, so its toggle re-renders no chat that has no card.
+  const sidebarOpen = useUIStore((state) => panelEnabled && state.isSidebarOpen);
   React.useLayoutEffect(() => {
     if (areaWidthRef.current !== null) applyAreaWidth(areaWidthRef.current);
-  }, [applyAreaWidth, contextPanelWidth]);
+  }, [applyAreaWidth, contextPanelWidth, sidebarOpen]);
 
   const roomy = !isMobile && wideEnough === true;
   const roomyBesidePanel = roomy && wideEnoughBesidePanel && !contextPanelExpanded;

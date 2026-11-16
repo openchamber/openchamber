@@ -17,6 +17,8 @@ interface MobileOverlayPanelProps {
   footer?: React.ReactNode;
   className?: string;
   contentMaxHeightClassName?: string;
+  /** The panel's scroll area, for a caller that moves it, such as a list restored after an entry. */
+  contentRef?: React.Ref<HTMLElement>;
   renderHeader?: (closeButton: React.ReactNode) => React.ReactNode;
   /** Stays above the scrolling content: a sheet's search field. */
   subheader?: React.ReactNode;
@@ -51,6 +53,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   footer,
   className,
   contentMaxHeightClassName,
+  contentRef,
   renderHeader,
   subheader,
   scrollContent = true,
@@ -238,6 +241,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
         })()}
         {subheader ? <div className="shrink-0 px-2 pt-2">{subheader}</div> : null}
         {scrollContent ? <ScrollableOverlay
+          ref={contentRef}
           useScrollShadow
           disableHorizontal
           // Contain the scroll inside the panel: without this, iOS chains the

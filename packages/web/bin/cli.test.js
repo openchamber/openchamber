@@ -5,7 +5,7 @@ import path from 'path';
 import { createServer } from 'http';
 import net from 'net';
 import { spawn } from 'child_process';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../server/lib/injected-env.js';
@@ -323,6 +323,68 @@ describe('cli args', () => {
 
     expect(parsed.options.goal).toBe(true);
     expect(parsed.options.goalTokenBudget).toBe('200000');
+  });
+
+  it('parses --target-session on schedule create and update only', () => {
+    for (const action of ['create', 'update']) {
+      const parsed = parseArgs(['schedule', action, '--target-session', 'ses_1']);
+      expect(parsed.scheduleAction).toBe(action);
+      expect(parsed.options.targetSession).toBe('ses_1');
+      expect(parsed.removedFlagErrors).toEqual([]);
+    }
+    expect(parseArgs(['session', 'list', '--target-session', 'ses_1']).removedFlagErrors).toEqual([
+      'Unknown option for session: --target-session (used by: schedule)',
+    ]);
+  });
+
+  it('refuses --target-session without a value instead of dropping the target', () => {
+    for (const argv of [
+      ['schedule', 'create', '--target-session', '--daily', '09:30'],
+      ['schedule', 'update', '--target-session', ''],
+      ['schedule', 'update', '--target-session'],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.options.targetSession).toBeUndefined();
+      expect(parsed.removedFlagErrors).toEqual(['Missing value for --target-session.']);
+    }
+  });
+
+  it('never takes the next word as the target after an empty inline --target-session=', () => {
+    for (const argv of [
+      ['schedule', '--target-session=', 'update', '--task', 't'],
+      ['schedule', 'update', '--target-session=', 'ses_other', '--task', 't'],
+    ]) {
+      const parsed = parseArgs(argv);
+      expect(parsed.scheduleAction).toBe('update');
+      expect(parsed.options.targetSession).toBeUndefined();
+      expect(parsed.removedFlagErrors).toEqual(['Missing value for --target-session.']);
+    }
+  });
+
+  it.each(['run', 'list', 'status', 'delete', 'enable', 'disable'])('rejects --target-session on schedule %s', (action) => {
+    const parsed = parseArgs(['schedule', action, '--task', 't', '--target-session', 'ses_1']);
+    expect(parsed.removedFlagErrors).toEqual([
+      `Unknown option for schedule ${action}: --target-session (used by: schedule create, schedule update)`,
+    ]);
+  });
+
+  it.each(['name', 'prompt', 'model', 'agent', 'variant', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'goal-token-budget'])(
+    'refuses schedule update with --%s given but no value',
+    (flag) => {
+      for (const argv of [
+        ['schedule', 'update', '--task', 't', `--${flag}`, '--json'],
+        ['schedule', 'update', '--task', 't', `--${flag}`],
+        ['schedule', 'update', '--task', 't', `--${flag}=`],
+      ]) {
+        expect(parseArgs(argv).removedFlagErrors).toEqual([`Missing value for --${flag}.`]);
+      }
+    },
+  );
+
+  it('keeps missing-value handling unchanged outside schedule update', () => {
+    expect(parseArgs(['schedule', 'update', '--task', 't']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['schedule', 'create', '--prompt', '--json']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['session', 'send', '--prompt', '--json']).removedFlagErrors).toEqual([]);
   });
 
   it('formats scheduled goal state compactly', () => {
@@ -965,6 +1027,104 @@ describe('CLI HTTP helpers', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  describe('schedule create and update requests', () => {
+    const savedTask = { id: 'task_1', name: 'Review', execution: {}, schedule: { kind: 'cron', cron: '0 9 * * *' } };
+
+    // Runs one schedule action with real parsed defaults and returns the posted bodies and stdout.
+    const runSchedule = async (argv, respond = () => createMockJsonResponse({ task: savedTask, created: true, updated: true })) => {
+      const originalFetch = globalThis.fetch;
+      const requests = [];
+      globalThis.fetch = async (_url, init = {}) => {
+        requests.push(JSON.parse(init.body));
+        return respond();
+      };
+      try {
+        const parsed = parseArgs(['schedule', ...argv, '--port', '45681']);
+        const output = await captureStdout(() => scheduleCommand(parsed.options, parsed.scheduleAction));
+        return { requests, output };
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    };
+
+    it('sends a target on create only when one is given, and no model with it', async () => {
+      const base = ['create', '--dir', '/repo', '--name', 'Review', '--prompt', 'p', '--cron', '0 9 * * *', '--json'];
+      const plain = await runSchedule([...base, '--model', 'openai/gpt-5.5']);
+      expect(plain.requests[0].input).not.toHaveProperty('targetSessionId');
+
+      const targeted = await runSchedule([...base, '--target-session', 'ses_1']);
+      expect(targeted.requests[0].action).toBe('schedule.create');
+      expect(targeted.requests[0].input.targetSessionId).toBe('ses_1');
+      expect(targeted.requests[0].input).not.toHaveProperty('model');
+    });
+
+    it('scopes target-session model inheritance to create in the help', async () => {
+      const output = await captureStdout(() => scheduleCommand({}, 'help'));
+      expect(output).toContain('required on create without --target-session');
+      expect(output).toMatch(/On create,\s+without --model or --agent it keeps the session's own/);
+      expect(output).toMatch(/Retargeting with update\s+keeps the task's stored model and agent/);
+    });
+
+    it('updates only the fields given and prints JSON only', async () => {
+      const { requests, output } = await runSchedule(['update', '--dir', '/repo', '--task', 'task_1', '--prompt', 'New prompt', '--json']);
+      expect(requests).toEqual([
+        { action: 'schedule.update', input: { directory: '/repo', taskId: 'task_1', prompt: 'New prompt' } },
+      ]);
+      expect(JSON.parse(output)).toEqual({ status: 'ok', task: savedTask, updated: true });
+    });
+
+    it('passes target, disabled and goal flags on update when they are given', async () => {
+      const { requests } = await runSchedule([
+        'update', '--dir', '/repo', '--task', 'task_1', '--target-session', 'ses_2',
+        '--disabled', '--goal', '--goal-token-budget', '5000', '--json',
+      ]);
+      expect(requests[0].input).toEqual({
+        directory: '/repo', taskId: 'task_1', targetSessionId: 'ses_2', disabled: true, goal: true, goalTokenBudget: 5000,
+      });
+    });
+
+    it('refuses an update without --task before any request', async () => {
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.fn();
+      globalThis.fetch = fetchSpy;
+      try {
+        const parsed = parseArgs(['schedule', 'update', '--dir', '/repo', '--prompt', 'p', '--port', '45681']);
+        await expect(scheduleCommand(parsed.options, 'update')).rejects.toThrow('Missing required --task.');
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('prints only the saved task id with --quiet', async () => {
+      const { output } = await runSchedule(['update', '--dir', '/repo', '--task', 'task_1', '--name', 'Review', '--quiet']);
+      expect(output).toBe('task_1\n');
+    });
+
+    it.each([true, false])('prints a framed human summary of the saved task with TTY=%s', async (isTTY) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+      Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: isTTY });
+      try {
+        const { output } = await runSchedule(['update', '--dir', '/repo', '--task', 'task_1', '--cron', '0 9 * * *']);
+        expect(output).toContain('Scheduled Task Updated');
+        expect(output).toContain('Review');
+        expect(output).toContain('id: task_1; goal:no; cron 0 9 * * *');
+        expect(output).toContain('updated');
+      } finally {
+        if (descriptor) Object.defineProperty(process.stdout, 'isTTY', descriptor);
+        else delete process.stdout.isTTY;
+      }
+    });
+
+    it('passes a refused update through with the server message', async () => {
+      const message = 'This task comes from /repo/.agents/loops/x.md; change that file instead';
+      await expect(runSchedule(
+        ['update', '--dir', '/repo', '--task', 'loop:x', '--prompt', 'p', '--json'],
+        () => ({ ...createMockJsonResponse({ error: message }, false), status: 400 }),
+      )).rejects.toMatchObject({ message, exitCode: EXIT_CODE.USAGE_ERROR });
+    });
   });
 
   it.each(['oc_ui_session', 'oc_ui_session_3000'])('retries UI-authenticated API requests with the %s cookie', async (cookieName) => {
@@ -1704,5 +1864,84 @@ describe('startup command lingering output', () => {
       { json: true },
       'status'
     )).rejects.toMatchObject({ exitCode: EXIT_CODE.USAGE_ERROR });
+  });
+});
+
+describe('schedule errors at the CLI entrypoint', () => {
+  const cliPath = fileURLToPath(new URL('./cli.js', import.meta.url));
+
+  // Runs the real entrypoint as a script would: piped output, own data dir, explicit port.
+  const runCli = (argv, dataDir) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [cliPath, ...argv], {
+      env: { ...process.env, OPENCHAMBER_DATA_DIR: dataDir, HOME: dataDir, NO_COLOR: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+
+  const withControlServer = async (fn) => {
+    const requests = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url);
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Scheduled target not found' }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      await withTempOpenChamberDataDir((dir) => fn(server.address().port, requests, dir));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  };
+
+  it('answers a missing --target-session value with JSON only under --json, before any request', async () => {
+    await withControlServer(async (port, requests, dir) => {
+      const result = await runCli(['schedule', 'update', '--task', 't', '--json', '--port', String(port), '--target-session'], dir);
+      expect(result.code).not.toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ status: 'error', error: { message: 'Missing value for --target-session.' } });
+      expect(result.stderr).toBe('');
+      expect(requests).toEqual([]);
+    });
+  });
+
+  it('prints a missing --target-session value as a plain error without --json', async () => {
+    await withControlServer(async (port, requests, dir) => {
+      const result = await runCli(['schedule', 'create', '--target-session', '--port', String(port)], dir);
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain('Error: Missing value for --target-session.');
+      expect(requests).toEqual([]);
+    });
+  });
+
+  it.each([
+    [['schedule', '--target-session=', 'update', '--task', 't', '--prompt', 'hello'], 'Missing value for --target-session.'],
+    [['schedule', 'update', '--target-session=', 'ses_other', '--task', 't', '--prompt', 'hello'], 'Missing value for --target-session.'],
+    [['schedule', 'run', '--dir', '/repo', '--task', 't', '--target-session', 'ses_1'], 'Unknown option for schedule run: --target-session (used by: schedule create, schedule update)'],
+    [['schedule', 'list', '--dir', '/repo', '--target-session', 'ses_1'], 'Unknown option for schedule list: --target-session (used by: schedule create, schedule update)'],
+    [['schedule', 'update', '--dir', '/repo', '--task', 't', '--prompt'], 'Missing value for --prompt.'],
+  ])('refuses %j with JSON only, a non-zero exit and no request', async (argv, message) => {
+    await withControlServer(async (port, requests, dir) => {
+      const result = await runCli([...argv, '--json', '--port', String(port)], dir);
+      expect(result.code).not.toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ status: 'error', error: { message } });
+      expect(result.stderr).toBe('');
+      expect(requests).toEqual([]);
+    });
+  });
+
+  it.each([
+    [['--json'], (result) => expect(JSON.parse(result.stdout)).toEqual({ status: 'error', error: { message: 'Scheduled target not found' } })],
+    [[], (result) => expect(result.stderr).toContain('Error: Scheduled target not found')],
+  ])('reports a refused update with %j as its mode requires', async (modeFlags, check) => {
+    await withControlServer(async (port, requests, dir) => {
+      const result = await runCli(['schedule', 'update', '--dir', '/repo', '--task', 't', '--target-session', 'ses_gone', ...modeFlags, '--port', String(port)], dir);
+      expect(result.code).toBe(EXIT_CODE.USAGE_ERROR);
+      expect(requests).toEqual(['/api/openchamber/control']);
+      check(result);
+    });
   });
 });

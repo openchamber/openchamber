@@ -33,8 +33,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
 
 - `commands-schedule.js`
-  - Implements scheduled task status/list/create/run/delete/enable/disable.
+  - Implements scheduled task status/list/create/update/run/delete/enable/disable.
   - Maps options to control-service inputs and renders results; project resolution, validation, persistence, and execution remain server-owned.
+  - `update` sends only the flags given; `--goal` and `--disabled` go out only when present, as `true`. `--target-session` names an existing session on `create` and `update` only; on any other schedule action, or with a missing or empty inline value, it is a parse error. On `update`, a value flag given without a value (`--prompt`, `--name`, schedule selectors, `--model`, `--agent`, `--variant`, `--timezone`, `--goal-token-budget`) is a parse error rather than a dropped change.
 
 - `commands-models.js`
   - Prints OpenChamber default, favorite, and recent model settings.
@@ -161,6 +162,16 @@ These modules hold reusable, non-presentational logic for commands.
 - Preserve the mode output contract when moving code (`clack-cli-patterns`, *Mode Contract*).
 - Prefer dependency injection from `cli.js` for cross-command behavior, especially when one command needs another command's implementation.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
+
+## Decisions
+
+### Why `schedule update` omits unset boolean flags instead of sending `false`
+
+`parseArgs` defaults `goal` and `disabled` to `false`, and `schedule.update` treats any boolean as a change: `false` enables the task and turns Goal Mode off. Sending the defaults would do that on every update that did not name them, so `update` sends each only when its flag is present. `create` still sends both, because a new task has no state to keep.
+
+### Why a missing `--target-session` value is an error and not ignored
+
+Most value flags keep their old value when the value is missing. For `--target-session` that would let `create` make a task that opens a new session on every run, with no error. The parser reports it through `removedFlagErrors` rather than throwing, so it fails before any request and as a JSON payload under `--json`, which a throw from `parseArgs` cannot do because `main()` has not yet seen the options.
 
 ## Verification
 

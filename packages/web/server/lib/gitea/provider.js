@@ -112,6 +112,23 @@ function mutationOperations() {
       reconcile: unknownOutcome,
     };
   }
+  operations['/issues/update'] = {
+    perform: (service, normalized, resolved) => service.updateIssue(call(resolved, { title: normalized.title, body: normalized.body })),
+    reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized.title, normalized.body),
+  };
+  // A pull request comment is an issue comment to Gitea, so one method serves both.
+  for (const route of ['/pr/comment/update', '/issues/comment/update']) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.updateIssueComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueCommentUpdate(resolved.providerTarget, normalized.commentId, normalized.body),
+    };
+  }
+  for (const route of ['/pr/comment/delete', '/issues/comment/delete']) {
+    operations[route] = {
+      perform: (service, normalized, resolved) => service.deleteIssueComment(call(resolved, { commentId: normalized.commentId })),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueCommentDelete(resolved.providerTarget, normalized.commentId),
+    };
+  }
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     operations[route] = {
       perform: (service, normalized, resolved) => service.setState(call(resolved, { state: normalized.state, kind })),
@@ -221,13 +238,13 @@ export function createGiteaFamilyProvider({
     transport: Object.freeze({ readCredential: accounts.readCredential }),
     resources: Object.freeze({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session).changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listChangeRequests(directory, { page, query, state, people, remote }),
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote, linked: context?.linked }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, labels, remote }),
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),

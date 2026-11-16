@@ -13,9 +13,10 @@ import { createNetworkOperationPlanner, isChangeReviewRemote } from './network-o
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
-import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
+import { createLfsFileScanner, discoverLfs, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
+import { birthtimeHoldsStill } from './directory-birthtime.js';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const CLEANUP_TIMEOUT_MS = 5_000;
@@ -43,6 +44,8 @@ const MANAGED_ENV_NAMES = new Set([
   'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NETRC',
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
+const GITLINK_PATTERN = /^160000 commit ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: +-\t|\t)([^]+)$/;
+const INDEX_FILE_MODES = new Set(['100644', '100755', '120000', '160000']);
 // What decides how Git converts line endings between the working tree and the index.
 const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
@@ -50,14 +53,98 @@ const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile
 // status; the operation's own code and status are applied over them.
 const operationError = (code, message, status = 500, details = {}) => Object.assign(new Error(message), details, { code, status });
 const publicError = (code, message) => ({ code, message });
-// `ls-tree -l` adds each object's size before the tab; the submodule parser
-// reads gitlinks in the short form, so their size column (always `-`) goes.
-const readTreeListing = (treeOutput) => ({
-  gitlinks: treeOutput.split('\0').filter((record) => record.startsWith('160000 '))
-    .map((record) => `${record.replace(/^(160000 commit [0-9a-f]+) +-\t/, '$1\t')}\0`).join(''),
-  treeObjects: parseTreeObjects(treeOutput),
-});
 const terminal = (state, code, message) => ({ state, error: publicError(code, message) });
+const INDEX_ENTRY_PATTERN = /^([0-7]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])\t([^]+)$/;
+const createIndexFilesStream = (scanner) => {
+  let remainder = Buffer.alloc(0);
+  let batch = [];
+  let objectEntries = new Map();
+  let batchBytes = 0;
+  let previousStageZeroPath = null;
+  const flush = async () => {
+    if (!batch.length) return;
+    const pending = batch;
+    const pendingObjectEntries = objectEntries;
+    batch = [];
+    objectEntries = new Map();
+    batchBytes = 0;
+    await scanner.scanBatch(pending, pendingObjectEntries);
+  };
+  const add = async (record) => {
+    const text = record.toString('utf8');
+    if (text.includes('\ufffd')) throw operationError('INVALID_REQUEST', 'Tracked-file listing is not valid UTF-8', 409);
+    const match = text.match(INDEX_ENTRY_PATTERN);
+    if (!match) throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
+    if (match[3] !== '0') return;
+    const file = match[4];
+    if (!INDEX_FILE_MODES.has(match[1]) || previousStageZeroPath === file) {
+      throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
+    }
+    previousStageZeroPath = file;
+    // A staged submodule does not belong to the committed manifest. It has no
+    // file content, so it must not become LFS attribute evidence.
+    if (match[1] === '160000') return;
+    const bytes = Buffer.byteLength(file) + 32;
+    if (bytes > LFS_DISCOVERY_LIMITS.maxBatchBytes) {
+      throw operationError('LFS_DISCOVERY_LIMIT_EXCEEDED', 'Tracked path exceeds its byte limit', 409);
+    }
+    if (batch.length >= LFS_DISCOVERY_LIMITS.fileBatchSize || batchBytes + bytes > LFS_DISCOVERY_LIMITS.maxBatchBytes) {
+      await flush();
+    }
+    batch.push(file);
+    batchBytes += bytes;
+    objectEntries.set(file, { oid: match[2], type: 'blob' });
+  };
+  return Object.freeze({
+    async write(chunk) {
+      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
+      for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
+        const record = remainder.subarray(0, separator);
+        remainder = remainder.subarray(separator + 1);
+        if (!record.length) throw operationError('INVALID_REQUEST', 'Tracked-file listing is invalid', 409);
+        await add(record);
+      }
+      if (remainder.length > LFS_DISCOVERY_LIMITS.maxBatchBytes) {
+        throw operationError('LFS_DISCOVERY_LIMIT_EXCEEDED', 'Tracked-file listing record exceeds its byte limit', 409);
+      }
+    },
+    async complete() {
+      if (remainder.length) throw operationError('INVALID_REQUEST', 'Tracked-file listing is incomplete', 409);
+      await flush();
+      return scanner.result();
+    },
+  });
+};
+const createGitlinksStream = () => {
+  let remainder = Buffer.alloc(0);
+  let output = '';
+  return Object.freeze({
+    write(chunk) {
+      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
+      for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
+        const record = remainder.subarray(0, separator).toString('utf8');
+        remainder = remainder.subarray(separator + 1);
+        if (record.includes('\ufffd')) throw operationError('INVALID_REQUEST', 'Tree listing is not valid UTF-8', 409);
+        const match = record.match(GITLINK_PATTERN);
+        if (!match) continue;
+        const entry = `${record}\0`;
+        if (Buffer.byteLength(output) + Buffer.byteLength(entry) > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
+          throw operationError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Submodule gitlink listing exceeds its byte limit', 409);
+        }
+        output += entry;
+      }
+      if (remainder.length > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
+        throw operationError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Tree listing record exceeds its byte limit', 409);
+      }
+    },
+    complete() {
+      if (remainder.length) throw operationError('INVALID_REQUEST', 'Tree listing is incomplete', 409);
+      return output;
+    },
+  });
+};
 // A remote-tracking ref mirrors the remote, so it follows a force-pushed
 // branch the way `git fetch` with the default refspec does. A local branch
 // destination is never moved backwards.
@@ -65,28 +152,6 @@ const singleRefFetchRefspec = (sourceRef, destinationRef) => (
   `${destinationRef.startsWith('refs/remotes/') ? '+' : ''}${sourceRef}:${destinationRef}`
 );
 const fileIdentity = (stats) => `${stats.dev}:${stats.ino}`;
-// Linux reuses an inode number when a directory is removed and recreated in the
-// same parent, so device and inode alone cannot tell a replaced directory from
-// the one we made. Creation time can, but only where the filesystem keeps one:
-// without it Node fills the field from the change time, which moves whenever
-// entries are written into the directory, and every clone would then look
-// replaced the moment it filled its own checkout. So change the directory once
-// on purpose and see whether the reported creation time sits still. A
-// filesystem that fails this, or answers too coarsely to tell, falls back to
-// device and inode rather than to a false conflict.
-const birthtimeHoldsStill = async (fsImpl, pathImpl, directory) => {
-  const probe = pathImpl.join(directory, '.openchamber-clone-probe');
-  try {
-    const before = await fsImpl.stat(directory);
-    await fsImpl.mkdir(probe);
-    await fsImpl.rm(probe, { recursive: true });
-    const after = await fsImpl.stat(directory);
-    return after.ctimeMs !== before.ctimeMs && after.birthtimeMs === before.birthtimeMs;
-  } catch {
-    await fsImpl.rm(probe, { recursive: true, force: true }).catch(() => {});
-    return false;
-  }
-};
 const directoryIdentity = (stats, birthtimeHolds) => (birthtimeHolds
   ? `${fileIdentity(stats)}:${stats.birthtimeMs}` : fileIdentity(stats));
 const lstatSnapshot = (stats) => ({
@@ -430,6 +495,7 @@ export function createNetworkOperations({
     maxOutputBytes = outputLimitBytes,
     rawOutput = false,
     requireCompleteOutput = false,
+    onStdout,
   }) => {
     if (transfer) await controls?.markTransferStarted(transferRole);
     return new Promise((resolve, reject) => {
@@ -456,7 +522,21 @@ export function createNetworkOperations({
     let settled = false;
     let outputExceeded = false;
     let inputError;
+    let stdoutWork = Promise.resolve();
+    let resolveStdoutEnd;
+    const stdoutEnd = onStdout && child.stdout
+      ? new Promise((resolve) => { resolveStdoutEnd = resolve; })
+      : Promise.resolve();
+    if (onStdout && child.stdout) child.stdout.once('end', () => resolveStdoutEnd());
     child.stdout?.on('data', (chunk) => {
+      if (onStdout) {
+        child.stdout.pause();
+        stdoutWork = stdoutWork.then(() => onStdout(chunk)).catch((error) => {
+          inputError = error;
+          cancelChild(child);
+        }).finally(() => child.stdout.resume());
+        return;
+      }
       if (requireCompleteOutput && !outputExceeded && stdoutState.bytes + chunk.length > maxOutputBytes) {
         outputExceeded = true;
         cancelChild(child);
@@ -484,11 +564,24 @@ export function createNetworkOperations({
       };
       if (outputExceeded) reject(operationError('LFS_DISCOVERY_LIMIT_EXCEEDED', 'Checkout discovery output exceeds its byte limit', 409,
         { cancelled: result.cancelled, timedOut: result.timedOut }));
-      else if (error || inputError) reject(Object.assign(error || inputError, result));
+      else if (error || inputError) {
+        const cause = error || inputError;
+        const causeCode = cause.code;
+        Object.assign(cause, result);
+        if (causeCode) cause.code = causeCode;
+        reject(cause);
+      }
       else resolve(result);
     };
-    child.once('error', (error) => settle(error, null, null));
-    child.once('close', (code, signal) => settle(null, code, signal));
+    child.once('error', (error) => {
+      stdoutWork.then(() => settle(error, null, null), () => settle(error, null, null));
+    });
+    child.once('close', (code, signal) => {
+      Promise.all([stdoutWork, stdoutEnd]).then(
+        () => settle(null, code, signal),
+        (error) => settle(error, code, signal),
+      );
+    });
     try {
       controls?.attachChild(child, { allowAfterCancellation });
     } catch (error) {
@@ -1025,6 +1118,7 @@ export function createNetworkOperations({
   const localGit = async (directory, args, controls, deadline, {
     input, allowedCodes = [0], disableLfsFilters = false,
     maxOutputBytes = outputLimitBytes, rawOutput = false,
+    onStdout,
   } = {}) => {
     const blocked = phaseError(controls, deadline);
     if (blocked) throw blocked;
@@ -1040,7 +1134,7 @@ export function createNetworkOperations({
       args: ['-c', `core.hooksPath=${platform === 'win32' ? 'NUL' : '/dev/null'}`, ...filterArgs, ...args],
       env,
       controls, deadline, input,
-      maxOutputBytes, rawOutput, requireCompleteOutput: true,
+      maxOutputBytes, rawOutput, onStdout, requireCompleteOutput: !onStdout,
     });
     if (!allowedCodes.includes(result.code) || result.cancelled || result.timedOut) {
       if (result.cancelled || result.timedOut) throw operationError(result.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Checkout hydration was interrupted', result.timedOut ? 408 : 499, result);
@@ -1248,10 +1342,14 @@ export function createNetworkOperations({
     const configOutput = await localGit(directory, [
       'config', '--blob', 'HEAD:.gitmodules', '--null', '--get-regexp', '^submodule\\..*\\.(path|url|update)$',
     ], controls, deadline, { allowedCodes: [0, 1, 128] });
-    // One listing serves both: gitlinks for submodules, and object sizes for the LFS scan.
-    const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
-      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
-    const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: 0 });
+    const gitlinks = createGitlinksStream();
+    await localGit(directory, ['ls-tree', '-rz', '--full-tree', 'HEAD'], controls, deadline, { onStdout: (chunk) => gitlinks.write(chunk) });
+    const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks: gitlinks.complete(), recursionDepth: 0 });
+    const scanner = createLfsFileScanner((args, input) => localGit(directory, args, controls, deadline,
+      { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path));
+    const files = createIndexFilesStream(scanner);
+    await localGit(directory, ['ls-files', '-z', '--stage'], controls, deadline, { onStdout: (chunk) => files.write(chunk) });
+    const scan = await files.complete();
     const children = manifest.modules.map((module) => {
       if (!parentEndpoint || !parentRemoteName) return { path: module.path, gitlink: module.gitlink };
       const resolved = resolveGitRelativeEndpoint(module.url, parentEndpoint);
@@ -1259,10 +1357,6 @@ export function createNetworkOperations({
     });
     const requirements = [];
     let sourceRequired = children.some((child) => !child.endpoint);
-    const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
-      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
-    const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
-      { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
     if ((scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete)
       && (!parentEndpoint || !parentRemoteName)) {
       sourceRequired = true;
@@ -1385,10 +1479,9 @@ export function createNetworkOperations({
       const configOutput = await localGit(directory, [
         'config', '--blob', 'HEAD:.gitmodules', '--null', '--get-regexp', '^submodule\\..*\\.(path|url|update)$',
       ], controls, deadline, { allowedCodes: [0, 1, 128] });
-      // One listing serves both: gitlinks for submodules, and object sizes for the LFS scan.
-      const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
-        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
-      const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: depth });
+      const gitlinks = createGitlinksStream();
+      await localGit(directory, ['ls-tree', '-rz', '--full-tree', 'HEAD'], controls, deadline, { onStdout: (chunk) => gitlinks.write(chunk) });
+      const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks: gitlinks.complete(), recursionDepth: depth });
       for (const module of hydrationPlan.hydrateSubmodules === false ? [] : manifest.modules) {
         if (phaseError(controls, deadline)) throw phaseError(controls, deadline);
         moduleCount += 1;
@@ -1483,10 +1576,11 @@ export function createNetworkOperations({
         }
       }
 
-      const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
-        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
-      const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
-        { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
+      const scanner = createLfsFileScanner((args, input) => localGit(directory, args, controls, deadline,
+        { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path));
+      const files = createIndexFilesStream(scanner);
+      await localGit(directory, ['ls-files', '-z', '--stage'], controls, deadline, { onStdout: (chunk) => files.write(chunk) });
+      const scan = await files.complete();
       const lfsPath = prefix || '.';
       if (!scan.attributesOutput && !scan.pointerSamples.length && scan.pointerScanComplete) {
         lfs.push({ path: lfsPath, status: 'not-needed' });

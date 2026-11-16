@@ -34,7 +34,10 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
 
   const update = (change) => {
     const run = writes.then(async () => {
-      const next = change(await read());
+      const store = await read();
+      const next = change(store);
+      // A service repeats its instructions on every start; the same text again is not a write.
+      if (next === store) return;
       const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
       await fsPromises.mkdir(dataDir, { recursive: true });
       await fsPromises.writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -48,6 +51,7 @@ export const createGuestInstructions = ({ dataDir, fsPromises = fs }) => {
     const key = directory === null ? GLOBAL_KEY : path.resolve(directory);
     const entries = { ...(store[guestId] ?? {}) };
     const trimmed = text.trim();
+    if ((entries[key] ?? '') === trimmed) return store;
     if (trimmed) entries[key] = trimmed;
     else delete entries[key];
     const next = { ...store };

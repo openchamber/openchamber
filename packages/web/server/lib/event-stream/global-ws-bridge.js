@@ -50,6 +50,11 @@ export function createGlobalMessageStreamWsBridge({
     const replay = globalHub.replayAfter(requestedLastEventId);
     const ready = { type: 'ready', scope: 'global' };
     if (replay === null) ready.replayReset = true;
+    // The events after the client's cursor follow in full: it missed nothing.
+    else if (requestedLastEventId) ready.replayed = true;
+    // No replay follows, so the client resumes from here: one that receives
+    // no event before its next reconnect still has a cursor to name.
+    if (!ready.replayed) ready.cursor = globalHub.cursor();
     const sent = sendMessageStreamWsFrame(socket, ready);
     if (!sent) {
       removeClient(socket);
@@ -127,6 +132,7 @@ export function createGlobalMessageStreamWsBridge({
           const sent = sendMessageStreamWsFrame(socket, {
             type: 'ready',
             scope: 'global',
+            cursor: globalHub.cursor(),
           });
           if (!sent) {
             removeClient(socket);

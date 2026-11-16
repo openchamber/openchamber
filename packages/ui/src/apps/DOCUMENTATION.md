@@ -28,17 +28,21 @@
 - Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
 - Settings uses the existing persistence and broadcast protocol. Moving its host changes no stored format, registry key or runtime availability.
 - The tablet shell's side panels follow the size class from `useTabletLayout` (`lib/device.ts`), never the device model. Where both fit (`roomyForPanels`, 1000 px wide and landscape) the sessions sidebar and the workspace panel can be open together. Where one fits (`roomyForOnePanel`, from 900 px: an unfolded iPhone Duo, a 13-inch iPad in portrait) both are side panels, but opening one puts the other away and closing it brings the displaced one back. In both classes the sidebar stays open after a session or page is picked. Narrower tablets keep the sidebar as a guest that closes after a pick, and the workspace as a full-cover drawer.
-- The workspace drawer's tabs (and the tablet's workspace panel, the same component) are the built-in five plus one per extension that opted its panel into the phone (`phoneGuestPanelModes`, id `plugin:<id>`). One per-device order and hidden set covers both kinds (`lib/mobileWorkspaceTabs.ts`): a new extension tab goes last, one whose extension left the catalog drops out of the strip, the drawer and Settings, and its saved place stays in the stored order for when it comes back. An open extension tab whose extension leaves falls back to the user's first tab.
+- The workspace drawer's tabs (and the tablet's workspace panel, the same component) are the built-in five (six in the native app, with Browser) plus one per extension that opted its panel into the phone (`phoneGuestPanelModes`, id `plugin:<id>`). One per-device order and hidden set covers both kinds (`lib/mobileWorkspaceTabs.ts`): a new extension tab goes last, one whose extension left the catalog drops out of the strip, the drawer and Settings, and its saved place stays in the stored order for when it comes back. An open extension tab whose extension leaves falls back to the user's first tab.
 - Code outside the shell opens a tab through `openMobileWorkspace` (`connectMobileWorkspaceOpener`, connected by `MobileShell`): an extension frame's `openSurface` and `openCommit`, an item handed to an extension panel. The request closes a full-screen extension page first, so the asked-for tab is on screen. Without a mounted shell the call answers false and the caller reports it.
 - Extension actions (`useGuestActions`) reach the phone's menus that have a desktop counterpart: the message sheet, the selection sheet, the session row's long-press menu, a long press on a Files row and the diff's line comment field. Every Files row has a long-press menu: Copy path, as the desktop row menu starts, then the extensions' file actions. An open-mode action is listed only for a guest that opted its panel in.
 - A tap on a sidebar row's extension mark (`MobileGuestMarks`) does what a desktop click does when the extension opted its panel into the phone: it opens the row, then the extension's workspace tab, with no item. Any other mark toasts its text and opens its link, when it has one.
 - The workspace drawer's tab strip scrolls the open tab clear of its edge fades whenever it changes, also when an action, `openSurface` or attach opened it while the drawer was closed (`SortableTabsStrip`, `layoutMode="scrollable"`).
+- The workspace Browser tab (native app only, `packages/mobile/DOCUMENTATION.md`) is positioned and clipped below the tab strip; the iframe browser must not use its absolute root against the viewport. Home returns to the running dev servers. Back, the toolbar's and Android's, goes back inside the page first, then through the addresses opened, then to the server list; at the list Android Back closes the drawer.
 - Extension pages that opted into the phone open full screen from the sessions list's More menu (`useUIStore.openGuestPageId`); the back ladder closes one before the drawers. `GuestHosts` (attach dialogs full screen, hidden frames for slash commands and background actions) is mounted by the shell as by the desktop layout.
 - The tablet composer stays expanded except in the one-panel class, which keeps the phone's pill; a hardware keyboard expands it everywhere.
 - The keyboard hold in `readTabletLayout` needs a focused text field. A keyboard class left on the root without one (a foldable switching screens can take the keyboard without the hide event) holds no layout, and a WebView resize with no field focused runs the hide (`mobileNativeChrome.ts`).
 - Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
 - iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
+- The connection heartbeat in the live connection's card on Instances (`MobileConnectionHeartbeat`) asks `/health` through `runtimeFetch` every 4 s, only while it is mounted and the app is in the foreground. On Capacitor the foreground comes from the native app state, since the WebView's page visibility is unreliable there. Going to the background or unmounting clears the pending ping, aborts the one in flight and stops its clock subscription. A ping with no answer within 5 s shows as "No answer", never as the last latency. Its trace steps on the shared clock's beat, four frames a second, like a spinner.
+- Keep screen awake (`mobileKeepScreenAwake`, device-local) keeps the display on in the native app always, or while the open session or a subagent below it is active in the global status store (`useKeepScreenAwake`). "While working" also needs `isConnected`, because the store keeps a lost server's last busy state; a dead server therefore releases the screen, and a reconnect holds it again only while the turn still runs. A permission request keeps the turn running, so it keeps the screen on. Android holds a screen wake lock, which the system drops when the app leaves the screen, so the hook asks again on each return. iOS turns off the idle timer through the app-local `KeepAwake` plugin, and every mount writes the current choice so a reloaded page clears what the last one set. The setting renders, and the hook acts, only where `canKeepScreenAwake` holds: the iOS app, or the Android app on a WebView that exposes `navigator.wakeLock`. The hosted mobile page never keeps the screen on.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
+- A sessions-sheet row is never a scroll container of its own: it clips with `oc-row-clip`, and the two-line row's 54 px box ends flush with the 32 px chevron at `top: 22`, so a drag that starts on a row scrolls the list.
 
 ## Decisions
 
@@ -56,7 +60,7 @@ The secure store and localStorage cannot commit together. A new reference lets a
 
 ### Why navigation carries intent and not the source's stores
 
-Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
+Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action, new-snippet action and selected skill without transferring chat state or overwriting the tab's independently edited settings.
 
 ### Why mobile web holds one back guard and not one history entry per layer
 
@@ -66,10 +70,24 @@ Popups, overlay sheets and the Settings stages open and close without passing th
 
 An unfolded iPhone Duo is 951 px wide: one 320 to 380 px panel leaves a readable chat, two do not. The full-cover drawer hid the chat and the sidebar on a screen that has room for one of them beside it, so the panels swap instead, and the displaced one returns when the other closes. Tablets under 900 px (an iPad mini, Air or 11-inch Pro in portrait) would leave the chat under ~510 px with a panel open, so they keep the drawer.
 
+### Why the heartbeat pings `/health` and not a signal the client already gets
+
+Latency is a round trip, and no event the client receives carries one. The ping runs only while the card is on screen, so it costs one small request every 4 s while someone looks at it. It goes through `runtimeFetch`, so over the relay it measures the relay path the app really uses.
+
 ### Why mobile listens for the dialog flag and not a mobile branch at every entry point
 
 About twenty shared entry points open Settings through `setSettingsDialogOpen`. The phone renders no dialog, so each one did nothing there and left the flag set, which blocks chat shortcuts. One bridge in the shell covers every entry point, the same way the VS Code bridge does.
 
+### Why Android uses the Screen Wake Lock API and iOS a native plugin
+
+The Android WebView grants `navigator.wakeLock` without a tap, and the lock shows up as the app's own screen wake lock in `dumpsys power`, so Android needs no native code. WKWebView grants it only inside a tap: Capacitor's web view answers WebKit's permission query with "prompt", so a request made when a run starts or after a relaunch is denied. iOS therefore sets `UIApplication.isIdleTimerDisabled` through `KeepAwake.swift`. An Android WebView without the API gets no setting, so nothing claims to keep the screen on there.
+
+"While working" follows the session's own run and its subagents. Waits on a pull request, an extension or a background command keep a turn open for hours with nothing new on screen, so they do not hold the display.
+
 ### Why mobile uses the Projects page and not a separate defaults form
 
 The shared page already supports project selection through mobile split-page navigation. Reusing it keeps the defaults controls, search anchors and persistence in one place.
+
+### Why rows clip with `overflow: clip` and not `overflow: hidden`
+
+`styles/mobile.css` rewrites every `.overflow-hidden` element to `overflow-y: auto !important` on a touch layout, so each phone row became a scroll container with its own scroll layer. The detailed row's chevron hung 2 px past the row's box and gave it something to scroll, and the row then swallowed a drag that started on it. `overflow: clip` clips the same way without a scroll box. Browsers without it (iOS 15) keep the `overflow: hidden` fallback, where the row's box fits its content and has nothing to scroll.

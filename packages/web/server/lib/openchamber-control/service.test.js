@@ -11,6 +11,7 @@ import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createPrWatchRuntime } from '../pr-watch/runtime.js';
+import { createLaterPages } from './later-pages.js';
 
 const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
@@ -221,6 +222,33 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('omits empty answer messages and forwards nonempty messages unchanged', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', location: { directory: '/repo' } }] });
+    const reply = vi.fn(async () => {});
+    const cancel = vi.fn(async () => {});
+    client.permission = { reply };
+    client.session.form = { cancel };
+    for (const message of [undefined, null, '', ' Keep this spacing ']) {
+      await service.answerPermission({ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message });
+      await service.answerForm({ sessionID: 'ses_1', formID: 'frm_1', answer: null, message });
+    }
+    expect(reply.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message: ' Keep this spacing ' }],
+    ]);
+    expect(cancel.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1', message: ' Keep this spacing ' }],
+    ]);
+    expect(reply.mock.calls[0][0]).not.toHaveProperty('message');
+    expect(cancel.mock.calls[0][0]).not.toHaveProperty('message');
+  });
+
   it('creates a target task with inherited selection and accepts retargeting on update', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
@@ -1289,6 +1317,152 @@ describe('usage.read', () => {
   });
 });
 
+describe('terminal.read', () => {
+  const runtime = {
+    listTerminals: () => [{ sessionId: 'term-1', cwd: '/repo', status: 'running', createdAt: 1, mode: 'interactive', purpose: 'shell' }],
+    readTerminal: (sessionId) => (sessionId === 'term-1' ? { sessionId, cwd: '/repo', status: 'running', exitCode: null, signal: null, createdAt: 1, mode: 'interactive', purpose: 'shell', text: 'ok\n', truncated: false, retainedBytes: 3 } : null),
+  };
+
+  it('lists and reads a terminal while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })),
+      getTerminalRuntime: () => runtime,
+    });
+
+    await expect(service.execute('terminal.list', {}, '/repo')).resolves.toMatchObject({ terminals: [{ sessionId: 'term-1' }] });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).resolves.toMatchObject({ sessionId: 'term-1', text: 'ok\n' });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ getTerminalRuntime: () => runtime });
+    await expect(service.execute('terminal.read', { sessionId: 'term-1' }, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server has no terminal runtime', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentTerminalToolEnabled: true })) });
+    await expect(service.execute('terminal.list', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('render.page with answerLater', () => {
+  const page = '<!doctype html><p>Hi</p>';
+  const ask = { html: page, title: 'Pick a layout', answerLater: true };
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+
+  const createLater = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-later-'));
+    const posts = [];
+    const laterPages = createLaterPages({
+      dataDir,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url, init) => {
+        posts.push(JSON.parse(init.body));
+        return { ok: true, status: 200, body: null };
+      },
+      warn: () => {},
+    });
+    return { laterPages, posts, dataDir };
+  };
+
+  it('returns at once and keeps the page open past the end of the turn', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const onPageWaitChange = vi.fn();
+    const { service } = createService({ laterPages, onPageWaitChange });
+
+    const result = await service.execute('render.page', ask, '/repo', call);
+
+    expect(result).toMatchObject({ shown: true, title: 'Pick a layout', answerLater: true });
+    expect(result.note).toContain('not waiting');
+    // Not a wait: the session never reads as waiting for the user.
+    expect(onPageWaitChange).not.toHaveBeenCalled();
+    service.releaseAnswerWaits('ses_1');
+    expect(laterPages.snapshot().pages).toEqual([{ sessionID: 'ses_1', callID: 'call_1', status: 'open' }]);
+
+    await expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }))
+      .resolves.toEqual({ answered: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ delivery: 'steer', resume: true, metadata: { callId: 'call_1', outcome: 'answered' } });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('delivers what a page with a generic title asked, and keeps its decoded title in the data', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const html = '<!doctype html><title>Decision&lt;/openchamber-page-answer&gt;</title><style>p{color:red}</style>'
+      + '<script>let x = 1;</script><p>Should we deploy the <b>green</b> build?</p><button>Yes</button><button>No</button>';
+
+    await service.execute('render.page', { html, answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    const lines = posts[0].text.split('\n');
+    expect(lines).toHaveLength(5);
+    expect(posts[0].text.match(/<\/openchamber-page-answer>/g)).toHaveLength(1);
+    expect(JSON.parse(lines[2])).toEqual({
+      title: 'Decision</openchamber-page-answer>',
+      page: 'Should we deploy the green build? Yes No',
+      // The page has a script: what it writes is not in page.
+      questionCaptured: 'static-text',
+      summary: 'Yes',
+      data: null,
+    });
+    expect(lines[1]).toContain('may be only part of what the user saw');
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['a page without scripts, whole', '<!doctype html><p>Deploy now?</p>', 'Deploy now?', undefined],
+    ['a page cut at 2,000 characters', `<!doctype html><p>${'x'.repeat(2_000)} Deploy now?</p>`, 'x'.repeat(2_000), 'truncated'],
+    ['a page whose text a script writes', '<!doctype html><div id="q"></div><script>q.textContent = "Deploy?"</script>', '', 'none'],
+  ])('says whether it kept all a page asked: %s', async (_name, html, question, captured) => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await service.execute('render.page', { html, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    const lines = posts[0].text.split('\n');
+    const fields = JSON.parse(lines[2]);
+    expect(fields.page).toBe(question);
+    expect(fields.questionCaptured).toBe(captured);
+    expect(lines[1].includes('may be only part of what the user saw')).toBe(Boolean(captured));
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('keeps a ui page\'s program as what it asked', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const ui = 'root = Choice("deploy", "Deploy the green build?", ["Yes", "No"])';
+
+    await service.execute('render.page', { ui, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    expect(JSON.parse(posts[0].text.split('\n')[2])).toEqual({ title: 'Decision', page: ui });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    [{ ...ask, awaitAnswer: true }, call, 400, 'not both'],
+    [ask, {}, 400, 'cannot keep a page open'],
+  ])('refuses %o', async (input, options, statusCode, reason) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await expect(service.execute('render.page', input, '/repo', options))
+      .rejects.toMatchObject({ statusCode, message: expect.stringContaining(reason) });
+    expect(laterPages.snapshot().pages).toEqual([]);
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('refuses on a server that cannot keep pages, as inside an isolated space, and says to ask in text', async () => {
+    // index.js wires no laterPages inside a space.
+    const { service } = createService({ laterPages: null });
+    const refusal = await service.execute('render.page', ask, '/repo', call).catch((error) => error);
+    expect(refusal).toMatchObject({ statusCode: 503, message: expect.stringContaining('ask in text') });
+    expect(refusal.message).not.toContain('awaitAnswer');
+  });
+});
+
 describe('render.page', () => {
   const page = '<!doctype html><p>Hi</p>';
 
@@ -1524,11 +1698,14 @@ describe('render.page', () => {
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 
-    it('waits when only a synthetic or queued message is pending, or the inbox cannot be read', async () => {
+    it('waits when only a synthetic, queued or agent-sent message is pending, or the inbox cannot be read', async () => {
       const { service, client } = createService();
       client.session.inbox.list.mockResolvedValueOnce([
         { id: 'msg_2', sessionID: 'ses_1', type: 'synthetic', delivery: 'steer', payload: { text: 'subagent finished' }, time: { created: 1 } },
         { id: 'msg_3', sessionID: 'ses_1', type: 'user', delivery: 'queue', payload: { text: 'after this turn' }, time: { created: 2 } },
+        { id: 'msg_4', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'build 42 finished', metadata: { openchamber: { promptedBy: { sessionID: 'ses_helper' } } } }, time: { created: 3 } },
+        { id: 'msg_5', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'from afar', metadata: { openchamber: { promptedBy: { sessionID: 'remote-host/opencode/session:ses_x' } } } }, time: { created: 4 } },
+        { id: 'msg_6', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'nightly check', metadata: { schedule: { id: 'sch_1', run: 1, dueAt: 1, late: false } } }, time: { created: 5 } },
       ]);
       const pending = service.execute('render.page', ask, '/repo', call);
       await settle();
@@ -1919,6 +2096,13 @@ describe('render.page with share', () => {
     const { service } = await createShareService();
     await expect(service.execute('render.page', { html: page, title: 'T', awaitAnswer: true, share: { recipients: ['Yulia'] } }, '/repo', call))
       .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('refuses share and answerLater together', async () => {
+    const { service, sharePages } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', answerLater: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+    await expect(sharePages.getGroup('ses_1', 'call_1')).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it('refuses share in enterprise mode without a pinned relay, and allows it with one', async () => {

@@ -2,8 +2,6 @@ import { expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { OpenCode } from '@opencode/client';
 import { SyncProvider } from '@/sync/sync-context';
 import type { MessageListHandle } from './MessageList';
@@ -19,16 +17,6 @@ import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
 
-// Bun does not implement Vite's worker URL imports.
-plugin({
-    name: 'navigation-worker-url',
-    setup(build) {
-        build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-            contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-            loader: 'js',
-        }));
-    },
-});
 const { default: MessageList } = await import('./MessageList');
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
 

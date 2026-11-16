@@ -1,0 +1,253 @@
+{
+  "zone": "composer",
+  "name": "Composer",
+  "sources": ["packages/ui/src/components/chat/ChatInput.tsx", "packages/ui/src/components/chat/composer/", "packages/ui/src/components/chat/ModelControls.tsx"],
+  "features": [
+    {
+      "id": "send",
+      "name": "Sending a prompt",
+      "what": "The user types a prompt and sends it; it lands in the chat and the agent answers.",
+      "reach": "Open a session, type in the composer, press Enter or click Send.",
+      "proof": "The prompt shows as a user bubble, the composer empties, the answer follows, Send is disabled while the box is empty.",
+      "scenarios": [
+        {
+          "id": "enter",
+          "kind": "path",
+          "title": "Enter sends the prompt, the composer empties and the answer arrives",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer send"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Explain the call frame"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "Explain the call frame"},
+            {"do": "editor", "empty": true},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "see", "on": "composer.send", "disabled": true}
+          ]
+        },
+        {
+          "id": "button",
+          "kind": "path",
+          "title": "Send is disabled while the box is empty, enabled with text, and sends on click",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer button"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "composer.send", "disabled": true},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Sent with the button"},
+            {"do": "see", "on": "composer.send", "disabled": false},
+            {"do": "click", "on": "composer.send"},
+            {"do": "see", "on": "chat.userBubble", "text": "Sent with the button"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        },
+        {
+          "id": "blank",
+          "kind": "break",
+          "title": "Only spaces and newlines send nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer blank"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "   "},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "composer.send", "disabled": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "shift-enter",
+          "kind": "path",
+          "title": "Shift+Enter starts a new line and sends nothing",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer newline"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "line one"},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "type", "text": "line two"},
+            {"do": "editor", "equals": "line one\nline two"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1000},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "line two"},
+            {"do": "editor", "empty": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "draft",
+      "name": "Drafts",
+      "what": "Text typed and not sent stays with its session.",
+      "reach": "Type in a session's composer, switch to another session or reload, come back.",
+      "proof": "The other session's composer is empty, the first one shows the text again.",
+      "scenarios": [
+        {
+          "id": "per-session",
+          "kind": "path",
+          "title": "Each session keeps its own unsent text across a switch",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Draft A"},
+            {"do": "session.create", "as": "b", "title": "Draft B"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "draft that belongs to A"},
+            {"do": "click", "on": "sidebar.row", "session": "b"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "b"},
+            {"do": "editor", "empty": true},
+            {"do": "click", "on": "sidebar.row", "session": "a"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "a"},
+            {"do": "editor", "equals": "draft that belongs to A"}
+          ]
+        },
+        {
+          "id": "reload",
+          "kind": "break",
+          "title": "Unsent text survives a page reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Draft reload"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "keep me after a reload"},
+            {"do": "pause", "ms": 1200},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "editor", "equals": "keep me after a reload"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "name": "Prompt history",
+      "what": "Arrow Up in an empty composer brings back the prompts sent before.",
+      "reach": "Open a session with a sent prompt, focus the empty composer, press Arrow Up.",
+      "proof": "The last prompt fills the composer.",
+      "scenarios": [
+        {
+          "id": "arrow-up",
+          "kind": "path",
+          "title": "Arrow Up recalls the last prompt",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer history"},
+            {"do": "session.send", "session": "s", "prompt": "First prompt in history"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "press", "key": "ArrowUp"},
+            {"do": "editor", "equals": "First prompt in history"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "autocomplete",
+      "name": "Commands and file mentions",
+      "what": "Typing / lists commands, typing @ lists project files; picking a file adds it as a chip that goes with the prompt.",
+      "reach": "Type / or @name in the composer.",
+      "proof": "The list shows the expected entry, Escape closes it, Enter turns a file into a chip and the sent prompt carries the file.",
+      "scenarios": [
+        {
+          "id": "slash",
+          "kind": "path",
+          "title": "/ lists commands and Escape closes the list",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer slash"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "/"},
+            {"do": "see", "on": "composer.popup", "text": "/compact"},
+            {"do": "press", "key": "Escape"},
+            {"do": "gone", "on": "composer.popup", "text": "/compact"},
+            {"do": "editor", "equals": "/"}
+          ]
+        },
+        {
+          "id": "mention",
+          "kind": "path",
+          "title": "@ finds a project file, Enter turns it into a chip, the sent prompt carries it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer mention"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Look at @retry"},
+            {"do": "see", "on": "composer.mentionRow", "path": "src/api/retry.ts"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.mentionChip", "path": "src/api/retry.ts"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "retry.ts"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stop",
+      "name": "Choosing a model and stopping a turn",
+      "what": "The model picker in the composer footer sets the model of the next prompt; while the agent works Send turns into Stop, and Stop ends the turn.",
+      "reach": "Click the model name in the composer footer, search, pick a model, send, then click Stop.",
+      "proof": "The footer names the picked model, Stop shows while the session is busy, the session goes idle after the click and Send comes back.",
+      "scenarios": [
+        {
+          "id": "click",
+          "kind": "path",
+          "title": "A slow model picked in the picker can be stopped from the composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer stop"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "silence"},
+            {"do": "click", "on": "picker.option", "text": "Fixture silence, 30s"},
+            {"do": "see", "on": "composer.model", "text": "Fixture silence"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "Think for a while"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "composer.stop"},
+            {"do": "session.busy", "session": "s"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10},
+            {"do": "gone", "on": "composer.stop"},
+            {"do": "see", "on": "composer.send"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recover",
+      "name": "Sending after a failed turn",
+      "what": "When the model provider is down the turn shows the connection error and retries; the user stops it, picks a working model and sends again.",
+      "reach": "A session whose model's server refuses connections.",
+      "proof": "The error and the retry countdown show, Stop ends the retries, the next prompt on another model is answered.",
+      "scenarios": [
+        {
+          "id": "provider-down",
+          "kind": "break",
+          "title": "A provider that is down shows its error and retries; after Stop another model answers",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Composer after error"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "This one fails", "model": "offline/no-answer", "wait": false},
+            {"do": "see", "on": "chat.userBubble", "text": "This one fails"},
+            {"do": "see", "on": "chat.error", "text": "ECONNREFUSED"},
+            {"do": "see", "on": "composer.status", "text": "Retrying"},
+            {"do": "click", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 10},
+            {"do": "see", "on": "composer.model", "text": "Offline fixture"},
+            {"do": "click", "on": "composer.model"},
+            {"do": "click", "on": "picker.search"},
+            {"do": "type", "text": "seeding speed"},
+            {"do": "click", "on": "picker.option", "text": "Fixture stream, seeding speed"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "And this one works"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.userBubble", "text": "And this one works"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"}
+          ]
+        }
+      ]
+    }
+  ]
+}

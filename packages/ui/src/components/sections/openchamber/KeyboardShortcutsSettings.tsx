@@ -197,8 +197,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   return (
     <>
       {/* Capped where a row's Clear button ends (label column, gap, key tile,
-          Edit, Clear), so the search lines up with the list under it. */}
-      <div className="mb-6 flex flex-col items-start gap-3 @xl:max-w-[30.25rem]">
+          Edit, Clear), so the search lines up with the list under it. The
+          first group gets the same 40px gap later sections get from pt-10. */}
+      <div className={cn('mb-6 flex flex-col items-start gap-3 @xl:max-w-[30.25rem]', hasVisibleActions && 'mb-10')}>
         <div className="relative w-full">
           <Icon
             name="search"

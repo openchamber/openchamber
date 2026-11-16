@@ -14,6 +14,9 @@ import { branchRefLabel } from './baseBranch';
 
 interface BranchComparisonSelectorProps {
   branches: readonly string[];
+  defaultBranches?: Readonly<Record<string, string>>;
+  /** The bound remote; only its default branch is listed first, since a base on another remote is rejected. */
+  primaryRemote?: string | null;
   currentBranch: string | null;
   base: string | null;
   onSelect: (ref: string) => void;
@@ -24,13 +27,14 @@ interface BranchComparisonSelectorProps {
   mobile?: boolean;
 }
 
-export function BranchComparisonSelector({ branches, currentBranch, base, onSelect, automatic = false, onSelectAutomatic, mobile = false }: BranchComparisonSelectorProps) {
+export function BranchComparisonSelector({ branches, defaultBranches, primaryRemote, currentBranch, base, onSelect, automatic = false, onSelectAutomatic, mobile = false }: BranchComparisonSelectorProps) {
   const { t } = useI18n();
   const tabletLayout = useTabletLayout();
   const useSheet = mobile && !tabletLayout.enabled;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const label = base ? branchRefLabel(base) : t('gitView.pr.field.baseBranch');
+  const primaryDefault = primaryRemote && defaultBranches?.[primaryRemote] ? `remotes/${primaryRemote}/${defaultBranches[primaryRemote]}` : null;
 
   const changeOpen = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -80,7 +84,7 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
           {open && rankByQuery(
             [...new Set(branches)]
               .filter((name) => name !== currentBranch)
-              .sort()
+              .sort((a, b) => Number(b === primaryDefault) - Number(a === primaryDefault) || (a < b ? -1 : a > b ? 1 : 0))
               .map((name) => ({
                 ref: name.startsWith('remotes/') ? `refs/${name}` : `refs/heads/${name}`,
                 label: branchRefLabel(name),

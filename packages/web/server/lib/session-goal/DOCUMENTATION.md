@@ -108,16 +108,17 @@ before touching the filesystem). Rationale: metadata rides every
    - authoritative live-activity check after the quiet window: re-read
      `/api/session/active`, bail if the parent resumed; then read OpenCode's
       job list (2.2.6+) for the whole subagent tree and bail while a
-      background subagent or image runs; then list the parent's child
-      sessions through `GET /api/session?parentID=` (cursor paged) and bail
-      while any of them is active, since child sessions OpenChamber starts
+       background subagent or image runs; then read active sessions' parent
+       links and bail while a direct child is active, since child sessions OpenChamber starts
       itself (workflow agents) are no OpenCode jobs and an older OpenCode has
       no job list. The loop rechecks after
       another quiet window so a missed parent idle event cannot strand the
-      goal when the child finishes. A status or children fetch failure is
-      unknown, not empty, so it skips the audit and retries after another quiet
-      window;
-     both reads live in `../opencode/session-activity.js`, shared with the
+       goal when the child finishes. Historical children are never paged.
+       Unknown status, child, job or shell activity skips the audit and
+       continuation and retries after 15, 30, then 60 seconds. A fourth failure
+       blocks the goal with a resumable reason. Confirmed running work or a
+       complete activity check resets this separate activity-failure counter;
+      these reads live in `../opencode/session-activity.js`, shared with the
      notification runtime;
    - messages come from `/api/session/:id/message` as v2's flat records
      (`type`, `content[]`, `model`, `finish`, `tokens`); `toLoopMessage`
@@ -342,14 +343,15 @@ ordering used by create and scheduled goals.
 
 ## Decisions
 
-### Why failed session reads retry before blocking
+### Why failed session and activity reads retry before blocking
 
-The activity checks already retry unknown reads after a quiet window. The
-initial session read follows that policy so a transient transport failure does
-not leave an active goal without a scheduled tick. The bounded backoff allows
+Session and activity reads retry so a transient transport failure does not
+leave an active goal without a scheduled tick. Separate counters let a successful
+session read reset its failures without erasing repeated activity failures.
+The bounded backoff allows
 recovery without sending a continuation from unknown state. At exhaustion, the
 runtime attempts to block with a resumable reason because an unscheduled active
-goal gives the user no explanation for the stopped turns.
+goal or an endless retry gives the user no explanation for the stopped turns.
 
 Retry settlement passes a write-time predicate through `persistSessionGoal`.
 The server checks it inside the metadata store's existing per-session write

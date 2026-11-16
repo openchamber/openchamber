@@ -72,8 +72,8 @@ type Props = {
       line's cluster, as on a one-line row. */
   marks?: React.ReactNode;
   badges: React.ReactNode;
-  /** Jev's "looks done" check: it sits in the time cluster, where the hover
-      Done action appears, left of the status dot so the dot stays by the time. */
+  /** Jev's "looks done" check: it comes and goes, so it opens the time
+      cluster and the marks that stay keep their place at the row's end. */
   doneHint?: React.ReactNode;
   /** Reserves room for permanently shown action buttons on the title line. */
   metaPaddingClass?: string;
@@ -179,13 +179,13 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
   const meta = (withMarks: boolean) => <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
+    {doneHint}
     {compact ? goal : null}
     {compact ? zombieIndicator ?? prBadge : null}
     {withMarks ? marks : null}
     {compact ? badges : null}
     {directoryIndicator}
     {pinnedMarker}
-    {doneHint}
     {statusDot}
     {timeSlot ? <span className="typography-micro leading-none text-muted-foreground tabular-nums">{timeSlot}</span> : null}
   </span>;

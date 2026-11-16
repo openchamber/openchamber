@@ -11,15 +11,19 @@
  * must never pass for "nothing is running".
  */
 
-import { unwrapOpenCodeResponse } from './response-envelope.js';
 import { z } from 'zod';
 
-const CHILDREN_PAGE_SIZE = 50;
+import { sessionParentId } from '../session-lineage.js';
+import { unwrapOpenCodeResponse } from './response-envelope.js';
+
 /** OpenCode's 30-minute image timeout, plus a minute. */
 const IMAGE_JOB_LIFETIME_MS = 31 * 60 * 1000;
-const CHILDREN_MAX_PAGES = 8;
 const MAX_SUBAGENT_DEPTH = 8;
-const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
+const sessionLineageSchema = z.object({
+  id: z.string().min(1),
+  parentID: z.string().min(1).nullish(),
+  metadata: z.unknown().optional(),
+});
 const runningShellsSchema = z.array(z.object({
   status: z.string(),
   command: z.string(),
@@ -63,45 +67,14 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
   };
 
   /**
-   * v2 has no `/session/{id}/children`; `GET /api/session?parentID=` lists a
-   * parent's subagent sessions, newest first, in cursor pages. Later pages
-   * carry the filter inside the cursor, so only the cursor and the limit
-   * travel. A parent with more subagents than this walks is unknown (`null`).
+   * Read only active sessions' ancestry. Direct-child checks take one link;
+   * queue delivery follows up to MAX_SUBAGENT_DEPTH, as in the UI. A chain
+   * deeper than the requested depth is outside that check's scope. The
+   * direct-child check also counts a subagent of a workflow agent: the agent
+   * is linked to the session by metadata, not by OpenCode's parentID, and
+   * stands in for the session's own turn.
    */
-  const fetchChildSessionIds = async (sessionId) => {
-    const ids = [];
-    const seenCursors = new Set();
-    let cursor;
-    for (let pageNumber = 0; pageNumber < CHILDREN_MAX_PAGES; pageNumber += 1) {
-      const page = await openCodeGet('/api/session', {
-        limit: String(CHILDREN_PAGE_SIZE),
-        ...(cursor ? { cursor } : { parentID: sessionId }),
-      }).catch(() => null);
-      if (!Array.isArray(page?.data)) return null;
-      for (const child of page.data) {
-        if (typeof child?.id === 'string' && child.id) ids.push(child.id);
-      }
-      const next = page.cursor?.next;
-      if (!next || page.data.length === 0 || seenCursors.has(next)) return ids;
-      seenCursors.add(next);
-      cursor = next;
-    }
-    return null;
-  };
-
-  /** True when a subagent of the session is still running; null when unknown. */
-  const hasWorkingChildren = async (sessionId, statuses) => {
-    const children = await fetchChildSessionIds(sessionId);
-    if (!children) return null;
-    return children.some((id) => Boolean(statuses[id]));
-  };
-
-  /**
-   * Queue delivery waits for running descendants, including nested subagents.
-   * A chain deeper than `MAX_SUBAGENT_DEPTH` counts as unrelated, as in the
-   * UI's ancestor walk, so a deep tree elsewhere cannot hold every queue.
-   */
-  const hasWorkingDescendants = async (sessionId, statuses) => {
+  const hasWorkingWithinDepth = async (sessionId, statuses, maxDepth, directOnly = false) => {
     const parents = new Map();
     const signal = requestSignal();
     let unknown = false;
@@ -109,7 +82,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       if (activeId === sessionId) continue;
       let current = activeId;
       const visited = new Set();
-      for (let depth = 0; current && depth < MAX_SUBAGENT_DEPTH; depth += 1) {
+      for (let depth = 0; current && depth < maxDepth; depth += 1) {
         if (signal.aborted) return null;
         if (visited.has(current)) {
           unknown = true;
@@ -119,15 +92,20 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
         if (!parents.has(current)) {
           const body = await openCodeGet(`/api/session/${encodeURIComponent(current)}`, undefined, signal).catch(() => null);
           const parsed = sessionLineageSchema.safeParse(body);
-          parents.set(current, parsed.success && parsed.data.id === current ? parsed.data.parentID ?? null : undefined);
+          parents.set(current, parsed.success && parsed.data.id === current
+            ? { id: sessionParentId(parsed.data), viaWorkflowLink: !parsed.data.parentID && sessionParentId(parsed.data) !== null }
+            : undefined);
         }
-        const parentId = parents.get(current);
-        if (parentId === undefined) {
+        const parent = parents.get(current);
+        if (parent === undefined) {
           unknown = true;
           break;
         }
-        if (parentId === sessionId) return true;
-        current = parentId;
+        if (parent.id === sessionId) {
+          if (!directOnly || depth === 0 || parent.viaWorkflowLink) return true;
+          break;
+        }
+        current = parent.id;
       }
     }
     return unknown ? null : false;
@@ -194,9 +172,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
 
   return {
     fetchActiveSessionStatuses,
-    fetchChildSessionIds,
-    hasWorkingChildren,
-    hasWorkingDescendants,
+    hasWorkingChildren: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH, true),
+    hasWorkingDescendants: (sessionId, statuses) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
     fetchRunningShells,
     fetchRunningBackgroundJobs,
   };

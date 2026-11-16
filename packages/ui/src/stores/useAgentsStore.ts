@@ -11,7 +11,7 @@ import {
 } from "@/lib/configUpdate";
 import { waitForOpenCodeConnection } from "@/stores/waitForOpenCodeConnection";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
-import { useConfigStore } from "@/stores/useConfigStore";
+import { useConfigStore, invalidateConfigCatalogsForReload } from "@/stores/useConfigStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
@@ -88,6 +88,11 @@ const agentsLastLoadedAt = new Map<string, number>();
 const agentsLoadGeneration = new Map<string, number>();
 const agentsLoadInFlight = new Map<string, { generation: number; request: Promise<boolean> }>();
 let agentsGeneration = 0;
+// A configuration reload retires every directory's reads in the same runtime.
+// Kept apart from `agentsGeneration`, which means a runtime switch: a caller
+// waiting on a read retired here still needs the replacement list, while a
+// runtime switch must return failure instead of joining work for another host.
+let agentsReloadEpoch = 0;
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
@@ -98,6 +103,19 @@ export const invalidateAgentsLoadCache = (directory: string | null = getConfigDi
   agentsLastLoadedAt.delete(cacheKey);
   agentsLoadGeneration.set(cacheKey, (agentsLoadGeneration.get(cacheKey) ?? 0) + 1);
   opencodeClient.invalidateAgentList(directory);
+};
+
+/**
+ * A configuration reload can replace the agent list of every directory. Retire
+ * their reads without clearing the lists already shown; each directory re-reads
+ * when the user next opens it.
+ */
+export const invalidateAllAgentsLoadCaches = () => {
+  agentsReloadEpoch += 1;
+  agentsLastLoadedAt.clear();
+  agentsLoadGeneration.clear();
+  agentsLoadInFlight.clear();
+  opencodeClient.clearAgentListRequests();
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -508,13 +526,15 @@ export const useAgentsStore = create<AgentsStore>()(
           }
 
           const runtimeGeneration = agentsGeneration;
+          const reloadEpoch = agentsReloadEpoch;
           const runtimeKey = getRuntimeKey();
           // A catalog event may retire the read a create/delete is waiting for.
           // That caller still needs the current list, not a failed mutation toast.
           const wasRetired = (loadGeneration: number) => (
             agentsGeneration === runtimeGeneration
             && getRuntimeKey() === runtimeKey
-            && (agentsLoadGeneration.get(cacheKey) ?? 0) !== loadGeneration
+            && (agentsReloadEpoch !== reloadEpoch
+              || (agentsLoadGeneration.get(cacheKey) ?? 0) !== loadGeneration)
           );
 
           let inFlight = agentsLoadInFlight.get(cacheKey);
@@ -533,6 +553,7 @@ export const useAgentsStore = create<AgentsStore>()(
           const generation = agentsLoadGeneration.get(cacheKey) ?? 0;
           const isCurrentLoad = () => (
             agentsGeneration === runtimeGeneration
+            && agentsReloadEpoch === reloadEpoch
             && (agentsLoadGeneration.get(cacheKey) ?? 0) === generation
             && getRuntimeKey() === runtimeKey
           );
@@ -858,8 +879,6 @@ if (typeof window !== "undefined") {
   window.__zustand_agents_store__ = useAgentsStore;
 }
 
-type ConfigRefreshMode = "active" | "projects";
-
 const normalizeRefreshScopes = (scopes?: ConfigChangeScope[]): ConfigChangeScope[] => {
   if (!scopes || scopes.length === 0) {
     return ["all"];
@@ -877,11 +896,9 @@ async function performConfigRefresh(options: {
   message?: string;
   delayMs?: number;
   scopes?: ConfigChangeScope[];
-  mode?: ConfigRefreshMode;
 } = {}) {
   const { message, delayMs } = options;
   const scopes = normalizeRefreshScopes(options.scopes);
-  const mode: ConfigRefreshMode = options.mode ?? (scopes.includes("all") ? "projects" : "active");
 
   try {
     updateConfigUpdateMessage(message || "Refreshing configuration…");
@@ -904,37 +921,41 @@ async function performConfigRefresh(options: {
     const refreshCommands = scopes.includes("all") || scopes.includes("commands");
     const refreshSkills = scopes.includes("all") || scopes.includes("skills");
 
+    // Only the directory the user is working in is read. Every read boots that
+    // location's plugins and MCP servers, so reading the saved projects here is
+    // the fan-out #6815 reports. The other directories keep their loaded
+    // catalogs and are taken out of the freshness window, so they re-read when
+    // the user next opens them.
     const currentDirectory = getCurrentDirectory();
-    const projects = mode === "projects" ? useProjectsStore.getState().projects : [];
-    const directoriesToRefresh = Array.from(
-      new Set([
-        ...(currentDirectory ? [currentDirectory] : []),
-        ...projects.map((project) => project.path).filter(Boolean),
-      ]),
-    );
-
-    if (scopes.includes("all") && mode === "projects") {
-      useConfigStore.setState({ directoryScoped: {} });
+    if (refreshProviders || refreshSdkAgents) {
+      invalidateConfigCatalogsForReload([
+        ...(refreshProviders ? ["provider" as const] : []),
+        ...(refreshSdkAgents ? ["agent" as const] : []),
+      ]);
     }
-
-    if (refreshProviders) {
-      useConfigStore.getState().invalidateProviderCache(mode === "active" ? currentDirectory : undefined);
+    if (refreshAgentConfigs) {
+      invalidateAllAgentsLoadCaches();
     }
 
     const sdkRefreshTasks: Promise<void>[] = [];
-    for (const directory of directoriesToRefresh) {
-      if (refreshProviders) {
-        sdkRefreshTasks.push(configStore.loadProviders({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
-      }
-      if (refreshSdkAgents) {
-        sdkRefreshTasks.push(configStore.loadAgents({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
-      }
+    if (refreshProviders) {
+      sdkRefreshTasks.push(configStore.loadProviders({
+        directory: currentDirectory,
+        source: 'agentsStore:refreshConfig',
+        fresh: true,
+      }).then(() => undefined));
+    }
+    if (refreshSdkAgents) {
+      sdkRefreshTasks.push(configStore.loadAgents({
+        directory: currentDirectory,
+        source: 'agentsStore:refreshConfig',
+        fresh: true,
+      }).then(() => undefined));
     }
 
     const uiRefreshTasks: Promise<void>[] = [];
     if (refreshAgentConfigs) {
-      invalidateAgentsLoadCache(currentDirectory);
-      uiRefreshTasks.push(agentConfigStore.loadAgents().then(() => undefined));
+      uiRefreshTasks.push(agentConfigStore.loadAgents(currentDirectory).then(() => undefined));
     }
     if (refreshCommands) {
       invalidateCommandsLoadCache(currentDirectory);
@@ -965,7 +986,6 @@ export async function refreshAfterOpenCodeRestart(options?: {
   message?: string;
   delayMs?: number;
   scopes?: ConfigChangeScope[];
-  mode?: ConfigRefreshMode;
 }) {
   await performConfigRefresh(options);
 }
@@ -974,7 +994,6 @@ export async function reloadOpenCodeConfiguration(options?: {
   message?: string;
   delayMs?: number;
   scopes?: ConfigChangeScope[];
-  mode?: ConfigRefreshMode;
 }) {
   startConfigUpdate(options?.message || "Reloading OpenCode configuration…");
 
@@ -1004,7 +1023,6 @@ export async function reloadOpenCodeConfiguration(options?: {
     const refreshOptions = {
       ...options,
       scopes: options?.scopes ?? ["all"],
-      mode: options?.mode ?? "projects",
     };
 
     if (payload?.requiresReload) {

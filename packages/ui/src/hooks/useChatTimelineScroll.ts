@@ -16,6 +16,7 @@ import {
 import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
 import {
     isWaitingPageRevealPending,
+    pendingWaitingPageID,
     releaseWaitingPageRevealOutside,
     subscribeRequestReveal,
     takeWaitingPageReveal,
@@ -50,6 +51,7 @@ import {
     nestedScrollableConsumesWheelUp,
     onFrameScroll,
     dispatchPageWaiting,
+    findWaitingPage,
     onPageWaiting,
     onRowExpand,
     onTabStep,
@@ -1610,11 +1612,22 @@ export const useChatTimelineScroll = ({
         if (pinned || !scrollNode || !currentSessionKey) return;
         const showRequested = () => {
             if (scrollRef.current !== scrollNode || handledEntryKeyRef.current !== currentSessionKey) return;
+            const pageId = pendingWaitingPageID();
             if (!takeWaitingPageReveal(currentSessionIdRef.current)) return;
             restoreRef.current?.cancel();
             jumpToEnd('instant', true);
             revealedPagesRef.current.clear();
-            dispatchPageWaiting(scrollNode.querySelector<HTMLElement>('[data-waiting-page]'));
+            const block = findWaitingPage(scrollNode, pageId);
+            if (pageId === null || !block) {
+                dispatchPageWaiting(block);
+                return;
+            }
+            // A question card named by the reader (the dock's line, its
+            // toast) is their own request, like Next on Tabs: it comes into
+            // view whatever auto-follow says.
+            revealedPagesRef.current.add(pageId);
+            pageRevealRef.current = { pageId, block, generation: userGenerationRef.current, until: performance.now() + PAGE_REVEAL_SETTLE_MS };
+            revealWaitingPageRef.current();
         };
         showRequested();
         return subscribeRequestReveal(showRequested);

@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -584,6 +585,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': '自分には非表示',
   'settings.projects.shared.replaceMode': '自分のセットアップコマンドのみ使用し、リポジトリのものはスキップ',
   'settings.projects.shared.toast.shareFailed': 'リポジトリ設定を更新できませんでした',
+  'settings.projects.notesTodos.title': 'メモとTODO',
+  'settings.projects.notesTodos.inRepository': 'メモとTODOをリポジトリに保存',
+  'settings.projects.notesTodos.inRepositoryDescription': 'このマシンでは .openchamber/notes-todos.json から読み込み、そこに保存するため、Git で同期できます。オンにするとメモとTODOがファイルへ移動し、オフにするとファイルの項目がこのマシンにコピーされます。',
+  'settings.projects.notesTodos.toast.saveFailed': 'メモとTODOの保存先を変更できませんでした',
   'settings.projects.actions.state.loading': '読み込み中...',
   'settings.projects.actions.state.noDesktopSshForwards': '有効なローカル SSH 転送がありません。',
   'settings.projects.actions.field.selectIconAria': 'アイコンを選択',
@@ -1259,6 +1264,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'エージェント通知ツール',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'エージェント通知ツール',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "作業が終わったときや行き詰まったときにエージェントが知らせます。",
+  'settings.openchamber.tools.field.agentTerminalTool': 'ターミナルパネル',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'エージェントがこのフォルダーのターミナルを一覧し、出力された内容を読めるようにします。ターミナルには入力された内容がすべて残り、秘密情報も含まれるため、オンにするまで無効のままです。',
   'settings.openchamber.tools.field.agentKnowledgeTool': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "エージェントがプロジェクトのメモ、ToDo、プランを読み書きできます。",
@@ -2434,6 +2441,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'ターミナルビューに Esc、Ctrl、矢印を表示',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'シェル終了時にタブを閉じる',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'ターミナルとプロジェクトアクションに適用されます。オフにすると、開発サーバー停止後のログなど、タブに出力が残ります。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'プロジェクトアクションの開始時にターミナルを開く',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'オフにすると、サイドパネルを切り替えずにアクションが実行されます。出力はターミナルのアクションのタブに残ります。',
   'settings.openchamber.visual.field.fileEditorKeymap': 'ファイルエディターキーマップ',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'デフォルト',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2492,8 +2501,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': 'ファイルツリーの位置',
   'settings.openchamber.visual.option.fileTreeSide.left': '左',
   'settings.openchamber.visual.option.fileTreeSide.right': '右',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'ワイドチャットレイアウト',
-  'settings.openchamber.visual.field.wideChatLayout': 'ワイドチャットレイアウト',
+  'settings.openchamber.visual.field.chatWidth': 'チャットの幅',
+  'settings.openchamber.visual.field.chatWidthInfo': '標準と広めでは、メッセージが中央の列に表示されます。全幅ではメッセージがチャット全体を使い、入力欄は広めと同じ幅のままです。',
+  'settings.openchamber.visual.option.chatWidth.default.label': '標準',
+  'settings.openchamber.visual.option.chatWidth.wider.label': '広め',
+  'settings.openchamber.visual.option.chatWidth.full.label': '全幅',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'インラインアシスタントアクション',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'インラインアシスタントアクション',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '同じ応答内の後のツール呼び出しの前に表示されるアシスタントテキストブロックに、回答コピー、画像保存、読み上げを表示します。',
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ja,
   ...extensionsSettingsI18n.ja,
   ...settingsLayoutI18n.ja,
+  ...mobileAppSettingsI18n.ja,
   'settings.page.integrations.title': '連携',
   'settings.agents.page.field.steps': '最大ステップ数',
   'settings.agents.page.field.stepsTooltip': 'エージェントが 1 ターンで実行できるツールステップの上限です。',

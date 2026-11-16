@@ -37,8 +37,13 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
   const workKeeps = useUIStore(inWorkKeepsSessions);
 
   React.useEffect(() => {
-    if (needsGlobalSessions) void ensureGlobalSessionsLoaded();
-  }, [needsGlobalSessions]);
+    if (!needsGlobalSessions) return;
+    // An automatic run reads the complete list only when one is due: a root
+    // that does not otherwise keep that list (Mini Chat) would read it on
+    // every open. The Settings preview always needs it.
+    if (autoRun && autoDeleteLastRunAt && Date.now() - autoDeleteLastRunAt < RETENTION_INTERVAL_MS) return;
+    void ensureGlobalSessionsLoaded();
+  }, [needsGlobalSessions, autoRun, autoDeleteLastRunAt]);
 
   const candidates = React.useMemo(() => buildSessionRetentionCandidates({
     sessions: [...activeSessions, ...archivedSessions],

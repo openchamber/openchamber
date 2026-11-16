@@ -15,6 +15,8 @@ import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
 import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
 import { readCodexCliLogin, signInEmailOf } from '../../web/server/lib/quota/providers/codex-cli.js';
+import { formatCredits } from '../../web/server/lib/quota/utils/formatters.js';
+import { fetchCursorSummaryWindow } from '../../web/server/lib/quota/providers/cursor-summary.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -66,6 +68,7 @@ type OpenAiUsagePayload = {
   };
   spend_control?: {
     individual_limit?: {
+      unit?: string;
       limit?: number | string;
       used?: number | string;
       used_percent?: number | string;
@@ -1078,7 +1081,7 @@ const codexUsageWindowsOf = (payload: OpenAiUsagePayload) => {
     const valueLabel = unlimited
       ? 'Unlimited'
       : balance !== null
-        ? String(balance)
+        ? formatCredits(balance)
         : null;
     windows.credits_balance = toUsageWindow({
       usedPercent: null,
@@ -1091,10 +1094,13 @@ const codexUsageWindowsOf = (payload: OpenAiUsagePayload) => {
     const spendLimit = payload.spend_control.individual_limit;
     const used = toNumber(spendLimit.used);
     const limit = toNumber(spendLimit.limit);
+    const isUsd = spendLimit.unit === 'usd';
     const valueLabel = used !== null && limit !== null
-      ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+      ? isUsd
+        ? `$${formatMoney(used)} / $${formatMoney(limit)}`
+        : `${used.toFixed(0)} / ${limit.toFixed(0)} used`
       : null;
-    windows.credits = toUsageWindow({
+    windows[isUsd ? 'usage' : 'credits'] = toUsageWindow({
       usedPercent: toNumber(spendLimit.used_percent),
       windowSeconds: null,
       resetAt: null,
@@ -2648,6 +2654,10 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
         post('aiserver.v1.DashboardService/GetMe').catch(() => null),
       ]);
       const windows = cursorEnterpriseWindows(usage, plan, authUsage, hardLimit, cursorTeamMemberSpend(teamSpend, me?.userId));
+      if (!windows.billing_cycle) {
+        const summaryWindow = await fetchCursorSummaryWindow(accessToken).catch(() => null);
+        if (summaryWindow) windows.billing_cycle = summaryWindow;
+      }
       if (!windows.billing_cycle && !windows.on_demand) {
         return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: 'No active Cursor subscription' });
       }

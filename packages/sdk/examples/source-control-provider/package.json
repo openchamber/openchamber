@@ -57,7 +57,8 @@
             ]
           },
           "changeRequestPatch": true,
-          "liveSummaries": true
+          "liveSummaries": true,
+          "commentEdit": true
         },
         "token": {
           "header": "authorization",
@@ -97,7 +98,10 @@
               "/{owner}/{repo}/issues/{number}"
             ]
           },
-          "features": {},
+          "features": {
+            "issueEdit": true,
+            "changeRequestEdit": true
+          },
           "changeRequestTemplates": [
             ".gitea/pull_request_template.md",
             ".github/pull_request_template.md"

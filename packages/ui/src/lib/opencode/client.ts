@@ -2047,8 +2047,9 @@ class OpencodeService {
     return true
   }
 
-  async cancelForm(sessionID: string, formID: string, directory?: string | null): Promise<boolean> {
-    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID }))
+  /** A `message` reaches the asking tool: the question tool hands it to the model as its result and the turn goes on. */
+  async cancelForm(sessionID: string, formID: string, directory?: string | null, message?: string): Promise<boolean> {
+    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID, message }))
     return true
   }
 
@@ -2352,6 +2353,11 @@ class OpencodeService {
 
   clearAgentListRequests(): void {
     this.listAgentsInFlight.clear()
+  }
+
+  /** Retire provider catalogs read before a configuration reload. */
+  clearProviderCatalogRequests(): void {
+    this.providerCatalogInFlight.clear()
   }
 
   async listCommands(directory?: string | null, signal?: AbortSignal): Promise<Command[]> {

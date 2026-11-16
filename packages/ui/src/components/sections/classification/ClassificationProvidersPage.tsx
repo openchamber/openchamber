@@ -11,7 +11,6 @@ import {
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import type { ClassifierSource } from '@/lib/routing/routingApi';
@@ -44,6 +43,70 @@ const MissingKeyDescription: React.FC<{ text: string; linkLabel: string; onOpen:
     </span>
   </>
 );
+
+/**
+ * The Gemini key kept for Jev alone, apart from OpenCode's Google key, which
+ * would also open every Gemini chat model there. Saving it picks Gemini.
+ */
+const GeminiKeyField: React.FC = () => {
+  const { t } = useI18n();
+  const keyPresent = useRoutingStore((state) => state.geminiKeyPresent);
+  const setGeminiKey = useRoutingStore((state) => state.setGeminiKey);
+  const clearGeminiKey = useRoutingStore((state) => state.clearGeminiKey);
+  const [input, setInput] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = () => {
+    const key = input.trim();
+    if (!key) return;
+    void run(async () => {
+      await setGeminiKey(key);
+      setInput('');
+    });
+  };
+
+  return (
+    <>
+      <SettingsFieldRow label={t('settings.classification.gemini.key.label')} info={t('settings.classification.gemini.key.info')}>
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <Input
+            type="password"
+            autoComplete="off"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') save(); }}
+            placeholder={keyPresent ? t('settings.routing.token.replacePlaceholder') : t('settings.routing.token.placeholder')}
+            aria-label={t('settings.classification.gemini.key.label')}
+            className="h-8 rounded-md px-3 min-w-0 flex-1"
+            disabled={busy}
+          />
+          <Button size="sm" variant="outline" onClick={save} disabled={busy || input.trim().length === 0}>
+            {t('settings.routing.token.save')}
+          </Button>
+          {keyPresent ? (
+            <Button size="sm" variant="ghost" onClick={() => void run(clearGeminiKey)} disabled={busy}>
+              {t('settings.routing.token.remove')}
+            </Button>
+          ) : null}
+        </div>
+      </SettingsFieldRow>
+      {error ? <p className={SETTINGS_DESCRIPTION_CLASS}>{error}</p> : null}
+    </>
+  );
+};
 
 /**
  * Settings → Providers → Classification providers: where Jev requests go, for
@@ -129,6 +192,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const zenKeyUsable = usable('zen-key');
   const openrouterUsable = usable('openrouter');
   const vercelUsable = usable('vercel');
+  const geminiUsable = usable('gemini');
   const customUsable = usable('custom');
 
   return (
@@ -151,18 +215,13 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
       ) : (
         <>
         <SettingsSection
-          title={(
-            <span className="flex items-center gap-2">
-              <ProviderLogo providerId="typesafe" className="size-4 shrink-0" />
-              {t('settings.classification.jev.title')}
-            </span>
-          )}
-          info={t('settings.classification.jev.info')}
+          title={t('settings.classification.model.title')}
+          info={t('settings.classification.model.info')}
           settingsItem="providers.classification"
         >
           <div className={SETTINGS_FIELDS_STACK_CLASS}>
             {status ? <p className={SETTINGS_HELPER_CLASS}>{status}</p> : null}
-            <SettingsRadioGroup aria-label={t('settings.classification.jev.title')}>
+            <SettingsRadioGroup aria-label={t('settings.classification.model.title')}>
               <SettingsRadioOption
                 selected={classifier.selected === 'off'}
                 onSelect={() => void pick('off')}
@@ -230,6 +289,16 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                       )}
                   />
                   <SettingsRadioOption
+                    selected={classifier.selected === 'gemini'}
+                    onSelect={() => void pick('gemini')}
+                    disabled={!geminiUsable}
+                    label={t('settings.classification.source.gemini.name')}
+                    // The free-tier note shows before a key is saved too: saving one selects Gemini.
+                    description={geminiUsable
+                      ? t('settings.classification.source.gemini.description')
+                      : `${t('settings.classification.source.gemini.description')} ${t('settings.classification.source.gemini.missing')}`}
+                  />
+                  <SettingsRadioOption
                     selected={classifier.selected === 'typesafe'}
                     onSelect={() => void pick('typesafe')}
                     disabled={!tokenPresent}
@@ -283,6 +352,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
               </SettingsFieldRow>
             )}
             {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
+            {locked ? null : <GeminiKeyField />}
             <SettingsFieldRow label={null}>
               <ClassifierTestButton disabled={classifier.effective === null} />
             </SettingsFieldRow>

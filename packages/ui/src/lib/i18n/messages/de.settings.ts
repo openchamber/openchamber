@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -567,6 +568,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': 'Für mich ausblenden',
   'settings.projects.shared.replaceMode': 'Nur meine Setup-Befehle verwenden, die des Repositorys überspringen',
   'settings.projects.shared.toast.shareFailed': 'Repository-Konfiguration konnte nicht aktualisiert werden',
+  'settings.projects.notesTodos.title': 'Notizen und Aufgaben',
+  'settings.projects.notesTodos.inRepository': 'Notizen und Aufgaben im Repository speichern',
+  'settings.projects.notesTodos.inRepositoryDescription': 'Dieses Gerät liest und speichert sie in .openchamber/notes-todos.json, damit Git sie synchronisieren kann. Beim Einschalten werden deine Notizen und Aufgaben in die Datei verschoben; beim Ausschalten werden die Einträge der Datei zurück auf dieses Gerät kopiert.',
+  'settings.projects.notesTodos.toast.saveFailed': 'Speicherort für Notizen und Aufgaben konnte nicht geändert werden',
   'settings.projects.actions.state.loading': 'Wird geladen...',
   'settings.projects.actions.state.noDesktopSshForwards': 'Keine aktivierten lokalen SSH-Weiterleitungen verfügbar.',
   'settings.projects.actions.field.selectIconAria': 'Symbol auswählen',
@@ -1209,6 +1214,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': 'Agenten-Benachrichtigungswerkzeug',
   'settings.openchamber.tools.field.agentNotifyToolAria': 'Agenten-Benachrichtigungswerkzeug',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Agenten melden sich, wenn die Arbeit fertig ist oder sie feststecken.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Terminalbereich',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Lässt den Agenten die Terminals dieses Ordners auflisten und lesen, was sie ausgegeben haben. Ein Terminal enthält alles, was eingegeben wurde, auch Geheimnisse, daher bleibt dies aus, bis du es einschaltest.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Projektwissen-Werkzeug",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Projektwissen-Werkzeug",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agenten lesen und pflegen Notizen, Todos und Pläne des Projekts.",
@@ -2363,6 +2370,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Esc, Strg, Pfeiltasten in der Terminalansicht anzeigen',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Tab schließen, wenn die Shell beendet wird',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Gilt für Terminals und Projektaktionen. Wenn aus, behält der Tab seine Ausgabe, etwa das Log eines Dev-Servers nach dem Stopp.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Terminal öffnen, wenn eine Projektaktion startet',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Wenn aus, startet die Aktion, ohne das Seitenpanel zu wechseln. Ihre Ausgabe bleibt im Tab der Aktion im Terminal.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Tastaturlayout für Datei-Editor',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Standard',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2404,8 +2413,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.stickyUserHeader': 'Fixierter Benutzerkopf',
   'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'Prompt-Navigator',
   'settings.openchamber.visual.field.promptNavigatorEnabled': 'Prompt-Navigator',
-  'settings.openchamber.visual.field.wideChatLayoutAria': 'Breites Chat-Layout',
-  'settings.openchamber.visual.field.wideChatLayout': 'Breites Chat-Layout',
+  'settings.openchamber.visual.field.chatWidth': 'Chatbreite',
+  'settings.openchamber.visual.field.chatWidthInfo': 'Standard und Breiter halten Nachrichten in einer zentrierten Spalte. Voll nutzt den ganzen Chat für Nachrichten, das Eingabefeld bleibt so breit wie bei Breiter.',
+  'settings.openchamber.visual.option.chatWidth.default.label': 'Standard',
+  'settings.openchamber.visual.option.chatWidth.wider.label': 'Breiter',
+  'settings.openchamber.visual.option.chatWidth.full.label': 'Voll',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Codeblock-Zeilen umbrechen',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Codeblock-Zeilen umbrechen',
   'settings.openchamber.visual.field.tableCellWrap': 'Tabellenzellen umbrechen',
@@ -2724,6 +2736,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   ...settingsLayoutI18n.de,
+  ...mobileAppSettingsI18n.de,
   'settings.page.integrations.title': 'Integrationen',
   'settings.agents.page.field.steps': 'Max. Schritte',
   'settings.agents.page.field.stepsTooltip': 'Wie viele Tool-Schritte der Agent in einem Zug machen darf, bevor er stoppen muss.',

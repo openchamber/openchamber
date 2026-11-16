@@ -29,6 +29,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(WindowLayoutPlugin.class);
         registerPlugin(RuntimeWebSocketPlugin.class);
         registerPlugin(WidgetBridgePlugin.class);
+        registerPlugin(MobileDevTunnelPlugin.class);
         registerPlugin(SharedFilesPlugin.class);
         super.onCreate(savedInstanceState);
         // With singleTask, each share is its own event: this intent on a cold start, later

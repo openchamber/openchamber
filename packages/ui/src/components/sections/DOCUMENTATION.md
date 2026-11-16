@@ -146,6 +146,18 @@ maintainer decision; never add a recurring refresh). Provider metadata wins
 field by field and models.dev fills the gaps. Discovery failure never removes
 rows or blocks saving.
 
+The custom-provider form recognizes the bundled OpenCode adapters for its three protocols, including `anthropic-compatible`. An edit keeps the stored bundled provider package while its protocol stays the same. Changing the protocol selects that protocol's default AI SDK package. The live catalog fills missing display fields but never supplies a package to persist; retained model packages belong to the server's merge.
+
+The custom-provider form has a "Client certificate" section (certificate,
+private key, passphrase) for gateways that require mutual TLS; "Find models"
+presents the same certificate. It is on the custom form only: public APIs
+never ask for a client certificate, so on built-in providers the fields would
+be noise. Paths are saved as `{file:path}` references and only full paths are
+accepted, because OpenCode resolves a relative path beside its config file
+while discovery runs elsewhere, so the same path would read two different
+files. The server keeps a certificate the form never read
+(`packages/web/server/lib/opencode/DOCUMENTATION.md`, `providers.js`).
+
 Model rows render collapsed (name, id, limits, non-text inputs) so a provider
 with dozens of models stays scannable; a row added by hand opens, and a row
 with a validation error opens on submit. Capabilities are written to the
@@ -211,6 +223,10 @@ it when Settings opens. The snapshot is only a starting point: the page reads
 the list again on every visit and after every credential write, a read
 started earlier never replaces a later one, and a snapshot from another
 runtime is ignored.
+
+### Why an edit keeps the stored provider adapter
+
+Two adapters can implement the same API protocol and still load through different OpenCode paths. Replacing a bundled adapter with the form's AI SDK default during an unrelated edit changes the provider the user configured.
 
 ### Why runtime-only MCP rows wait for the config read
 
@@ -604,7 +620,7 @@ only ever sends v2.
 | Agent | `system` (the markdown body), `description`, `model` as `provider/model#variant`, `mode`, `steps`, `hidden`, `color`, `request.body.temperature` / `request.body.top_p`, and an ordered `permissions` rule list |
 | Command | `template` (the markdown body), `description`, `agent`, `model` with `#variant`, `subagent` |
 | MCP server | `type` (required), `command` / `url`, `environment`, `headers`, `disabled`, `codemode`, `timeout: { startup, catalog, execution }`, snake_case `oauth` |
-| Provider | `package` with the `aisdk:` prefix, `settings.baseURL`, `headers`, `body`, models keyed by id with `modelID`, `capabilities`, `variants`, `cost.cache.read/write`, `disabled` |
+| Provider | `package` with `aisdk:` for AI SDK adapters or a bare bundled OpenCode package, `settings.baseURL`, `headers`, `body`, models keyed by id with `modelID`, `capabilities`, `variants`, `cost.cache.read/write`, `disabled` |
 | Plugin | `{ package, options }`, serialized as a bare string when there are no options |
 
 Two consequences worth knowing:
@@ -760,3 +776,21 @@ the theme's canvas and accent.
 
 Imported themes add up quickly (the catalog, a themes folder). Without a cap
 the page below the list moves further down with every import.
+
+## About: the Android app's own update
+
+On the Android app, About shows the app's version with a "Download app
+{version}" button while the app's update check offers a newer APK, the same
+link as the update toast (`openchamber/AboutSettings.tsx`,
+`MobileAppUpdateToast.tsx`). The check button there checks the app build too.
+Closing the toast skips that version for the toast only; the button stays
+until the version is installed. iOS updates through the App Store and gets no
+button. The server's update buttons on the same page name the server or the
+desktop app they replace, never the phone app.
+
+### Why the button lives in About and the toast is not shown again
+
+A user who closed the toast already said no to it, so About is a quiet place
+to find the update instead of a toast that comes back. A second update item
+in the sessions footer was rejected: that item belongs to server updates in
+the browser, and a second meaning there confuses both.

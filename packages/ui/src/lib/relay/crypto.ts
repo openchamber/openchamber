@@ -153,8 +153,9 @@ export const createFrameEncryptor = (key: CryptoKey): FrameEncryptor => {
   };
 };
 
-// Enforces strictly increasing per-direction counters: the relay WS preserves
-// ordering, so any regression or replay means tampering and must fail closed.
+// Enforces consecutive per-direction counters: the relay WS preserves ordering
+// and loses nothing while open, so a regression or replay means tampering and
+// a gap means a lost or dropped message; both must fail closed.
 export const createFrameDecryptor = (key: CryptoKey): FrameDecryptor => {
   let lastCounter = 0n;
   return {
@@ -169,6 +170,9 @@ export const createFrameDecryptor = (key: CryptoKey): FrameDecryptor => {
       const counter = readCounter(iv, IV_PREFIX_BYTES);
       if (counter <= lastCounter) {
         throw new RelayCryptoError('frame counter regression');
+      }
+      if (counter !== lastCounter + 1n) {
+        throw new RelayCryptoError('frame counter gap');
       }
       let plaintext: ArrayBuffer;
       try {

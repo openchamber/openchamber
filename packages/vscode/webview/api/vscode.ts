@@ -1,5 +1,5 @@
 import type { VSCodeAPI } from '@openchamber/ui/lib/api/types';
-import { executeVSCodeCommand, openVSCodeExternalUrl, sendBridgeMessage } from './bridge';
+import { executeVSCodeCommand, openVSCodeExternalUrl, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 
 export const createVSCodeActionsAPI = (): VSCodeAPI => ({
   async executeCommand(command: string, ...args: unknown[]): Promise<unknown> {
@@ -20,14 +20,14 @@ export const createVSCodeActionsAPI = (): VSCodeAPI => ({
   },
 
   async pickFiles(options): Promise<unknown> {
-    return sendBridgeMessage('api:files/pick', options);
+    return sendBridgeMessageWithOptions('api:files/pick', options, { timeoutMs: 0 });
   },
 
   async saveImage(payload: unknown): Promise<unknown> {
-    return sendBridgeMessage('api:files/save-image', payload);
+    return sendBridgeMessageWithOptions('api:files/save-image', payload, { timeoutMs: 0 });
   },
 
   async saveMarkdown(payload: unknown): Promise<unknown> {
-    return sendBridgeMessage('api:files/save-markdown', payload);
+    return sendBridgeMessageWithOptions('api:files/save-markdown', payload, { timeoutMs: 0 });
   },
 });

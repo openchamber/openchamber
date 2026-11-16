@@ -9,7 +9,7 @@ import { isSharingTurnedOff } from '@/lib/share-pages/api';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
 /**
- * The pages this server received (decision 0018): what the `pages` surface
+ * The pages this server received: what the `pages` surface
  * lists, and whether the rail shows it at all. One feed for every reader (the
  * rail, the switch shortcut, the list, the phone's drawer), read on first use,
  * again on every `received-page-changed` event and after the event stream

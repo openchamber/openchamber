@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Message, Part } from '@/lib/opencode/model';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 
 import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -415,7 +415,7 @@ const RawMessageRow = React.memo(function RawMessageRow({
                 <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
               </Tooltip>
             </div>
-            <WorkerHighlightedCode
+            <HighlightedCode
               language="json"
               code={jsonValue}
               style={{

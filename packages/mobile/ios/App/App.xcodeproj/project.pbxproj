@@ -33,6 +33,8 @@
 		D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A2 /* ShortcutRequests.swift */; };
 		D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A1 /* RuntimeWebSocket.swift */; };
 		D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */; };
+		D0F2000000000000000000B3 /* MobileDevTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A3 /* MobileDevTunnel.swift */; };
+		D0F2000000000000000000B4 /* KeepAwake.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F1000000000000000000A4 /* KeepAwake.swift */; };
 		D0E2000000000000000000B3 /* SharedFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A3 /* SharedFiles.swift */; };
 		D0H2000000000000000000B1 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0H1000000000000000000A1 /* ShareInbox.swift */; };
 		D0H2000000000000000000B2 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0H1000000000000000000A1 /* ShareInbox.swift */; };
@@ -125,6 +127,8 @@
 		D0E1000000000000000000A2 /* ShortcutRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRequests.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A1 /* RuntimeWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocket.swift; sourceTree = "<group>"; };
 		D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeWebSocketTask.swift; sourceTree = "<group>"; };
+		D0F1000000000000000000A3 /* MobileDevTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileDevTunnel.swift; sourceTree = "<group>"; };
+		D0F1000000000000000000A4 /* KeepAwake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepAwake.swift; sourceTree = "<group>"; };
 		D0E1000000000000000000A3 /* SharedFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFiles.swift; sourceTree = "<group>"; };
 		D0H1000000000000000000A1 /* ShareInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInbox.swift; sourceTree = "<group>"; };
 		D0G1000000000000000000A1 /* ShareStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareStaging.swift; sourceTree = "<group>"; };
@@ -229,6 +233,8 @@
 				D0E1000000000000000000A2 /* ShortcutRequests.swift */,
 				D0F1000000000000000000A1 /* RuntimeWebSocket.swift */,
 				D0F1000000000000000000A2 /* RuntimeWebSocketTask.swift */,
+				D0F1000000000000000000A3 /* MobileDevTunnel.swift */,
+				D0F1000000000000000000A4 /* KeepAwake.swift */,
 				D0E1000000000000000000A3 /* SharedFiles.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -555,6 +561,8 @@
 				D0E2000000000000000000B2 /* ShortcutRequests.swift in Sources */,
 				D0F2000000000000000000B1 /* RuntimeWebSocket.swift in Sources */,
 				D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */,
+				D0F2000000000000000000B3 /* MobileDevTunnel.swift in Sources */,
+				D0F2000000000000000000B4 /* KeepAwake.swift in Sources */,
 				D0E2000000000000000000B3 /* SharedFiles.swift in Sources */,
 				D0H2000000000000000000B1 /* ShareInbox.swift in Sources */,
 				D0B2000000000000000000B3 /* PushClearing.swift in Sources */,
