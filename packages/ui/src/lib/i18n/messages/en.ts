@@ -631,6 +631,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'View',
   'sessions.sidebar.header.viewMode.projects': 'Tree',
   'sessions.sidebar.header.viewMode.timeline': 'List',
+  'sessions.sidebar.header.viewMode.headerless': 'Hide section headers',
   'sessions.sidebar.header.projectDisplay.label': 'Show projects',
   'sessions.sidebar.header.projectDisplay.all': 'All projects',
   'sessions.sidebar.header.listGrouping.label': 'Sessions',

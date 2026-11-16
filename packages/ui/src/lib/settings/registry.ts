@@ -403,6 +403,9 @@ export const SETTINGS_REGISTRY = {
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
+  // Headerless list (issue #21): the same order with no headers. Per surface
+  // so the phone keeps its own choice.
+  sidebarHeaderless: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('headerlessSidebar') }),
   // Tree zone row lines and optional row elements, as one value:
   // `stores/useSessionDisplayStore.ts` completes a stored one with the
   // defaults, field by field.

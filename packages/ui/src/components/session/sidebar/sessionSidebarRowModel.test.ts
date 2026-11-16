@@ -1027,3 +1027,116 @@ describe('buildSessionSidebarRowModel', () => {
     });
   });
 });
+
+describe('headerless sidebar', () => {
+  const HEADER_KINDS = new Set<SessionSidebarRow['kind']>(['activity-header', 'project-header', 'group-header', 'folder-header']);
+  const PROJECT_ICON_CONTEXTS = new Set(['timeline-mixed', 'timeline-by-time', 'mixed-flat']);
+  const sessionIds = (rows: readonly SessionSidebarRow[]): string[] => rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+  test('draws the normal order with no header rows, each session once at its first position', () => {
+    const child: SessionNode = { session: session('child', 'parent'), children: [], worktree: null };
+    const input = args([project([group([node('a'), node('b', [child])])])]);
+    input.pinnedItems = [timelineItem('a')];
+    input.workItems = [timelineItem('b')];
+    input.zoneSessionIds = new Set(['a', 'b']);
+
+    // Oracle: the normal projection's session order, keeping each ID's first
+    // appearance, is what a flat list without headers has to draw.
+    const normalIds = sessionIds(buildSessionSidebarRowModel(input).rows);
+    const expected = [...new Set(normalIds)];
+
+    const model = buildSessionSidebarRowModel({ ...input, headerless: true });
+    expect(sessionIds(model.rows)).toEqual(expected);
+    expect(sessionIds(model.rows)).toEqual(['a', 'b']);
+    expect(model.rows.some((row) => HEADER_KINDS.has(row.kind))).toBe(false);
+    // Collapse, section drag and the sticky header key off header rows, so a
+    // headerless list has none of them.
+    expect(model.stickyHeaders).toEqual([]);
+    expect(model.sectionHeaders).toEqual([]);
+    // Every row still names its own project.
+    expect(model.rows.every((row) => row.kind !== 'session' || PROJECT_ICON_CONTEXTS.has(row.renderContext))).toBe(true);
+  });
+
+  test('marks each section boundary with one thin divider and nothing before the first section', () => {
+    const input: SessionSidebarRowModelArgs = {
+      ...args([project([group([node('project-session')])])]),
+      headerless: true,
+      pinnedItems: [timelineItem('pinned-session')],
+      workItems: [timelineItem('work-session')],
+      zoneSessionIds: new Set(['pinned-session', 'work-session']),
+    };
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const kinds = rows.map((row) => row.kind);
+    expect(kinds).toEqual(['session', 'section-divider', 'session', 'section-divider', 'session']);
+    expect(rows.filter((row) => row.kind === 'section-divider').every((row) => row.estimateSize > 0)).toBe(true);
+  });
+
+  test('ignores collapse: there are no headers to close a section or project', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.workItems = [timelineItem('working')];
+    input.collapsedProjects = new Set(['project-a']);
+    input.collapsedGroups = new Set(['project-a:main']);
+    input.collapsedActivities = new Set(['work']);
+
+    expect(sessionIds(buildSessionSidebarRowModel({ ...input, headerless: true }).rows)).toEqual(['working', 'a', 'b']);
+  });
+
+  test('is flat: a subsession is not opened under its parent', () => {
+    const child: SessionNode = { session: session('child', 'parent'), children: [], worktree: null };
+    const input = args([project([group([node('parent', [child])])])]);
+    input.expandedParents = new Set(['project:active:parent']);
+
+    expect(sessionIds(buildSessionSidebarRowModel({ ...input, headerless: true }).rows)).toEqual(['parent']);
+  });
+
+  test('reveals twenty rows and twenty more from one whole-list Show more', () => {
+    const sessions = Array.from({ length: 25 }, (_, index) => node(`s${index}`));
+    const input = args([project([group(sessions)])]);
+
+    const first = buildSessionSidebarRowModel({ ...input, headerless: true }).rows;
+    expect(first.filter((row) => row.kind === 'session')).toHaveLength(20);
+    const more = first.find((row) => row.kind === 'show-control');
+    expect(more?.kind === 'show-control' && more.control).toBe('more');
+    expect(more?.kind === 'show-control' && more.containerKey).toBe('activity:headerless');
+    expect(more?.kind === 'show-control' && more.increment).toBe(20);
+
+    const expanded = buildSessionSidebarRowModel({
+      ...input,
+      headerless: true,
+      visibleCountByContainer: new Map([['activity:headerless', 40]]),
+    }).rows;
+    expect(expanded.filter((row) => row.kind === 'session')).toHaveLength(25);
+    const fewer = expanded.find((row) => row.kind === 'show-control');
+    expect(fewer?.kind === 'show-control' && fewer.control).toBe('fewer');
+  });
+
+  test('navigation and selection follow the rows actually drawn', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.pinnedItems = [timelineItem('a')];
+
+    const model = buildSessionSidebarRowModel({ ...input, headerless: true });
+    expect(model.navigationEntries.map((entry) => entry.sessionId)).toEqual(sessionIds(model.rows));
+    expect(model.selectionEntries.map((entry) => entry.id)).toEqual(sessionIds(model.rows));
+  });
+
+  test('List rows keep the project on a three-line row by time and a one-line compact row', () => {
+    const byTime = buildSessionSidebarRowModel({
+      ...args([project([group([])])]),
+      headerless: true,
+      viewMode: 'timeline',
+      listGrouping: 'time',
+      timelineItems: [timelineItem('a')],
+    }).rows;
+    expect(byTime).toMatchObject([{ kind: 'session', renderContext: 'timeline-by-time', node: { session: { id: 'a' } } }]);
+
+    const compact = buildSessionSidebarRowModel({
+      ...args([project([group([])])]),
+      headerless: true,
+      viewMode: 'timeline',
+      timelineItems: [timelineItem('a')],
+      timelineLayout: { chats: 'section', projectGroups: true, compactRows: true, chatsGroupIndex: 0 },
+    }).rows;
+    expect(compact).toMatchObject([{ kind: 'session', renderContext: 'mixed-flat', node: { session: { id: 'a' } } }]);
+  });
+});

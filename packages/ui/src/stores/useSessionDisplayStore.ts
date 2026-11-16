@@ -115,6 +115,13 @@ type SessionDisplayStore = {
   setSingleProjectId: (projectId: string) => void;
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
+  /**
+   * Draw the current view's section order without its section, project, group
+   * or folder headers (issue #21). Off by default; every row names its own
+   * project.
+   */
+  headerlessSidebar: boolean;
+  setHeaderlessSidebar: (headerless: boolean) => void;
   listSessionGrouping: ListSessionGrouping;
   setListSessionGrouping: (grouping: ListSessionGrouping) => void;
   /** Local display preference; motion remains opt-in. */
@@ -233,6 +240,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // choice, and VS Code always renders the grouped view.
       sidebarViewMode: 'timeline',
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
+      headerlessSidebar: false,
+      setHeaderlessSidebar: (headerless) => set({ headerlessSidebar: headerless }),
       listSessionGrouping: 'project',
       setListSessionGrouping: (grouping) => set({ listSessionGrouping: grouping }),
       showChatsSection: true,
@@ -259,7 +268,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 13,
+      version: 14,
       // v1→v2 adds projectSortOrder using the canonical manual ordering.
       // v2→v3 replaces the previously shipped recent default with manual.
       // v3→v4 removes displayMode (single sidebar row layout).
@@ -273,6 +282,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // v11→v12 folds detailedZoneRows into sessionRowDisplay.zoneLines.
       // v12→v13 folds sidebarLayout.timelineCompactRows into
       // sessionRowDisplay.listLines and adds chatsLines/projectLines.
+      // v13→v14 adds headerlessSidebar (off by default).
       migrate: migrateSessionDisplayState,
       // Hydration parses the sidebar layout and the row display whatever the
       // stored version: a missing one keeps the default, a stored one (also

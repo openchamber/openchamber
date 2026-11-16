@@ -450,6 +450,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Affichage',
   'sessions.sidebar.header.viewMode.projects': 'Arborescence',
   'sessions.sidebar.header.viewMode.timeline': 'Liste',
+  'sessions.sidebar.header.viewMode.headerless': 'Masquer les en-têtes de section',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
   'chat.chatInput.chooseProject': 'Choisir un projet',
   'sessions.archivePage.allDirectories': 'Tous les répertoires',

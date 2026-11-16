@@ -551,6 +551,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Görünüm',
   'sessions.sidebar.header.viewMode.projects': 'Ağaç',
   'sessions.sidebar.header.viewMode.timeline': 'Liste',
+  'sessions.sidebar.header.viewMode.headerless': 'Bölüm başlıklarını gizle',
   'chat.chatInput.chooseProject': 'Proje seç',
   'sessions.archivePage.allDirectories': 'Tüm dizinler',
   'sessions.sidebar.header.projectDisplay.label': 'Projeleri göster',

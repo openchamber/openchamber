@@ -130,6 +130,8 @@ type SessionProjectCollectionProps = {
     isDesktopShellRuntime: boolean;
     projectSortOrder: import('@/stores/useSessionDisplayStore').ProjectSortOrder;
     sidebarViewMode: SidebarViewMode;
+    /** Draw the same order with no section, project, group or folder headers. */
+    headerlessSidebar: boolean;
     emptyState: React.ReactNode;
     searchEmptyState: React.ReactNode;
     isSessionsLoading: boolean;
@@ -1028,7 +1030,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, hiddenFromAllProjectIds, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, attentionItems, zoneSessionIds, sidebarLayout.sectionOrder, timelineLayout, zoneRowLines, chatsRowLines, projectRowLines, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+    headerless: view.headerlessSidebar,
+  }), [runIndex, chatGroup, showChatsSection, hiddenFromAllProjectIds, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, pinnedItems, workItems, attentionItems, zoneSessionIds, sidebarLayout.sectionOrder, timelineLayout, zoneRowLines, chatsRowLines, projectRowLines, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.headerlessSidebar, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

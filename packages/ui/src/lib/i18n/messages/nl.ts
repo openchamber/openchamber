@@ -631,6 +631,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Weergave',
   'sessions.sidebar.header.viewMode.projects': 'Boom',
   'sessions.sidebar.header.viewMode.timeline': 'Lijst',
+  'sessions.sidebar.header.viewMode.headerless': 'Sectiekopteksten verbergen',
   'sessions.sidebar.header.projectDisplay.label': 'Projecten tonen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle projecten',
   'sessions.sidebar.header.listGrouping.label': 'Sessies',

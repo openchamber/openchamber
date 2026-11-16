@@ -593,6 +593,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'العرض',
   'sessions.sidebar.header.viewMode.projects': 'مجمّعة',
   'sessions.sidebar.header.viewMode.timeline': 'خط زمني',
+  'sessions.sidebar.header.viewMode.headerless': 'أخفاء عناوين الأقسام',
   'sessions.sidebar.header.projectDisplay.label': 'إظهار المشاريع',
   'sessions.sidebar.header.projectDisplay.all': 'كل المشاريع',
   'sessions.sidebar.header.listGrouping.label': 'الجلسات',

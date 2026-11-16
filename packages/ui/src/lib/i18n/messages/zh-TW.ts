@@ -657,6 +657,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '檢視',
   'sessions.sidebar.header.viewMode.projects': '樹狀',
   'sessions.sidebar.header.viewMode.timeline': '清單',
+  'sessions.sidebar.header.viewMode.headerless': '隱藏區段標題',
   'sessions.sidebar.activity.chatsEmpty': '尚無聊天。',
   'chat.chatInput.chooseProject': '選擇專案',
   'sessions.archivePage.allDirectories': '所有目錄',

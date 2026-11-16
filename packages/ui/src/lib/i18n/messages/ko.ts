@@ -629,6 +629,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '보기',
   'sessions.sidebar.header.viewMode.projects': '트리',
   'sessions.sidebar.header.viewMode.timeline': '목록',
+  'sessions.sidebar.header.viewMode.headerless': '섹션 헤더 숨기기',
   'sessions.sidebar.activity.chatsEmpty': '아직 채팅이 없습니다.',
   'chat.chatInput.chooseProject': '프로젝트 선택',
   'sessions.archivePage.allDirectories': '모든 디렉터리',

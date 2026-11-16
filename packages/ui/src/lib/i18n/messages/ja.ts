@@ -629,6 +629,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '表示',
   'sessions.sidebar.header.viewMode.projects': 'ツリー',
   'sessions.sidebar.header.viewMode.timeline': 'リスト',
+  'sessions.sidebar.header.viewMode.headerless': 'セクション見出しを隠す',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
   'sessions.archivePage.allDirectories': 'すべてのディレクトリ',

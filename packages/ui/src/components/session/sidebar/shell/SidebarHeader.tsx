@@ -231,6 +231,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setWorktreeSortOrder = useSessionDisplayStore((state) => state.setWorktreeSortOrder);
   const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
   const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
+  const headerlessSidebar = useSessionDisplayStore((state) => state.headerlessSidebar);
+  const setHeaderlessSidebar = useSessionDisplayStore((state) => state.setHeaderlessSidebar);
   const listSessionGrouping = useSessionDisplayStore((state) => state.listSessionGrouping);
   const setListSessionGrouping = useSessionDisplayStore((state) => state.setListSessionGrouping);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
@@ -303,6 +305,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
           {sidebarViewMode === mode ? checkMark : null}
         </DropdownMenuItem>
       ))}
+      {toggleItem('sessions.sidebar.header.viewMode.headerless', headerlessSidebar, () => {
+        const next = !headerlessSidebar;
+        setHeaderlessSidebar(next);
+        void updateDesktopSettings({ sidebarHeaderless: next });
+      })}
     </>);
   }
   // The list view keeps projects in the manual order and has no worktree
@@ -475,7 +482,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuSub>
     </>);
   }
-  if (!isSingleProjectMode) {
+  if (!isSingleProjectMode && !headerlessSidebar) {
     displayMenuSections.push(<>
       <DropdownMenuItem onClick={collapseAll} className="flex items-center gap-2">
         <Icon name="contract-up-down" className="h-4 w-4" />

@@ -638,6 +638,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.viewMode.label": "Vista",
   "sessions.sidebar.header.viewMode.projects": "Árbol",
   "sessions.sidebar.header.viewMode.timeline": "Lista",
+  "sessions.sidebar.header.viewMode.headerless": "Ocultar encabezados de sección",
   "sessions.sidebar.activity.chatsEmpty": "Aún no hay chats.",
   "chat.chatInput.chooseProject": "Elegir proyecto",
   "sessions.archivePage.allDirectories": "Todos los directorios",

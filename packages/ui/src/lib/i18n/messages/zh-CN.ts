@@ -629,6 +629,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '视图',
   'sessions.sidebar.header.viewMode.projects': '树形',
   'sessions.sidebar.header.viewMode.timeline': '列表',
+  'sessions.sidebar.header.viewMode.headerless': '隐藏分区标题',
   'sessions.sidebar.activity.chatsEmpty': '暂无聊天。',
   'chat.chatInput.chooseProject': '选择项目',
   'sessions.archivePage.allDirectories': '所有目录',

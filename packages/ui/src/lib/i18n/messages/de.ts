@@ -577,6 +577,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Ansicht',
   'sessions.sidebar.header.viewMode.projects': 'Baum',
   'sessions.sidebar.header.viewMode.timeline': 'Liste',
+  'sessions.sidebar.header.viewMode.headerless': 'Abschnittsüberschriften ausblenden',
   'sessions.sidebar.activity.chatsEmpty': 'Noch keine Chats.',
   'chat.chatInput.chooseProject': 'Projekt auswählen',
   'sessions.switcher.openAria': 'Sitzungswechsler öffnen',

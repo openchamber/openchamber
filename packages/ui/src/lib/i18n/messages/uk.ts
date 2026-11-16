@@ -638,6 +638,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.viewMode.label": "Вигляд",
   "sessions.sidebar.header.viewMode.projects": "Деревом",
   "sessions.sidebar.header.viewMode.timeline": "Списком",
+  "sessions.sidebar.header.viewMode.headerless": "Сховати заголовки розділів",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
   "sessions.archivePage.allDirectories": "Всі директорії",

@@ -593,6 +593,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'תצוגה',
   'sessions.sidebar.header.viewMode.projects': 'מקובץ',
   'sessions.sidebar.header.viewMode.timeline': 'ציר זמן',
+  'sessions.sidebar.header.viewMode.headerless': 'הסתרת כותרות מקטעים',
   'sessions.sidebar.header.projectDisplay.label': 'הצג פרויקטים',
   'sessions.sidebar.header.projectDisplay.all': 'כל הפרויקטים',
   'sessions.sidebar.header.listGrouping.label': 'הפעלות',
