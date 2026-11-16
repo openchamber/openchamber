@@ -1,11 +1,6 @@
 import { Gitlab } from '@gitbeaker/rest';
 import { isPlainObject, isString } from './validation.js';
 
-// GitBeaker's bundled requester follows redirects with the credential header
-// attached and re-sends every request, mutations included, after 429 and 502.
-// This requester keeps GitBeaker's request and response shapes but never
-// follows a redirect, and retries only reads: a write answered by a 502 may
-// already be applied, so it surfaces to the durable executor instead.
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
 
@@ -96,12 +91,6 @@ function createRequesterFn(fetchImpl) {
   };
 }
 
-/**
- * A file read from the instance's API, for the bytes GitBeaker would buffer.
- * The credential goes to the instance only: a redirect (object storage hands
- * out signed URLs) is followed once, without it, and only over HTTPS or on
- * the instance itself. A `Range` header passes through for video seeking.
- */
 export function createGitLabDownloader({ origin, token, tokenType = 'token', fetch: fetchImpl = (request) => fetch(request) }) {
   const credential = tokenType === 'oauth' ? { authorization: `Bearer ${token}` } : { 'private-token': token };
   return async (apiPath, { range, signal } = {}) => {
