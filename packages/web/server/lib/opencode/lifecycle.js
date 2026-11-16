@@ -8,19 +8,27 @@ import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses, readManagedProcessOwner, claimManagedProcess, readManagedProcessEntries, commandIdentifiesOurServer } from './managed-process-registry.js';
 import { parseBoundedIntWithDefault, parsePositiveIntWithDefault } from '../shared/parse-int.js';
 import {
+  appendGeneration,
   clearManagedOpenCodeState,
+  createEmptyManagedOpenCodeStore,
   createLaunchFingerprint,
   decideManagedOpenCodeLaunch,
   hashLaunchSecret,
+  migrateV1StoreToV2,
   readDrainingOpenCodeRecords,
   readLogSince,
   readLogTail,
   readManagedOpenCodeState,
-  resolveManagedOpenCodePaths,
+  readManagedOpenCodeStore,
+  recordHandoffStep,
+  reapManagedOpenCodeStore,
+  resolveManagedOpenCodeStorePaths,
   rotateManagedLogIfOversized,
   sameOpenCodeArgs,
+  transitionGenerationState,
   writeDrainingOpenCodeRecords,
   writeManagedOpenCodeState,
+  writeManagedOpenCodeStore,
 } from './managed-opencode-state.js';
 import { createDrainingOpenCodeRegistry, resolveOpenCodeDrainGraceMs } from './draining-opencode.js';
 import { buildManagedServersResponse } from './managed-servers.js';
@@ -269,7 +277,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // takes from environment variables are never stored in it, so this is the
   // only place their values can be read back (see auth.js).
   let managedProcessEnv = null;
-  const managedPaths = resolveManagedOpenCodePaths(dataDir);
+  const managedPaths = resolveManagedOpenCodeStorePaths(dataDir);
 
   const isManagedOpenCodeProcessAlive = () => {
     const child = state.openCodeProcess;
@@ -429,8 +437,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const writeOwnState = (record) => {
     ownRecord = record;
     writeManagedOpenCodeState(managedPaths.statePath, record);
+    recordGenerationStart(record);
   };
   const clearOwnState = () => {
+    if (ownRecord?.pid) closeGenerationForPid(ownRecord.pid);
     ownRecord = null;
     clearManagedOpenCodeState(managedPaths.statePath);
   };
@@ -439,6 +449,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     if (ownRecord?.pid === pid) ownRecord = null;
     const saved = readManagedOpenCodeState(managedPaths.statePath);
     if (saved?.pid === pid) clearManagedOpenCodeState(managedPaths.statePath);
+    closeGenerationForPid(pid);
   };
 
   const isPidAlive = (pid) => {
@@ -450,9 +461,125 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  // A recorded pid can be reused by an unrelated process, so it is signalled only when its command still matches.
+  // ---- v2 store wiring (#82) ----
+  // The v2 store (managed-opencode-state.js) is the ownership record for
+  // action paths. It is dual-written with the v1 pair for one release:
+  // state.json + draining.json keep their exact v1 behaviour for the
+  // other servers sharing this data dir, while the store accumulates
+  // the generation history, the write-ahead handoff record and the
+  // reaper's view. First read bootstraps the store by migrating the
+  // v1 pair (no lost generations); every load reaps generations whose
+  // recorded pid is gone (store-only reaper: signal-0 liveness, never
+  // `ps` inference). Store sync failures never break the v1 flow.
+  const syncStore = (fn) => {
+    try {
+      fn();
+    } catch (error) {
+      console.error(`[OpenCode] v2 store sync failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const loadManagedStore = () => {
+    let store = readManagedOpenCodeStore(managedPaths.storePath);
+    if (!store) {
+      const hasV1 = readManagedOpenCodeState(managedPaths.statePath) !== null
+        || readDrainingOpenCodeRecords(managedPaths.drainingPath).length > 0;
+      store = hasV1
+        ? migrateV1StoreToV2({ statePath: managedPaths.statePath, drainingPath: managedPaths.drainingPath })
+        : createEmptyManagedOpenCodeStore();
+      if (hasV1) writeManagedOpenCodeStore(managedPaths.storePath, store);
+    }
+    const { store: reapedStore, reaped } = reapManagedOpenCodeStore(store, { isPidAlive });
+    if (reaped.length > 0) writeManagedOpenCodeStore(managedPaths.storePath, reapedStore);
+    return reapedStore;
+  };
+  const generationForPid = (store, pid) => [...store.generations].reverse()
+    .find((generation) => generation.pid === pid && generation.state !== 'closed') ?? null;
+  const ensureGeneration = (store, record, state) => {
+    const existing = generationForPid(store, record.pid);
+    if (existing) return { store, generation: existing };
+    const next = appendGeneration(store, {
+      pid: record.pid,
+      port: record.port,
+      binary: record.binary,
+      args: record.args ?? [],
+      fingerprint: record.fingerprint ?? '',
+      state,
+      started_at: record.startedAt ?? new Date().toISOString(),
+    });
+    return { store: next, generation: generationForPid(next, record.pid) };
+  };
+  const recordGenerationStart = (record) => syncStore(() => {
+    const { store } = ensureGeneration(loadManagedStore(), record, 'active');
+    writeManagedOpenCodeStore(managedPaths.storePath, store);
+  });
+  const closeGenerationForPid = (pid) => syncStore(() => {
+    let store = loadManagedStore();
+    const generation = generationForPid(store, pid);
+    if (!generation) return;
+    store = transitionGenerationState(store, generation.generation_id, 'closed');
+    writeManagedOpenCodeStore(managedPaths.storePath, store);
+  });
+  const handoffIdFor = (predecessorPid, successorPid) => `handoff-${predecessorPid}-${successorPid}`;
+  // Write-ahead: 'prepared' is persisted after the successor exists but
+  // before the switch; 'switched' once the port points at the successor;
+  // 'confirmed' once the predecessor is draining; 'aborted' on failure.
+  // A crash between any two steps replays from the last persisted step
+  // (replayHandoffStep in managed-opencode-state.js).
+  const recordHandoffPrepared = (predecessor, successorPid, context) => syncStore(() => {
+    let store = loadManagedStore();
+    ({ store } = ensureGeneration(store, predecessor, 'active'));
+    const predecessorGeneration = generationForPid(store, predecessor.pid);
+    const successorGeneration = generationForPid(store, successorPid);
+    if (!predecessorGeneration || !successorGeneration) return;
+    const busy = Array.isArray(context?.busySessionIds)
+      ? context.busySessionIds
+      : (typeof listBusySessionIds === 'function' ? listBusySessionIds() : []);
+    store = recordHandoffStep(store, {
+      handoff_id: handoffIdFor(predecessor.pid, successorPid),
+      predecessor: predecessorGeneration.generation_id,
+      successor: successorGeneration.generation_id,
+      busy_set: (Array.isArray(busy) ? busy : []).map((id) => String(id)),
+      step: 'prepared',
+      outcome: null,
+      at: new Date().toISOString(),
+    });
+    writeManagedOpenCodeStore(managedPaths.storePath, store);
+  });
+  const recordHandoffAdvance = (predecessorPid, successorPid, step, outcome) => syncStore(() => {
+    let store = loadManagedStore();
+    const existing = store.handoffs.find((handoff) => handoff.handoff_id === handoffIdFor(predecessorPid, successorPid));
+    if (!existing) return;
+    store = recordHandoffStep(store, { ...existing, step, outcome, at: new Date().toISOString() });
+    writeManagedOpenCodeStore(managedPaths.storePath, store);
+    if (step === 'confirmed') {
+      const generation = generationForPid(store, predecessorPid);
+      if (generation && (generation.state === 'active' || generation.state === 'starting')) {
+        store = transitionGenerationState(store, generation.generation_id, 'draining');
+        writeManagedOpenCodeStore(managedPaths.storePath, store);
+      }
+    }
+  });
+  syncStore(() => loadManagedStore());
+
+  // Ownership for action paths comes from the records (#82): a pid is
+  // ours only when a non-closed store generation names it, or the v1
+  // pair does (a record a v1-only peer wrote after this store was
+  // bootstrapped). The record is then verified. A store generation is
+  // its own identity — binary, fingerprint and started_at were
+  // recorded at spawn — so signal-0 liveness verifies it and `ps` is
+  // never consulted on the store path. A v1-only record carries no
+  // such identity, so until the v1 pair retires it keeps the legacy
+  // command-line verification: a recycled pid must never be adopted
+  // or signalled on a bare number.
   const isOwnedOpenCodePid = (pid, binary) => {
     if (process.platform === 'win32' || !Number.isInteger(pid) || pid <= 0) return false;
+    const store = readManagedOpenCodeStore(managedPaths.storePath);
+    const inStore = store?.generations.some((generation) => generation.pid === pid && generation.state !== 'closed') ?? false;
+    if (inStore && isPidAlive(pid)) return true;
+    const recorded = inStore
+      || readManagedOpenCodeState(managedPaths.statePath)?.pid === pid
+      || readDrainingOpenCodeRecords(managedPaths.drainingPath).some((record) => record.pid === pid);
+    if (!recorded) return false;
     const result = spawnSyncProcess('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     const command = String(result?.stdout ?? '').trim();
     return command.includes(path.basename(binary)) && /\bserve\b/.test(command);
@@ -538,6 +665,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const closeRecordedOpenCodeProcess = async ({ pid, binary }) => {
     if (isOwnedOpenCodePid(pid, binary)) await terminateRecordedOpenCodeProcess(pid);
     if (!isPidAlive(pid)) await unregisterManagedProcess(pid);
+    closeGenerationForPid(pid);
   };
 
   // draining.json is shared by every server on the data dir; a write keeps the
@@ -548,6 +676,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const theirs = readDrainingOpenCodeRecords(managedPaths.drainingPath)
       .filter((record) => !mine.has(record.pid) && Number.isInteger(otherServerOwning(record.pid)));
     writeDrainingOpenCodeRecords(managedPaths.drainingPath, [...records, ...theirs]);
+    syncStore(() => {
+      let store = loadManagedStore();
+      for (const record of [...records, ...theirs]) {
+        if (!Number.isInteger(record.port) || record.port <= 0 || typeof record.binary !== 'string') continue;
+        const generation = generationForPid(store, record.pid);
+        if (!generation) {
+          ({ store } = ensureGeneration(store, record, 'draining'));
+        } else if (generation.state === 'active' || generation.state === 'starting') {
+          store = transitionGenerationState(store, generation.generation_id, 'draining');
+        }
+      }
+      writeManagedOpenCodeStore(managedPaths.storePath, store);
+    });
   };
 
   const drainingOpenCode = createDrainingOpenCodeRegistry({
@@ -589,7 +730,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   });
 
   const seedDrainingOpenCode = () => {
-    for (const record of readDrainingOpenCodeRecords(managedPaths.drainingPath)) {
+    const recordsByPid = new Map();
+    for (const record of readDrainingOpenCodeRecords(managedPaths.drainingPath)) recordsByPid.set(record.pid, record);
+    const store = readManagedOpenCodeStore(managedPaths.storePath);
+    for (const generation of store?.generations ?? []) {
+      if (generation.state === 'draining' && !recordsByPid.has(generation.pid)) {
+        recordsByPid.set(generation.pid, { pid: generation.pid, port: generation.port, binary: generation.binary });
+      }
+    }
+    for (const record of recordsByPid.values()) {
       if (drainingOpenCode.has(record.pid) || !isOwnedOpenCodePid(record.pid, record.binary) || otherServerOwning(record.pid) !== null) continue;
       drainingOpenCode.add({
         ...record,
@@ -1198,10 +1347,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           startedAt: new Date().toISOString(),
         });
         handoffPredecessor = savedState;
+        recordHandoffPrepared(savedState, serverInstance.pid, handoffContext);
       } else {
         if (savedState) {
           if (decision.action === 'replace') {
             await terminateRecordedOpenCodeProcess(savedState.pid);
+            closeGenerationForPid(savedState.pid);
             await waitForPortRelease(savedState.port, 5000);
           }
           clearOwnState();
@@ -1275,7 +1426,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         });
 
         if (handoffPredecessor) {
+          recordHandoffAdvance(handoffPredecessor.pid, serverInstance.pid, 'switched', null);
           retireHandoffPredecessor(handoffPredecessor, handoffContext?.busySessionIds ?? null);
+          recordHandoffAdvance(handoffPredecessor.pid, serverInstance.pid, 'confirmed', 'predecessor-draining');
         }
         return serverInstance;
       }
@@ -1287,6 +1440,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (serverInstance && state.openCodeProcess === serverInstance) state.openCodeProcess = null;
       if (handoffPredecessor) writeOwnState(handoffPredecessor);
       const message = error instanceof Error ? error.message : String(error);
+      if (handoffPredecessor && serverInstance?.pid) {
+        recordHandoffAdvance(handoffPredecessor.pid, serverInstance.pid, 'aborted', message);
+        closeGenerationForPid(serverInstance.pid);
+      }
       state.lastOpenCodeError = message;
       if (!handoffContext) state.openCodePort = null;
       syncToHmrState();
