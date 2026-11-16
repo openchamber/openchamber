@@ -1,50 +1,26 @@
-/**
- * Background shell commands, as the transcript and the shell routes report them.
- *
- * OpenCode 2.x runs a `shell` call with `background: true` (or one moved to the
- * background mid-run) as a job and settles the tool call at once: its
- * metadata carries `status: "running"` and the `shellID`, and its text is a
- * "moved to the background" notice followed by instructions for the model.
- * While the command runs, `/api/shell` lists it with the originating session
- * in its metadata, and `shell.created` / `shell.exited` / `shell.deleted`
- * announce it on the event stream. When the job settles, OpenCode appends one
- * synthetic message whose metadata names the shell (`source: "shell"`) and
- * whose text wraps the result in a `<shell …>` envelope (core
- * `tool/plugin/shell.ts`, `shell/result.ts`).
- */
 
 import { z } from "zod"
 
 import type { Message, Metadata, ToolPart } from "./model"
 
-/** A command the shell service is still running for a session. */
 export type RunningShell = {
   id: string
   sessionID: string
   command: string
-  /** File the combined output streams to. */
   file: string
   startedAt: number
 }
 
-/**
- * How the shell service reported a command's end on the event stream. A
- * command exits with a terminal status, or is removed: a running command by
- * a user's Stop (the shell route) or by aborting the turn whose tool call
- * waits on it, an exited one when OpenCode evicts it from its history.
- */
 export type ShellEnd =
   | { kind: "exited"; status: "exited" | "timeout" | "killed"; exit?: number }
   | { kind: "removed" }
 
-/** How a background command ended, from its completion message. */
 export type ShellCompletion = {
   shellID: string
   state: "completed" | "cancelled" | "error"
   exit?: number
   signal?: string
   timeout?: boolean
-  /** Captured output and any failure notice, without the envelope. */
   output: string
   endedAt: number
 }
@@ -54,20 +30,11 @@ const callMetadataSchema = z.object({
   shellID: z.string().min(1),
 })
 
-/**
- * The shell id of a call OpenCode moved to the background, or undefined for
- * any other call. Only a settled call carries the marker.
- */
 export function readBackgroundShellID(part: ToolPart): string | undefined {
   if (part.state.status !== "completed") return undefined
   return readBackgroundShellIDFromMetadata(part.state.metadata)
 }
 
-/**
- * The shell id in the metadata a call settles with when its command went to
- * the background. A call that waits for its command settles only after the
- * command ended, without this marker.
- */
 export function readBackgroundShellIDFromMetadata(metadata: Metadata | undefined): string | undefined {
   const parsed = callMetadataSchema.safeParse(metadata ?? {})
   return parsed.success ? parsed.data.shellID : undefined
@@ -75,11 +42,6 @@ export function readBackgroundShellIDFromMetadata(metadata: Metadata | undefined
 
 const runningCallMetadataSchema = z.object({ shellID: z.string().min(1) })
 
-/**
- * The shell id of a call the turn still waits for, or undefined for any other
- * call. While the command runs, OpenCode's only progress update carries just
- * this id; the output reaches the call when the command ends.
- */
 export function readRunningShellID(part: ToolPart): string | undefined {
   if (part.state.status !== "running") return undefined
   const parsed = runningCallMetadataSchema.safeParse(part.state.metadata ?? {})
@@ -97,7 +59,6 @@ const completionMetadataSchema = z.object({
 
 const ENVELOPE = /^\s*<shell\b[^>]*>\n?([\s\S]*?)\n?<\/shell>\s*$/
 
-/** The background command a message reports the end of, or undefined for any other message. */
 export function readShellCompletion(message: Message): ShellCompletion | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = completionMetadataSchema.safeParse(message.metadata ?? {})
@@ -114,9 +75,7 @@ export function readShellCompletion(message: Message): ShellCompletion | undefin
   }
 }
 
-/** The completion of one background command among a session's messages. */
 export function findShellCompletion(messages: readonly Message[], shellID: string): ShellCompletion | undefined {
-  // The completion lands after the call, so the newest messages are checked first.
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const completion = readShellCompletion(messages[index])
     if (completion?.shellID === shellID) return completion
@@ -131,37 +90,24 @@ export const shellCompletionFailed = (completion: ShellCompletion): boolean => (
   || (completion.exit !== undefined && completion.exit !== 0)
 )
 
-// --- Stopping a background command -------------------------------------------
-//
-// OpenCode 2.0.19 has no cancel route for a background job. `shell.remove`
-// kills the process, but the completion it hands the agent is an error
-// (`Shell.NotFoundError`, "nothing ran"), and agents answer that by running
-// the command again. OpenChamber therefore tells the agent first, in a
-// synthetic message that does not resume the session, what that error is.
-// The message only corrects the reading of the error; it must not forbid
-// the command, or an agent keeps avoiding it for the rest of the session.
+// external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/tool/plugin/shell.ts Removing a shell reports Shell.NotFoundError to the agent, so a cancellation note precedes removal.
 
-// Stopping several commands at once writes one note for all of them, so the
-// agent reads a single explanation before the completions arrive together.
 
 const CANCELLATION_METADATA_KEY = "openchamberShellCancellation"
 
 const cancellationMetadataSchema = z.object({
   [CANCELLATION_METADATA_KEY]: z.union([
     z.object({ shellIDs: z.array(z.string().min(1)).min(1) }),
-    // Notes written before stops were grouped name one shell.
     z.object({ shellID: z.string().min(1) }).transform((value) => ({ shellIDs: [value.shellID] })),
   ]),
 })
 
 export type StoppedShell = { shellID: string; command: string }
 
-/** A command to stop, with the directory its shell runs in. */
 export type ShellToStop = StoppedShell & { shellDirectory: string }
 
 const describeStoppedShell = (shell: StoppedShell): string => `\`${shell.command}\` (shell ID: ${shell.shellID})`
 
-/** The note that precedes stopping background commands of one session. Model-facing text, never shown in the UI. */
 export function shellCancellationNote(shells: readonly [StoppedShell, ...StoppedShell[]]) {
   const single = shells.length === 1
   return {
@@ -183,14 +129,12 @@ export function shellCancellationNote(shells: readonly [StoppedShell, ...Stopped
   }
 }
 
-/** The shells a stop note is about, or undefined for any other message. */
 export function readShellCancellation(message: Message): { shellIDs: string[]; stoppedAt: number } | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = cancellationMetadataSchema.safeParse(message.metadata ?? {})
   return parsed.success ? { shellIDs: parsed.data[CANCELLATION_METADATA_KEY].shellIDs, stoppedAt: message.time.created } : undefined
 }
 
-/** When the user stopped one background command, if they did. */
 export function findShellCancellation(messages: readonly Message[], shellID: string): { stoppedAt: number } | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const cancellation = readShellCancellation(messages[index])
@@ -210,11 +154,6 @@ type ShellInfoWire = {
   time: { started: number }
 }
 
-/**
- * A running command started on behalf of a session. The shell tool tags every
- * command it spawns with the session; commands without one (a terminal the
- * TUI opened) belong to no session and are not tracked.
- */
 export function runningShellFromWire(info: ShellInfoWire): RunningShell | undefined {
   if (info.status !== "running") return undefined
   const owner = shellOwnerSchema.safeParse(info.metadata)

@@ -1,13 +1,3 @@
-/**
- * A command the user runs from a code block of the agent's reply.
- *
- * OpenCode runs it as a user shell command, the way `!command` does, and hands
- * the agent the output without waking it. The chat adds two synthetic messages
- * around that run, both hidden from the timeline: a note before it that ties
- * the shell message to the block, so the block finds its run again after a
- * reload, and a continuation after it that starts the agent's next turn.
- * `session.shell` takes no metadata, so the note is the only durable link.
- */
 
 import { z } from "zod"
 
@@ -30,7 +20,6 @@ const noteSchema = z.object({
 
 export type ReplyCommandNote = z.infer<typeof noteSchema>
 
-/** No description: a labelled synthetic message draws as a notice row. */
 export function replyCommandNote(note: ReplyCommandNote) {
   return {
     text: `The user is running this command from your reply:\n${note.command}`,
@@ -66,21 +55,16 @@ export type ShellMessage = Extract<Message, { role: "shell" }>
 export type ReplyCommandRun = {
   note: ReplyCommandNote
   shell: ShellMessage
-  /** How the command ended, once OpenCode handed the output to the agent. */
   completion?: ShellCompletion
-  /** The agent has been asked to continue from this run. */
   continued: boolean
 }
 
-/** The newest run of `command` from the reply, or null while it has none. */
 export function findReplyCommandRun(messages: readonly Message[], replyMessageID: string, command: string): ReplyCommandRun | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const note = readReplyCommandNote(messages[index])
     if (note?.replyMessageID !== replyMessageID || note.command !== command) continue
-    // OpenCode orders the shell by the id minted before the note went out, so
-    // it can sort ahead of the note.
+    // external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/session A shell ID is minted before the linking note and can sort ahead of it.
     const shell = messages.find((message): message is ShellMessage => message.role === "shell" && message.id === note.shellMessageID)
-    // A note whose command never started leaves the block as if it never ran.
     if (!shell) continue
     return {
       note,
@@ -92,16 +76,10 @@ export function findReplyCommandRun(messages: readonly Message[], replyMessageID
   return null
 }
 
-/** The run still owes the agent its continuation. A command the user stopped owes none. */
 export const awaitsContinuation = (run: ReplyCommandRun): boolean => (
   run.completion !== undefined && run.completion.state !== "cancelled" && !run.continued
 )
 
-/**
- * The records without the shell rows a block of a loaded reply shows itself.
- * A run whose reply is outside the loaded history keeps its row, so it stays
- * visible somewhere. Returns the input unchanged when nothing is dropped.
- */
 export function dropReplyCommandRows<T extends { info: Message }>(records: T[]): T[] {
   const replyOfShell = new Map<string, string>()
   const replies = new Set<string>()
