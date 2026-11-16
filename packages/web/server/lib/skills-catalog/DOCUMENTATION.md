@@ -15,6 +15,14 @@ This module provides skill discovery, scanning, and installation capabilities fo
   - `scan.js`: Skills scanning from git repositories.
   - `source.js`: Source string parsing for git repositories.
 
+## Invariants
+
+- The in-memory scan and metadata caches are authoritative. A disk write that fails or is skipped keeps every entry for the running process, and the next successful write persists the current entries.
+- The data directory is resolved on every call, so a test can point `OPENCHAMBER_DATA_DIR` at a fresh directory. The installed-sources temp file name is unique per write, so two installs finishing together never rename each other's file away.
+- A scan of a subpath that does not exist returns `ok: true` with no items. A failed `ls-tree` reads as an empty catalog, so a mistyped or removed subpath shows no skills instead of an error.
+- A root-level `SKILL.md` is dropped from scan results. OpenCode names a skill after the folder that holds it, and a file at the repository root has no such folder name.
+- A source `#ref` is limited to letters, digits and `._/-`, never starts with `-` (it becomes a git argument) and never contains `..`.
+
 ## Public API
 
 The following functions are exported and used by the web server:
@@ -137,10 +145,14 @@ The following functions are internal helpers used by exported functions:
 - Per-skill decisions override global policy via `conflictDecisions` map.
 - Conflict response includes `{ skillName, scope, source }` for each conflict.
 
+### Why an SSH source takes its subpath only from options
+An SSH URL is `git@host:owner/repo.git`, so the part after the colon is the repository itself and nothing in the URL can name a skill subpath. `options.subpath` is the only source of a subpath for an SSH source. A shorthand source reads the subpath from the URL tail, as in `owner/repo/sub/path`.
+
 ### Cache Management
-- Cache keys include `normalizedRepo`, `subpath`, and `identityId` for isolation.
+- Cache keys include `normalizedRepo`, `ref`, `subpath`, and `identityId` for isolation. The ref belongs in the key because branches of one repository are different catalogs.
 - Default TTL is 3 hours for both scan results and GitHub repository metadata.
 - Scan and GitHub metadata caches persist to JSON files in the OpenChamber data dir, so app restarts and page refreshes reuse previous results instead of re-hitting GitHub.
+- GitHub metadata lookups time out after 1.5 seconds, well under the catalog route's client request deadline, so optional enrichment never aborts catalog loading. A failed lookup is cached for five minutes, which keeps a rate-limited or failing API from being hit on every catalog load.
 - Scans run through a global concurrency limiter (2 at a time) with per-key in-flight deduplication.
 - The refresh button passes `refresh: true` and bypasses the cache.
 

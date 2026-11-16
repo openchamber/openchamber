@@ -53,7 +53,6 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
         throw new Error('Symlinks are not supported in skills');
       }
 
-      // Guard against traversal: ensure source is still under srcReal
       const nextRealParent = await fs.promises.realpath(path.dirname(nextSrc));
       if (!nextRealParent.startsWith(srcReal)) {
         throw new Error('Invalid source path traversal detected');
@@ -75,8 +74,6 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
         }
         continue;
       }
-
-      // Skip other types (sockets, devices, etc.)
     }
   };
 
@@ -84,7 +81,6 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
 }
 
 async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref = null }) {
-  // A `#ref` on the source picks the branch or tag; otherwise the default branch.
   const branch = ref ? ['--branch', ref] : [];
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, tempDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, tempDir];
@@ -181,7 +177,6 @@ export async function installSkillsFromRepository({
     return { ok: false, error: { kind: 'invalidSource', message: 'No skills selected for installation' } };
   }
 
-  // Validate names early and compute conflicts without mutating.
   const skillPlans = requestedDirs.map((skillDirPosix) => {
     const skillName = path.posix.basename(skillDirPosix);
     return { skillDirPosix, skillName, installable: validateSkillName(skillName) };
@@ -227,15 +222,12 @@ export async function installSkillsFromRepository({
       return { ok: false, error: { kind: 'networkError', message: msg || 'Failed to clone repository' } };
     }
 
-    // Selective checkout for only requested skill dirs.
     await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
     const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
     if (!setResult.ok) {
       return { ok: false, error: { kind: 'unknown', message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
     }
 
-    // The checkout fetches the selected blobs from the partial clone, so it
-    // authenticates like the clone did.
     const checkoutResult = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { identity, credentialResolver, timeoutMs: 60_000 });
     if (!checkoutResult.ok) {
       return { ok: false, error: { kind: 'unknown', message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
@@ -264,7 +256,7 @@ export async function installSkillsFromRepository({
       if (!decision) {
         if (exists && conflictPolicy === 'skipAll') decision = 'skip';
         if (exists && conflictPolicy === 'overwriteAll') decision = 'overwrite';
-        if (!exists) decision = 'overwrite'; // no conflict, proceed
+        if (!exists) decision = 'overwrite';
       }
 
       if (exists && decision === 'skip') {
@@ -276,7 +268,6 @@ export async function installSkillsFromRepository({
         await removeDirectory(targetDir);
       }
 
-      // Ensure project parent directories exist
       await ensureDir(path.dirname(targetDir));
 
       try {
