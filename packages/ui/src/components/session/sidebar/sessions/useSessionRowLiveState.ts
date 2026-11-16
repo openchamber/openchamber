@@ -17,7 +17,6 @@ type SessionRowLiveStateInput = {
   timelineBadgeSessionScopes: readonly BlockingBadgeSessionScope[] | undefined;
 };
 
-/** What is happening to a session right now, as its row shows it: a running turn, a pending request, an unread result, a move or an AI rename. */
 export function useSessionRowLiveState({
   node,
   sessionDirectory,
@@ -31,8 +30,6 @@ export function useSessionRowLiveState({
   );
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
-  // Read as a boolean, not as the value: the row must not re-render on every
-  // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
   const isAiRenaming = useIsSessionAiRenamePending(session.id, sessionDirectory);
@@ -49,12 +46,7 @@ export function useSessionRowLiveState({
   const markedUnread = useSessionMarkedUnread(session.id);
   const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && (!isActive || markedUnread);
   const showStatusMarker = isStreaming || showUnreadStatus;
-  // The settled duration lives exactly as long as the unread marker does, so a
-  // session read (or watched) while it finishes never keeps a stale total.
   const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration;
-  // A request waiting on the user stands for the turn: the session is stopped
-  // on it, so the running mark and its timer step aside for the one warning
-  // mark (the timer reads its start from the store and resumes where it is).
   const waitingOnUser = hasPendingPermission || hasPendingForm;
   return {
     isZombie,

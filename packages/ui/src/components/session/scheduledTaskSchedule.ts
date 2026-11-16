@@ -2,7 +2,6 @@ import type { useI18n } from '@/lib/i18n';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { canonicalizeTimezone } from '@/lib/timezones';
 
-/** A task's run times as HH:mm, each once, in order; malformed entries are dropped. */
 const scheduleTimes = (schedule: ScheduledTask['schedule']): string[] => {
   const raw = Array.isArray(schedule.times)
     ? schedule.times
@@ -11,7 +10,6 @@ const scheduleTimes = (schedule: ScheduledTask['schedule']): string[] => {
   return Array.from(new Set(valid)).sort((a, b) => a.localeCompare(b));
 };
 
-/** A task's schedule in words, as the Scheduled tasks list and the chat show it. */
 export const formatSchedule = (schedule: ScheduledTask['schedule'], t: ReturnType<typeof useI18n>['t']): string => {
   const timesLabel = scheduleTimes(schedule).join(', ') || '--:--';
   const formatWeekday = (value: number) => {

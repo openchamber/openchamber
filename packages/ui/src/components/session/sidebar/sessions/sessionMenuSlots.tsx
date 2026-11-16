@@ -11,7 +11,6 @@ import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorCla
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 
-/** Menu primitives of the surface a session menu opens in. */
 export type SessionMenuSlots = {
   Item: React.ElementType;
   Separator: React.ElementType;

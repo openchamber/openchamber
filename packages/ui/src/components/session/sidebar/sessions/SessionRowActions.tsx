@@ -33,9 +33,7 @@ type SessionRowActionsProps = {
   menuContent: React.ReactNode;
 };
 
-// Base UI's trigger handlers open the menu, so it records the click and
-// stays open when the pointer leaves it. A menu opened only through `open`
-// has no open event, and Base UI closes it on pointer leave like a hover menu.
+// external: https://base-ui.com/react/components/menu Trigger handlers record the opening event so a clicked menu stays open on pointer leave.
 const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
   event.stopPropagation();
 };
@@ -48,7 +46,6 @@ const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) 
   event.stopPropagation();
 };
 
-/** The buttons a row shows over its right end: track or finish work, quick archive, open in the editor, and the ⋯ menu. */
 export function SessionRowActions({
   layout,
   session,
@@ -113,10 +110,6 @@ export function SessionRowActions({
   return (
     <div className={cn(
       'absolute inset-e-1 z-10 flex items-center gap-0.5',
-      // Timeline actions overlay the first line's right cluster, not the
-      // row's vertical centre.
-      // Two-line rows: the row's 6px top padding plus the fixed 20px
-      // first line, so the 20px buttons cover that line exactly.
       isTimelineRow && !isOneLineTimelineRow ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
       isSessionMenuOpen
         ? 'opacity-100'
@@ -124,9 +117,6 @@ export function SessionRowActions({
           ? 'opacity-100'
           : cn('opacity-0', revealOnHoverClass),
     )}>
-      {/* Their own tooltip group: the pointer crosses these buttons on
-          its way into the row's tooltip, which a tooltip of the same
-          group would replace on the spot. */}
       <TooltipProvider delayDuration={400}>
       {showWorkAction ? (
         <Tooltip>
@@ -144,8 +134,6 @@ export function SessionRowActions({
               onClick={handleWorkToggleClick}
               onKeyDown={(event) => event.stopPropagation()}
             >
-              {/* The check glyph draws smaller than the others at the same
-                  box, so it takes the next icon size; the button stays put. */}
               <Icon name={isInWork ? 'check' : 'eye'} className={isInWork ? checkIconSizeClass : actionIconSizeClass} />
             </button>
           </TooltipTrigger>

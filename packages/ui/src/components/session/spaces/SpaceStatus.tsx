@@ -1,17 +1,3 @@
-/**
- * The state of an isolated space. Its work row in the sidebar shows one mark at the row's end, and
- * the lines it stands for, each with the one action that moves it on, in the row's tooltip; the
- * phone's actions sheet and the lists of spaces, which have the room, write them out. While it
- * is being made (journey step 2) the step the host announced; a failed creation with the way to
- * remove it; once it runs, the access it lacks (step 4), with the way to the grant dialog; a space
- * that is stopped, broken or not answering (step 8) with the action that repairs it, and what an
- * action from the row's menu is doing or why it failed; which of the project's setup commands runs,
- * which one failed with the way to its output, or a run that was cut off (5d-4); and a session list
- * the space did not answer in full. Nothing when the space runs with its access and its setup done.
- *
- * The row has one line, so the text never sits on it: the mark says how much it matters (a spinner
- * for a wait, a stop for a stopped space, a warning, an error) and the tooltip says the rest.
- */
 
 import React from 'react';
 
@@ -58,7 +44,6 @@ const FAILED_TEXT = {
   remove: 'spaces.group.actionFailed.remove',
 } satisfies Record<SpaceAction, I18nKey>;
 
-// What each state says, how it is coloured, and the one action that repairs it.
 const STATE_LINE = {
   container_gone: { text: 'spaces.group.state.containerGone', tone: 'warning', action: 'remove' },
   gatekeeper_gone: { text: 'spaces.group.state.gatekeeperGone', tone: 'error', action: 'remove' },
@@ -68,13 +53,11 @@ const STATE_LINE = {
   not_answering: { text: 'spaces.group.state.notAnswering', tone: 'warning', action: 'restart' },
 } satisfies Record<Exclude<SpaceCondition['kind'], 'busy' | 'action_failed' | 'unreachable'>, { text: I18nKey; tone: StatusTone; action: SpaceAction }>;
 
-/** How much a line matters, from least to most; the mark takes the most of its lines. */
 type StatusTone = 'note' | 'busy' | 'stopped' | 'warning' | 'error';
 const TONE_RANK = { note: 0, busy: 1, stopped: 2, warning: 3, error: 4 } satisfies Record<StatusTone, number>;
 
 type StatusLine = { tone: StatusTone; text: string; action?: { label: string; run: () => void } };
 
-// A command as the line shows it: its first line, cut short; the output window shows it whole.
 const MAX_COMMAND_SHOWN = 80;
 const shownCommand = (command: string): string => {
   const lines = command.trim().split('\n');
@@ -82,7 +65,6 @@ const shownCommand = (command: string): string => {
   return first.length > MAX_COMMAND_SHOWN || lines.length > 1 ? `${first.slice(0, MAX_COMMAND_SHOWN)}…` : first;
 };
 
-/** What the space's state says, most pressing first; empty when there is nothing to say. */
 const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
   const { t } = useI18n();
   const entry = useSpacesStore((state) => state.journey?.get(spaceId));
@@ -91,12 +73,10 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
   const catalog = useConfigStore((state) => state.providers);
   const providerName = (providerId: string) => catalog.find((provider) => provider.id === providerId)?.name ?? providerId;
   const condition = spaceConditionOf(entry, mark, action);
-  // Delete asks first; every other repair runs at once (the maintainer's call: nothing is lost).
   const repair = (next: SpaceAction): StatusLine['action'] => ({
     label: t(SPACE_ACTION_TEXT[next]),
     run: () => (next === 'remove' ? useSpacesStore.getState().openDeleteDialog(spaceId) : void runSpaceAction(spaceId, next)),
   });
-  // The way to the grant dialog, opened on the provider that lacks access.
   const grant = (providerId: string | null): StatusLine['action'] => ({
     label: t('spaces.group.access.give'),
     run: () => useSpacesStore.getState().openAccessDialog(spaceId, providerId),
@@ -107,7 +87,6 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
   }
   if (condition?.kind === 'busy') return [{ tone: 'busy', text: t(BUSY_TEXT[condition.action]) }];
   if (entry?.state === 'failed') {
-    // Dismissing a failed creation removes what is left of it, without a confirmation: its code never arrived.
     const failed = t('spaces.group.failed', { reason: entry.failure ? spaceFailureText(t, entry.failure) : t('spaces.group.failedNoReason') });
     const remove = { label: t('spaces.group.remove'), run: () => void runSpaceAction(spaceId, 'remove') };
     const removeFailure = action?.kind === 'failed' ? action.failure : null;
@@ -121,8 +100,6 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
   if (condition?.kind === 'action_failed') {
     return [{ tone: 'error', text: t(FAILED_TEXT[condition.action], { reason: spaceFailureText(t, condition.failure) }), action: repair(condition.action) }];
   }
-  // The machine is off or out of reach: nothing to do here but wait, or, once the machine left
-  // Settings, delete the space; on this computer Docker is started again from Settings.
   if (condition?.kind === 'unreachable') {
     if (!condition.gone && condition.machine === null) {
       return [{ tone: 'warning', text: t('spaces.group.state.dockerNotRunning'), action: { label: t('spaces.group.state.openDockerSettings'), run: () => useUIStore.getState().openSettingsAt('isolated-spaces') } }];
@@ -144,8 +121,6 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
   } else if (setup?.state === 'interrupted') {
     lines.push({ tone: 'warning', text: t('spaces.group.setup.interrupted'), action: { label: t('spaces.group.setup.runAgain'), run: () => void runSpaceAction(spaceId, 'setup') } });
   } else if (setup?.state === 'failed') {
-    // A failed command leaves the space working, so it reads as a warning; its output window
-    // says what happened and offers the run again.
     lines.push({
       tone: 'warning',
       text: t(setup.timedOut ? 'spaces.group.setup.timedOut' : 'spaces.group.setup.failed', { command: shownCommand(setup.command) }),
@@ -173,9 +148,6 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
     lines.push({ tone: 'note', text: t('spaces.group.access.unknown') });
   }
 
-  // The space did not answer the host's last read in full: its last known sessions stand in, and
-  // the user should know they may be old. A stopped, unreachable or silent space says so above
-  // instead; this line speaks for the rest, a list read in part or one the journey has no entry for.
   if (mark && mark.state !== 'complete') lines.push({ tone: 'warning', text: t('sessions.sidebar.group.spaceStale') });
   return lines;
 };
@@ -194,16 +166,10 @@ const TONE_CLASS = {
   error: 'text-[var(--status-error)]',
 } satisfies Record<StatusTone, string>;
 
-/**
- * The state written out, each line with the action that moves it on: in the work row's tooltip,
- * on the phone's actions sheet, and in the lists of spaces, which have the room. `onAction` runs
- * before a line's action, for a surface that closes first.
- */
 export const SpaceStatusLines: React.FC<{
   spaceId: string;
   className?: string;
   onAction?: () => void;
-  /** Leaves out the stopped line, for a row that names the state and offers Start itself. */
   hideStopped?: boolean;
 }> = ({ spaceId, className, onAction, hideStopped = false }) => {
   const all = useSpaceStatusLines(spaceId);
@@ -237,17 +203,11 @@ export const SpaceStatusLines: React.FC<{
   );
 };
 
-/**
- * The mark at the end of a space's work row, as much as the most pressing line matters; nothing
- * while there is nothing to say. The row's tooltip and the phone's sheet say the rest.
- */
 export const SpaceStatusMark: React.FC<{ spaceId: string; className?: string }> = ({ spaceId, className }) => {
   const { t } = useI18n();
   const lines = useSpaceStatusLines(spaceId);
   if (lines.length === 0) return null;
   const tone = lines.reduce<StatusTone>((top, line) => (TONE_RANK[line.tone] > TONE_RANK[top] ? line.tone : top), 'note');
-  // A stopped space is a resting state, not a fault: a word where a row's time goes. A square
-  // there read as a Stop button (maintainer, 2026-10-26).
   if (tone === 'stopped') {
     return <span className={cn('flex-shrink-0 typography-micro text-muted-foreground', className)}>{t('spaces.row.state.stopped')}</span>;
   }

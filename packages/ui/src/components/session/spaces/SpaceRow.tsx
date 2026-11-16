@@ -1,10 +1,3 @@
-/**
- * One isolated space as the lists of spaces show it (journey step 9): the project's
- * spaces page, the spaces without a project in Settings, and the phone's project editor. Its name,
- * its network, its state written out (the sidebar row has it behind a mark), and the same actions
- * as its row in the sidebar, a menu on the desktop and the sheet on the phone. A space
- * whose project is no longer registered also names the folder it was made for.
- */
 
 import React from 'react';
 
@@ -38,11 +31,6 @@ const CONTEXT_MENU_SLOTS = { Item: ContextMenuItem, Separator: ContextMenuSepara
 
 const BADGE_CLASS = 'shrink-0 typography-micro px-1 rounded leading-none pb-px';
 
-/**
- * The space's network as a badge beside its name: allowed addresses only in the success tone,
- * open internet in the warning tone the create dialog uses for it, and a network the host could
- * not read in a neutral one, never as either.
- */
 const NetworkBadge: React.FC<{ network: SpaceEntry['network'] }> = ({ network }) => {
   const { t } = useI18n();
   if (network === null) {
@@ -54,12 +42,10 @@ const NetworkBadge: React.FC<{ network: SpaceEntry['network'] }> = ({ network })
   return <span className={cn(BADGE_CLASS, 'text-[var(--status-success)] bg-[var(--status-success)]/10')}>{t('spaces.row.network.allowlist')}</span>;
 };
 
-/** The folder a space was made for, and that it is gone when it is. */
 const FolderLine: React.FC<{ folder: SpaceEntry['projectFolder'] }> = ({ folder }) => {
   const { t } = useI18n();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   if (folder.path === null) return null;
-  // The path wraps rather than being cut: its end, the folder's name, is what the user knows it by.
   return (
     <>
       <p className="typography-micro break-all text-muted-foreground">{formatPathForDisplay(folder.path, homeDirectory)}</p>
@@ -70,25 +56,19 @@ const FolderLine: React.FC<{ folder: SpaceEntry['projectFolder'] }> = ({ folder 
 
 export const SpaceRow: React.FC<{
   entry: SpaceEntry;
-  /** The phone opens the actions as a sheet, where the desktop has a menu. */
   actions: 'menu' | 'sheet';
-  /** For a space whose project is no longer registered: where it came from. */
   showFolder?: boolean;
 }> = ({ entry, actions, showFolder = false }) => {
   const { t } = useI18n();
   const bytes = useSpaceDiskBytes(entry.placeId, entry.id);
   const { actions: available, applicable, busy, unavailable } = useSpaceActions(entry.id);
-  // What a space is mostly opened here for stays in sight: its work back to the project, and
-  // Start or Stop. The rest, rarer, is in the menu beside them.
   const toggle = available.find((action) => action === 'start' || action === 'stop') ?? null;
   const meta = [t(SPACE_STATE_TEXT[entry.state]), ...(bytes !== null ? [formatDiskSize(bytes)] : [])].join(' · ');
   const row = (
     <div className="flex w-full items-start gap-2 py-1.5" data-space-row={entry.id}>
       <Icon name="instance" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 space-y-0.5">
-        {/* The badge wraps under a long name rather than cutting it: the name is what the user knows the space by. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          {/* A name from the label: text to show. */}
           <p className="typography-ui-label min-w-0 max-w-full truncate text-foreground">{entry.name}</p>
           <span className="typography-meta text-muted-foreground">{meta}</span>
           <NetworkBadge network={entry.network} />
@@ -121,8 +101,6 @@ export const SpaceRow: React.FC<{
     </div>
   );
   if (actions !== 'menu') return row;
-  // On the desktop the row's right click opens every action, the ones it
-  // shows as buttons included, as the space's work row in the sidebar does.
   return (
     <ContextMenu>
       <ContextMenuTrigger render={row} />

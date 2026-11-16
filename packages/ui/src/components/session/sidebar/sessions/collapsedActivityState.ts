@@ -9,8 +9,6 @@ import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionUnread } from '@/sync/session-unread';
 
-// Ordered by how much the user is needed: a blocked turn outranks a running
-// one, which outranks something merely unread.
 export type CollapsedActivityState = 'permission' | 'form' | 'active' | 'unread' | null;
 
 const mergeCollapsedActivityStates = (
@@ -30,7 +28,6 @@ const getSessionNodeActivityState = (
   if (activeSessionIds.has(node.session.id)) return 'active';
 
   let state: CollapsedActivityState = null;
-  // A subtask is never unread on its own; its parent carries the mark.
   if (unreadSessionIds.has(node.session.id) && !node.session.parentID) state = 'unread';
 
   for (const child of node.children) {
@@ -62,12 +59,9 @@ export const getSessionNodesActivityState = (
 
 type SessionActivityProps = {
   nodes: readonly SessionNode[];
-  // Sessions not present as nodes whose pending requests still count, such as
-  // the hidden subagents of timeline rows.
   blockingSessionIds?: readonly string[];
 };
 
-/** Every session in the hidden subtrees, and the top-level ones among them: only those can be unread. */
 const collectActivityIds = (nodes: readonly SessionNode[]) => {
   const active = new Set<string>();
   const unread = new Set<string>();
@@ -98,7 +92,6 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  // A session idling while its background command runs is still at work.
   const waitingOnShell = useBackgroundShellsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -106,7 +99,6 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  // And one waiting on an image it started.
   const waitingOnImage = useBackgroundImagesStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -114,7 +106,6 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  // So is one waiting on its pull request: the server wakes it.
   const waitingOnPullRequest = usePrWatchStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -122,7 +113,6 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  // And one waiting on a timer or an extension.
   const waitingOnExtension = useExtensionWaitsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -137,10 +127,6 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.unread]));
-  // Pending requests come from the cross-directory index, which every
-  // directory feeds live and the host seeds, so a collapsed group in a project
-  // that was never opened still shows the request. Subtasks count too: a
-  // permission asked by a subagent blocks the whole family.
   const blocked = useGlobalBlockingRequestsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     let result: CollapsedActivityState = null;
@@ -148,7 +134,6 @@ export const useCollapsedSessionActivityState = ({
       const pending = state.bySession.get(sessionId);
       if (!pending) continue;
       if (pending.permissions.length > 0) return 'permission';
-      // A page that waits for the user's answer blocks the agent like a form.
       if (pending.forms.length > 0 || pending.pages.length > 0) result = 'form';
     }
     return result;

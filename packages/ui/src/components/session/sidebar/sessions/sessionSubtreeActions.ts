@@ -25,17 +25,6 @@ type SessionSubtreeOutcome = {
   failedIds: string[];
 };
 
-/**
- * Every descendant an archive or delete should reach, resolved when the user
- * acts rather than while rows render.
- *
- * `knownDescendantIds` is what the surface already sees: a row's `parentID`
- * children on desktop, the active list on mobile. Both stop at an archived child, so an
- * active subagent under an archived intermediate stayed behind (an edge #2580
- * pointed out). The global lineage reaches through archived intermediates:
- * archive takes the active sessions below, since it must not restamp archived
- * ones, and delete takes the whole subtree.
- */
 export const collectSessionSubtreeIds = (
   rootId: string,
   knownDescendantIds: readonly string[],
@@ -48,7 +37,6 @@ export const collectSessionSubtreeIds = (
   return [...ids];
 };
 
-/** Rendered subsessions only; the global action lineage adds linked reviews. */
 export const collectParentIdDescendantIds = (root: SessionNode): string[] => {
   const ids: string[] = [];
   const visit = (node: SessionNode): void => {
@@ -62,13 +50,6 @@ export const collectParentIdDescendantIds = (root: SessionNode): string[] => {
   return ids;
 };
 
-/**
- * A session's active subtree from the global cache, built the way the project
- * tree builds it: it stops at an archived session and everything below it.
- * Detailed zone rows render a root with no children, so an
- * action that needs the subagents of such a row resolves them here when the
- * user acts.
- */
 export const buildActiveSessionTreeFromCache = (root: Session): SessionNode => {
   const childrenByParentId = new Map<string, Session[]>();
   for (const session of readGlobalSessionLineage().descendantsOf(root.id, 'active')) {
@@ -81,12 +62,6 @@ export const buildActiveSessionTreeFromCache = (root: Session): SessionNode => {
   return buildActiveSessionNode(childrenByParentId, root);
 };
 
-/**
- * Every descendant a move to another worktree takes along: the row's rendered
- * tree (`knownDescendants`) plus the active subtree from the global lineage,
- * so a move from a flat row, the header or the project tree takes the same
- * subagents along.
- */
 export const collectSessionMoveDescendants = (root: Session, knownDescendants: readonly Session[]): Session[] => {
   const descendants = new Map(knownDescendants.map((session) => [session.id, session]));
   for (const descendant of readGlobalSessionLineage().descendantsOf(root.id, 'active')) {
@@ -96,21 +71,11 @@ export const collectSessionMoveDescendants = (root: Session, knownDescendants: r
   return [...descendants.values()];
 };
 
-// The first recorded server answer for the failed ids, as a toast description.
 const failureDescription = (ids: readonly string[], t: Translate): { description: string } | undefined => {
   const error = takeSessionActionFailure(ids);
   return error ? { description: describeSessionActionError(error, t) } : undefined;
 };
 
-/**
- * Undo an archive that just succeeded.
- *
- * Restores exactly the sessions that archive moved, on the runtime they were
- * archived on. When the archive closed the open session (`reopenId`) and the
- * user has not opened another one since, it opens again, so the screen returns
- * to where it was. Archive side effects that are not archive state, such as a
- * deleted btw fork, are not undone.
- */
 export const undoArchive = async (
   archivedIds: readonly string[],
   reopenId: string | null,
@@ -129,7 +94,6 @@ export const undoArchive = async (
   if (session) ui.setCurrentSession(reopenId, resolveGlobalSessionDirectory(session));
 };
 
-/** Toast options offering Undo for an archive that just succeeded. */
 export const archiveUndoToastOptions = (
   archivedIds: readonly string[],
   reopenId: string | null,
@@ -144,16 +108,6 @@ export const archiveUndoToastOptions = (
   };
 };
 
-/**
- * Archive or hard-delete a session together with its descendants.
- *
- * The server does not cascade `time.archived`, so a parent archived on its own
- * leaves its subagents active as orphan roots. Desktop sidebar rows, Recent,
- * managed Chats, and the mobile sessions sheet resolve the subtree first and
- * run it through here, so the calls made and the outcome the user sees stay
- * the same: a lone session keeps the singular copy, a subtree reports counts,
- * and a partial failure says how many sessions were left behind.
- */
 export const runSessionSubtreeAction = async (
   action: SessionSubtreeAction,
   session: Session,
@@ -180,9 +134,6 @@ export const runSessionSubtreeAction = async (
 
   const ids = [session.id, ...descendantIds];
   if (hardDelete) {
-    // Delete root + all descendants individually. If the server
-    // cascade-deletes some children before we get to them, 404 is
-    // treated as success by deleteSession and no rollback occurs.
     const { deletedIds, failedIds } = await store.deleteSessions(ids);
     if (failedIds.length === 0) {
       const totalDeleted = deletedIds.length;

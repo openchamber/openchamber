@@ -52,55 +52,39 @@ import { getWorkFolderScope } from './sessionFolderIdentity';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled } from './sessionNodeItemUtils';
 import { collectSessionMoveDescendants } from './sessionSubtreeActions';
 
-/** Track / Done for a session that is a work of its own. */
 type SessionMenuWork = {
   inWork: boolean;
   toggle: () => void;
 };
 
-/** Where Move to folder files the session. */
 export type SessionMenuFolders = {
-  /** The row's folder owner: `work:<dir>` for a worktree or space, else the project's or Chats'. */
   ownerKey: string | null;
   projectId: string | null;
-  /** Names the new folder in place in the list; without it a dialog asks for the name. */
   createInline?: (scope: string) => { id: string } | null;
 };
 
 type SessionActionsMenuItemsProps = {
   session: Session;
   directory: string | null;
-  /** The menu is open; AI rename loads its eligibility only then. */
   open: boolean;
   slots: SessionMenuSlots;
   archived: boolean;
   pinned: boolean;
-  /** Null when the session leaves Track / Done to the work it belongs to. */
   work: SessionMenuWork | null;
-  /** The project Move to worktree lists the worktrees of. */
   projectId: string | null;
   currentWorktree: WorktreeMetadata | null;
-  /** Subsessions the surface already shows; a move takes them along. */
   descendants: readonly Session[];
   startWorktreeLoad: ((args: StartSessionWorktreeMenuLoadArgs) => StartSessionWorktreeMenuLoadResult) | null;
-  /** Null when the surface may not file this session in a folder. */
   folders: SessionMenuFolders | null;
-  /** Touch menus leave out keyboard hints. */
   touch?: boolean;
   onRename: () => void;
   onExport: () => void;
   onMoveSession: () => void;
   onArchive: () => void;
-  /** Null when the session cannot come back on its own. */
   onRestore: (() => void) | null;
   onDelete: () => void;
 };
 
-/**
- * Every action on one session, the same in the sidebar row's menu and in the
- * header's session menus. Each surface supplies what only it knows (rename in
- * place, its dialogs, where the session sits) and the menu primitives it opens in.
- */
 export function SessionActionsMenuItems({
   session,
   directory,
@@ -134,13 +118,9 @@ export function SessionActionsMenuItems({
   const archiveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('archive_current_session', shortcutOverrides), '');
   const isStreaming = useSessionTurnActivity(session.id) !== null;
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
-  // Keep leaves one survivor that still carries its run marker; the overview
-  // has no run to show for it, so the item goes with the run.
   const inLiveRun = useMultiRunMemberIds(session.id).length > 0;
   const multiRunKey = React.useMemo(() => (inLiveRun ? getMultiRunIdentity(session)?.key ?? null : null), [inLiveRun, session]);
 
-  // Per-session warming is offered only while Settings chose it, for a root
-  // session the host's OpenCode runs (a space's sessions run on its own).
   const perSessionWarming = useSessionWarmingStore((state) => state.enabled);
   const isWarmed = useSessionWarmUntil(session.id) !== undefined;
   const canKeepWarm = perSessionWarming && !archived && !isSubtaskSession
@@ -239,8 +219,6 @@ export function SessionActionsMenuItems({
         {t('sessions.sidebar.session.menu.moveTo')}
       </SubTrigger>
     );
-    // Only a disabled item explains itself: an enabled one opens the
-    // worktree list, which the hint would cover.
     const worktreeMenuHint = isMovingToWorktree
       ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
       : isStreaming
@@ -339,9 +317,6 @@ export function SessionActionsMenuItems({
   };
 
   const renderFolderMenu = (placement: SessionMenuFolders, sessionDirectory: string) => {
-    // A session files where its row lives: the project root's folders, or
-    // those of its own worktree, which itself files whole. Every other
-    // scope is read only to find and clear an older membership.
     const workScope = getWorkFolderScope(placement.ownerKey);
     const scopes: string[] = [];
     const pushScope = (candidate: string | null | undefined) => {
@@ -440,8 +415,6 @@ export function SessionActionsMenuItems({
     && canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: archived, isVSCode, sessionDirectory: directory });
   const canMoveToProject = !isSubtaskSession && !archived && !isVSCode && Boolean(directory) && !isSpaceDirectory(directory);
 
-  // Where else the session opens. Two or more share one submenu; a lone one
-  // stays a plain item, since a submenu of one only adds a hover.
   const openTargets = [
     !isVSCode ? {
       key: 'side-panel',
@@ -557,8 +530,6 @@ export function SessionActionsMenuItems({
         </SessionMenuItemHint>
       ) : null}
       {canMoveToWorktree ? renderMoveMenu(canMoveToProject) : canMoveToProject ? (
-        // Without worktrees to list (Chats), moving to another project is the
-        // only move, and a submenu of one only adds a hover.
         <SessionMenuItemHint hint={isStreaming ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy') : t('sessions.moveSession.hint')}>
           <span className="block">
             <Item disabled={isStreaming || isMovingToWorktree} onClick={onMoveSession} className="w-full [&>svg]:me-1">

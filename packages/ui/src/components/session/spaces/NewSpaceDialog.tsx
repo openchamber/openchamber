@@ -1,13 +1,3 @@
-/**
- * The create dialog of an isolated space (journey step 1): its name, where it
- * runs, what code it starts from, its network, and model access given up front. Opened from the
- * new-session draft picker, the one entry point; never mounted in VS Code (decision 16).
- *
- * Opening it is the user acting in the feature's own screen, so it checks the places now
- * (decision 19); nothing checks them earlier to decide whether to offer the entry. With one place
- * the dialog names it; with another machine set up in Settings it offers the choice, and under
- * the machine says that the keys granted below are stored there (the maintainer's call of 2026-10-12).
- */
 
 import React from 'react';
 
@@ -40,12 +30,8 @@ import { DockerSetupNotice } from './DockerSetupNotice';
 import { ModelKeySource } from './ModelKeySource';
 import { defaultKeySource, isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
 
-// The places, each checked by the host as the list came: none at all is a failure of its own.
 type PlacesState = { kind: 'checking' } | { kind: 'ready'; places: SpacePlace[] } | { kind: 'failed'; failure: SpaceFailure };
 type ChangesState = { kind: 'loading' } | { kind: 'ready'; files: string[] } | { kind: 'unknown' };
-// `sourceChosen` once the user touched where the key comes from, the name or the key included, so
-// the host's logins arriving later never move the radio under their cursor; until then the host's
-// login, when it has one to offer, is the choice, since it asks for nothing.
 type AccessChoice = KeySourceChoice & { selected: boolean; sourceChosen: boolean };
 
 type NewSpaceDialogProps = {
@@ -54,7 +40,6 @@ type NewSpaceDialogProps = {
   project: { id: string; path: string };
 };
 
-/** The places, checked when the dialog opens and again on `recheck`. */
 const usePlaces = (open: boolean): [PlacesState, () => void] => {
   const [state, setState] = React.useState<PlacesState>({ kind: 'checking' });
   const [turn, setTurn] = React.useState(0);
@@ -109,7 +94,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const hostLogins = useSpaceHostLogins(open);
-  // A login-only provider has a row only while the host has a login the space can be given.
   const loginOnly = SPACE_LOGIN_ONLY_PROVIDERS.filter((id) => usableHostLoginOf(hostLogins.logins, id) !== null);
   const providers = useSpaceModelProviders(open ? project.path : null, loginOnly);
 
@@ -127,9 +111,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     setAccess({});
   }, [open]);
 
-  // The registries the project installs from, as the allowlist's first domains: its setup commands
-  // install dependencies, and an empty list would refuse every download. Set once per opening, and
-  // only while the user has not changed the list.
   const domainsTouched = React.useRef(false);
   React.useEffect(() => {
     if (!open) return;
@@ -142,8 +123,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     return () => { current = false; };
   }, [open, project.path]);
 
-  // The providers arrive from the host after the dialog opened: ticked when the composer's model is
-  // its own, and following the host's login and saved key until the user picks a source.
   const logins = hostLogins.logins;
   React.useEffect(() => {
     const currentProviderId = useConfigStore.getState().currentProviderId;
@@ -167,15 +146,10 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
 
   const changedFiles = changes.kind === 'ready' ? changes.files : [];
   const hasChanges = changedFiles.length > 0;
-  // With changes the uncommitted start is the default; with an unreadable list, the clean one, so
-  // nothing travels that the user was not shown.
   const effectiveStart: SpaceStart = start ?? (hasChanges ? 'uncommitted' : 'clean');
-  // Until the user picks, the first place that answers; the first place at all when none does, so
-  // its failure is the one shown.
   const listed = places.kind === 'ready' ? places.places : [];
   const place = listed.find((candidate) => candidate.id === placeId) ?? listed.find((candidate) => candidate.available) ?? listed[0] ?? null;
   const canRestrict = place === null || !place.available || place.hostIsolation;
-  // A choice the place turned out not to support falls back to the one it does.
   const effectiveMode = mode === 'allowlist' && !canRestrict ? 'open' : mode ?? (canRestrict ? 'allowlist' : 'open');
   const chosenAccess = providers.filter((provider) => access[provider.id]?.selected);
   const accessIncomplete = chosenAccess.some((provider) => !isAccessChoiceComplete(provider, access[provider.id]));
@@ -201,7 +175,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     setSubmitError(null);
     const grants: SpaceModelAccess[] = chosenAccess.map((provider) => modelGrantOf(provider, access[provider.id]));
     try {
-      // Before the space is asked for: the trust prompt for shared commands opens over this dialog.
       const setup = await resolveSpaceSetupPlan(project.path);
       await startSpaceCreation({
         projectId: project.id,
@@ -210,7 +183,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
         access: grants,
         refusalMessage: t('spaces.create.queueRefused'),
       });
-      // The first message goes on a model the space was given, not on one it would refuse.
       const model = composerModelForSpaceAccess(grants.map((grant) => grant.provider));
       if (model) {
         useConfigStore.getState().setProvider(model.providerId);
@@ -226,7 +198,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   };
 
 
-  // A titled block, as the new worktree dialog has them; `info` is the explanation behind its mark.
   const block = (title: string, children: React.ReactNode, info?: string) => (
     <section className="flex min-w-0 flex-col gap-2">
       <h3 className="flex items-center gap-1.5 typography-meta font-semibold text-foreground">
@@ -237,11 +208,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     </section>
   );
 
-  // A place by the name the user knows it: this computer, or the machine as they wrote it.
   const placeName = (candidate: SpacePlace) => candidate.machine ?? t('spaces.create.place.localDocker');
-  // Under the chosen place: on this computer, the action that gets Docker going or the step to
-  // take, and a memory too small for a space; elsewhere what the host said; on another machine,
-  // what granting a key below means there.
   const placeDetails = (candidate: SpacePlace) => {
     const setupShown = candidate.setup && (candidate.setup.remedy || candidate.setup.job || (candidate.available && candidate.setup.memory?.low));
     return (
@@ -274,7 +241,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
             <Icon name="computer" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             <span>
               {placeName(place)}
-              {/* A product name and its version, the same in every language. */}
               {place.available && place.version ? <span className="ms-2 whitespace-nowrap typography-meta text-muted-foreground">{`Docker ${place.version}`}</span> : null}
             </span>
           </div>
@@ -317,7 +283,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
             <Icon name={showFiles ? 'arrow-down-s' : 'arrow-right-s'} className="ms-0.5 h-3.5 w-3.5" />
           </button>
           {showFiles ? (
-            // Paths from the user's own repository: text to show, left to right in every language.
             <ScrollableOverlay as="ul" dir="ltr" outerClassName="mt-1 max-h-32" className="typography-meta text-muted-foreground" disableHorizontal>
               {changedFiles.map((file) => <li key={file} className="truncate font-mono">{file}</li>)}
             </ScrollableOverlay>
@@ -327,7 +292,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     </div>
   );
 
-  // The domains sit under the option they belong to, inside the one group.
   const networkBlock = (
     <div className="space-y-1.5">
       <SettingsRadioGroup aria-label={t('spaces.create.network.label')}>
@@ -339,7 +303,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
           label={t('spaces.create.network.allowlist')}
           description={canRestrict ? undefined : t('spaces.create.network.cannotRestrict')}
         />
-        {/* Always there, disabled for the open internet, so choosing it moves nothing. */}
         <div className="space-y-1.5 ps-6">
           {domains.length > 0 ? (
             <div className="flex flex-wrap gap-1">
@@ -370,7 +333,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
           selected={effectiveMode === 'open'}
           onSelect={() => setMode('open')}
           label={t('spaces.create.network.open')}
-          // What it risks is said in the warning colour once it is the choice.
           description={<span className={cn(effectiveMode === 'open' && 'text-status-warning')}>{t('spaces.create.network.openWarning')}</span>}
         />
       </SettingsRadioGroup>
@@ -404,7 +366,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   const nameField = (
     <Input value={name} onChange={(event) => setName(event.target.value)} aria-label={t('spaces.create.name.label')} spellCheck={false} />
   );
-  // What goes in on the left, what it can reach on the right; one column on a phone.
   const leftBlocks = (
     <>
       {block(t('spaces.create.name.label'), nameField)}
@@ -425,14 +386,12 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       {rightBlocks}
     </div>
   ) : (
-    // Two columns once the window leaves room for them; a narrow window reads top to bottom.
     <div className="grid gap-5 md:grid-cols-2 md:gap-x-10">
       <div className="flex min-w-0 flex-col gap-5">{leftBlocks}</div>
       <div className="flex min-w-0 flex-col gap-5">{rightBlocks}</div>
     </div>
   );
 
-  // One line beside the buttons: why the create failed, or, quietly, that a model is still to choose.
   const status = submitError
     ? { text: submitError, className: 'text-status-error', icon: true }
     : chosenAccess.length === 0 && providers.length > 0
@@ -464,7 +423,6 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* A fixed height: what opens or closes inside scrolls, the dialog never jumps. */}
       <DialogContent className="flex h-[min(30rem,85vh)] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

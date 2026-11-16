@@ -1,13 +1,3 @@
-/**
- * The apply dialog of an isolated space (decisions 7 and 8, user journey step 6): what
- * the agent changed, as a branch named after the space or as uncommitted changes, and "delete the
- * space afterwards", on unless an agent still works there. Opened from the group's "⋯" menu, the
- * phone's sheet, the session header and the delete confirmation.
- *
- * Every path it shows came out of the space, so it is text in a monospace list and nothing else.
- * Mounted once by the main layout and the mobile app, behind the switch; never in VS Code
- * (decision 16).
- */
 
 import React from 'react';
 
@@ -31,7 +21,6 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PreviewRead = { kind: 'reading' } | { kind: 'read'; preview: SpaceApplyPreview } | { kind: 'refused'; refusal: SpaceApplyRefusal };
 
-// The units every file manager shows, whatever the language; only the number is localised.
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
 const formatSize = (bytes: number): string => {
@@ -47,7 +36,6 @@ const formatSize = (bytes: number): string => {
 
 export const SpaceApplyDialog: React.FC = () => {
   const spaceId = useSpacesStore((state) => state.applyDialog);
-  // Keyed by the space, so every opening starts with its own defaults and its own read.
   return spaceId ? <ApplyDialogFor key={spaceId} spaceId={spaceId} /> : null;
 };
 
@@ -60,7 +48,6 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
   const [readCount, setReadCount] = React.useState(0);
   const [as, setAs] = React.useState<'branch' | 'changes'>('branch');
   const [branch, setBranch] = React.useState(() => branchNameOfSpace(name));
-  // Off when an agent is still at work as the dialog opens: deleting would stop it mid-turn.
   const [removeAfterwards, setRemoveAfterwards] = React.useState(() => !agentWorking);
   const [applying, setApplying] = React.useState(false);
   const [refusal, setRefusal] = React.useState<SpaceApplyRefusal | null>(null);
@@ -98,7 +85,6 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
     setStartFailure(null);
     await runSpaceAction(spaceId, 'start');
     setStarting(false);
-    // The start's own reason, which otherwise shows only on the group's status line.
     const after = useSpacesStore.getState().actions.get(spaceId);
     if (after?.kind === 'failed' && after.action === 'start') setStartFailure(spaceFailureText(t, after.failure));
     else setReadCount((count) => count + 1);
@@ -121,7 +107,6 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
     else if (applied.status === 'applied') {
       toast.success(applied.appliedPaths === 1 ? t('spaces.apply.done.changesSingle') : t('spaces.apply.done.changesPlural', { count: applied.appliedPaths }));
     }
-    // The work is applied, but the space asked to go stayed: its chats could not be saved.
     if (result.outcome.kept) toast.warning(t('spaces.apply.keptChatsNotSaved', { name }));
     close();
   };
@@ -155,7 +140,6 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
     </div>
   );
 
-  // A stopped space whose network filter is gone never starts again (see "Repair").
   const gatekeeperGone = useSpacesStore((state) => state.journey?.get(spaceId)?.damage === 'gatekeeper_gone');
   const branchRefusal = refusal?.kind === 'branch_exists' || refusal?.kind === 'invalid_branch' ? refusal : null;
   const topRefusal = refusal && !branchRefusal ? refusal : read.kind === 'refused' ? read.refusal : null;

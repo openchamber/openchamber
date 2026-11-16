@@ -105,8 +105,6 @@ export const SessionDialogs: React.FC = () => {
 
     const hasDirtyWorktrees = hasCompletedDirtyCheck && dirtyWorktreePaths.size > 0;
 
-    // The branch toggles appear only once the check allows them, so a
-    // worktree on the default branch never offers deleting it.
     const [canDeleteBranch, setCanDeleteBranch] = React.useState(false);
     const branchCheckWorktree = deleteDialog?.mode === 'worktree'
         ? deleteDialog.worktree ?? deleteDialogSummaries[0]?.metadata ?? null
@@ -151,11 +149,7 @@ export const SessionDialogs: React.FC = () => {
     const removeRemoteOptionDisabled =
         isProcessingDelete || !isWorktreeDelete || !canRemoveRemoteBranches;
     const deleteLocalOptionDisabled = isProcessingDelete || !isWorktreeDelete;
-    // Keeping moves the sessions working in the worktree now, subfolders
-    // included, which can differ from the list the dialog was opened with.
     const keepCandidatePath = isWorktreeDelete ? branchCheckPath : undefined;
-    // The global list and the live stores, as the keep run reads them: a live
-    // store can hold a session the global list has not loaded yet.
     const subscribeKeepSessions = React.useCallback((notify: () => void) => (
         keepCandidatePath ? subscribeSessionsInWorktree(childStores, notify) : () => {}
     ), [childStores, keepCandidatePath]);
@@ -165,7 +159,6 @@ export const SessionDialogs: React.FC = () => {
     );
     const keepSessions = deleteDialogShouldKeepSessions && keepSessionCount > 0;
 
-    // Session loading is handled by sync bootstrap — no manual loadSessions needed.
 
     const openDeleteDialog = React.useCallback((payload: { sessions: Session[]; dateLabel?: string; mode?: 'session' | 'worktree'; worktree?: WorktreeMetadata | null }) => {
         setDeleteDialog({
@@ -387,14 +380,11 @@ export const SessionDialogs: React.FC = () => {
                 }
             );
 
-            // A directory inside the removed checkout, such as `<worktree>/sub`, goes with it.
             const isInRemovedWorktree = (directory: string): boolean => Boolean(
                 normalizedWorktreePath
                 && directory
                 && checkoutHoldsDirectory(normalizedWorktreePath, directory)
             );
-            // Read now, not when the delete started: a teardown can run for
-            // minutes, and "Delete without teardown" can come much later.
             const newSessionDraft = useSessionUIStore.getState().newSessionDraft;
             const draftDirectory = normalizeProjectDirectory(newSessionDraft?.directoryOverride);
             if (
@@ -415,7 +405,6 @@ export const SessionDialogs: React.FC = () => {
 
             return true;
         } catch (error) {
-            // The caller's toast offers to delete without the teardown.
             if (error instanceof Error && isWorktreeTeardownFailure(error)) throw error;
             toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
                 id: toastId,
@@ -425,10 +414,6 @@ export const SessionDialogs: React.FC = () => {
         }
     }, [canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, git, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, sourceControl, t]);
 
-    // Runs after the dialog closes so a slow removal cannot hold the UI. The
-    // sessions are archived while their folder still exists, and come back if
-    // the removal fails (`archiveSessionsThenRemoveWorktree`); kept, they move
-    // to their project first (`moveWorktreeSessionsThenRemove`).
     const removeSelectedWorktreeInBackground = React.useCallback((
         worktree: WorktreeMetadata,
         sessionIds: string[],
@@ -436,14 +421,11 @@ export const SessionDialogs: React.FC = () => {
         keepSessionsInProject: boolean,
     ): Promise<void> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
-        // `skipTeardown` only from the failure toast; the same options otherwise.
         const run = async (skipTeardown: boolean, attemptSessionIds: string[]): Promise<void> => {
             const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
-            // The row shows it from here, through archiving the sessions too.
             markWorktreeRemoving(worktree.path);
             try {
                 if (keepSessionsInProject) {
-                    // The global list and the live stores, read again at each step.
                     const readSessions = () => readSessionsInWorktree(childStores, worktree.path);
                     const keptIds = readSessions().map((session) => session.id);
                     const kept = await moveWorktreeSessionsThenRemove({
@@ -477,8 +459,6 @@ export const SessionDialogs: React.FC = () => {
                     },
                 });
                 if (!result.removed) return;
-                // The removed work leaves the working set: its sessions' tabs
-                // close and the app moves off them, as Done does.
                 leaveFinishedSessions(attemptSessionIds, { projectId: getProjectRefForWorktree(worktree).id });
 
                 toast.success(shouldRemoveRemote
@@ -515,8 +495,6 @@ export const SessionDialogs: React.FC = () => {
         return run(false, sessionIds);
     }, [archiveSession, archiveSessions, canRemoveRemoteBranches, childStores, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, removeSelectedWorktree, t, unarchiveSessions]);
 
-    // Paths whose quick delete is being checked or removed, so a repeated
-    // Shift+click cannot remove the same worktree twice.
     const quickDeletePathsRef = React.useRef<Set<string>>(new Set());
 
     const deleteWorktreeWithoutDialogIfSafe = React.useCallback(async (
@@ -529,7 +507,6 @@ export const SessionDialogs: React.FC = () => {
         }
         quickDeletePathsRef.current.add(pathKey);
         try {
-            // A failed check counts as unsafe: the dialog shows what it can.
             const status = await getWorktreeStatus(worktree.path).catch(() => undefined);
             if (!canDeleteWorktreeWithoutConfirm(status)) {
                 openDeleteDialog({ sessions, mode: 'worktree', worktree });

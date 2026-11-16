@@ -33,10 +33,6 @@ type ProjectIdentityProps = {
 type ProjectHeaderIdentityProps = ProjectIdentityProps & {
   isCollapsed?: boolean;
   alwaysShowActions?: boolean;
-  /**
-   * Touch-width sidebars (VS Code) keep the project's icon and put the chevron
-   * after its name, as a zone header does, instead of trading the icon for it.
-   */
   keepIconWithCollapse?: boolean;
   labelClassName?: string;
 };
@@ -59,8 +55,6 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = resolveProjectColor(projectColor);
   const hasCollapseControl = isCollapsed !== undefined;
-  // The project icon swaps for the collapse chevron on hover; a touch-width
-  // header keeps the icon and shows the chevron after the label instead.
   const chevronInSlot = hasCollapseControl && !keepIconWithCollapse;
   const iconVisibilityClassName = chevronInSlot
     ? (alwaysShowActions ? 'hidden' : 'group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0')
@@ -106,10 +100,6 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         )}
       </span>
-      {/* The rows' size at medium weight (maintainer, 2026-11-12; a step
-          larger read a little too big): under the Projects caption a project
-          is an item of the list, and its icon, weight and the indent of its
-          sessions set it apart from them. */}
       <span className={cn('truncate font-medium text-foreground typography-ui-label', labelClassName)}>{projectLabel}</span>
       {hasCollapseControl && keepIconWithCollapse ? (
         <Icon
@@ -123,10 +113,6 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
 
 interface SortableProjectItemProps extends ProjectIdentityProps {
   disabled?: boolean;
-  /**
-   * The projects this one sorts among: those under the same caption, Projects
-   * or a group of projects. A drag only lands among them.
-   */
   sortGroup?: string;
   projectDescription: string;
   projectDirectory?: string;
@@ -139,20 +125,16 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   onNewSession: () => void;
   onNewWorktreeSession?: () => void;
   onManageWorktrees?: () => void;
-  /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
-  /** The issues and PRs board on this project's repository; absent in VS Code. */
   onOpenSourceBoard?: () => void;
   onNewFolder?: () => void;
   onOpenFolder?: () => void;
   onRenameStart: () => void;
-  /** Archives the project's sessions except pinned, running and In work ones. */
   onArchiveAll?: () => void;
   onClose: () => void;
   children?: React.ReactNode;
   showCreateButtons?: boolean;
   hideHeader?: boolean;
-  /** Aggregated activity/attention indicator shown while the project is collapsed. */
   statusIndicator?: React.ReactNode;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
@@ -198,7 +180,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 }) => {
   const { t } = useI18n();
   const folderMissing = useProjectFolderMissing(projectDirectory);
-  // Project headers only exist in the projects view, which always pins them.
   const stickyZoneHeaders = true;
   const {
     attributes,
@@ -307,24 +288,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     event.stopPropagation();
   }, []);
 
-  // Ctrl+click opens the context menu on macOS. Decided from the click itself:
-  // a right button press fires no click, so a flag set on press stayed set
-  // and swallowed the next real click.
   const handleToggleClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.ctrlKey) return;
     onToggle();
   }, [onToggle]);
 
-  // Hover-revealed header actions swap in over the label's right end
-  // (`oc-actions-mask`) instead of pushing it; the reserve is how far they
-  // reach in past the header's 14px right padding: the new-session button
-  // 2px from the edge, then the worktree and menu buttons (24px, 4px apart)
-  // from 28px.
   const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
-  // With a mouse the project's menu is its right-click menu (Shift+F10 from
-  // the keyboard); the ⋯ button shows on touch only: always in touch layouts,
-  // on hover for a touch screen elsewhere. Hover reserves count it only where
-  // it always shows.
   const showMenuButton = !hideDirectoryControls && alwaysShowActions;
   const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (showMenuButton ? 1 : 0);
   const headerActionsReserveClass = groupedHeaderActionCount === 2
@@ -334,7 +303,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       : showCreateButtons || groupedHeaderActionCount === 1
         ? '[--oc-actions-reserve:0.75rem]'
         : undefined;
-  // A header with no hover actions covers nothing.
   const headerLabelMaskClass = alwaysShowActions || !headerActionsReserveClass
     ? undefined
     : isMenuOpen
@@ -350,7 +318,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      // Lifted, the header leaves its place open: its copy follows the pointer.
       className={cn('relative', isDragging && 'opacity-0')}
     >
       {!hideHeader ? (
@@ -358,22 +325,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
           <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
             <ContextMenuTrigger
               render={
-                // Keep the live context-menu trigger when the shared zone
-                // header moves between the section and the pinned layer.
-                // Full-bleed band: pull past the list container's padding so
-                // the section band spans the entire sidebar width (ref: edge-
-                // to-edge section headers, not rounded pills).
                 <CrossfadeZoneHeader
                   className={cn(
                     '-ms-2.5 -me-2 text-start group/project select-none',
-                    // The touch sidebar sits on the editor's background, so its
-                    // sticky header takes the list's own colour.
                     stickyZoneHeaders && 'sticky top-0 z-20',
                     stickyZoneHeaders && (mobileVariant ? 'bg-background' : 'bg-sidebar'),
                   )}
                   data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}
                   onContextMenu={(event) => {
-                    // VS Code hides project actions entirely (hideDirectoryControls).
                     if (hideDirectoryControls) return;
                     event.preventDefault();
                     setIsContextMenuOpen(true);
@@ -381,9 +340,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 />
               }
             >
-            {/* The whole header lifts, its toggle too; its buttons stay buttons.
-                Enter and Space sort from the header itself and open or close
-                the project from its toggle. */}
             <div
               ref={setActivatorNodeRef}
               className={cn('relative flex items-center gap-1 py-1 ps-4 pe-3.5', !disabled && 'cursor-grab active:cursor-grabbing')}
@@ -442,7 +398,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
                       keepIconWithCollapse={mobileVariant}
-                      // The label starts past the 14px icon and the 6px gap.
                       labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)}
                     />
                     {folderMissing ? (

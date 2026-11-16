@@ -47,11 +47,6 @@ type SessionRowMenusInput = {
   }) => StartSessionWorktreeMenuLoadResult;
 };
 
-/**
- * A session row's two menus: the ⋯ dropdown and the right-click menu, with
- * their open state and the dialogs their items open (move, export). Rename
- * waits here for the menu to finish closing before the row enters rename mode.
- */
 export function useSessionRowMenus({
   node,
   sessionDirectory,
@@ -128,8 +123,6 @@ export function useSessionRowMenus({
       folders={hasFolderMutationAuthority ? {
         ownerKey: folderOwnerKey ?? null,
         projectId: sessionProjectId ?? null,
-        // Zone rows mix projects, so they ask for the new folder's name in a
-        // dialog; a project's rows name it in place in the list.
         createInline: isZoneRow ? undefined : (scope) => {
           const newFolder = createFolderAndStartRename(scope);
           if (newFolder) pendingFolderCreateRef.current = true;
@@ -138,9 +131,6 @@ export function useSessionRowMenus({
       } : null}
       touch={mobileVariant}
       onRename={() => {
-        // Defer rename until dropdown close transition completes.
-        // onOpenChangeComplete fires after animation + focus cleanup are done,
-        // avoiding focus stealing from Base UI's unmount cleanup.
         pendingRenameRef.current = { id: session.id, title: sessionTitle };
       }}
       onExport={() => sessionExport.requestExport(session, sessionDirectory, node)}
@@ -164,8 +154,6 @@ export function useSessionRowMenus({
   );
 
   const contextMenuContent = (
-    // The shared menu: the dropdown's glass with its redraw guard, without
-    // which the blur under it went stale and the transcript read through.
     <ContextMenuContent
       finalFocus={() => {
         if (pendingFolderCreateRef.current) {

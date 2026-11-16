@@ -16,8 +16,6 @@ type SessionRowPrBadgeProps = {
   trackerDirectory: string | null;
 };
 
-// The PR (or issue) badge carries its own tooltip (status text) and opens
-// it: timeline rows have no whole-row tooltip, so this is where that lives.
 export function SessionRowPrBadge({
   primaryRef,
   refLines,
@@ -42,15 +40,12 @@ export function SessionRowPrBadge({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            // The `+N` only counts the others; the tooltip lists them.
             if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
             if (primaryRef.url) openTrackerItem(primaryRef.url, trackerDirectory, event);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >
-          {/* The state's colour is on the mark alone; the number stays neutral. */}
           <Icon name={primaryRef.icon} className={cn('h-3 w-3', primaryRef.color && 'oc-ref-tint')} style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined} />
-          {/* One-line rows keep the coloured mark only; its tooltip lists every link. */}
           {isOneLineTimelineRow ? null : <>
             <span className="leading-none tabular-nums">{primaryRef.label}</span>
             {moreRefCount > 0 ? <span data-ref-more className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}

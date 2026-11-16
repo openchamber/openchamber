@@ -1246,6 +1246,51 @@ rest it is as quiet as the button was.
 
 ## Loading rules
 
+- Authoritative deletion cleanup requires a complete answer from the owning
+  space. A partial or failed space read cannot prove its sessions deleted; a
+  space absent from the authoritative space list takes its sessions with it.
+- Project selection on mount preserves launch navigation, including restored
+  sessions, links and drafts. Only a later user project switch selects that
+  project's remembered session. Unknown ownership keeps the switch pending until
+  authoritative maps can resolve it.
+- A containing worktree may label a session only when it belongs to that session's
+  resolved project. Live branch lookup also checks the containing worktree root
+  for subdirectory sessions, whose own directory rarely has a Git status entry.
+- Worktree prefix lookup runs for each session on sidebar rebuilds and avoids
+  allocating entry pairs or concatenated path prefixes in that loop.
+- Root-branch resolution keys its cache by project path and input branch and
+  coalesces initial status bursts. The same input stays cached for 5 minutes;
+  another project's settled branch cannot trigger a quadratic resolution cascade.
+- Row comparators consume precomputed descendant structure and editing lookups.
+  Repeated recursive subtree walks per row make a group rebuild quadratic.
+  Descendant action callbacks key by IDs so a reference-only tree rebuild does
+  not invalidate every row's handler.
+- Folder assignment clears memberships in other scopes first, because the folder
+  store deduplicates within one scope only. Persisted cyclic or disconnected
+  folder and session graphs project from deterministic roots without rewriting
+  their stored parent links.
+- Neighbor and hover prefetch share deduplication and concurrency. Ending a hover
+  cancels only its delayed timer, never an existing neighbor request. Active-session
+  loading finishes before neighbor speculation, and stopped spaces are skipped.
+- Explicit secondary metadata owns branch filtering: a null branch there cannot
+  fall back to a raw worktree branch that the owning projection hid deliberately.
+- Session reference identity includes provider, repository and item. Full branch
+  status wins duplicate summaries; unknown linked change requests remain visible
+  and suppress issue badges. Conflicts take precedence over failing checks, while
+  pending checks and required reviews keep a change request unready to merge.
+- Selecting a session or opening a draft explicitly leaves full-page surfaces,
+  even when it selects the already-current session and no store transition fires.
+- Archive Undo restores exactly the successful IDs on their original runtime.
+  It reopens an archived current session only if the user has not since selected
+  another, and does not undo unrelated side effects such as deleted btw forks.
+- Inline rename waits for menu close and focus cleanup before taking focus. Title
+  selection waits until the seeded title reaches the input, and outside-click
+  handling belongs to that occurrence so duplicate rows cannot save its edit.
+- Scrolling closes row tooltips and suppresses new ones until the gesture stops.
+  Otherwise a stationary pointer opens successive interactive tooltips that stay
+  stacked while their rows move away.
+- Guest-mark tone classes remain literal source strings because the stylesheet
+  generator discovers complete class names statically.
 - Publish bootstrap demand only for the current directory and the selected session's directory. Known project roots and worktrees are topology, not demand: rows and sessions come from the global session list, activity from the global status index and the host status seed. Every directory-scoped read makes OpenCode create and initialize a location, so demanding the whole topology created one per project at startup.
 - Directory demand and refresh requests preserve path case after separator and drive-letter normalization. Case-insensitive sidebar membership keys stay inside the collection projection; sending those keys as paths creates duplicate directory stores and can address a different directory on case-sensitive filesystems.
 - A never-bootstrapped directory is ready only after a complete global snapshot. Before that, the group shows global loading or failure, and Retry reloads the global list. An empty Chats zone shows its loading as a spinner on its own caption and adds no row: the list very often turns out empty, and a loading row pushed every zone below down and back up. Failures still take a row, with Retry. Previously loaded groups stay ready during background polling. Directory failures and denied folder access still use forced bootstrap or native access recovery for the affected directory.

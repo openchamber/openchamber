@@ -93,17 +93,11 @@ const areSessionRenderSemanticsEqual = (prev: Session, next: Session): boolean =
   && prev.time?.created === next.time?.created
   && prev.time?.updated === next.time?.updated
   && prev.time?.archived === next.time?.archived
-  // The row renders from metadata (goal, in-work state, the recap tooltip) and
-  // judges the done hint and the recap against `time.idle`. A metadata change
-  // arrives as a new object, so the reference is the cheap exact signal.
   && prev.time?.idle === next.time?.idle
   && prev.metadata === next.metadata
   && sameMultiRunIdentity(prev, next)
 );
 
-// Returns the name of the first prop whose change requires a render, or null
-// when the row can skip it. The name feeds the stream perf counters so sidebar
-// churn is explained, not only counted.
 const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNodeItemProps): string | null => {
   if (prev.node.session.id !== next.node.session.id) return 'node';
   if (!areSessionRenderSemanticsEqual(prev.node.session, next.node.session)) return 'node';

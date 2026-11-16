@@ -11,22 +11,13 @@ import {
 } from '@/lib/sidebarSections';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
-/**
- * The sections editor's state on this device, never stored: whether the
- * manager is open, the section being edited (the sidebar previews it in its
- * place while it is), and what a new pin list is being made for.
- */
 type PinListRequest = { pin: (listId: string) => void };
-/** The phone's Pin to: a sheet listing Pinned and the user's lists for one work. */
 type PinToRequest = { current: string | null; pin: (list: string | null) => void; unpin: () => void };
 
 type SidebarSectionsUiState = {
   managerOpen: boolean;
-  /** The section being edited, as it stands; the sidebar draws it in place of the saved one. */
   draft: CustomSidebarSection | null;
-  /** The draft is a new section, not yet in the saved list. */
   draftIsNew: boolean;
-  /** How many works (or projects, for a group of projects) the draft lists right now; null while nothing measured it. */
   draftMatchCount: number | null;
   pinListRequest: PinListRequest | null;
   pinToRequest: PinToRequest | null;
@@ -47,12 +38,7 @@ export const editSection = (section: CustomSidebarSection, isNew: boolean): void
 export const updateSectionDraft = (draft: CustomSidebarSection): void => useSidebarSectionsUiStore.setState({ draft });
 export const discardSectionDraft = (): void => useSidebarSectionsUiStore.setState({ draft: null, draftIsNew: false, draftMatchCount: null });
 
-/** Asks for a new pin list's name; `pin` files the work into the list once it exists. */
 export const requestNewPinList = (pin: (listId: string) => void): void => useSidebarSectionsUiStore.setState({ pinListRequest: { pin } });
-/**
- * The phone's swipe Pin: with no pin lists it pins to Pinned or unpins at
- * once, as before; with lists it asks which one.
- */
 export const requestPinTo = (request: PinToRequest): void => {
   if (useSessionDisplayStore.getState().pinLists.length === 0) {
     if (request.current) request.unpin(); else request.pin(null);
@@ -76,17 +62,14 @@ export const setSidebarSectionHidden = (id: string, hidden: boolean): void => {
   void updateDesktopSettings({ sidebarHiddenSections: useSessionDisplayStore.getState().hiddenSections });
 };
 
-/** Whether one more section of the user's own fits; the stored list keeps at most `SIDEBAR_SECTIONS_MAX`. */
 export const canAddSidebarSection = (sections: readonly SidebarSectionEntry[]): boolean => (
   sections.filter((entry) => entry.kind === 'custom').length < SIDEBAR_SECTIONS_MAX
 );
 
-/** Saves the draft in its place, a new one under the Pinned section, and closes the editor. */
 export const commitSectionDraft = (): void => {
   const { draft, draftIsNew } = useSidebarSectionsUiStore.getState();
   if (!draft) return;
   const sections = useSessionDisplayStore.getState().sections;
-  // Past the limit the stored list would drop a section the user already has.
   if (draftIsNew && !canAddSidebarSection(sections)) return;
   const next = draftIsNew
     ? insertAfterPinned(sections, draft)
@@ -95,12 +78,6 @@ export const commitSectionDraft = (): void => {
   discardSectionDraft();
 };
 
-/**
- * Deletes a pin list. Sections stop asking for it, and a section left asking
- * for no pin list at all goes with it (the one made with the list among them):
- * without its pins its other chips would list far more than it did. Pins filed
- * in the list stay pinned and show in their projects with the pin mark.
- */
 export const deleteSidebarPinList = (id: string): void => {
   const store = useSessionDisplayStore.getState();
   store.setPinLists(store.pinLists.filter((list) => list.id !== id));
@@ -108,7 +85,6 @@ export const deleteSidebarPinList = (id: string): void => {
   stopAskingFor('pins', id);
 };
 
-/** A deleted folder leaves the sections as a deleted pin list does. */
 export const removeFolderFromSections = (id: string): void => stopAskingFor('folders', id);
 
 const stopAskingFor = (category: 'pins' | 'folders', id: string): void => {
@@ -134,10 +110,6 @@ const insertAfterPinned = (sections: readonly SidebarSectionEntry[], section: Si
   return next;
 };
 
-/**
- * A new pin list with a section that shows it, right under Pinned: a list no
- * section shows would leave its works in their projects with a pin mark.
- */
 export const createPinListWithSection = (name: string): SidebarPinList | null => {
   const trimmed = name.trim();
   const store = useSessionDisplayStore.getState();

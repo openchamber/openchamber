@@ -11,7 +11,6 @@ import { describeSessionActionError } from './sessionActionError';
 type DeleteSessionSource = {
   archivedBucket?: boolean;
   hardDelete?: boolean;
-  /** Bypass the confirmation dialog and delete/archive immediately. */
   skipConfirm?: boolean;
 };
 
@@ -74,8 +73,6 @@ export const useSessionActions = (args: Args) => {
   const handleSessionSelect = React.useCallback(
     (sessionId: string, sessionDirectory?: string | null) => {
       streamPerfMark('navigation.session_select');
-      // Selecting a session always leaves any full-page surface, even when
-      // the session is already the current one (no store transition fires).
       useUIStore.getState().closeMainSurfaces();
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
@@ -108,9 +105,6 @@ export const useSessionActions = (args: Args) => {
       try {
         await updateSessionTitle(editingSessionId, trimmed);
       } catch (error) {
-        // The form closes either way: a rename that silently stays open
-        // reads as "Enter does nothing". The toast says what OpenCode
-        // answered, with its log ref, so the failure can be looked up.
         console.error('[session-actions] rename failed', error);
         toast.error(t('sessions.sidebar.session.rename.error', {
           detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
@@ -135,9 +129,6 @@ export const useSessionActions = (args: Args) => {
       precomputed?: { descendantIds: string[] },
     ) => {
       const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      // Use the snapshot taken when the dialog opened (if any) so the
-      // executed list matches what the user was told. Fall back to a fresh
-      // collection for direct-execute (no-dialog) callers.
       const effectiveDescendantIds = precomputed?.descendantIds
         ?? descendantIds;
       await runSessionSubtreeAction(

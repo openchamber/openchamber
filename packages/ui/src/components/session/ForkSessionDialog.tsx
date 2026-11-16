@@ -70,15 +70,9 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
-  // A worktree is the host project's: one made from a space's session would hold none of the
-  // space's changes, so a fork there stays in the space.
   const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true && !isSpaceDirectory(projectDirectory) && !isSpaceDirectory(resolvedWorktreeProjectDirectory);
-  // The goal loop lives in the web server; VS Code only renders goal state.
   const showRunAsGoal = React.useMemo(() => !isVSCodeRuntime(), []);
 
-  // Toggling goal mode swaps the prefilled instructions between the
-  // report-back default and the assertive execute-to-completion variant —
-  // but never clobbers text the user has edited.
   const handleToggleRunAsGoal = React.useCallback((next: boolean) => {
     setRunAsGoal(next);
     setInstructions((current) => {
@@ -100,9 +94,6 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     void ensureGitStatus(resolvedWorktreeProjectDirectory, git);
   }, [ensureGitStatus, git, open, resolvedWorktreeProjectDirectory]);
 
-  // Reset only when the dialog transitions to open. Reading the store snapshot
-  // here (instead of subscribing) avoids clobbering in-progress user edits when
-  // the config store refreshes in the background while the dialog is open.
   React.useEffect(() => {
     if (!open) return;
     const config = useConfigStore.getState();

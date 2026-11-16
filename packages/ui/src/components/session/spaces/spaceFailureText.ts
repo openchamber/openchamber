@@ -1,6 +1,3 @@
-// What a refusal or failure of the spaces journey says to the user. The codes the user can act on
-// have a sentence of their own in every language; any other shows the server's message, in
-// English, rather than nothing.
 
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { SpacesRequestError, type SpaceFailure } from '@/lib/spaces/spaces-api';
@@ -44,7 +41,6 @@ const KNOWN: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
   ['image_pulling', 'spaces.failure.imagePulling'],
 ]);
 
-// The same two failures on another machine: what to do there, not on this computer.
 const ON_MACHINE: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
   ['docker_cli_missing', 'spaces.failure.dockerMissingOn'],
   ['docker_daemon_unreachable', 'spaces.failure.dockerNotRunningOn'],
@@ -52,17 +48,11 @@ const ON_MACHINE: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
 
-/**
- * The text of a failure. The `login_*` refusals name the login the user is to sign in to, so a
- * caller that knows the provider passes its login's name as `name`; a caller that knows the
- * failure is about another machine passes it as `machine`, so Docker's absence is placed there.
- */
 export const spaceFailureText = (t: Translate, failure: SpaceFailure, params?: I18nParams): string => {
   const key = (params?.machine ? ON_MACHINE.get(failure.code) : undefined) ?? KNOWN.get(failure.code);
   return key ? t(key, params) : t('spaces.failure.unexpected', { message: failure.message || failure.code });
 };
 
-/** A thrown error as a failure: the journey's own refusals keep their code, anything else is unexpected. */
 export const failureOfError = (error: Error): SpaceFailure => (error instanceof SpacesRequestError
   ? { code: error.code, message: error.message }
   : { code: 'space_request_failed', message: error.message });

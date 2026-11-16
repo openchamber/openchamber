@@ -4,11 +4,6 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import type { SessionGroup, SessionNode } from '../types';
 import type { ProjectSection } from '../projects/sessionProjectRender';
 
-/**
- * A work is what the sidebar lists as one entry: a linked worktree or an
- * isolated space with all its sessions, or a root session of the project root
- * with the sessions nested under it. See DOCUMENTATION.md next to this file.
- */
 export type SidebarWorkRef =
   | { kind: 'group'; key: string; projectId: string; group: SessionGroup }
   | { kind: 'session'; key: string; projectId: string | null; rootSessionId: string };
@@ -17,26 +12,15 @@ type SidebarGroupWorkRef = Extract<SidebarWorkRef, { kind: 'group' }>;
 
 type SidebarWorkIndex = {
   bySessionId: ReadonlyMap<string, SidebarWorkRef>;
-  /** Every worktree and space work, in section and group order, sessions or not. */
   groupWorks: readonly SidebarGroupWorkRef[];
 };
 
-/**
- * A group that is a work of its own: a linked worktree's, or an isolated
- * space's, which is a separate copy of the project the same way.
- */
 export const isGroupWork = (group: SessionGroup): boolean => (
   !group.isMain && group.isArchivedBucket !== true && (Boolean(group.space) || group.worktree !== null)
 );
 
-/** The root folder holding a session or a worktree, and the project of that folder. */
 export type SidebarFolderMembership = { folderId: string; projectId: string };
 
-/**
- * The folder of the work's own project that holds it. A work that changed
- * project (a nested folder added as one) keeps its stored membership in the
- * old project, whose folders no longer list it.
- */
 export const findWorkFolderId = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): string | null => {
   const memberId = ref.kind === 'group' ? worktreeFolderMemberId(ref.group.directory) : ref.rootSessionId;
   const membership = memberId ? folderByMember.get(memberId) : undefined;
@@ -47,11 +31,6 @@ export const isFiledInFolder = (ref: SidebarWorkRef, folderByMember: ReadonlyMap
   findWorkFolderId(ref, folderByMember) !== null
 );
 
-/**
- * The sessions in work of a root session's work: the root and what nests
- * under it, past subagents, whose own state never counts. The work is in work
- * while any of them is, and Done closes all of them.
- */
 export const collectSessionWorkInWork = (root: SessionNode): Session[] => {
   const inWork: Session[] = [];
   const stack: SessionNode[] = [root];
@@ -66,11 +45,6 @@ export const collectSessionWorkInWork = (root: SessionNode): Session[] => {
 
 const worktreeWorkGroupKey = (projectId: string, group: SessionGroup): string => `${projectId}:${group.id}`;
 
-/**
- * A worktree's entry in a folder of its project root, beside the session ids
- * there. The folder store and the server treat members as opaque ids, so a
- * worktree is filed with the same assign and unassign changes as a session.
- */
 export const worktreeFolderMemberId = (directory: string | null): string | null => {
   const normalized = normalizePath(directory);
   return normalized ? `worktree:${normalized}` : null;
@@ -78,7 +52,6 @@ export const worktreeFolderMemberId = (directory: string | null): string | null 
 
 const sessionWorkKey = (rootSessionId: string): string => `session:${rootSessionId}`;
 
-/** Which work each listed session belongs to, from the project sections. */
 export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): SidebarWorkIndex => {
   const bySessionId = new Map<string, SidebarWorkRef>();
   const groupWorks: SidebarGroupWorkRef[] = [];
@@ -109,14 +82,6 @@ export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): Side
   return { bySessionId, groupWorks };
 };
 
-/**
- * The works of the sessions `include` accepts, each once, in the order of the
- * first of their sessions in `orderedSessions` (the sidebar's lifecycle order,
- * so a work moves up when any of its sessions does). With `archiveAnchors`
- * (`buildWorktreeArchiveAnchors`) a worktree work also stands where its
- * archived sessions hold it, and is listed for them alone. With `rootOf` a
- * nested session can resolve through its root's registered project work.
- */
 export const orderSidebarWorks = (
   orderedSessions: readonly Session[],
   index: SidebarWorkIndex,
@@ -141,11 +106,6 @@ export const orderSidebarWorks = (
   return [...rankByKey.values()].sort((left, right) => left.rank - right.rank).map((entry) => entry.ref);
 };
 
-/**
- * The top-level session each session nests under, itself for a top-level
- * one, by the sidebar's nesting (`childrenMap`): a subagent, a review or a
- * promoted /btw belongs to the session it came from, not to a work of its own.
- */
 export const buildSessionRootIndex = (
   rootSessions: readonly Session[],
   childrenMap: ReadonlyMap<string, readonly Session[]>,
@@ -163,32 +123,15 @@ export const buildSessionRootIndex = (
   return rootOf;
 };
 
-/**
- * The works In work lists, before Pinned takes its own: a work is in work when
- * its root or a session nested under it, past subagents, is. In work spans
- * projects. A session without a registered project work stays hidden until
- * session admission has checked its configuration and registered its folder.
- */
 export const orderInWorkWorks = (
   orderedSessions: readonly Session[],
   index: SidebarWorkIndex,
   rootOf: ReadonlyMap<string, string>,
   isChatDirectory: (directory: string | null | undefined) => boolean,
 ): SidebarWorkRef[] => orderSidebarWorks(orderedSessions, index, (session) => (
-  // A subagent's own work state never puts its run in work: the user works
-  // in the sessions they started, as the Done button on a row reads it.
   !session.parentID && !session.time?.archived && !isChatDirectory(session.directory) && isSessionInWork(session)
 ), EMPTY_ANCHORS, rootOf);
 
-/**
- * Where each worktree work's archived sessions hold it in `orderedSessions`,
- * by work key: a position between two listed sessions, before the first
- * unpinned top-level session that was last active before the newest archived
- * session of the worktree. Archiving a session is not work, so the worktree
- * keeps the place its newest session gave it instead of falling to the next
- * one's. Top-level sessions are listed newest first after the pinned ones,
- * which is what makes the position well defined.
- */
 export const buildWorktreeArchiveAnchors = ({
   groupWorks,
   archivedSessions,
@@ -199,7 +142,6 @@ export const buildWorktreeArchiveAnchors = ({
   groupWorks: readonly SidebarGroupWorkRef[];
   archivedSessions: readonly Session[];
   orderedSessions: readonly Session[];
-  /** A session's value in the lifecycle order, newer is higher. */
   orderValueOf: (session: Session) => number;
   isPinned: (session: Session) => boolean;
 }): ReadonlyMap<string, number> => {

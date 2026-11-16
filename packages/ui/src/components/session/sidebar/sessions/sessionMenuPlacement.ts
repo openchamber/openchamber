@@ -8,11 +8,9 @@ import { normalizePath } from '../utils';
 import { resolveSessionFolderOwnerKey } from './sessionFolderIdentity';
 import { createSessionOwnershipIndex } from './sessionOwnership';
 
-/** Where a session sits in the sidebar, for a session menu opened outside it. */
 type SessionMenuPlacement = {
   projectId: string | null;
   folderOwnerKey: string | null;
-  /** Its sidebar row is a work of its own, so the menu offers Track / Done. */
   ownsWork: boolean;
 };
 
@@ -22,17 +20,11 @@ type PlacementSources = {
   authoritativeProjects: readonly Pick<OpenCodeProject, 'id' | 'worktree'>[];
   spaces: readonly SpaceMark[];
   isVSCode: boolean;
-  /** The active sessions the sidebar lists, for multi-run membership. */
   activeSessions: readonly Session[];
-  /** The scope a legacy run's title identity is read in, as the sidebar's run index reads it. */
   resolveLegacyScope: (session: Session) => string | null;
   lookup: (sessionId: string) => Session | undefined;
 };
 
-/**
- * The placement the sidebar gives `session`, resolved by the same ownership
- * index and folder rule its rows use.
- */
 export const resolveSessionMenuPlacement = (session: Session, sources: PlacementSources): SessionMenuPlacement => {
   const archived = Boolean(session.time?.archived);
   const projects = sources.projects.flatMap((project) => {
@@ -49,28 +41,17 @@ export const resolveSessionMenuPlacement = (session: Session, sources: Placement
     sources.spaces,
   );
   const owner = ownership.bySessionId.get(session.id);
-  // A run needs two active members, as in the sidebar: the survivor that
-  // Keep leaves is an ordinary session again.
   const isRunLane = buildMultiRunIndex(sources.activeSessions, sources.resolveLegacyScope)
     .runKeyBySessionId.has(session.id);
   return {
     projectId: owner?.projectId ?? null,
     folderOwnerKey: resolveSessionFolderOwnerKey(session, owner, isRunLane),
-    // A worktree or a space is the work of the sessions in it, a run's row
-    // owns its lanes, and a review or btw session belongs to the work it
-    // nests under.
     ownsWork: !isRunLane
       && (!owner || owner.kind === 'project')
       && resolveSessionNestingParentId(session, sources.lookup) === null,
   };
 };
 
-/**
- * The sessions in work of the work `root` heads: it and the reviews and btw
- * sessions nested under it, past subagents, whose own state never counts.
- * The sidebar's `collectSessionWorkInWork` over a row's tree, for a session
- * that has no row at hand.
- */
 export const collectNestedWorkInWork = (root: Session, sessions: readonly Session[]): Session[] => {
   const byId = new Map(sessions.map((session) => [session.id, session]));
   const nestedByParentId = new Map<string, Session[]>();

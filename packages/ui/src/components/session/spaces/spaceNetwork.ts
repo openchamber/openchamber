@@ -1,5 +1,3 @@
-// The network of a running space as its dialogs use it: the gatekeeper's journal, and allowing a
-// domain from it. The access dialog and the setup output window both list refused domains with Allow.
 
 import React from 'react';
 
@@ -10,7 +8,6 @@ import { failureOfError, spaceFailureText } from './spaceFailureText';
 
 type JournalState = { kind: 'loading' } | { kind: 'ready'; journal: SpaceJournal } | { kind: 'failed'; failure: SpaceFailure };
 
-/** The gatekeeper's journal, read while `enabled` and again on `refresh`; never polled. */
 export const useSpaceJournal = (spaceId: string, enabled: boolean) => {
   const [state, setState] = React.useState<JournalState>({ kind: 'loading' });
   const [generation, setGeneration] = React.useState(0);
@@ -27,7 +24,6 @@ export const useSpaceJournal = (spaceId: string, enabled: boolean) => {
   return { state, refresh: () => setGeneration((value) => value + 1) };
 };
 
-/** Allows a domain in a running space, one at a time, and keeps the failure by the domain it was for. */
 export const useOpenSpaceDomain = (spaceId: string) => {
   const { t } = useI18n();
   const [opening, setOpening] = React.useState<string | null>(null);
