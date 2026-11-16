@@ -15,7 +15,6 @@ import { isGuestActive } from './capabilities.ts';
 import { safeHttpsAddress } from './tool-presentation.ts';
 import type { InstalledGuest } from './types.ts';
 
-/** One mark as `GET /api/guests/marks` lists it: who set it, on what, and what it shows. */
 export type GuestMarkEntry = { guestId: string; target: ServiceMarkTarget; mark: ServiceMark };
 
 const entrySchema = z.object({
@@ -34,11 +33,6 @@ const entrySchema = z.object({
 
 const listSchema = z.object({ marks: z.array(z.unknown()) });
 
-/**
- * The marks route's answer. `null` when it is not that answer at all, which a
- * caller treats as a failed read; one entry this build cannot read is left
- * out and the rest stay.
- */
 export const parseGuestMarksJson = (content: string): GuestMarkEntry[] | null => {
   let value: unknown;
   try {
@@ -54,48 +48,37 @@ export const parseGuestMarksJson = (content: string): GuestMarkEntry[] | null =>
   });
 };
 
-/** A mark as a sidebar row draws it. */
 export type RowGuestMark = {
   guestId: string;
-  /** The extension's name, which the tooltip puts before `text`. */
   guestName: string;
-  /** The extension's place in the catalog; rows list marks in this order. */
   order: number;
   icon: string;
   tone: GuestTone;
   text: string;
-  /** The extension has a panel, and a click opens it. */
   panel: boolean;
-  /** What a click opens when the extension has no panel; null when the mark gave no usable address. */
   url: string | null;
 };
 
-/** A folder the app knows and the project it belongs to: project roots and worktree paths, normalized. */
 export type GuestMarkPlace = { path: string; projectId: string };
 
 export type GuestMarkIndex = {
   bySession: ReadonlyMap<string, readonly RowGuestMark[]>;
-  /** By the normalized folder of a `{ directory }` target. */
   byFolder: ReadonlyMap<string, readonly RowGuestMark[]>;
-  /** By `guestBranchMarkKey` of the project the target's folder belongs to. */
   byBranch: ReadonlyMap<string, readonly RowGuestMark[]>;
 };
 
 const NO_MARKS: ReadonlyMap<string, readonly RowGuestMark[]> = new Map();
 
-/** The one list every row without marks reads. */
 export const NO_ROW_GUEST_MARKS: readonly RowGuestMark[] = [];
 
 export const EMPTY_GUEST_MARK_INDEX: GuestMarkIndex = { bySession: NO_MARKS, byFolder: NO_MARKS, byBranch: NO_MARKS };
 
 export const guestBranchMarkKey = (projectId: string, branch: string): string => JSON.stringify([projectId, branch]);
 
-/** Whether the sidebar shows this extension's marks: it is on, approved, and its manifest asks for them. */
 export const mayGuestShowMarks = (guest: InstalledGuest): boolean => (
   guest.marks === true && isGuestActive(guest) && hasGuestCapability(guest.capabilities, 'marks')
 );
 
-/** The project of the known folder that holds `directory`, by the longest match. */
 const projectOfFolder = (directory: string, places: readonly GuestMarkPlace[]): string | null => {
   let best: GuestMarkPlace | null = null;
   for (const place of places) {
@@ -110,7 +93,6 @@ const sameRowMark = (a: RowGuestMark, b: RowGuestMark): boolean => (
   && a.tone === b.tone && a.text === b.text && a.panel === b.panel && a.url === b.url
 );
 
-/** `next` with every list that did not change taken from `previous`, and `previous` itself when none did. */
 const keepUnchanged = (
   next: Map<string, RowGuestMark[]>,
   previous: ReadonlyMap<string, readonly RowGuestMark[]>,
@@ -129,14 +111,6 @@ const keepUnchanged = (
   return changed ? kept : previous;
 };
 
-/**
- * Joins what the server lists with what this client holds: the catalog says
- * whose marks may show, under what name and in what order, and the known
- * folders place a branch target in a project. A branch target in a folder of
- * no known project shows nowhere. One mark per extension per row key; of two
- * the later in the list stays. Lists and maps that did not change keep their
- * identity, so a row whose marks are the same does not render.
- */
 export const joinGuestMarks = (
   entries: readonly GuestMarkEntry[],
   guests: readonly InstalledGuest[],
@@ -195,12 +169,6 @@ export const joinGuestMarks = (
     : index;
 };
 
-/**
- * The marks of one row from the lists that name it, most specific first (the
- * session's, the branch's, the folder's): one per extension, the first list
- * that has one wins, in catalog order. A single non-empty list is returned as
- * it is.
- */
 export const mergeRowGuestMarks = (lists: ReadonlyArray<readonly RowGuestMark[]>): readonly RowGuestMark[] => {
   const filled = lists.filter((list) => list.length > 0);
   if (filled.length === 0) return NO_ROW_GUEST_MARKS;
@@ -212,5 +180,4 @@ export const mergeRowGuestMarks = (lists: ReadonlyArray<readonly RowGuestMark[]>
   return [...byGuest.values()].sort((a, b) => a.order - b.order);
 };
 
-/** How many marks a row draws; the rest are listed in the row's tooltip. */
 export const ROW_GUEST_MARKS_SHOWN = 2;

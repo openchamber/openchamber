@@ -30,7 +30,6 @@ const errorSchema = z.object({
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
-  /** Why the manifest did not parse, in the parser's words. */
   reason: z.string().trim().min(1).max(1000).optional(),
 });
 
@@ -42,7 +41,6 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
-  /** `contributes.opencodePlugin` names a folder that is missing or holds no entry file OpenCode finds. */
   | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'bundled'
@@ -52,7 +50,6 @@ export type InstallGuestErrorCode =
   | 'extract-failed'
   | 'too-large'
   | 'enterprise-mode'
-  /** The server installed it, but this build cannot read the row it answered with. */
   | 'unreadable'
   | 'failed';
 
@@ -161,12 +158,6 @@ export const installGuest = async (
   }
 };
 
-/**
- * Send a `.zip` picked or dropped in the browser to the host. Same result
- * shape as `installGuest`, so one flow handles both; the archive travels as a
- * raw octet-stream body over `runtimeFetch`, which is what the files tree
- * upload uses too, so relay and tunnel runtimes carry it unchanged.
- */
 export const uploadGuestZip = async (
   file: File,
   options: InstallGuestOptions = {},
@@ -196,8 +187,6 @@ export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> 
     const response = await runtimeFetch(`/api/guests/${id}`, { method: 'DELETE' });
     if (response.status === 204) {
       if (storageId && globalThis.indexedDB) {
-        // Server removal has already succeeded. A failed local cleanup cannot undo it;
-        // the retired installation identity makes any retained bytes inaccessible.
         await removeDeviceGuestStorage({ runtimeKey, guestId: id, storageId }).catch(() => {
           console.warn('Could not clear local extension preferences.');
         });
@@ -224,7 +213,6 @@ export const setGuestEnabled = async (id: string, enabled: boolean): Promise<boo
   }
 };
 
-/** Record the user's answer to the approval dialog. An empty list withdraws approval. */
 export const approveGuestCapabilities = async (id: string, granted: readonly GuestCapability[]): Promise<boolean> => {
   try {
     const response = await runtimeFetch(`/api/guests/${id}/capabilities`, {
