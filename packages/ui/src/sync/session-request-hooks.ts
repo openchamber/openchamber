@@ -4,7 +4,7 @@ import type { FormRequest, PermissionRequest, Session } from "@/lib/opencode/mod
 import { subscribeDirectoryPermission, subscribeDirectoryPermissions, subscribeDirectoryForms } from "./child-store"
 import { deriveRecoveredQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
-import { useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import { selectIndexedBlockingRequests, useGlobalBlockingRequestsStore, type BlockingRequestKinds } from "./global-blocking-requests"
 import type { State } from "./types"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests, computeSubtreeIds } from "./scoped-blocking-requests"
 import { useDirectoryStore, useDirectorySync } from "./directory-sync-hooks"
@@ -52,28 +52,22 @@ export function useSessionPermissions(sessionID: string, directory?: string, opt
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-type SessionBlockingRequests = {
-  hasPermission: boolean
-  hasForm: boolean
-}
-
-const NO_SESSION_BLOCKING_REQUESTS: SessionBlockingRequests = {
+const NO_SESSION_BLOCKING_REQUESTS: BlockingRequestKinds = {
   hasPermission: false,
   hasForm: false,
 }
 
 export function useSessionBlockingRequests(
-  scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
-): SessionBlockingRequests {
+  scopes: readonly { directory: string | null; sessionIDs: readonly string[] }[],
+): BlockingRequestKinds {
   const { childStores } = useSyncRuntime()
-  const scopedStores = React.useMemo(() => scopes.map((scope) => ({
-    sessionIDs: scope.sessionIDs,
-    store: childStores.ensureChild(scope.directory, { bootstrap: false }),
-  })), [childStores, scopes])
   React.useEffect(() => {
-    for (const scope of scopes) childStores.pin(scope.directory)
+    const directories = scopes.flatMap((scope) => (
+      scope.directory && childStores.getChild(scope.directory) ? [scope.directory] : []
+    ))
+    for (const directory of directories) childStores.pin(directory)
     return () => {
-      for (const scope of scopes) childStores.unpin(scope.directory)
+      for (const directory of directories) childStores.unpin(directory)
     }
   }, [childStores, scopes])
   const snapshotRef = useRef(NO_SESSION_BLOCKING_REQUESTS)
@@ -81,16 +75,24 @@ export function useSessionBlockingRequests(
     let hasPermission = false
     let hasForm = false
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
-    for (const { sessionIDs, store } of scopedStores) {
-      const { permission: permissions, form: forms, status } = store.getState()
-      const storeAuthoritative = status === "complete"
+    for (const { directory, sessionIDs } of scopes) {
+      const store = directory ? childStores.getChild(directory) : undefined
+      if (!store) {
+        const pending = selectIndexedBlockingRequests(indexed, sessionIDs)
+        hasPermission ||= pending.hasPermission
+        hasForm ||= pending.hasForm
+        continue
+      }
+      const { permission: permissions, form: forms, pendingRequestsReady } = store.getState()
       for (const sessionID of sessionIDs) {
-        const pending = indexed.get(sessionID)
         hasPermission ||= Boolean(permissions[sessionID]?.length)
-          || (!storeAuthoritative && Boolean(pending?.permissions.length))
         hasForm ||= Boolean(forms[sessionID]?.length)
-          || Boolean(pending?.pages.length)
-          || (!storeAuthoritative && Boolean(pending?.forms.length))
+          || Boolean(indexed.get(sessionID)?.pages.length)
+      }
+      if (!pendingRequestsReady) {
+        const pending = selectIndexedBlockingRequests(indexed, sessionIDs)
+        hasPermission ||= pending.hasPermission
+        hasForm ||= pending.hasForm
       }
     }
     const previous = snapshotRef.current
@@ -100,19 +102,54 @@ export function useSessionBlockingRequests(
     const next = { hasPermission, hasForm }
     snapshotRef.current = next
     return next
-  }, [scopedStores])
+  }, [childStores, scopes])
   const subscribe = React.useCallback((notify: () => void) => {
-    const unsubscribers = [
-      ...scopedStores.flatMap(({ sessionIDs, store }) => [
-        subscribeDirectoryPermissions(store, sessionIDs, notify),
-        subscribeDirectoryForms(store, sessionIDs, notify),
-      ]),
-      useGlobalBlockingRequestsStore.subscribe(notify),
-    ]
-    return () => {
-      for (const unsubscribe of unsubscribers) unsubscribe()
+    const storeUnsubscribers = new Map<string, () => void>()
+    let queued = false
+    let active = true
+    const announce = () => {
+      if (queued) return
+      queued = true
+      queueMicrotask(() => {
+        queued = false
+        if (active) notify()
+      })
     }
-  }, [scopedStores])
+    const syncStoreSubscriptions = () => {
+      const directories = new Set(scopes.flatMap((scope) => (scope.directory ? [scope.directory] : [])))
+      for (const [directory, unsubscribe] of storeUnsubscribers) {
+        if (directories.has(directory)) continue
+        unsubscribe()
+        storeUnsubscribers.delete(directory)
+      }
+      for (const scope of scopes) {
+        const { directory } = scope
+        if (!directory || storeUnsubscribers.has(directory)) continue
+        const store = childStores.getChild(directory)
+        if (!store) continue
+        const unsubscribers = [
+          subscribeDirectoryPermissions(store, scope.sessionIDs, notify),
+          subscribeDirectoryForms(store, scope.sessionIDs, notify),
+        ]
+        storeUnsubscribers.set(directory, () => {
+          for (const unsubscribe of unsubscribers) unsubscribe()
+        })
+      }
+    }
+    syncStoreSubscriptions()
+    const unsubscribeRegistry = childStores.subscribeRegistry(() => {
+      syncStoreSubscriptions()
+      announce()
+    })
+    const unsubscribeIndex = useGlobalBlockingRequestsStore.subscribe(notify)
+    return () => {
+      active = false
+      unsubscribeRegistry()
+      unsubscribeIndex()
+      for (const unsubscribe of storeUnsubscribers.values()) unsubscribe()
+      storeUnsubscribers.clear()
+    }
+  }, [childStores, scopes])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

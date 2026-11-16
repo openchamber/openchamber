@@ -9,6 +9,7 @@ import { dropSessionCaches } from "./session-cache"
 import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
 import { useSessionUIStore, type SentMessage } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
+import { settleGlobalBlockingRequest } from "./global-blocking-requests"
 import {
   DEFERRED_ANSWER_LEAD_IN,
   DEFERRED_QUESTION_NOTE,
@@ -900,9 +901,12 @@ function recoverStaleBlockingRequest(sessionId: string): void {
   }
 }
 
-function removeFormRequestFromChildStores(sessionId: string, requestId: string): boolean {
+function removeFormRequestFromChildStores(sessionId: string, requestId: string, settle = true): boolean {
   const stores = _childStores
-  if (!stores || !requestId) return false
+  if (!requestId) return false
+
+  if (settle) settleGlobalBlockingRequest("form", sessionId, requestId)
+  if (!stores) return false
 
   let removed = false
   for (const [, store] of stores.children) {
@@ -972,9 +976,12 @@ function isPermissionRequestNotFoundError(error: unknown): boolean {
   return /Permission(?:\.)?NotFoundError|Permission request not found/i.test(message)
 }
 
-function removePermissionRequestFromChildStores(sessionId: string, requestId: string): boolean {
+function removePermissionRequestFromChildStores(sessionId: string, requestId: string, settle = true): boolean {
   const stores = _childStores
-  if (!stores || !requestId) return false
+  if (!requestId) return false
+
+  if (settle) settleGlobalBlockingRequest("permission", sessionId, requestId)
+  if (!stores) return false
 
   let removed = false
   for (const [, store] of stores.children) {
@@ -2089,6 +2096,7 @@ export async function respondToPermission(
     if (await opencodeClient.replyToPermission(sessionId, requestId, response, { directory }) !== true) {
       throw new Error("Permission reply failed")
     }
+    removePermissionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isPermissionRequestNotFoundError(error)) {
       removePermissionRequestFromChildStores(sessionId, requestId)
@@ -2110,6 +2118,7 @@ export async function dismissPermission(
     if (await opencodeClient.replyToPermission(sessionId, requestId, "reject", { directory }) !== true) {
       throw new Error("Permission dismissal failed")
     }
+    removePermissionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isPermissionRequestNotFoundError(error)) {
       removePermissionRequestFromChildStores(sessionId, requestId)
@@ -2141,7 +2150,7 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   if (toDismiss.length === 0) return false
 
   for (const { sessionId: scopedSessionId, permission } of toDismiss) {
-    removePermissionRequestFromChildStores(scopedSessionId, permission.id)
+    removePermissionRequestFromChildStores(scopedSessionId, permission.id, false)
   }
 
   await Promise.all(
@@ -2463,7 +2472,7 @@ export async function dismissOpenFormsForSession(
   if (toDismiss.length === 0) return { dismissed: false, deferred }
 
   for (const [{ sessionId: scopedSessionId, form }] of toDismiss) {
-    removeFormRequestFromChildStores(scopedSessionId, form.id)
+    removeFormRequestFromChildStores(scopedSessionId, form.id, false)
   }
 
   await Promise.all(

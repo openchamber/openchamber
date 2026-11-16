@@ -1,13 +1,14 @@
 import React from 'react';
 import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useBackgroundImagesStore } from '@/sync/background-images';
 import { usePrWatchStore } from '@/sync/pr-watch';
 import { useExtensionWaitsStore } from '@/sync/extension-waits';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionUnread } from '@/sync/session-unread';
+import { useSessionBlockingRequests } from '@/sync/sync-context';
+import { selectBlockingBadgeSessionScopes } from './sessionNodeItemUtils';
 
 export type CollapsedActivityState = 'permission' | 'form' | 'active' | 'unread' | null;
 
@@ -84,6 +85,15 @@ export const useCollapsedSessionActivityState = ({
     () => (blockingSessionIds && blockingSessionIds.length > 0 ? new Set([...ids.active, ...blockingSessionIds]) : ids.active),
     [blockingSessionIds, ids.active],
   );
+  const blockingDirectorySignature = useGlobalSessionsStore(React.useCallback((state) => {
+    if (!enabled || blockingIds.size === 0) return '';
+    const entries: [string, string][] = [];
+    for (const sessionId of blockingIds) {
+      const session = state.entityById.get(sessionId);
+      entries.push([sessionId, session ? resolveGlobalSessionDirectory(session) ?? '' : '']);
+    }
+    return JSON.stringify(entries);
+  }, [blockingIds, enabled]));
   const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -127,16 +137,40 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.unread]));
-  const blocked = useGlobalBlockingRequestsStore(React.useCallback((state): CollapsedActivityState => {
-    if (!enabled) return null;
-    let result: CollapsedActivityState = null;
-    for (const sessionId of blockingIds) {
-      const pending = state.bySession.get(sessionId);
-      if (!pending) continue;
-      if (pending.permissions.length > 0) return 'permission';
-      if (pending.forms.length > 0 || pending.pages.length > 0) result = 'form';
+  const scopes = React.useMemo(() => {
+    if (!enabled || blockingDirectorySignature === '') return [];
+    const sessionIDsByDirectory = new Map<string, string[]>();
+    const unplacedSessionIDs: string[] = [];
+    const add = (directory: string | null, sessionID: string) => {
+      if (!directory) {
+        unplacedSessionIDs.push(sessionID);
+        return;
+      }
+      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
+      sessionIDs.push(sessionID);
+      sessionIDsByDirectory.set(directory, sessionIDs);
+    };
+    for (const node of nodes) {
+      for (const scope of selectBlockingBadgeSessionScopes(node, false, null)) {
+        for (const sessionID of scope.sessionIDs) add(scope.directory, sessionID);
+      }
     }
-    return result;
-  }, [enabled, blockingIds]));
+    for (const sessionID of blockingSessionIds ?? []) {
+      const session = useGlobalSessionsStore.getState().entityById.get(sessionID);
+      add(session ? resolveGlobalSessionDirectory(session) : null, sessionID);
+    }
+    const groupedScopes: { directory: string | null; sessionIDs: string[] }[] = [...sessionIDsByDirectory]
+      .map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
+    if (unplacedSessionIDs.length > 0) groupedScopes.push({ directory: null, sessionIDs: unplacedSessionIDs });
+    return groupedScopes;
+  }, [blockingDirectorySignature, blockingSessionIds, enabled, nodes]);
+  const scopedRequests = useSessionBlockingRequests(scopes);
+  const blocked: CollapsedActivityState = !enabled
+    ? null
+    : scopedRequests.hasPermission
+      ? 'permission'
+      : scopedRequests.hasForm
+        ? 'form'
+        : null;
   return blocked ?? active ?? waitingOnShell ?? waitingOnImage ?? waitingOnPullRequest ?? waitingOnExtension ?? unread;
 };

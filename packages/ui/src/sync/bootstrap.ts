@@ -124,6 +124,12 @@ async function initializeDirectory(input: DirectoryBootstrapInput, sessions: Pro
   commit({ status: "partial" })
   if (input.isStale?.()) return "stale"
 
+  let committedRequestSnapshots = 0
+  const noteRequestSnapshotCommitted = (): void => {
+    committedRequestSnapshots += 1
+    if (committedRequestSnapshots === 2) commit({ pendingRequestsReady: true })
+  }
+
   const critical = Promise.allSettled([
     sessions.then(async (listed) => {
       if (listed !== "complete") return
@@ -140,13 +146,15 @@ async function initializeDirectory(input: DirectoryBootstrapInput, sessions: Pro
       const form = await readDirectoryFormSnapshot(store, () => (
         opencodeClient.listPendingForms({ directories: [directory] })
       ))
-      if (commit({ form })) noteQuestionFormSnapshot(directory, Object.values(form).flat())
+      if (!commit({ form })) return
+      noteQuestionFormSnapshot(directory, Object.values(form).flat())
+      noteRequestSnapshotCommitted()
     }),
     read(async () => {
       const permission = await readDirectoryPermissionSnapshot(store, () => (
         opencodeClient.listPendingPermissions({ directories: [directory] })
       ))
-      commit({ permission })
+      if (commit({ permission })) noteRequestSnapshotCommitted()
     }),
     read(() => opencodeClient.getConfig(directory).then((config) => {
       if (commit({ config })) emitSyncConfigChanged(directory, config)

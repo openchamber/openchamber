@@ -3,6 +3,11 @@ import type { PermissionRequest } from "@/types/permission"
 import type { WorktreeMetadata } from "@/types/worktree"
 import type { FormRequest } from "@/lib/opencode/model"
 import type { InputState } from "./input-store"
+import {
+  applyGlobalBlockingRequestEvents,
+  resetGlobalBlockingRequests,
+  useGlobalBlockingRequestsStore,
+} from "./global-blocking-requests"
 
 const transportErrors = await import("@/lib/relay/transport-error")
 
@@ -5438,6 +5443,54 @@ describe("dismissPermission not-found handling", () => {
 
     await expect(respondToPermission("session-a", "perm-500", "once")).rejects.toThrow()
     expect(store.getState().permission["session-a"]).toHaveLength(1)
+  })
+})
+
+describe("a local clear settles the cross-directory index", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    permissionReplyError = null
+    resetGlobalBlockingRequests()
+  })
+
+  afterEach(() => {
+    resetGlobalBlockingRequests()
+  })
+
+  const indexPermission = (permission: PermissionRequest) => {
+    applyGlobalBlockingRequestEvents("/test/project", [{ type: "permission.asked", properties: permission }])
+  }
+
+  test("an accepted reply drops the request from the index with the store", async () => {
+    const permission = buildPermission("perm-live", "session-a")
+    const store = createStore({ "session-a": [permission] })
+    const childStores = createChildStores([["/test/project", store]])
+    indexPermission(permission)
+    expect(useGlobalBlockingRequestsStore.getState().bySession.get("session-a")?.permissions).toHaveLength(1)
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-live", "once")
+
+    expect(store.getState().permission["session-a"]).toBe(undefined)
+    // The tray, the phone's bell, "In work" and the overviews read only the
+    // index, so a local clear must not leave them showing the request.
+    expect(useGlobalBlockingRequestsStore.getState().bySession.get("session-a")).toBe(undefined)
+  })
+
+  test("a reply the server reports as not found settles the index too", async () => {
+    const permission = buildPermission("perm-stale", "session-a")
+    const store = createStore({ "session-a": [permission] })
+    const childStores = createChildStores([["/test/project", store]])
+    indexPermission(permission)
+    permissionReplyError = Object.assign(new Error("permission.reply failed (404): PermissionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, dismissPermission } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await expect(dismissPermission("session-a", "perm-stale")).rejects.toThrow()
+    expect(useGlobalBlockingRequestsStore.getState().bySession.get("session-a")).toBe(undefined)
   })
 })
 

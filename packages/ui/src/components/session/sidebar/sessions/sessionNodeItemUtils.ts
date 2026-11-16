@@ -64,7 +64,7 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
 };
 
 export type BlockingBadgeSessionScope = {
-  directory: string;
+  directory: string | null;
   sessionIDs: string[];
 };
 
@@ -93,28 +93,45 @@ export const getSessionWorktreeMenuDisabled = ({
   isMovingToWorktree: boolean;
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
-export const selectBlockingBadgeSessionScopes = (
+const visitBlockingBadgeSessions = (
   node: SessionNode,
   isExpanded: boolean,
-  fallbackDirectory: string | null,
-): BlockingBadgeSessionScope[] => {
-  const sessionIDsByDirectory = new Map<string, string[]>();
+  visitSession: (session: SessionNode['session'], directory: string | null) => void,
+): void => {
   const visit = (current: SessionNode): void => {
-    const directory = resolveGlobalSessionDirectory(current.session)
-      ?? normalizePath(current.worktree?.path)
-      ?? fallbackDirectory;
-    if (directory) {
-      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
-      sessionIDs.push(current.session.id);
-      sessionIDsByDirectory.set(directory, sessionIDs);
-    }
+    visitSession(
+      current.session,
+      resolveGlobalSessionDirectory(current.session) ?? normalizePath(current.worktree?.path),
+    );
     for (const child of current.children) {
       if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
       visit(child);
     }
   };
   visit(node);
-  return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
+};
+
+export const selectBlockingBadgeSessionScopes = (
+  node: SessionNode,
+  isExpanded: boolean,
+  fallbackDirectory: string | null,
+): BlockingBadgeSessionScope[] => {
+  const sessionIDsByDirectory = new Map<string, string[]>();
+  const unplacedSessionIDs: string[] = [];
+  visitBlockingBadgeSessions(node, isExpanded, (session, directory) => {
+    const resolved = directory ?? fallbackDirectory;
+    if (!resolved) {
+      unplacedSessionIDs.push(session.id);
+      return;
+    }
+    const sessionIDs = sessionIDsByDirectory.get(resolved) ?? [];
+    sessionIDs.push(session.id);
+    sessionIDsByDirectory.set(resolved, sessionIDs);
+  });
+  const scopes: BlockingBadgeSessionScope[] = [...sessionIDsByDirectory]
+    .map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
+  if (unplacedSessionIDs.length > 0) scopes.push({ directory: null, sessionIDs: unplacedSessionIDs });
+  return scopes;
 };
 
 export const selectFolderRootNodes = (

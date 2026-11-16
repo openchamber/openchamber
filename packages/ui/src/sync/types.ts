@@ -46,6 +46,7 @@ export type State = {
   sessionStatusInvalidated?: Record<string, true>
   permission: Record<string, PermissionRequest[]>
   form: Record<string, FormRequest[]>
+  pendingRequestsReady?: boolean
   vcs: Vcs | undefined
   limit: number
   message: Record<string, Message[]>

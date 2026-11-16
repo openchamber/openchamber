@@ -106,6 +106,21 @@ describe("bootstrapDirectory", () => {
     expect(await bootstrap.environment).toBe("failed")
     expect(input.store.getState().form.session).toEqual([pending])
     expect(input.store.getState().sessionStatusReady).toBe(true)
+    // The request snapshots answered for themselves, so row badges trust this
+    // store even though its bootstrap failed on the config read.
+    expect(input.store.getState().pendingRequestsReady).toBe(true)
+  })
+
+  test("a failed request snapshot leaves the store without request authority", async () => {
+    permissions.mockRejectedValue(Object.assign(new Error("permission.list failed"), { status: 400 }))
+    const input = inputFor()
+    const bootstrap = bootstrapDirectory(input)
+    expect(await bootstrap.sessions).toBe("complete")
+    expect(await bootstrap.environment).toBe("failed")
+    // The form snapshot committed, the permission one did not: a row badge
+    // cannot tell what is pending here, so it still reads the index.
+    expect(input.store.getState().form).toEqual({})
+    expect(input.store.getState().pendingRequestsReady).toBeUndefined()
   })
 
   test("a failed status snapshot preserves live state and does not grant idle authority", async () => {

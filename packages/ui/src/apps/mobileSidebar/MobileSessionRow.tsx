@@ -20,7 +20,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { MobileGuestMarks } from './MobileGuestMarks';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
-import type { SessionNode } from '@/components/session/sidebar/types';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -52,8 +51,6 @@ import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwo
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
-const collectDescendantIds = (node: SessionNode): string[] => node.children.flatMap((child) => [child.session.id, ...collectDescendantIds(child)]);
-
 export const MobileSessionRow: React.FC<{
   row: SessionRowModel;
   geometry: MobileTreeGeometry;
@@ -79,11 +76,7 @@ export const MobileSessionRow: React.FC<{
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
   const hasChildren = node.children.length > 0;
   const expanded = row.expanded === true;
-  const familyIds = React.useMemo(
-    () => (hasChildren && !expanded ? [session.id, ...collectDescendantIds(node)] : [session.id]),
-    [expanded, hasChildren, node, session.id],
-  );
-  const pendingRequests = usePendingRequests(familyIds);
+  const pendingRequests = usePendingRequests(node, expanded, directory || null);
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));

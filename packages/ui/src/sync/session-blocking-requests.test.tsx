@@ -173,18 +173,21 @@ describe('useSessionBlockingRequests', () => {
       await withProbe(true, async () => {
         await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
           sessions: {},
-          pending: { child: { permissions: [{ id: 'seeded-permission', sessionID: 'child', action: 'bash', resources: ['*'] }], forms: [], pages: [] } },
+          pending: { child: { permissions: [permission('seeded-permission', 'child')], forms: [], pages: [] } },
           serverTime: 0,
         }), () => CHILD_DIR) })
-        expect(stores!.child.getState().permission.child).toBeUndefined()
-        expect(rendered).toEqual({ hasPermission: true, hasForm: false })
+        expect(rendered?.hasPermission).toBe(true)
+
+        // The directory's own request snapshot read its permissions and found none.
+        await act(async () => stores!.child.setState({ pendingRequestsReady: true }))
+        expect(rendered?.hasPermission).toBe(false)
       })
     } finally {
       resetGlobalBlockingRequests()
     }
   })
 
-  test('a store whose bootstrap completed outranks a form the index still holds', async () => {
+  test('a store that has read its requests outranks a form the index still holds', async () => {
     resetGlobalBlockingRequests()
     try {
       await withProbe(true, async () => {
@@ -196,13 +199,35 @@ describe('useSessionBlockingRequests', () => {
         }), () => CHILD_DIR) })
         expect(rendered?.hasForm).toBe(true)
 
-        // The directory's own bootstrap read its pending forms and found none.
-        await act(async () => stores!.child.setState({ status: 'complete' }))
+        // The directory's own request snapshot read its forms and found none.
+        await act(async () => stores!.child.setState({ pendingRequestsReady: true }))
         expect(rendered?.hasForm).toBe(false)
 
-        // A form the complete store holds still shows.
+        // A form the ready store holds still shows.
         await act(async () => stores!.child.setState({ form: { child: [form('live-form', 'child')] } }))
         expect(rendered?.hasForm).toBe(true)
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
+  })
+
+  test('request snapshots answer even when an unrelated read left the bootstrap partial', async () => {
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+          sessions: {},
+          pending: { child: { permissions: [], forms: [{ id: 'answered-form', sessionID: 'child', title: 'Answer' }], pages: [] } },
+          serverTime: 0,
+        }), () => CHILD_DIR) })
+        expect(rendered?.hasForm).toBe(true)
+
+        // Both request snapshots committed, but the project's config read failed,
+        // so the store never reached `complete`. That read does not decide
+        // whether a badge is trustworthy.
+        await act(async () => stores!.child.setState({ pendingRequestsReady: true, status: 'partial' }))
+        expect(rendered?.hasForm).toBe(false)
       })
     } finally {
       resetGlobalBlockingRequests()

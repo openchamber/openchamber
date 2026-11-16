@@ -322,7 +322,7 @@ function createDirectoryStore(directory: string, seedSessions: boolean): StoreAp
     if (state.session !== prev.session) persistSessions(directory, state.session)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
     notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
-    if (state.status !== prev.status) notifyAllFormSubscribers(store)
+    if (state.status !== prev.status || state.pendingRequestsReady !== prev.pendingRequestsReady) notifyAllFormSubscribers(store)
     notifyChangedSessionMessages(store, state, prev)
   })
 

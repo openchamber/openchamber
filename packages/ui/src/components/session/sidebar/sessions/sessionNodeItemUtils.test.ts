@@ -92,6 +92,33 @@ describe('selectBlockingBadgeSessionScopes', () => {
       { directory: '/fallback', sessionIDs: ['root'] },
     ]);
   });
+
+  test("a session with no directory resolves through its own worktree's path", () => {
+    const root: SessionNode = {
+      session: session('root', 'Root'),
+      children: [],
+      worktree: {
+        path: '/worktrees/feature',
+        projectDirectory: '/repo',
+        branch: 'feature',
+        label: 'feature',
+      },
+    };
+
+    expect(selectBlockingBadgeSessionScopes(root, false, null)).toEqual([
+      { directory: '/worktrees/feature', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('a session nothing can place keeps a scope of its own, for the index to answer', () => {
+    const grandchild: SessionNode = { session: session('grandchild', 'Grandchild'), children: [], worktree: null };
+    const child: SessionNode = { session: session('child', 'Child'), children: [grandchild], worktree: null };
+    const root: SessionNode = { session: session('root', 'Root'), children: [child], worktree: null };
+
+    expect(selectBlockingBadgeSessionScopes(root, false, null)).toEqual([
+      { directory: null, sessionIDs: ['root', 'child', 'grandchild'] },
+    ]);
+  });
 });
 
 describe('nodeHasPinnedMembershipChange', () => {

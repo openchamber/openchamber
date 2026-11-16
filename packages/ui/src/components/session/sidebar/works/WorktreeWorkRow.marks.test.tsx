@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
+import { OpenCode } from '@opencode/client';
+import { opencodeClient } from '@/lib/opencode/client';
+import { SyncProvider } from '@/sync/sync-context';
 import { EMPTY_GUEST_MARK_INDEX, type GuestMarkEntry } from '@/lib/guests/marks';
 import { useGuestMarksStore } from '@/lib/guests/marks-store';
 import type { InstalledGuest } from '@/lib/guests/types';
@@ -60,7 +63,23 @@ const group = (sessions: SessionGroup['sessions'] = []): SessionGroup => ({
 });
 
 const noop = () => undefined;
+const createSdk = () => OpenCode.make({
+  baseUrl: 'https://worktree.test',
+  fetch: async (request) => {
+    const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
+    if (path.endsWith('/event')) {
+      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    const body = path.endsWith('/location')
+      ? { directory: '/project-a', project: { id: 'project-a', directory: '/project-a', canonical: '/project-a' } }
+      : path.endsWith('/session/active') ? {}
+      : { data: [] };
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+  },
+});
+
 const row = (detailed: boolean, sessions?: SessionGroup['sessions']) => (
+  <SyncProvider sdk={createSdk()} directory="">
   <I18nProvider>
     <WorktreeWorkRow
       group={group(sessions)}
@@ -78,6 +97,7 @@ const row = (detailed: boolean, sessions?: SessionGroup['sessions']) => (
       setSessionSwitcherOpen={noop}
     />
   </I18nProvider>
+  </SyncProvider>
 );
 
 let win: Window;
@@ -92,6 +112,21 @@ const showMarks = (guests: InstalledGuest[], entries: GuestMarkEntry[]): void =>
   useGuestMarksStore.getState().replaceEntries(entries, 'server-a');
 };
 const drawn = (): string[] => Array.from(host.querySelectorAll('[data-guest-mark]')).map((node) => node.getAttribute('aria-label') ?? '');
+
+const clientMocks = [
+  spyOn(opencodeClient, 'getFilesystemHomeInfo').mockResolvedValue({ home: '/home' }),
+  spyOn(opencodeClient, 'getFilesystemHome').mockResolvedValue('/home'),
+  spyOn(opencodeClient, 'getLocation').mockResolvedValue({
+    directory: '/project-a',
+    project: { id: 'project-a', directory: '/project-a', canonical: '/project-a' },
+  }),
+  spyOn(opencodeClient, 'getConfig').mockResolvedValue({}),
+  spyOn(opencodeClient, 'listProjects').mockResolvedValue([]),
+];
+
+afterAll(() => {
+  for (const mock of clientMocks) mock.mockRestore();
+});
 
 beforeEach(() => {
   win = new Window({ url: 'http://localhost/' });
