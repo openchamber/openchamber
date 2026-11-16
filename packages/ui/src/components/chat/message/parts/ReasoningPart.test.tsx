@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -350,6 +350,26 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('aria-expanded="false"');
   });
 
+  test('shows an incomplete reasoning paragraph while it streams', async () => {
+    jest.useFakeTimers();
+    const dom = installDomStub();
+    const root = createRoot(dom.container);
+    const render = (text: string) => (
+      <TestProviders><ReasoningPart part={makeReasoningPart({ start: 1_000 }, text)} messageId="msg_2020" streamPhase="streaming" /></TestProviders>
+    );
+    try {
+      await act(async () => { root.render(render('A thought')); });
+      await act(async () => { dom.container.querySelector<HTMLElement>('[role="button"][aria-expanded]')?.click(); });
+      await act(async () => { root.render(render('A thought still in progress')); });
+      await act(async () => { jest.advanceTimersByTime(150); });
+      expect(dom.container.textContent).toContain('A thought still in progress');
+    } finally {
+      await act(async () => { root.unmount(); });
+      dom.restore();
+      jest.useRealTimers();
+    }
+  });
+
   test('live in-progress reasoning opens while it streams when the setting asks for it', () => {
     const markup = renderExpandingWhileStreaming();
 
@@ -367,10 +387,7 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
     expect(markup).toContain('data-scrollable="true"');
   });
 
-  test('a live part with no committed text yet shows the busy header and no empty summary', () => {
-    // The streaming early-return keeps the block mounted before the block-level
-    // reveal commits a first line. The header must read as busy and must not
-    // paint an empty summary row.
+  test('a live part with no text yet shows the busy header and no empty summary', () => {
     const markup = renderPart(makeReasoningPart({ start: 1_000 }, ''), 'streaming');
     const withText = renderPart(makeReasoningPart({ start: 1_000 }), undefined);
 
