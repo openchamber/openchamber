@@ -57,6 +57,13 @@ describe('standalone bracket math with blank lines', () => {
     expect(prepareMarkdownMath(text, true).content).toBe(text);
   });
 
+  test('keeps closers that cannot form a standalone dollar delimiter', () => {
+    for (const source of [
+      '\\[\nx\n\ny\n\\\\\\]\n\n[Important](https://example.test)',
+      '\\[\nx\n\ny\n\\]\u00a0\n\n[Important](https://example.test)',
+    ]) for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).toBe(source);
+  });
+
   test('renders a formula containing an interval during a live response', () => {
     const text = '\\[\nx \\in [0,1)\n\n\\]';
     const prepared = prepareMarkdownMath(text, true);
@@ -187,6 +194,61 @@ describe('standalone bracket math with blank lines', () => {
     prepare(`${source}[ref]`, true);
     const completed = `${source}[ref]: https://example.test`;
     expect(prepare(completed, true).content).toBe(prepareMarkdownMath(completed, true).content);
+  });
+
+  test('rechecks reference definitions that start before the cached tail', () => {
+    for (const suffix of ['[ref]', '[ref]: ']) {
+      const prepare = createMarkdownMathPreparer();
+      const first = `\\[\n[ref]\n\ny\n\\]\n\n${suffix}`;
+      prepare(first, true);
+      const completed = `${first}${suffix.endsWith(']') ? ': ' : ''}https://example.test`;
+      expect(prepare(completed, true).content).toBe(prepareMarkdownMath(completed, true).content);
+    }
+  });
+
+  test('does not include text after an earlier standalone closer in a formula', () => {
+    const source = '\\[\nx\n\\]\nImportant text\n\n\\]';
+    expect(prepareMarkdownMath(source, false).content).toBe(source);
+    expect(prepareMarkdownMath(source, true).content).toBe(source);
+  });
+
+  test('does not convert ordinary text after an internal closing delimiter', () => {
+    const source = '\\[\nx \\] and ordinary text\n\nmore text\n\\]';
+    for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).toBe(source);
+  });
+
+  test('keeps a literal closing delimiter inside a formula', () => {
+    const source = '\\[\n\\verb|\\]|\n\n+1\n\\]';
+    for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).not.toBe(source);
+  });
+
+  test('keeps a closing delimiter inside a TeX comment', () => {
+    const source = '\\[\nx % \\]\n\n+1\n\\]';
+    for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).not.toBe(source);
+  });
+
+  test('keeps text after an internal opening delimiter inside a comment', () => {
+    const source = '\\[\nx % \\[ \\]\nIMPORTANT 90% SOLD OUT\n\n\\]';
+    for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).toBe(source);
+  });
+
+  test('recognizes a closer after a verbatim percent', () => {
+    const source = '\\[\n\\verb|%| \\]\nImportant text\n\n\\]';
+    for (const streaming of [false, true]) expect(prepareMarkdownMath(source, streaming).content).toBe(source);
+  });
+
+  test('reuses a prepared formula after a completed reference definition', () => {
+    const prepare = createMarkdownMathPreparer();
+    const source = '\\[\nx\n\ny\n\\]\n\n[ref]: https://example.test\n\n';
+    const first = prepare(source, true);
+    expect(prepare(`${source}tail`, true).remend).toBe(first.remend);
+  });
+
+  test('reuses a prepared formula when prose follows a reference definition', () => {
+    const prepare = createMarkdownMathPreparer();
+    const source = '\\[\nx\n\ny\n\\]\n\n[ref]: https://example.test\nLong response:';
+    const first = prepare(source, true);
+    expect(prepare(`${source} tail`, true).remend).toBe(first.remend);
   });
 
   test('rechecks definitions inside block quotes and can disable preparation for extra plugins', () => {

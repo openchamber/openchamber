@@ -10,12 +10,30 @@ const defaultRemend: StreamdownProps['remend'] = { linkMode: 'text-only', single
 
 type PreparedMath = { content: string; remend: StreamdownProps['remend']; reserved: string[]; resumeAt: number | null; parsed: string | null };
 
-function hasUnescapedOpening(source: string): boolean {
+function hasUnescapedDelimiter(source: string): boolean {
   for (let index = 0; index < source.length; index++) {
     if (source[index] !== '\\') continue;
     const start = index;
     while (source[index + 1] === '\\') index++;
-    if (source[index + 1] === '[' && (index - start + 1) % 2 === 1) return true;
+    if ((index - start + 1) % 2 === 1 && source[index + 1] === '[') return true;
+  }
+  let comment = false;
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] === '\n' || source[index] === '\r') { comment = false; continue; }
+    if (comment) continue;
+    if (source[index] === '%') { comment = true; continue; }
+    if (source[index] !== '\\') continue;
+    const start = index;
+    while (source[index + 1] === '\\') index++;
+    if ((index - start + 1) % 2 === 0) continue;
+    if (source[index + 1] === '%') { index++; continue; }
+    if (source.startsWith('verb', index + 1) && !/[a-zA-Z]/.test(source[index + 5] ?? '')) {
+      const delimiterAt = index + (source[index + 5] === '*' ? 6 : 5);
+      const delimiter = source[delimiterAt];
+      const close = delimiter && delimiter !== '\n' && delimiter !== '\r' ? source.indexOf(delimiter, delimiterAt + 1) : -1;
+      if (close >= 0 && !/[\r\n]/.test(source.slice(delimiterAt + 1, close))) { index = close; continue; }
+    }
+    if (source[index + 1] === '[' || source[index + 1] === ']') return true;
   }
   return false;
 }
@@ -45,11 +63,11 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
       const lineStart = source.lastIndexOf('\n', endOfFragment - 1) + 1;
       const line = source.slice(lineStart, endOfFragment);
       const marker = line.lastIndexOf('\\]');
-      if (marker < 0 || line.slice(marker + 2).trim()) continue;
+      if (marker < 0 || !/^[ \t]*$/.test(line.slice(marker + 2))) continue;
       const end = lineStart + marker;
       let slashStart = end;
       while (slashStart > lineStart && source[slashStart - 1] === '\\') slashStart--;
-      if ((end - slashStart + 1) % 2 === 0) continue;
+      if (end !== slashStart) continue;
       const prefix = source.slice(lineStart, slashStart);
       const openingPrefix = source.slice(source.lastIndexOf('\n', candidate - 1) + 1, candidate);
       const openingMarkers = openingPrefix.replace(/(?:^|[ \t])(?:[-+*]|\d{1,9}[.)])(?=[ \t])/g, '');
@@ -77,7 +95,7 @@ export function prepareMarkdownMath(source: string, streaming: boolean, enabled 
       const body = source.slice(candidate + 2, end);
       if (body.trim()
         && startLine !== null && node.position.start.line > startLine
-        && !hasUnescapedOpening(body)
+        && !hasUnescapedDelimiter(body)
         && !body.includes('$') && !body.includes('~') && !entity.test(body) && !body.includes('openchamber://session/')) {
         changes.push(candidate, end);
       }
@@ -127,7 +145,7 @@ export function createMarkdownMathPreparer(): (source: string, streaming: boolea
     if (enabled && streaming && previous?.safeTail && source.startsWith(previous.source)) {
       const appended = source.slice(previous.source.length);
       const oldContent = previous.prepared.content;
-      const unparsed = previous.prepared.parsed === null ? '' : source.slice(previous.prepared.parsed.length);
+      const unparsed = previous.prepared.parsed === null ? '' : source.slice(Math.max(0, previous.prepared.parsed.length - 1));
       if (!previous.source.endsWith('\\') && !previous.source.endsWith('\r')
         && !appended.includes('\\[') && !unparsed.includes(']:')
         && !previous.prepared.reserved.some((character) => appended.includes(character))) {
@@ -145,7 +163,9 @@ export function createMarkdownMathPreparer(): (source: string, streaming: boolea
       const lineStart = source.lastIndexOf('\n', prepared.resumeAt - 1) + 1;
       const prefix = source.slice(lineStart, prepared.resumeAt - 2);
       const separator = /^[ \t>]*\r?\n/.exec(tail);
-      safeTail = !!separator && separator[0].includes('>') === prefix.includes('>') && !tail.includes('\\[');
+      const lastDefinition = tail.lastIndexOf(']:');
+      const definitionEnded = lastDefinition < 0 || /^[ \t]*(?:<[^<>\r\n]+>|[^\s<]+)(?:[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^()\r\n]*\)))?[ \t]*\r?\n[ \t>]*(?:\r?\n|[^ \t>"'(])/.test(tail.slice(lastDefinition + 2));
+      safeTail = !!separator && separator[0].includes('>') === prefix.includes('>') && !tail.includes('\\[') && definitionEnded;
     }
     previous = { source, prepared, safeTail };
     return prepared;
