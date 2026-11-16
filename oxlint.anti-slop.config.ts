@@ -53,6 +53,7 @@ export default defineConfig({
     "openchamber/no-module-mocks-in-tests": "error",
     "openchamber/no-raw-fetch": "error",
     "openchamber/no-real-waits-in-tests": "error",
+    "openchamber/no-session-list-scan-in-selectors": "error",
     "openchamber/no-source-text-in-tests": "error",
     "openchamber/no-timers": "error",
     "openchamber/no-wire-client-imports": "error",
