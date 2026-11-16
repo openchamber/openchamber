@@ -13,16 +13,11 @@ function form(fields) {
   return new URLSearchParams(Object.entries(fields).filter(([, value]) => isString(value) && value));
 }
 
-// OpenChamber registers its own OAuth application on gitlab.com only. A
-// self-managed instance has no such application, so its operator supplies an
-// id through OPENCHAMBER_GITLAB_CLIENT_ID or the `gitlabClientId` setting;
-// until then that instance offers personal access tokens and `glab` instead.
 const HOSTED_GITLAB_ORIGIN = 'https://gitlab.com';
 const HOSTED_GITLAB_CLIENT_ID = 'b5db9852a2368e2fd232a9945d94123fb61cf4af67e7eca680418929f93bcf59';
 
 export const defaultGitLabClientId = (origin) => (origin === HOSTED_GITLAB_ORIGIN ? HOSTED_GITLAB_CLIENT_ID : '');
 
-/** The OAuth application an instance signs in with: env, then settings, then ours on gitlab.com. */
 export async function resolveGitLabClientId(origin, readSettings) {
   const envValue = isString(process.env.OPENCHAMBER_GITLAB_CLIENT_ID) ? process.env.OPENCHAMBER_GITLAB_CLIENT_ID.trim() : '';
   if (envValue) return envValue;
@@ -52,7 +47,6 @@ export async function probeGitLabAuth({ origin, clientId, fetch: fetchImpl = fet
   } catch (error) {
     throw new GitLabRequestError('unreachable', error?.message || 'GitLab instance is unreachable');
   }
-  // Rate limiting and server errors say nothing about whether this is GitLab.
   if (versionResponse.status === 429 || versionResponse.status >= 500) {
     throw new GitLabRequestError('temporarily-unavailable', 'GitLab instance is temporarily unavailable', versionResponse.status);
   }
@@ -110,11 +104,6 @@ export async function exchangeGitLabDeviceCode({ origin, clientId, deviceCode, f
   return { status: 'connected', accessToken: payload.access_token, scope: isString(payload.scope) ? payload.scope : '', ...renewal(payload) };
 }
 
-/**
- * What keeps an OAuth sign-in alive. GitLab access tokens expire after two
- * hours; the refresh token trades for a new pair before then. Absent fields
- * mean a token that does not expire.
- */
 function renewal(payload) {
   const result = {};
   if (isString(payload?.refresh_token) && payload.refresh_token) result.refreshToken = payload.refresh_token;
@@ -122,11 +111,6 @@ function renewal(payload) {
   return result;
 }
 
-/**
- * Trades a refresh token for a new access token. GitLab rotates the refresh
- * token too, so the old one is spent once this succeeds. A rejected grant is
- * an invalid sign-in; anything else is the instance being unavailable.
- */
 export async function refreshGitLabAccessToken({ origin, clientId, refreshToken, fetch: fetchImpl = fetch, timeoutMs = 10_000 }) {
   const response = await fetchWithTimeout(fetchImpl, `${origin}/oauth/token`, {
     method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
