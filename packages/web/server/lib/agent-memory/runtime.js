@@ -1,58 +1,11 @@
-/**
- * Agent memory storage.
- *
- * What the agent has learned and chose to keep, in two scopes:
- *
- * - **project** — `<projectsDir>/<projectId>/memory.json`. How this codebase
- *   works, what was decided, where things live. `<projectId>` is the bounded
- *   stem `projectConfigFileStemOf` gives the id (the id itself up to 200
- *   characters, `path_sha256_<digest>` beyond), the same folder that holds
- *   `project-context`'s `context.json` and sits beside the config file.
- * - **global** — `<userConfigRoot>/memory.json`. Who the user is and how they
- *   want to be worked with. It belongs to no project, so it cannot live under
- *   one.
- *
- * The split is not cosmetic. A wrong project fact costs one project and is
- * noticed quickly; a wrong global fact quietly shapes every session in every
- * project, and the user has no code to check it against. Global memory is
- * therefore deliberately narrower: fewer entries, and only the types that
- * genuinely have no other home.
- *
- * This is NOT the notes surface. Notes are what the user writes for themselves
- * and hands to the agent by pinning; memory is what the agent writes for
- * itself. Keeping them apart keeps an agent mistake out of the user's notes.
- *
- * Because the agent writes here unprompted, two invariants guard the store:
- *
- * - **Restatements replace.** A memory the agent phrases differently the second
- *   time supersedes the first rather than sitting beside it, so the store
- *   cannot fill with variants of one fact that later disagree.
- * - **Timestamps are the record of change.** The panel derives "new" and
- *   "changed" from `createdAt` and `updatedAt` against when the user last
- *   looked, so what the agent stored without asking stays visible without the
- *   store carrying any review state of its own.
- */
-
 const MEMORY_VERSION = 1;
 
-/**
- * Titles are what every session carries, so their combined length is the
- * standing cost of memory. Short enough to keep a full store's index modest,
- * long enough to say what an entry is about.
- */
 export const MEMORY_TITLE_MAX_LENGTH = 60;
-/** Shared with the action layer, which must reject an over-limit title or body as a 400. */
 export const MEMORY_BODY_MAX_LENGTH = 2000;
 
-/** Global memory stays small on purpose: it is the highest-blast-radius store. */
 const GLOBAL_MEMORY_MAX_ITEMS = 60;
 const PROJECT_MEMORY_MAX_ITEMS = 200;
 
-/**
- * `fact` — something true about the project or the user.
- * `preference` — how the user wants work done.
- * `reference` — a pointer to a resource that is hard to rediscover.
- */
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
@@ -62,7 +15,6 @@ import { z } from 'zod';
 
 const count = z.number().int().nonnegative().catch(0);
 
-/** The last pass's record in `memory-dream.json`; a field it cannot read falls back, never fails the file. */
 const dreamRecordSchema = z.object({
   finishedAt: z.number().nonnegative(),
   status: z.enum(['done', 'failed']).catch('done'),
@@ -71,7 +23,6 @@ const dreamRecordSchema = z.object({
   rewritten: count,
   undone: z.boolean().catch(false),
   error: z.string().min(1).transform((value) => value.slice(0, 500)).nullable().catch(null),
-  // Project entries the pass found belong in the project's agent docs; the panel offers to move them.
   toDocs: z.array(z.string().min(1)).max(200).catch([]),
 });
 
@@ -84,34 +35,13 @@ const dreamStateSchema = z.object({
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 
-/**
- * Two entries are the same memory when this much of the incoming one is already
- * in the stored one. Set high on purpose: merging two genuinely different
- * memories destroys one of them silently, which is far worse than keeping a
- * near-duplicate the user can see and delete.
- */
 const DUPLICATE_OVERLAP_THRESHOLD = 0.75;
 
-/**
- * Below this many meaningful words, overlap is noise — "use bun" and "use npm"
- * share half their tokens. Short entries fall back to exact-title matching.
- */
 const DUPLICATE_MIN_TOKENS = 4;
 
-/**
- * A new entry sharing this much wording with a stored one is reported back as
- * related. A reversed decision ("unit tests moved from bun to vitest") is
- * phrased too differently to count as a duplicate, so without the report it
- * lands beside the entry it contradicts. Set low on purpose: a false match
- * costs the agent one line to ignore, and the agent decides what replaces what.
- */
 const RELATED_OVERLAP_THRESHOLD = 0.4;
 const RELATED_LIMIT = 3;
 
-/**
- * Words carried by almost every sentence, so their overlap says nothing about
- * whether two memories mean the same thing.
- */
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'has',
   'have', 'in', 'into', 'is', 'it', 'its', 'not', 'of', 'on', 'or', 'that',
@@ -127,7 +57,6 @@ const tokenize = (value) => {
   return tokens;
 };
 
-/** How much of `incoming` is already present in `existing`, in `[0, 1]`. */
 const overlapFraction = (incoming, existing) => {
   if (incoming.size === 0) return 0;
   let shared = 0;
@@ -137,16 +66,6 @@ const overlapFraction = (incoming, existing) => {
   return shared / incoming.size;
 };
 
-/**
- * The stored entry a new one should replace, or null for a genuinely new
- * memory.
- *
- * Exact title match alone is not enough: an agent that re-learns the same fact
- * phrases it differently each time ("run UI tests per file" / "UI tests must be
- * run one file at a time"), and storing both leaves the two free to drift apart
- * until they contradict each other. Comparing the wording catches the restated
- * duplicate that the title check misses.
- */
 const findSupersededEntry = (entries, title, body) => {
   const lowerTitle = title.toLowerCase();
   const exact = entries.find((entry) => entry.title.toLowerCase() === lowerTitle);
@@ -167,7 +86,6 @@ const findSupersededEntry = (entries, title, body) => {
   return best;
 };
 
-/** Stored entries close enough in wording that a new one may reverse them, closest first. */
 const findRelatedEntries = (entries, title, body) => {
   const incoming = tokenize(`${title} ${body}`);
   if (incoming.size < DUPLICATE_MIN_TOKENS) return [];
@@ -184,11 +102,6 @@ const clampLength = (value, maxLength) => {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-/**
- * Whether a write's body fits the limit after the same trim the store applies.
- * A missing or non-string body is not this check's business: the required-body
- * test below answers it, and its message is the truthful one.
- */
 const bodyFitsLimit = (value) => (asNonEmptyString(value)?.length ?? 0) <= MEMORY_BODY_MAX_LENGTH;
 
 const limitForScope = (scope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
@@ -204,10 +117,6 @@ const sanitizeEntries = (value, now, scope) => {
 
     const id = asNonEmptyString(entry.id);
     const title = clampLength(asNonEmptyString(entry.title) || '', MEMORY_TITLE_MAX_LENGTH);
-    // Tolerant on purpose: entries written by older builds that truncated at a
-    // shorter limit, or hand-edited past it, must still load — the store is the
-    // agent's memory and failing the whole read would look like memory loss.
-    // Only writes enforce the limit now, so the asymmetry never widens.
     const body = clampLength(typeof entry.body === 'string' ? entry.body : '', MEMORY_BODY_MAX_LENGTH).trim();
     if (!id || !title || !body || seen.has(id)) continue;
     seen.add(id);
@@ -221,8 +130,6 @@ const sanitizeEntries = (value, now, scope) => {
       type: MEMORY_TYPES.has(entry.type) ? entry.type : 'fact',
       createdAt,
       updatedAt: Number.isFinite(entry.updatedAt) && entry.updatedAt >= 0 ? entry.updatedAt : createdAt,
-      // Re-checked on every read, not trusted from the file: an entry written
-      // before a pattern existed, or edited on disk since, is judged now.
       ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
@@ -255,7 +162,6 @@ export const createAgentMemoryRuntime = (deps) => {
     return value;
   };
 
-  /** `target` is `{ scope: 'global' }` or `{ scope: 'project', projectId }`. */
   const resolveTarget = (target) => {
     if (target?.scope === 'global') {
       return { scope: 'global', key: 'global', filePath: path.join(userConfigRoot, 'memory.json') };
@@ -265,7 +171,6 @@ export const createAgentMemoryRuntime = (deps) => {
       return {
         scope: 'project',
         key: `project:${projectId}`,
-        // Same bounded folder name as `project-context` and the config file.
         filePath: path.join(projectsDirPath, projectConfigFileStemOf(projectId), 'memory.json'),
       };
     }
@@ -318,11 +223,6 @@ export const createAgentMemoryRuntime = (deps) => {
     }
   };
 
-  /**
-   * Missing is authoritative empty; malformed is a failure. An agent that reads
-   * "no memory" from a corrupt file would cheerfully rewrite everything it
-   * thought it had lost.
-   */
   const read = async (target) => {
     const resolved = resolveTarget(target);
     const stored = await readJson(resolved.filePath);
@@ -347,10 +247,6 @@ export const createAgentMemoryRuntime = (deps) => {
   const create = async (target, value) => {
     const resolved = resolveTarget(target);
     const title = clampLength(asNonEmptyString(value?.title) || '', MEMORY_TITLE_MAX_LENGTH);
-    // Writes reject an over-limit body instead of truncating it: a silent slice
-    // left the agent with a success for a body it never stored, and the store
-    // then read back as a memory the agent never wrote. (Reads in sanitizeEntries
-    // stay tolerant of legacy over-limit entries — this asymmetry is deliberate.)
     if (!bodyFitsLimit(value?.body)) {
       throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${value.body.trim().length}`);
     }
@@ -362,12 +258,6 @@ export const createAgentMemoryRuntime = (deps) => {
       const now = Date.now();
       const current = await read(target);
 
-      // A restatement of something already stored is an update, not a second
-      // copy: an agent re-learning a fact each session would otherwise fill the
-      // store with near-duplicates and contradict itself.
-      //
-      // Checked before the capacity limit, because replacing an entry does not
-      // grow the store — a full store must still be able to correct itself.
       const existing = findSupersededEntry(current.entries, title, body);
       if (existing) {
         const updated = {
@@ -384,10 +274,6 @@ export const createAgentMemoryRuntime = (deps) => {
 
       const limit = limitForScope(resolved.scope);
       if (current.entries.length >= limit) {
-        // Handed its own titles and told what to do with them. A bare "full"
-        // leaves the agent with a dead end, when the useful move — merge the
-        // overlapping entries, drop the stale ones, then retry — is something
-        // only it can judge.
         const titles = current.entries.map((entry) => `- ${entry.title}`).join('\n');
         throw new Error(
           `${resolved.scope} memory is full (${current.entries.length}/${limit} entries). `
@@ -415,11 +301,6 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  /**
-   * A rewrite of one entry by id. The panel uses it for user corrections, and
-   * the agent's save uses it when it names the entry it is rewriting, which is
-   * how a tidy-up merges and corrects without guessing at a match.
-   */
   const update = async (target, memoryId, patch) => {
     const resolved = resolveTarget(target);
     const id = asNonEmptyString(memoryId);
@@ -453,7 +334,6 @@ export const createAgentMemoryRuntime = (deps) => {
         ...(hasType ? { type: patch.type } : {}),
         updatedAt: Date.now(),
       };
-      // Judged on the new text, as a read would judge it.
       delete updated.flagged;
       if (findThreatPattern(`${updated.title}\n${updated.body}`)) updated.flagged = true;
       const entries = current.entries.map((entry) => (entry.id === id ? updated : entry));
@@ -478,11 +358,6 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  /**
-   * Both scopes at once, for the session index. A failure in one scope must not
-   * hide the other: losing the project half should not also erase what the
-   * agent knows about the user.
-   */
   const readAll = async (projectId) => {
     const settled = await Promise.allSettled([
       read({ scope: 'global' }),
@@ -497,19 +372,8 @@ export const createAgentMemoryRuntime = (deps) => {
     };
   };
 
-  /**
-   * The last dreaming pass of a scope, kept beside its store in
-   * `memory-dream.json`: when it ran, what it changed, and the entries as they
-   * were before it, which is all an undo needs. Only the last pass is kept, so
-   * the file stays one store's size.
-   */
   const dreamStatePath = (resolved) => path.join(path.dirname(resolved.filePath), 'memory-dream.json');
 
-  /**
-   * Missing and malformed both read as "never dreamed": the state only decides
-   * when the next pass is due and offers an undo, so a lost file costs one
-   * early pass, never memory.
-   */
   const readDreamState = async (target) => {
     const resolved = resolveTarget(target);
     const stored = await readJson(dreamStatePath(resolved)).catch(() => ({ missing: true, value: null }));
@@ -534,13 +398,6 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  /**
-   * Records a finished pass. `snapshot` is the store as the pass found it and
-   * `after` the id and `updatedAt` of every entry it left; a pass that changed
-   * nothing passes `null` for both, so no undo is offered for it. Dreaming state
-   * is written under the store's own lock, so an undo can never interleave with
-   * a pass being recorded.
-   */
   const recordDream = async (target, { lastRunAt, record, snapshot, after = null }) => {
     const resolved = resolveTarget(target);
     return withWriteLock(resolved.key, async () => {
@@ -555,15 +412,6 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  /**
-   * Takes back what the last pass changed, and only that: an entry it deleted
-   * comes back unless one with its id exists again, and an entry it rewrote
-   * returns to its old text unless someone changed it after the pass. An entry
-   * created since, an edit made since, and an entry deleted since all stay as
-   * they are, so undoing a pass never undoes the agent's or the user's own work.
-   * What the pass left is told apart by the `after` record: an entry still at
-   * the `updatedAt` the pass left it with is the pass's version.
-   */
   const undoDream = async (target) => {
     const resolved = resolveTarget(target);
     return withWriteLock(resolved.key, async () => {
