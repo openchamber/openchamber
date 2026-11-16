@@ -1,20 +1,5 @@
 import express from 'express';
 
-/**
- * The routes behind the account card of an extension notification channel
- * (Settings → Integrations). They answer what `extension-channels.js` knows
- * and never a token:
- *
- * - `GET /api/notifications/channels` → `{ channels: [{ providerId, guestId, name, channel, account | null }] }`
- * - `PUT /api/notifications/channels/:providerId/account` `{ token, username?, instance? }` → `{ channel }` (the public view)
- * - `DELETE /api/notifications/channels/:providerId/account` → `{ removed }`
- *
- * A failure is `{ error, code }` with the status the channels module gave:
- * 404 `CHANNEL_UNKNOWN`, 400 `TOKEN_REQUIRED` / `USERNAME_REQUIRED` /
- * `USERNAME_INVALID` / `INSTANCE_REQUIRED` / `UNSUPPORTED_INSTANCE`, 401 `TOKEN_REFUSED`, 503
- * `CHANNEL_UNAVAILABLE`, 502 `MALFORMED_PROVIDER_RESPONSE`. A store that cannot
- * be read is 500, never an empty list.
- */
 export const registerNotificationChannelRoutes = (app, { channels }) => {
   const json16 = express.json({ limit: '16kb' });
 

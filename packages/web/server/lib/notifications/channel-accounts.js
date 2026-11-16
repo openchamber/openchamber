@@ -4,18 +4,6 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
-/**
- * The accounts behind extension notification channels (`provides:
- * ["notifications"]`): one account per channel, keyed by the channel's
- * provider id (`ext-<guestId>`), in `{dataDir}/notification-channels.json`,
- * written `0o600` through a temp file and a rename. The token is read by the
- * delivery module alone, to mint a per-call handle; `publicView` is what a
- * route or a card may see and never carries it.
- *
- * A corrupt file is an error, not an empty store: a channel must not read as
- * disconnected because its file could not be parsed. Writes to one file are
- * chained in this process, as the guest auth store's are.
- */
 
 export const notificationChannelsPersistPath = (dataDir) => path.join(dataDir, 'notification-channels.json');
 
@@ -48,7 +36,6 @@ const corrupt = (persistPath, cause) => Object.assign(new Error(`Notification ch
   code: 'INVALID_NOTIFICATION_CHANNELS_STORE', cause,
 });
 
-/** What leaves this module: the instance and who the account is, never the token. */
 const publicViewOf = (channel) => {
   if (!channel) return null;
   const account = {
@@ -105,7 +92,6 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
     await fsImpl.chmod(persistPath, 0o600);
   };
 
-  /** Read-modify-write under this process's chain for the file. */
   const mutate = (change) => {
     const next = chain.catch(() => undefined).then(async () => {
       const store = await readStore();
@@ -120,12 +106,9 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
   return Object.freeze({
     beginConnect,
     cancelConnect: (providerId) => pendingConnections.delete(providerId),
-    /** The stored channel with its token, for minting a handle; null when none is connected. */
     read: async (providerId) => (await readStore()).channels[providerId] ?? null,
     publicView: async (providerId) => publicViewOf((await readStore()).channels[providerId] ?? null),
-    /** Every connected channel's public view, by provider id. */
     list: async () => Object.fromEntries(Object.entries((await readStore()).channels).map(([id, channel]) => [id, publicViewOf(channel)])),
-    /** Connecting replaces whatever account the channel had: one account per channel. */
     set: (providerId, { instance, token, account }, expectedConnection) => mutate((store) => {
       if (expectedConnection !== undefined && pendingConnections.get(providerId) !== expectedConnection) return null;
       pendingConnections.delete(providerId);
@@ -134,7 +117,6 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
       store.channels[providerId] = { revision: randomUUID(), instance, account: stored };
       return publicViewOf(store.channels[providerId]);
     }),
-    /** The channel's server refused the token: the account stays, marked, until the user reconnects. */
     markInvalid: (providerId, reason = 'unauthorized', expectedChannel) => mutate((store) => {
       const channel = store.channels[providerId];
       if (!channel) return false;
@@ -143,7 +125,6 @@ export const createNotificationChannelAccounts = ({ persistPath, now = Date.now,
       channel.account.invalidReason = reason;
       return true;
     }),
-    /** Disconnect, and "remove means forget" for an uninstalled extension. */
     remove: (providerId) => {
       pendingConnections.delete(providerId);
       return mutate((store) => {

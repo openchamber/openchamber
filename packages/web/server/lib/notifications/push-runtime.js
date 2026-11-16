@@ -17,12 +17,10 @@ export const createPushRuntime = (deps) => {
   const {
     fsPromises,
     path,
-    // Resolves the web-push module; it is loaded on first use, not with the server.
     loadWebPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
-    // Session keys of revoked or expired clients (client-push-access.js).
     getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
@@ -56,8 +54,6 @@ export const createPushRuntime = (deps) => {
           : {};
       const { bySession: subscriptionsBySession, changed } = withHashedSessionKeys(stored);
       if (changed && !legacyKeysScrubQueued) {
-        // Rewrite once so raw tokens leave the disk without waiting for the
-        // next subscription change.
         legacyKeysScrubQueued = true;
         void persistPushSubscriptionUpdate((current) => current).catch((error) => {
           console.warn('Failed to rewrite push subscriptions with hashed keys:', error);
@@ -90,8 +86,6 @@ export const createPushRuntime = (deps) => {
       await writePushSubscriptionsToDisk(next);
       return next;
     });
-    // A failed write (a full disk) rejects only its own caller; the next
-    // subscription still writes instead of replaying that error until a restart.
     persistPushSubscriptionsLock = result.catch(() => {});
     return result;
   };
@@ -163,7 +157,6 @@ export const createPushRuntime = (deps) => {
         createdAt: now,
         lastSeenAt: now,
         userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
-        // Platform lets the sender route mobile PWA push through the same presence gate as APNs.
         platform:
           typeof platform === 'string' && platform
             ? platform
@@ -217,8 +210,6 @@ export const createPushRuntime = (deps) => {
     });
   };
 
-  // A browser can sit under several keys and a send reaches it through any of them, so it
-  // leaves every key except those in `keep`.
   const removePushDevicesOfSessions = async (sessionKeys, keep) => {
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
@@ -266,8 +257,6 @@ export const createPushRuntime = (deps) => {
   const sendPushToAllUiSessions = async (payload, options = {}) => {
     const requireNoSse = options.requireNoSse === true;
     const store = await readPushSubscriptionsFromDisk();
-    // Rejects when the client list cannot be read: this notification is lost with a log line
-    // in the fanout, since sending would reach a revoked device.
     const invalidSessionKeys = await getInvalidSessionKeys();
     const sessions = store.subscriptionsBySession || {};
     const subscriptionsByEndpoint = new Map();
@@ -286,10 +275,6 @@ export const createPushRuntime = (deps) => {
 
     await Promise.all(Array.from(subscriptionsByEndpoint.values()).map(async (sub) => {
       if (requireNoSse) {
-        // Mobile PWA subscriptions follow the same presence model as native push: suppress only
-        // when an interactive (desktop/web) client is visible. The phone PWA's own foreground is
-        // handled in the service worker (focused-client check), so it won't double-notify.
-        // Non-mobile (desktop/web) subscriptions keep the existing any-visible gate.
         const suppressed = isMobilePlatform(sub.platform) ? isAnyInteractiveClientVisible() : isAnyUiVisible();
         if (suppressed) return;
       }
@@ -297,9 +282,6 @@ export const createPushRuntime = (deps) => {
     }));
   };
 
-  // A client is "mobile" if it reports a native mobile platform. Anything else (web, desktop,
-  // vscode, or an older client that doesn't report a platform) is treated as interactive — i.e.
-  // a surface where the user would actually see the in-app notification.
   const MOBILE_PLATFORMS = new Set(['ios', 'android']);
   const isMobilePlatform = (platform) => typeof platform === 'string' && MOBILE_PLATFORMS.has(platform);
 
@@ -308,7 +290,6 @@ export const createPushRuntime = (deps) => {
     const now = Date.now();
     const nextVisible = Boolean(visible);
     const existing = uiVisibilityByToken.get(token);
-    // Keep the last known platform if this beacon didn't carry one (e.g. a heartbeat).
     const nextPlatform = typeof platform === 'string' && platform ? platform : existing?.platform;
     uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now, platform: nextPlatform });
   };
@@ -324,10 +305,6 @@ export const createPushRuntime = (deps) => {
     return false;
   };
 
-  // True when at least one NON-mobile client (desktop/web/vscode) is currently visible. Used to
-  // suppress native push to the phone: an active desktop already shows the notification, so the
-  // phone doesn't need it. Deliberately based on the desktop's visibility (reliable), never the
-  // phone's own (a backgrounded WKWebView can't report "hidden" before iOS suspends it).
   const isAnyInteractiveClientVisible = () => {
     const now = Date.now();
     pruneUiVisibility(now);
