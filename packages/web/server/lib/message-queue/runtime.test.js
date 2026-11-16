@@ -520,6 +520,16 @@ describe('a message queued as a goal', () => {
 });
 
 describe('message queue runtime', () => {
+  it('echoes the enqueue correlation id in snapshots and broadcasts', async () => {
+    const { runtime, openCode, broadcasts } = createRuntime();
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const result = await runtime.enqueue(SESSION, DIRECTORY, item({ clientRequestId: 'client-123' }));
+    expect(result.session.items[0].clientRequestId).toBe('client-123');
+    expect(runtime.sessionSnapshot(SESSION).items[0].clientRequestId).toBe('client-123');
+    expect(broadcasts.at(-1).properties.session.items[0].clientRequestId).toBe('client-123');
+    await expect(runtime.enqueue(SESSION, DIRECTORY, item({ clientRequestId: '../invalid' }))).rejects.toThrow('invalid clientRequestId');
+  });
   it('delivers the head of the queue when the session goes idle, in order', async () => {
     const { runtime, openCode, emit, promptSent, broadcasts, replayAfterSend } = createRuntime();
     runtime.start();

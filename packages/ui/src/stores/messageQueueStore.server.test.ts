@@ -40,6 +40,7 @@ type ServerReply = {
   revision: number
   session?: ServerSession
   sessions?: ServerSession[]
+  itemId?: string
   item?: ServerItem
   items?: ServerItem[]
 }
@@ -282,7 +283,7 @@ describe("server-owned message queue", () => {
   })
 
   test("addToQueue shows the message at once and settles on the server's copy", async () => {
-    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]) })
+    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]), itemId: "srv-1" })
     const pending = useMessageQueueStore.getState().addToQueue(target, {
       content: "hi @reviewer",
       text: "hi",
@@ -291,6 +292,8 @@ describe("server-owned message queue", () => {
       sendConfig: { providerID: "p", modelID: "m", agent: "build" },
     })
     expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
+    const clientRequestId = calls[0]?.body.item.clientRequestId
+    expect(/^[0-9a-f]{32}$/.test(clientRequestId)).toBe(true)
     await pending
 
     expect(calls[0]).toEqual({
@@ -300,6 +303,7 @@ describe("server-owned message queue", () => {
       body: {
         directory: "/repo",
         item: {
+          clientRequestId,
           content: "hi @reviewer",
           text: "hi",
           agentMention: "reviewer",
@@ -315,7 +319,7 @@ describe("server-owned message queue", () => {
   test("accepted queue history survives automatic delivery and manual take without recapture", async () => {
     const historyTarget = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'history-accepted' };
     const item = serverItem('history-item', 'original prompt');
-    respond = () => json({ revision: 100, session: { ...session([item]), sessionId: historyTarget.sessionId } });
+    respond = () => json({ revision: 100, session: { ...session([item]), sessionId: historyTarget.sessionId }, itemId: item.id });
     const pending = useMessageQueueStore.getState().addToQueue(historyTarget, {
       content: item.content,
       attachments: [{ ...attachment, dataUrl: 'file:///repo/note.txt' }],
@@ -338,7 +342,7 @@ describe("server-owned message queue", () => {
     const historyTarget = { runtimeKey: 'runtime-a', directory: '/original', sessionId: 'history-runtime-switch' };
     respond = () => {
       activeRuntimeKey = 'runtime-b';
-      return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory } });
+      return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory }, itemId: 'srv-1' });
     };
     await useMessageQueueStore.getState().addToQueue(historyTarget, {
       content: 'for original runtime', sendConfig: { providerID: 'p', modelID: 'm' },
@@ -361,7 +365,7 @@ describe("server-owned message queue", () => {
       { kind: "context" as const, text: "issue body", metadata: issueMetadata },
       { kind: "synthetic" as const, text: "conflict payload" },
     ]
-    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "with context")]) })
+    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "with context")]), itemId: "srv-1" })
     await useMessageQueueStore.getState().addToQueue(target, {
       content: "with context",
       context,
@@ -380,7 +384,7 @@ describe("server-owned message queue", () => {
 
   test("a message queued as a goal keeps its goal on the server, in the projection, and on take", async () => {
     const goal = { objective: "the whole plan", tokenBudget: 5000 }
-    respond = () => json({ revision: 9, session: session([serverItem("srv-1", "Implement this plan", { goal })]) })
+    respond = () => json({ revision: 9, session: session([serverItem("srv-1", "Implement this plan", { goal })]), itemId: "srv-1" })
     await useMessageQueueStore.getState().addToQueue(target, {
       content: "Implement this plan",
       sendConfig: { providerID: "p", modelID: "m" },
@@ -505,7 +509,7 @@ describe("server-owned message queue", () => {
       ...session([serverItem("q1", "first"), serverItem("q2", "second")], "q1"),
       directory: "/repo/moved",
     }), "runtime-a")
-    enqueue.resolve(json({ revision: 4, session: session([serverItem("q1", "first")]) }))
+    enqueue.resolve(json({ revision: 4, session: session([serverItem("q1", "first")]), itemId: "q1" }))
     await pending
 
     const state = useMessageQueueStore.getState()
@@ -563,26 +567,270 @@ describe("server-owned message queue", () => {
 
   test("removeFromQueue and clearQueue update locally and tell the server", async () => {
     useMessageQueueStore.setState({ queuedMessages: { [key]: [{ id: "q1", content: "a", text: "a", createdAt: 1 }, { id: "q2", content: "b", text: "b", createdAt: 2 }] } })
-    respond = () => json({ revision: 10, session: session([serverItem("q2", "b")]) })
+    const removed = deferredResponse()
+    respond = () => { removed.resolve(json({ revision: 10, session: session([serverItem("q2", "b")]) })); return removed.promise }
     useMessageQueueStore.getState().removeFromQueue(target, "q1")
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q2"])
     await Promise.resolve()
     await Promise.resolve()
     expect(calls[0]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1/items/q1", body: undefined, directory: "/repo" })
 
-    respond = () => json({ revision: 11, session: session([]) })
+    let clearCalled: () => void = () => {}
+    const clearRequest = new Promise<void>((resolve) => { clearCalled = resolve })
+    respond = () => { clearCalled(); return json({ revision: 11, session: session([]) }) }
     useMessageQueueStore.getState().clearQueue(target)
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
-    await Promise.resolve()
+    await clearRequest
     expect(calls[1]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1", body: undefined, directory: "/repo" })
   })
 
   test("reorderQueue sends the complete new order", async () => {
     useMessageQueueStore.setState({ queuedMessages: { [key]: [{ id: "q1", content: "a", text: "a", createdAt: 1 }, { id: "q2", content: "b", text: "b", createdAt: 2 }] } })
-    respond = () => json({ revision: 12, session: session([serverItem("q2", "b"), serverItem("q1", "a")]) })
+    let reorderCalled: () => void = () => {}
+    const reorderRequest = new Promise<void>((resolve) => { reorderCalled = resolve })
+    respond = () => { reorderCalled(); return json({ revision: 12, session: session([serverItem("q2", "b"), serverItem("q1", "a")]) }) }
     useMessageQueueStore.getState().reorderQueue(target, "q2", "q1")
-    await Promise.resolve()
+    await reorderRequest
     expect(calls[0]).toEqual({ method: "PUT", path: "/api/message-queue/sessions/session-1/order", body: { itemIds: ["q2", "q1"] }, directory: "/repo" })
+  })
+
+  test("remove waits for the server id of a pending enqueue", async () => {
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    if (!id) throw new Error("missing optimistic entry")
+    useMessageQueueStore.getState().removeFromQueue(target, id)
+    expect(calls).toHaveLength(1)
+    let deleteCalled: () => void = () => {}
+    const deleteRequest = new Promise<void>((resolve) => { deleteCalled = resolve })
+    respond = () => { deleteCalled(); return json({ revision: 3, session: session([]) }) }
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    await deleteRequest
+    expect(calls[1]?.path).toBe("/api/message-queue/sessions/session-1/items/srv-1")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("a broadcast before enqueue settles does not duplicate the actionable row", async () => {
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const temporary = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    applyMessageQueueUpdatedEvent(updated(2, session([serverItem("srv-1", "pending")])), "runtime-a")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual([temporary])
+    applyMessageQueueUpdatedEvent(updated(3, session([serverItem("srv-1", "pending"), serverItem("other", "other")])), "runtime-a")
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["srv-1", "other"])
+  })
+
+  test("an acceptance broadcast releases a take while the enqueue response is stalled", async () => {
+    const enqueue = deferredResponse()
+    respond = (call) => call.path.endsWith("/take")
+      ? json({ revision: 3, session: session([]), item: serverItem("srv-1", "pending") })
+      : enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    if (!id) throw new Error("missing optimistic entry")
+    const taken = useMessageQueueStore.getState().takeForSend(target, id)
+    applyMessageQueueUpdatedEvent(updated(2, session([{ ...serverItem("srv-1", "pending"), clientRequestId: calls[0]?.body.item.clientRequestId }])), "runtime-a")
+    await queued
+    expect((await taken).map((item) => item.content)).toEqual(["pending"])
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await Promise.resolve()
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+  })
+
+  test("successive accepted enqueues keep their separate pending projections", async () => {
+    const first = deferredResponse()
+    const second = deferredResponse()
+    respond = (call) => call.body?.item?.content === "second" ? second.promise : first.promise
+    const config = { providerID: "p", modelID: "m" }
+    const a = useMessageQueueStore.getState().addToQueue(target, { content: "first", sendConfig: config })
+    const b = useMessageQueueStore.getState().addToQueue(target, { content: "second", sendConfig: config })
+    const firstId = calls[0]?.body.item.clientRequestId
+    applyMessageQueueUpdatedEvent(updated(2, session([{ ...serverItem("q1", "first"), clientRequestId: firstId }])), "runtime-a")
+    await a
+    await Promise.resolve()
+    const secondId = calls.find((call) => call.body?.item?.content === "second")?.body.item.clientRequestId
+    expect(Boolean(secondId)).toBe(true)
+    applyMessageQueueUpdatedEvent(updated(3, session([serverItem("q1", "first"), { ...serverItem("q2", "second"), clientRequestId: secondId }])), "runtime-a")
+    await b
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((entry) => entry.id)).toEqual(["q1", "q2"])
+    first.resolve(json({ revision: 2, session: session([serverItem("q1", "first")]), itemId: "q1" }))
+    second.resolve(json({ revision: 3, session: session([serverItem("q1", "first"), serverItem("q2", "second")]), itemId: "q2" }))
+  })
+
+  test("a session move retains pending rows and sends later enqueues to the new directory", async () => {
+    const first = deferredResponse()
+    const second = deferredResponse()
+    respond = (call) => call.body?.item?.content === "second" ? second.promise : first.promise
+    const config = { providerID: "p", modelID: "m" }
+    const a = useMessageQueueStore.getState().addToQueue(target, { content: "first", sendConfig: config })
+    const b = useMessageQueueStore.getState().addToQueue(target, { content: "second", sendConfig: config })
+    const moved = { ...session([serverItem("q1", "first")]), directory: "/repo/moved" }
+    applyMessageQueueUpdatedEvent(updated(3, moved), "runtime-a")
+    first.resolve(json({ revision: 2, session: session([serverItem("q1", "first")]), itemId: "q1" }))
+    await a
+    await Promise.resolve()
+    expect(calls.find((call) => call.body?.item?.content === "second")?.body.directory).toBe("/repo/moved")
+    const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")!
+    const movedKey = getMessageQueueKey(movedTarget)
+    expect(useMessageQueueStore.getState().queuedMessages[movedKey]?.map((entry) => entry.content)).toEqual(["first", "second"])
+    second.resolve(json({ revision: 4, session: { ...moved, items: [serverItem("q1", "first"), serverItem("q2", "second")] }, itemId: "q2" }))
+    await b
+    expect(useMessageQueueStore.getState().queuedMessages[movedKey]?.map((entry) => entry.id)).toEqual(["q1", "q2"])
+  })
+
+  test("a snapshot during enqueue is applied after its response", async () => {
+    const enqueue = deferredResponse()
+    respond = (call) => call.method === "GET"
+      ? json({ revision: 3, sessions: [session([serverItem("srv-1", "pending"), serverItem("other", "other")])] })
+      : enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const temporary = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    await useMessageQueueStore.getState().hydrate()
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual([temporary])
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["srv-1", "other"])
+  })
+
+  test("take waits for the server id of a pending enqueue", async () => {
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    if (!id) throw new Error("missing optimistic entry")
+    const taken = useMessageQueueStore.getState().takeForSend(target, id)
+    expect(calls).toHaveLength(1)
+    respond = () => json({ revision: 3, session: session([]), item: serverItem("srv-1", "pending") })
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    expect((await taken)[0]?.content).toBe("pending")
+    expect(calls[1]?.path).toBe("/api/message-queue/sessions/session-1/items/srv-1/take")
+  })
+
+  test("bulk take waits for pending enqueue", async () => {
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const taken = useMessageQueueStore.getState().takeForSend(target)
+    expect(calls).toHaveLength(1)
+    respond = () => json({ revision: 3, session: session([]), items: [serverItem("srv-1", "pending")] })
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    expect((await taken)[0]?.content).toBe("pending")
+    expect(calls[1]?.path).toBe("/api/message-queue/sessions/session-1/take")
+  })
+
+  test("a bulk take precedes a later enqueue and retains its optimistic row", async () => {
+    const first = deferredResponse()
+    const config = { providerID: "p", modelID: "m" }
+    respond = (call) => {
+      if (call.path.endsWith("/take")) return json({ revision: 3, session: session([]), items: [serverItem("q1", "first")] })
+      if (call.body?.item?.content === "second") return json({ revision: 4, session: session([serverItem("q2", "second")]), itemId: "q2" })
+      return first.promise
+    }
+    const a = useMessageQueueStore.getState().addToQueue(target, { content: "first", sendConfig: config })
+    const take = useMessageQueueStore.getState().takeForSend(target)
+    const b = useMessageQueueStore.getState().addToQueue(target, { content: "second", sendConfig: config })
+    first.resolve(json({ revision: 2, session: session([serverItem("q1", "first")]), itemId: "q1" }))
+    await a
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.some((m) => m.content === "second")).toBe(true)
+    expect((await take).map((m) => m.content)).toEqual(["first"])
+    await b
+    expect(calls.map((c) => c.path)).toEqual([
+      "/api/message-queue/sessions/session-1/items",
+      "/api/message-queue/sessions/session-1/take",
+      "/api/message-queue/sessions/session-1/items",
+    ])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["second"])
+  })
+
+  test("clear precedes a later enqueue", async () => {
+    const first = deferredResponse()
+    const config = { providerID: "p", modelID: "m" }
+    respond = (call) => {
+      if (call.method === "DELETE") return json({ revision: 3, session: session([]) })
+      if (call.body?.item?.content === "second") return json({ revision: 4, session: session([serverItem("q2", "second")]), itemId: "q2" })
+      return first.promise
+    }
+    const a = useMessageQueueStore.getState().addToQueue(target, { content: "first", sendConfig: config })
+    useMessageQueueStore.getState().clearQueue(target)
+    const b = useMessageQueueStore.getState().addToQueue(target, { content: "second", sendConfig: config })
+    first.resolve(json({ revision: 2, session: session([serverItem("q1", "first")]), itemId: "q1" }))
+    await Promise.all([a, b])
+    expect(calls.map((c) => c.method)).toEqual(["POST", "DELETE", "POST"])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["second"])
+  })
+
+  test("a rejected enqueue does not block bulk take", async () => {
+    const first = deferredResponse()
+    respond = (call) => call.method === "GET" ? json({ revision: 1, sessions: [] }) : call.path.endsWith("/take")
+      ? json({ revision: 2, session: session([]), items: [serverItem("existing", "existing")] })
+      : first.promise
+    const enqueue = useMessageQueueStore.getState().addToQueue(target, { content: "bad", sendConfig: { providerID: "p", modelID: "m" } })
+    const failed = enqueue.then(() => false, () => true)
+    const take = useMessageQueueStore.getState().takeForSend(target)
+    first.resolve(new Response("failed", { status: 500 }))
+    expect(await failed).toBe(true)
+    expect((await take).map((m) => m.content)).toEqual(["existing"])
+  })
+
+
+  test("a message already being sent is not taken a second time", async () => {
+    respond = (call) => call.method === "GET"
+      ? json({ revision: 3, sessions: [session([serverItem("q1", "hello")], "q1")] })
+      : new Response(JSON.stringify({ error: "message is being sent" }), { status: 409 })
+    expect(await useMessageQueueStore.getState().takeForSend(target, "q1")).toEqual([])
+    expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+  })
+
+  test("other 409 responses remain errors", async () => {
+    respond = (call) => call.method === "GET" ? json({ revision: 3, sessions: [] })
+      : new Response(JSON.stringify({ error: "scheduled messages cannot be taken" }), { status: 409 })
+    await expect(useMessageQueueStore.getState().takeForSend(target, "q1")).rejects.toThrow()
+  })
+
+  test("a runtime switch stops a delayed take from reaching the new runtime", async () => {
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "pending", sendConfig: { providerID: "p", modelID: "m" } })
+    const id = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id
+    if (!id) throw new Error("missing optimistic entry")
+    const taken = useMessageQueueStore.getState().takeForSend(target, id)
+    activeRuntimeKey = "runtime-b"
+    enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "pending")]), itemId: "srv-1" }))
+    await queued
+    await expect(taken).rejects.toThrow("runtime changed")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("switching away and back detaches stalled enqueue and ignores its late response", async () => {
+    respond = () => json({ revision: 1, sessions: [] })
+    await useMessageQueueStore.getState().hydrate()
+    const old = deferredResponse()
+    respond = () => old.promise
+    const first = useMessageQueueStore.getState().addToQueue(target, { content: "old", sendConfig: { providerID: "p", modelID: "m" } })
+    const firstResult = first.then(() => "accepted", () => "rejected")
+    const waiting = useMessageQueueStore.getState().addToQueue(target, { content: "waiting", sendConfig: { providerID: "p", modelID: "m" } })
+    const waitingRejected = waiting.then(() => false, () => true)
+    useMessageQueueStore.getState().resetForRuntimeSwitch("runtime-a")
+    activeRuntimeKey = "runtime-b"
+    expect(await waitingRejected).toBe(true)
+    useMessageQueueStore.getState().resetForRuntimeSwitch("runtime-b")
+    activeRuntimeKey = "runtime-a"
+    respond = (call) => call.method === "GET"
+      ? json({ revision: 3, sessions: [session([serverItem("new", "new")])] })
+      : json({ revision: 4, session: session([serverItem("new", "new"), serverItem("newer", "newer")]), itemId: "newer" })
+    await useMessageQueueStore.getState().hydrate()
+    await useMessageQueueStore.getState().addToQueue(target, { content: "newer", sendConfig: { providerID: "p", modelID: "m" } })
+    old.resolve(json({ revision: 99, session: session([serverItem("old", "old")]), itemId: "old" }))
+    expect(await firstResult).toBe("accepted")
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.map((item) => item.id)).toEqual(["new", "newer"])
   })
 })
 
@@ -601,7 +849,7 @@ describe("a session in an isolated space", () => {
   })
 
   test("its queue requests go to the space, and the space's answer settles the projection", async () => {
-    respond = () => json({ revision: 1, session: spaceSession([serverItem("s1", "later")]) })
+    respond = () => json({ revision: 1, session: spaceSession([serverItem("s1", "later")]), itemId: "s1" })
     await useMessageQueueStore.getState().addToQueue(spaceTarget, { content: "later", sendConfig: { providerID: "p", modelID: "m" } })
     useMessageQueueStore.getState().removeFromQueue(spaceTarget, "s1")
     await Promise.resolve()

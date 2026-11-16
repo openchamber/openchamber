@@ -18,6 +18,8 @@ import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { toPublicItem } from './public-item.js';
+import { asNonEmptyString, asRecord } from './boundary.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -51,9 +53,7 @@ const getQueuedSendRetryDelayMs = (failures) =>
 // Boundary readers: the only place raw JSON (client bodies, the queue file,
 // OpenCode responses, hub events) is inspected. Everything below them
 // branches on the domain values they return.
-const asNonEmptyString = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 const asText = (value) => (typeof value === 'string' ? value : '');
-const asRecord = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
 const asList = (value) => (Array.isArray(value) ? value : null);
 const asCount = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : null);
 
@@ -153,6 +153,11 @@ export const parseQueuedItemInput = (value) => {
   const goal = parseGoal(raw.goal);
   if (goal && !text.trim()) throw new TypeError('a goal needs message text');
   const item = { content, text };
+  const clientRequestId = asNonEmptyString(raw.clientRequestId);
+  if (clientRequestId) {
+    if (!/^[a-zA-Z0-9-]{1,100}$/.test(clientRequestId)) throw new TypeError('invalid clientRequestId');
+    item.clientRequestId = clientRequestId;
+  }
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
   item.attachments = attachments;
@@ -182,32 +187,6 @@ const parseStoredItem = (value) => {
   } catch {
     return null;
   }
-};
-
-const toPublicAttachment = ({ dataUrl: _dataUrl, ...attachment }) => attachment;
-
-// What clients see: everything except the payloads — attachment data URLs
-// (megabytes of base64) and captured context (a PR diff, say) — which would
-// otherwise ride every broadcast. A take hands the full item back.
-const toPublicItem = (item) => {
-  const publicItem = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
-  if (item.agentMention) publicItem.agentMention = item.agentMention;
-  publicItem.attachments = item.attachments.map(toPublicAttachment);
-  // Older persisted items have no UI summary. Prefer their attached comment
-  // before falling back to the model-facing context text.
-  const contextPreview = item.contextPreview || item.context
-    .filter((part) => part.kind !== 'instruction')
-    .map((part) => asNonEmptyString(asRecord(part.metadata?.openchamberContext)?.text) || part.text.trim())
-    .find(Boolean);
-  if (contextPreview) {
-    const firstLine = contextPreview.split('\n', 1)[0];
-    publicItem.contextPreview = firstLine.slice(0, 100)
-      + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
-  }
-  publicItem.sendConfig = { ...item.sendConfig };
-  if (item.goal) publicItem.goal = { ...item.goal };
-  if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
-  return publicItem;
 };
 
 const extractSessionStatus = (payload) => {

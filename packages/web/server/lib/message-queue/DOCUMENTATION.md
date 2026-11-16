@@ -62,6 +62,11 @@ only when the arming flow supplied its own (the plan flow); otherwise the
 delivered `text` is the objective. A goal needs message text. Snapshots keep
 `goal`, so the queue row can show it.
 
+An optional `clientRequestId` accompanies a client enqueue in snapshots and
+broadcasts. It lets that client identify the accepted item even when its HTTP
+response is delayed. Older clients omit it and older servers ignore it; it is a
+correlation value, not an idempotency key.
+
 The server is a courier for `context`: it validates the shape (a kind it
 knows, a `metadata` object on `context` entries) and delivers each entry as a
 synthetic text part, an entry's `instructions` going out as its own part just

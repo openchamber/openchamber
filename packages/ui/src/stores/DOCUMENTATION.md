@@ -505,6 +505,22 @@ clear all projections of their session in that runtime. Projection items carry
 attachment metadata only, so `popToInput()` and `takeForSend()` asynchronously
 remove the message on the server and retrieve its complete captured payload.
 
+An optimistic row has a temporary id until enqueue returns the server's item id.
+Actions for one runtime, owner and session run in order and wait for acceptance before addressing
+the server. While enqueue is pending, its session's newest server view waits for
+the response so the optimistic row and its server copy do not appear twice. A
+server event or snapshot carrying the enqueue's random request id confirms it
+without waiting for the HTTP response. Older servers omit that id, so the client
+waits for their response. A failed enqueue re-reads the server, which may have
+accepted it even if the response was lost. A delayed action is not sent to a
+different runtime after a switch. A switch detaches the old operations, and a
+session move carries pending rows and redirects later enqueues to its new directory.
+
+### Why wait for the server's id
+
+Even a client-generated id would not stop an action from reaching the server
+before its enqueue. Waiting for acceptance also works with existing servers.
+
 `lib/messages/queuedMessagePreview.ts` derives the queue row from typed text,
 then attached comments/context, then the first filename. The store sends a
 bounded `contextPreview` with the captured item so server projections can show
