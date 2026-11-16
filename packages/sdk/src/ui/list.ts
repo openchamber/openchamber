@@ -6,11 +6,8 @@ import { UI_CSS } from './style.ts';
 export type ListItem = {
   id: string;
   title: string;
-  /** Micro muted line under the title. */
   subtitle?: string;
-  /** Fixed-width mono text before the title, like an issue key. */
   leading?: string;
-  /** Muted tabular text at the right, like a date or count. */
   meta?: string;
   badge?: { label: string; tone?: Tone };
   disabled?: boolean;

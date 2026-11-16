@@ -20,17 +20,11 @@ export type HostThemeTokens = {
   selection: string;
   focus: string;
   primary: string;
-  /** Secondary surface (sidebars, muted rows). */
   mutedSurface: string;
-  /** Text on `elevated`. */
   elevatedForeground: string;
-  /** Pressed state of a clickable. */
   active: string;
-  /** Text on `selection`. */
   selectionForeground: string;
-  /** Text on `primary`. */
   primaryForeground: string;
-  /** Host-computed text on neutral or tinted surfaces, not on a solid fill. */
   primaryText: string;
   successText: string;
   warningText: string;
@@ -41,13 +35,7 @@ export type HostThemeTokens = {
   error: string;
   info: string;
   font: string;
-  /**
-   * The app's body text size as a pixel length, `14px` at the default
-   * interface font size and larger when the user raises it. `applyHostTheme`
-   * makes it the frame's `1rem`. Hosts before this token leave it out.
-   */
   fontSize?: string;
-  /** Monospace stack for code and identifiers. */
   mono: string;
   radius: string;
   syntaxKeyword?: string;
@@ -77,26 +65,14 @@ export type SessionSnapshot = {
   agent?: string;
 };
 
-/**
- * Which host chrome mounted this iframe. Not `openSurface`. `status` is the
- * extension's section in the chat's Work Status panel.
- */
 export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'popover' | 'block';
 
-/**
- * The call a `block` surface draws: the component's name and its arguments as
- * the agent wrote them. A model wrote them, so text from a page or a ticket
- * can steer them: treat them as untrusted, and do nothing with side effects
- * until the user clicks.
- */
 export type GuestBlockCall = {
   name: string;
   args: Record<string, string>;
-  /** What this frame answered the agent with (`answerBlock`), kept across a reload; `null` before that. */
   answered: string | null;
 };
 
-/** Characters of the text a block's frame answers the agent with. */
 export const GUEST_BLOCK_ANSWER_MAX = 2_000;
 
 export type GuestConnection = {
@@ -154,20 +130,12 @@ export type SessionLifecycleEvent = {
 
 export const GUEST_FILE_ENTRY_KINDS = ['file', 'directory', 'other'] as const;
 
-/** What a directory entry or an existing path is. */
 export type GuestFileEntryKind = (typeof GUEST_FILE_ENTRY_KINDS)[number];
 
 export const GUEST_FILE_STAT_KINDS = ['file', 'directory', 'other', 'missing'] as const;
 
-/** `stat` answer: an entry kind, or `missing` when nothing is at that path. */
 export type GuestFileStatKind = (typeof GUEST_FILE_STAT_KINDS)[number];
 
-/**
- * Where a guest file path points. A relative path is inside the open project
- * (capability `files`). A path starting with `/` or `~/` is outside it and
- * must match one of the manifest's `contributes.filesystem` patterns
- * (capability `filesystem`).
- */
 export type GuestFileScope = 'project' | 'filesystem';
 
 export type FileReadRequest = { path: string };
@@ -181,26 +149,14 @@ export type FileListEntry = { name: string; kind: GuestFileEntryKind };
 export type FileListResult = { entries: FileListEntry[] };
 export type FileStatResult = { kind: GuestFileStatKind; size: number; mtime: number };
 
-/**
- * One-off text generation with the user's Small Model (capability `model`).
- * No session, no history, no tools: `prompt` in, `text` out. The app picks
- * the model the same way it does for its own background actions.
- */
 export type GenerateRequest = {
   prompt: string;
   system?: string;
-  /** Upper bound on the answer, 1 to `GUEST_GENERATE_OUTPUT_TOKENS_MAX`. */
   maxOutputTokens?: number;
 };
 
 export type GenerateResult = { text: string };
 
-/**
- * The outcome of a `generate` whose frame was gone when the model answered:
- * the panel closed or its frame reloaded first. `request` is what that frame
- * sent. The host keeps it for a frame of the same extension on the same
- * surface and project, and hands it over once (`onLateGenerateResult`).
- */
 export type LateGenerateResult = { request: GenerateRequest } & (
   | { ok: true; result: GenerateResult }
   | { ok: false; code: HostRequestErrorCode; error: string }
@@ -243,31 +199,16 @@ export type HostReadyContext = {
   surface: GuestHostSurface;
   connection: GuestConnection;
   settings: GuestSettings;
-  /**
-   * The item this surface was opened for: the chip the user clicked on the
-   * composer (`AttachIssueRequest`), or the message / session a declared
-   * action ran on (`GuestMessageItem` / `GuestSessionItem`). `null` when
-   * opened from the rail icon or the composer + menu.
-   */
   item: GuestItem | null;
-  /** The call this frame draws; present only on the `block` surface. */
   block?: GuestBlockCall;
-  /** Present only in the host-created child frame for an active popover. */
   popover?: GuestPopoverContext;
-  /** Optional capabilities advertised by a newer host. Absent remains compatible with older hosts. */
   features?: {
     deviceStorage?: true;
     statusControls?: true;
     popovers?: true;
-    /** The host keeps `generate` answers that arrive after their frame is gone (`onLateGenerateResult`). */
     lateGenerateResults?: true;
-    /** The host captures the microphone for a frame with the `microphone` grant (`openMicrophone`). */
     microphone?: true;
   };
-  /**
-   * The device the frame is drawn on, re-sent with `ready` when it changes
-   * (rotation, a keyboard opening). Hosts before this field leave it out.
-   */
   device?: HostDevice;
 };
 
@@ -275,30 +216,22 @@ export const DEVICE_FORM_FACTORS = ['phone', 'tablet', 'desktop'] as const;
 export const DEVICE_POINTERS = ['coarse', 'fine'] as const;
 
 export type HostDevice = {
-  /** `phone` and `tablet` are the app's touch layouts; `desktop` is everything else. */
   formFactor: (typeof DEVICE_FORM_FACTORS)[number];
-  /** `coarse` for a finger: make hit targets at least 44px tall. */
   pointer: (typeof DEVICE_POINTERS)[number];
-  /** Safe-area insets of the screen in CSS pixels: the notch, the home indicator, rounded corners. */
   insets: { top: number; right: number; bottom: number; left: number };
-  /** Height in CSS pixels the on-screen keyboard covers at the bottom; 0 while it is closed. */
   keyboard: number;
 };
 
 export type GuestItemRole = 'user' | 'assistant';
 
-/** A `contributes.actions` entry with `where: "message"` ran on this message. */
 export type GuestMessageItem = {
   kind: 'message';
-  /** The action id from the manifest. */
   action: string;
   sessionId: string;
   sessionTitle: string;
-  /** The session's project directory, or `null` for a session without one. */
   directory: string | null;
   messageId: string;
   role: GuestItemRole;
-  /** Message text as the Markdown export renders it, capped at `GUEST_ITEM_MESSAGE_TEXT_MAX`. */
   text: string;
 };
 
@@ -309,64 +242,43 @@ export type GuestSessionItemMessage = {
   createdAt: number;
 };
 
-/** A `contributes.actions` entry with `where: "session"` ran on this session. */
 export type GuestSessionItem = {
   kind: 'session';
-  /** The action id from the manifest. */
   action: string;
   sessionId: string;
   sessionTitle: string;
-  /** The session's project directory, or `null` for a session without one. */
   directory: string | null;
-  /** Present only when the action declared `payload: ["messages"]` and the user granted `conversation`. Oldest first. */
   messages?: GuestSessionItemMessage[];
-  /** Set when the oldest messages were dropped to stay within `GUEST_ITEM_SESSION_MAX`. */
   truncated?: boolean;
 };
 
-/** A `contributes.actions` entry with `where: "selection"` ran on text selected in a message. */
 export type GuestSelectionItem = {
   kind: 'selection';
   action: string;
   sessionId: string;
   directory: string | null;
   messageId: string;
-  /** The selected text as Markdown, capped at `GUEST_ITEM_MESSAGE_TEXT_MAX`. */
   text: string;
 };
 
-/** A `contributes.actions` entry with `where: "file"` ran on a row of the Files view. */
 export type GuestFileItem = {
   kind: 'file';
   action: string;
   directory: string | null;
-  /** Absolute path. */
   path: string;
   isDirectory: boolean;
 };
 
-/** A `contributes.actions` entry with `where: "diff"` ran on selected lines of a file or a diff. */
 export type GuestDiffItem = {
   kind: 'diff';
   action: string;
   directory: string | null;
-  /** The file as the view names it, relative to the project when it can be. */
   path: string;
   startLine: number;
   endLine: number;
   side?: 'additions' | 'deletions';
 };
 
-/**
- * The user clicked an identifier or a link in a chat message that the
- * extension's `contributes.links` claims, with `action: "open"`. Built by the
- * host from the match: `identifier` is what `{id}` or the key matched. `url`
- * is the clicked link without its fragment and without query parameters
- * other than the template's own; for an identifier in text, the link the first
- * template without `{segment}` builds from it, absent when there is none or
- * the identifier does not have `urls.identifier`'s shape (`PROJ-12` and
- * `number`).
- */
 export type GuestLinkItem = {
   kind: 'link';
   identifier: string;
@@ -375,7 +287,6 @@ export type GuestLinkItem = {
 
 export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem | GuestLinkItem;
 
-/** The captured target of a background action. Delivered once through `onAction`, not `onItem`. */
 export type GuestActionItem = GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
 
 export type ActionResultPayload = { ok: true } | { ok: false; error: string };
@@ -392,38 +303,31 @@ export const isGuestLinkItem = (item: GuestItem | null): item is GuestLinkItem =
   item !== null && item.kind === 'link'
 );
 
-/** The composer chip: what the guest handed to `attach`, with `text` filled from the chip. */
 export const isGuestAttachItem = (item: GuestItem | null): item is AttachIssueRequest => (
   item !== null && (item.kind === undefined || item.kind === 'issue' || item.kind === 'pull')
 );
 
-/** What the host asks a guest that declared `contributes.commands` when the user submits `/name args`. */
 export type ResolveRequest = {
   command: string;
   args: string;
 };
 
-/** The guest's answer to `resolve`: the chip to attach, `null` for nothing, or why it failed. */
 export type ResolveResultPayload =
   | { item: AttachIssueRequest | null }
   | { error: string };
 
 export type BadgeRequest = {
-  /** 0 to `GUEST_BADGE_MAX`; `null` clears the badge. */
   count: number | null;
 };
 
-/** A commit the guest asks the host to show in its Diff view. */
 export type OpenCommitRequest = {
   sha: string;
 };
 
-/** Abbreviated or full hex commit id: 7 to 64 characters. The host resolves it in the open project. */
 export const GUEST_COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
 
 export const isGuestCommitSha = (value: string): boolean => GUEST_COMMIT_SHA.test(value);
 
-/** The content height the guest would like, in CSS px. Only the `status` surface sizes its frame from it. */
 export type ResizeRequest = {
   height: number;
 };
@@ -433,11 +337,8 @@ export type ToastKind = 'info' | 'success' | 'error';
 export type ToastRequest = {
   kind: ToastKind;
   message: string;
-  /** Show Copy. `true` copies the message; an object supplies different text, up to 32,000 characters. */
   copy?: boolean | { text: string };
-  /** Show an OK button that dismisses the toast. */
   dismiss?: boolean;
-  /** Keep the toast until dismissed. Always includes OK, even when `dismiss` is false. */
   persistent?: boolean;
 };
 
@@ -453,7 +354,6 @@ export type AttachBranches = {
   base: string;
 };
 
-/** Plain JSON: what survives `JSON.stringify` / `JSON.parse` unchanged. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 export type AttachIssueRequest = {
@@ -465,19 +365,12 @@ export type AttachIssueRequest = {
   kind?: AttachThreadKind;
   author?: string;
   branches?: AttachBranches;
-  /**
-   * Opaque payload the guest chose. The host stores it with the chip and the
-   * session snapshot and hands it back unchanged as `ready.item.data`; it
-   * never reaches the model or the chip text. Serialized size is capped at
-   * `GUEST_ATTACH_DATA_MAX`; `clampAttachRequest` drops a larger value.
-   */
   data?: JsonValue;
 };
 
 export type StartSessionRequest = AttachIssueRequest & {
   projectId?: string;
   worktree?: GuestSessionWorktree;
-  /** Preserve the current page/chat by default. */
   navigation?: 'preserve' | 'open';
 };
 
@@ -490,7 +383,6 @@ export const GUEST_ATTACH_URL_MAX = 2_000;
 export const GUEST_ATTACH_TEXT_MAX = 16_000;
 export const GUEST_ATTACH_AUTHOR_MAX = 80;
 export const GUEST_ATTACH_BRANCH_MAX = 200;
-/** `JSON.stringify(data).length` ceiling for `AttachIssueRequest.data`. */
 export const GUEST_ATTACH_DATA_MAX = 16_000;
 export const GUEST_ACCOUNT_MAX = 200;
 export const GUEST_SESSION_MODEL_MAX = 200;
@@ -498,49 +390,22 @@ export const GUEST_SESSION_AGENT_MAX = 80;
 export const GUEST_SETTING_VALUE_MAX = 2_000;
 export const GUEST_REQUEST_PATH_MAX = 2_000;
 export const GUEST_REQUEST_BODY_MAX = 64_000;
-/** Bytes of a `request` / `serviceRequest` answer; a larger one is `RESPONSE_TOO_LARGE`, never cut off. */
 export const GUEST_REQUEST_RESPONSE_MAX = 8_000_000;
 export const GUEST_REQUEST_TIMEOUT_MS = 20_000;
-/** Guest file path, in characters. */
 export const GUEST_FILE_PATH_MAX = 1_024;
-/** File content in characters, read and write alike. */
 export const GUEST_FILE_CONTENT_MAX = 2_000_000;
-/** Entries a `listDir` answer carries; longer directories are truncated. */
 export const GUEST_FILE_LIST_MAX = 2_000;
-/** Characters in a `generate` prompt. */
 export const GUEST_GENERATE_PROMPT_MAX = 64_000;
-/** Characters in a `generate` system prompt. */
 export const GUEST_GENERATE_SYSTEM_MAX = 8_000;
-/** Largest `maxOutputTokens` a guest may ask for. */
 export const GUEST_GENERATE_OUTPUT_TOKENS_MAX = 4_000;
-/** Characters in a `generate` answer. */
 export const GUEST_GENERATE_TEXT_MAX = 256_000;
-/**
- * How long `generate` waits for the model before `HOST_TIMEOUT`.
- *
- * Must exceed the largest deadline the Small Model server can derive for a
- * guest-shaped request, plus margin for the iframe → host bridge → HTTP chain.
- * The server no longer cuts at a flat 60 s: it budgets 60 s base plus 40 ms per
- * estimated token (~4 chars/token), capped at 900 s
- * (`generationBudgetMs` in `packages/web/server/lib/small-model/index.js`,
- * issue #5017). At the guest limits (`GUEST_GENERATE_PROMPT_MAX` +
- * `GUEST_GENERATE_SYSTEM_MAX` = 72 000 chars ≈ 18 000 tokens) that is 780 s,
- * so 960 s leaves the chain ~3 minutes.
- */
 export const GUEST_GENERATE_TIMEOUT_MS = 960_000;
-/** How long the host keeps a `LateGenerateResult` nobody has taken. */
 export const GUEST_GENERATE_LATE_KEEP_MS = 60 * 60_000;
-/** `LateGenerateResult`s the host keeps per extension; a newer one drops the oldest. */
 export const GUEST_GENERATE_LATE_MAX = 8;
-/** Characters of one message's text on a `GuestMessageItem` or a `GuestSessionItem` message. */
 export const GUEST_ITEM_MESSAGE_TEXT_MAX = 200_000;
-/** `JSON.stringify` length ceiling for a `GuestSessionItem`; the host drops the oldest messages to stay under it. */
 export const GUEST_ITEM_SESSION_MAX = 2_000_000;
-/** Largest count a rail badge shows. */
 export const GUEST_BADGE_MAX = 999;
-/** Largest height a `resize` message may carry; the host clamps further per surface. */
 export const GUEST_FRAME_HEIGHT_MAX = 10_000;
-/** Characters in a `resolve-result` error string. */
 export const GUEST_RESOLVE_ERROR_MAX = 500;
 
 export const HOST_REQUEST_ERROR_CODES = [
@@ -583,7 +448,6 @@ export const isHostRequestErrorCode = (value: string): value is HostRequestError
   hostRequestErrorCodeSet.has(value)
 );
 
-/** Unknown or omitted wire codes become HOST_REJECTED. */
 export const resolveHostRequestErrorCode = (value: string | undefined): HostRequestErrorCode => (
   value && isHostRequestErrorCode(value) ? value : 'HOST_REJECTED'
 );
@@ -598,7 +462,6 @@ export const isJsonValue = (value: JsonValue | undefined): value is JsonValue =>
   return false;
 };
 
-/** Whether `data` is plain JSON that serializes within `GUEST_ATTACH_DATA_MAX`. */
 export const isAttachData = (value: JsonValue | undefined): value is JsonValue => (
   isJsonValue(value) && JSON.stringify(value).length <= GUEST_ATTACH_DATA_MAX
 );
@@ -607,7 +470,6 @@ const clampBranch = (value: string | undefined): string => (
   value?.trim().slice(0, GUEST_ATTACH_BRANCH_MAX) ?? ''
 );
 
-/** Guest attach is dropped by the host schema if these limits overflow. */
 export const clampAttachRequest = (request: AttachIssueRequest): AttachIssueRequest => {
   const id = request.id.trim().slice(0, GUEST_ATTACH_ID_MAX);
   const title = request.title.trim().slice(0, GUEST_ATTACH_TITLE_MAX);
@@ -641,7 +503,6 @@ export const clampAttachRequest = (request: AttachIssueRequest): AttachIssueRequ
   return next;
 };
 
-/** Same attach clamp. `worktree` stays only when the guest asked for one. */
 export const clampStartSessionRequest = (request: StartSessionRequest): StartSessionRequest => {
   const next: StartSessionRequest = clampAttachRequest(request);
   if (request.projectId) next.projectId = request.projectId;
@@ -652,7 +513,6 @@ export const clampStartSessionRequest = (request: StartSessionRequest): StartSes
   return next;
 };
 
-/** Prompt text uses the compose limit. `send` stays only when the guest asked. */
 export const clampPromptRequest = (request: PromptRequest): PromptRequest => {
   const next: PromptRequest = {
     text: request.text.trim().slice(0, GUEST_COMPOSE_TEXT_MAX),
@@ -663,32 +523,20 @@ export const clampPromptRequest = (request: PromptRequest): PromptRequest => {
   return next;
 };
 
-/** Badge counts are whole numbers from 0 to `GUEST_BADGE_MAX`; anything else clears. */
 export const clampBadgeCount = (count: number | null): number | null => {
   if (count === null || !Number.isFinite(count)) return null;
   return Math.min(GUEST_BADGE_MAX, Math.max(0, Math.round(count)));
 };
 
-/** Resize heights are whole CSS pixels from 0 to `GUEST_FRAME_HEIGHT_MAX`; a non-number asks for 0. */
 export const clampFrameHeight = (height: number): number => {
   if (!Number.isFinite(height)) return 0;
   return Math.min(GUEST_FRAME_HEIGHT_MAX, Math.max(0, Math.ceil(height)));
 };
 
-/**
- * Which grant a file path needs. `/…` and `~/…` are outside the project and
- * go through the declared `filesystem` patterns; anything else is joined to
- * the open project directory.
- */
 export const guestFileScope = (path: string): GuestFileScope => (
   path.startsWith('/') || path === '~' || path.startsWith('~/') ? 'filesystem' : 'project'
 );
 
-/**
- * What the host schema accepts as a file path. Semantics (`..`, symlinks,
- * declared patterns) are the server's call and come back as `BAD_PATH`; this
- * only keeps a message from being dropped unanswered.
- */
 export const isGuestFilePath = (value: string): boolean => (
   value.length > 0
   && value.length <= GUEST_FILE_PATH_MAX
@@ -710,9 +558,6 @@ export const isGuestRequestPath = (value: string): boolean => {
   return !segments.some((segment) => segment === '.' || segment === '..');
 };
 
-// Wire messages. The zod schemas in `protocol.ts` are the host's parse of an
-// untrusted guest; these types are the shared contract and protocol.ts asserts
-// the two agree at compile time.
 
 type Envelope = {
   channel: typeof OPENCHAMBER_SDK_CHANNEL;
@@ -726,20 +571,14 @@ export type HostConnectionMessage = Envelope & { type: 'connection'; payload: { 
 export type HostSettingsMessage = Envelope & { type: 'settings'; payload: { settings: GuestSettings } };
 export type HostSessionLifecycleMessage = Envelope & { type: 'session-lifecycle'; payload: SessionLifecycleEvent };
 export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestItem | null } };
-/** What the extension's service sent its frames (`emit`). */
 type HostServiceEventMessage = Envelope & { type: 'service-event'; payload: { topic: string; data: JsonValue } };
 export type HostStatusControlEventMessage = Envelope & { type: 'status-control-event'; payload: GuestStatusControlEvent };
 export type HostPopoverClosedMessage = Envelope & { type: 'popover-closed'; payload: GuestPopoverClosedEvent };
-/** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
-/** The file a `file` surface edits; pushed after `ready` and again whenever the frame reconnects. */
 export type HostFileOpenMessage = Envelope & { type: 'file-open'; payload: FileEditorDocument };
-/** Host → guest request. The guest answers with `file-snapshot-result` carrying the same `id`. */
 export type HostFileSnapshotMessage = Envelope & { type: 'file-snapshot'; id: string; payload: FileSnapshotRequest };
-/** The snapshot with this `version` is on disk. */
 export type HostFileSavedMessage = Envelope & { type: 'file-saved'; payload: { version: string } };
-/** A kept `generate` outcome, pushed once to a frame that sent `generate-late-listen`. */
 export type HostGenerateLateMessage = Envelope & { type: 'generate-late'; payload: LateGenerateResult };
 export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: true; payload?: HostResultPayload }
@@ -748,9 +587,7 @@ export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
 
 export type HostShellsMessage = Envelope & { type: 'shells'; payload: { subscriptionId: string; snapshot: GuestRunningShellsSnapshot } };
 
-/** Mono microphone samples at the rate the frame asked for, about 21 ms a push at 48 kHz. */
 export type HostMicrophoneAudioMessage = Envelope & { type: 'microphone-audio'; payload: { samples: Float32Array<ArrayBuffer> } };
-/** The host stopped capturing on its own; no audio follows until the frame opens the microphone again. */
 export type HostMicrophoneEndedMessage = Envelope & { type: 'microphone-ended'; payload: { reason: GuestMicrophoneEndReason } };
 
 export type HostMessage =
@@ -809,19 +646,12 @@ export type GuestStatusControlsMessage = GuestCall<'status-controls', { controls
 export type GuestPopoverOpenMessage = GuestCall<'popover-open', GuestPopoverRequest>;
 export type GuestPopoverCloseMessage = GuestCall<'popover-close', { id: string; reason?: 'closed' | 'escape' }>;
 export type GuestPopoverAnchorMessage = GuestCall<'popover-anchor', { id: string; active: boolean }>;
-/** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
-/** Completes a host `action`. The host sends no `result` back. */
 export type GuestActionResultMessage = Envelope & { type: 'action-result'; id: string; payload: ActionResultPayload };
-/** Answers a host `file-snapshot` by `id`. The host sends no `result` back. */
 export type GuestFileSnapshotResultMessage = Envelope & { type: 'file-snapshot-result'; id: string; payload: FileSnapshotResultPayload };
-/** A file editor's state changed. Fire and forget. */
 export type GuestFileChangeMessage = Envelope & { type: 'file-change'; payload: FileEditorChange };
-/** The user asked to save (Cmd/Ctrl+S inside the frame). Fire and forget. */
 export type GuestFileSaveMessage = Envelope & { type: 'file-save' };
-/** The editor cannot open this file; the host shows its source instead. Fire and forget. */
 export type GuestFileUnsupportedMessage = Envelope & { type: 'file-unsupported' };
-/** This frame takes kept `generate` outcomes; the host pushes them as `generate-late`. Fire and forget, repeated on every `ready`. */
 export type GuestGenerateLateListenMessage = Envelope & { type: 'generate-late-listen' };
 
 export type GuestShellsSubscribeMessage = GuestCall<'shells-subscribe', GuestShellsSubscription>;
@@ -924,7 +754,6 @@ const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'microphone-audio', 'microphone-ended',
 ]);
 
-/** What a postMessage payload may carry before it is read as a host message. */
 type WireRecord = {
   channel?: unknown;
   v?: unknown;
@@ -976,13 +805,6 @@ const readResultMessage = (wire: WireRecord): HostResultMessage | null => {
   return null;
 };
 
-/**
- * The guest's read of a host message. The host is the trusted parent frame
- * (the client only listens to `event.source === parent`), so this checks the
- * envelope and the discriminant rather than every field, and the guest bundle
- * carries no schema library for it. The host side parses guest input with
- * `guestMessageSchema` in `@openchamber/sdk/schemas`.
- */
 export const readHostMessage = (data: MessageEvent['data']): HostMessage | null => {
   const wire = asWireRecord(data);
   if (!wire || wire.channel !== OPENCHAMBER_SDK_CHANNEL || wire.v !== OPENCHAMBER_SDK_API_VERSION) return null;
