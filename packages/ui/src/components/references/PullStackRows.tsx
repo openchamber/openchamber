@@ -8,10 +8,8 @@ import { cn } from '@/lib/utils';
 
 import { REFERENCE_META_TEXT } from './referencePickerItems';
 
-/** How a layer is drawn: an icon in a theme colour. */
 type LayerLook = { icon: IconName; color: string };
 
-/** A layer's state in the theme's PR colours; the previewed one takes its own live look. */
 const layerLook = (layer: PullRequestStackLayer): LayerLook => {
     if (layer.state === 'merged') return { icon: 'git-merge', color: 'var(--pr-merged)' };
     if (layer.state === 'closed') return { icon: 'git-close-pull-request', color: 'var(--pr-closed)' };
@@ -19,19 +17,10 @@ const layerLook = (layer: PullRequestStackLayer): LayerLook => {
     return { icon: 'git-pull-request', color: 'var(--pr-open)' };
 };
 
-/**
- * A stack as GitHub's stack map draws it: the top layer first, the branch the
- * stack lands on last. Each layer is one line, its state, number and title;
- * the previewed one is marked and drawn in its live colour. A layer opens on
- * click where the surface opens items (`onOpen`).
- */
 export const PullStackRows: React.FC<{
     stack: PullRequestStack;
-    /** The previewed PR's number. */
     current: number;
-    /** `#12`, or `!12` for a GitLab merge request. */
     numberLabel: (number: number) => string;
-    /** The previewed PR's look, which follows its checks. */
     currentLook: LayerLook;
     onOpen?: (layer: PullRequestStackLayer) => void;
 }> = ({ stack, current, numberLabel, currentLook, onOpen }) => {
