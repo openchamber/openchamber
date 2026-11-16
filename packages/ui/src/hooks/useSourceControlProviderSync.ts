@@ -1,18 +1,3 @@
-/**
- * Keeps the source-control provider list, and the connected instances of
- * those providers, current while the app runs.
- *
- * Both are read once when the app connects, but an extension can start or
- * stop acting as a Git host at any time (approved, enabled, updated, paused,
- * removed). The server announces that on the control stream; this hook asks
- * for the provider list and the auth store's instances again then, and also
- * when the stream reconnects, since a change made during the gap was not
- * announced to this client. The instance list names only registered
- * providers, so a provider added mid-session has no instances (and no link
- * matching or account status) until it is read again. The registry keeps the
- * held list when a refresh fails, and a refresh made while a read is out is
- * answered by one more read after it.
- */
 
 import React from 'react';
 

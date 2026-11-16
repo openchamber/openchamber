@@ -1,14 +1,3 @@
-/**
- * useLocalTTS Hook
- *
- * React hook for local (Kokoro via sherpa-onnx) text-to-speech playback.
- * Synthesis runs on the OpenChamber server in the dictation worker.
- *
- * Long texts are pipelined by sentence chunks: the first chunk starts playing
- * as soon as it is synthesized while the next chunk synthesizes in the
- * background, so time-to-first-audio stays ~1 chunk regardless of message
- * length.
- */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -16,17 +5,9 @@ import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 export interface LocalTTSSpeakOptions {
     beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
-    /** Catalog id of the local model to use; defaults to the server's default model. */
     model?: string;
-    /** Speaker id within the model (Kokoro voices; Piper models have one) */
     speakerId?: number;
-    /** Playback speed multiplier (1.0 = normal) */
     speed?: number;
-    /**
-     * `'auto'`: the server picks a model and voice for the text's language.
-     * The language is judged on the whole message, not on each chunk sent for
-     * synthesis, so a short chunk cannot flip the voice mid-reply.
-     */
     language?: 'auto';
     onStart?: () => void;
     onEnd?: () => void;
@@ -38,21 +19,13 @@ export interface UseLocalTTSReturn {
     error: string | null;
     speak: (text: string, options?: LocalTTSSpeakOptions) => Promise<void>;
     stop: () => void;
-    /** Unlock audio for mobile Safari - call this on user gesture */
     unlockAudio: () => Promise<void>;
 }
 
-/** Target chunk size: big enough to amortize requests, small enough for low latency. */
 const MIN_CHUNK_CHARS = 60;
 const MAX_CHUNK_CHARS = 400;
-// Enough of the message for language detection to see whole sentences.
 const LANGUAGE_SAMPLE_CHARS = 2000;
 
-/**
- * Split text into sentence-aligned chunks for pipelined synthesis.
- * Sentences are merged until MIN_CHUNK_CHARS and hard-split at
- * MAX_CHUNK_CHARS so a single run-on sentence cannot stall the pipeline.
- */
 function splitTextForSynthesis(text: string): string[] {
     const normalized = text.replace(/\s+/g, ' ').trim();
     if (!normalized) {
@@ -81,11 +54,6 @@ function splitTextForSynthesis(text: string): string[] {
         chunks.push(current.trim());
     }
 
-    // Latency trim for the FIRST chunk only: if the opening sentence is long,
-    // split it at a clause boundary (comma/semicolon/colon) so the first
-    // audio starts sooner. Only the first chunk gets this treatment — comma
-    // splits inside every sentence would chop the prosody, and after playback
-    // starts the pipeline hides synthesis time anyway.
     if (chunks.length > 0 && chunks[0].length > 120) {
         const first = chunks[0];
         const clauseBreak = /[,;:]\s/g;
@@ -235,7 +203,6 @@ export function useLocalTTS(): UseLocalTTSReturn {
             setIsPlaying(true);
             options?.onStart?.();
 
-            // Pipelined: synthesize chunk N+1 while chunk N is playing.
             let nextFetch: Promise<ArrayBuffer> = fetchChunk(chunks[0]);
             for (let i = 0; i < chunks.length; i += 1) {
                 const buffer = await nextFetch;
@@ -244,7 +211,6 @@ export function useLocalTTS(): UseLocalTTSReturn {
                 }
                 if (i + 1 < chunks.length) {
                     nextFetch = fetchChunk(chunks[i + 1]);
-                    // Playback can exit before awaiting this prefetch; keep its rejection handled.
                     void nextFetch.catch(() => {});
                 }
                 await playBuffer(buffer);

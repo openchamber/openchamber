@@ -14,7 +14,6 @@ export const useTerminalSessionKeepalive = (): void => {
     }
     const touch = () => {
       if (globalThis.navigator?.onLine === false) return;
-      // One batch per directory: a terminal inside an isolated space is touched in that space.
       for (const [directory, dirState] of useTerminalStore.getState().sessions) {
         const ids: string[] = [];
         for (const tab of dirState.tabs) {

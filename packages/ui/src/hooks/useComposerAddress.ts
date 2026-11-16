@@ -5,13 +5,6 @@ import type { InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftSto
 import { useInputStore, type ComposerAddress } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-/**
- * Where a surface outside the chat column files what it hands the composer: a
- * comment (inline draft) or an image (attachment). The composer publishes its
- * own address, so a `/btw` fork takes them along with the input it owns.
- * `directory` is the caller's own notion of the project, used only while no
- * composer is mounted to publish one.
- */
 const resolveInline = (
     published: InlineCommentDraftTarget | null,
     sessionKey: string | null,
@@ -32,7 +25,6 @@ export const readComposerDraftTarget = (directory: string | null | undefined): I
     directory,
 );
 
-/** Capture both destinations before an asynchronous attach starts. */
 export const readComposerAddress = (directory: string | null | undefined): ComposerAddress => {
     const address = useInputStore.getState().composerAddress;
     return {
@@ -51,9 +43,5 @@ export const useComposerDraftTarget = (directory: string | null | undefined): In
     );
 };
 
-/**
- * The attachment slot of the composer on screen, or null when none is mounted,
- * in which case the caller's files belong to whatever slot is current.
- */
 export const readComposerAttachmentTarget = (): ChatDraftIdentity | null =>
     useInputStore.getState().composerAddress?.attachments ?? null;
