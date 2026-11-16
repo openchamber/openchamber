@@ -1,5 +1,3 @@
-// A chats root may not exist until the first draft. Resolve its existing
-// ancestor so both that first mkdir and later OpenCode sessions use disk casing.
 export const canonicalDirectoryPath = async (directory, fsPromises, path) => {
   let ancestor = path.resolve(directory);
   const missing = [];

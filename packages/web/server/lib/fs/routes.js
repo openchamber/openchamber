@@ -33,11 +33,6 @@ const PREVIEW_GRANT_IDLE_TTL_MS = 10 * 60 * 1000;
 const PREVIEW_GRANT_MAX_ENTRIES = 256;
 const PREVIEW_SANDBOX_POLICY = 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads';
 
-/**
- * Grants for HTML previews. A grant names the workspace base the page's files
- * resolve against and the read root its script may read bytes from. It stays
- * valid while the page keeps loading files and lapses after ten idle minutes.
- */
 const createPreviewGrants = ({ crypto = globalThis.crypto, now = () => Date.now() } = {}) => {
   const grants = new Map();
 
@@ -129,10 +124,6 @@ const createCommandTimeoutMs = () => {
   return 5 * 60 * 1000;
 };
 
-// How long a cached git-read result stays fresh. The location of a repo's git
-// directory is effectively static while the app runs, so a short TTL safely
-// absorbs the burst of identical lookups a fresh client (e.g. right after a
-// page reload) fires for every project. Set to 0 to disable caching.
 const createGitReadCacheTtlMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
   if (Number.isFinite(raw) && raw >= 0) return raw;
@@ -214,9 +205,6 @@ const streamUploadBody = async (req, handle, maxBytes) => {
   }
 };
 
-// Only deterministic, side-effect-free git plumbing path queries are cacheable.
-// Anything outside this allowlist (including any non-git command) runs normally
-// — we never cache arbitrary exec.
 const normalizeCommand = (command) =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
 
@@ -225,9 +213,6 @@ const isCacheableGitReadCommand = (command) => {
   return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
 };
 
-// Dual-constraint bound per the project's caching policy (count + bytes). Git
-// rev-parse outputs are tiny, so these ceilings are generous and only guard
-// against pathological growth on long-lived, many-directory deployments.
 const GIT_READ_CACHE_MAX_ENTRIES = 500;
 const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 
@@ -256,8 +241,6 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
     return { ok: true, base: resolvedBase, resolved };
   }
 
-  // Managed roots (config root, relocated chats root) stay valid targets
-  // even outside the active workspace.
   for (const root of managedRoots) {
     if (isPathWithinRoot(resolved, root, path, os)) {
       return { ok: true, base: path.resolve(root), resolved };
@@ -300,8 +283,6 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-// Chats belong to no project, so with no project open the chats roots are the
-// only place a path may resolve. The config root stays behind a project.
 const resolveChatsPathWithoutProject = async ({ targetPath, chatsRoots, path, os, fsPromises, normalizeDirectoryPath }) => {
   const resolveIn = (baseDirectory) => resolveWorkspacePath({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, managedRoots: [] });
   for (const root of chatsRoots) {
@@ -339,12 +320,6 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     return resolved;
   }
 
-  // The active project directory is validated with fs.realpath, so the base is
-  // canonical while the client (and the file tree) addresses files under the
-  // user-visible root, which may itself be a symlink. Retry against the raw
-  // directory the client asked for so those paths stay addressable. Symlink
-  // resolution still happens afterwards, and the routes that need canonical
-  // containment re-check it against this base.
   const requestedBase = resolvedProject.requestedDirectory;
   if (typeof requestedBase === 'string' && requestedBase && requestedBase !== resolvedProject.directory) {
     const lexical = resolveWorkspacePath({
@@ -360,8 +335,6 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     }
   }
 
-  // Keep legacy lexical paths valid, but also accept the canonical roots
-  // returned by /fs/home. Never infer filesystem identity from letter case.
   let resolutionError;
   for (const root of managedRoots) {
     try {
@@ -386,28 +359,10 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   return worktree;
 };
 
-// Nested repository discovery bounds: only shallow walks are useful for the
-// Git tab's "pick a repository" picker, and deep/monorepo trees can explode
-// otherwise. Directories deeper than maxDepth or beyond the visit cap are
-// silently not searched.
 const GIT_DIRS_MAX_DEPTH = 3;
 const GIT_DIRS_MAX_DIRS = 100;
 const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 'target', '.next']);
 
-// Walks rootPath and returns every nested git repository path (a directory
-// containing a `.git` entry — a directory, a worktree pointer file, or a
-// symlink). A repository boundary stops descent: nested repos inside repos
-// are not reported. The root's own `.git` is the exception and the walk goes
-// on below it, so a root repository's submodules and nested checkouts are
-// reported too; the client decides whether the root or a discovered repository
-// is the one a surface works in.
-// Symlinked directories are followed, the way the file tree follows them: a
-// parent folder of links to repositories kept elsewhere is a common way to
-// group them into one project. Each real directory is walked once, so a link
-// loop or two links to one repository cannot repeat it, and repositories are
-// reported under the path the link gives them inside the project.
-// Breadth-first traversal checks shallow siblings before deeper subtrees can
-// exhaust the visit cap.
 const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
   const results = [];
   const walkedRealPaths = new Set();
@@ -433,8 +388,6 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
     try {
       dirents = await fsPromises.readdir(dir, { withFileTypes: true });
     } catch (error) {
-      // Unreadable subtree — skip it unless it is the root itself, which the
-      // route maps to 403/404/500 through the shared error handling.
       if (dir === rootPath) {
         throw error;
       }
@@ -459,7 +412,6 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
         continue;
       }
       if (dirent.isSymbolicLink()) {
-        // A link to a file, or a dangling one, is not a place to look.
         const target = await fsPromises.stat(pathModule.join(dir, dirent.name)).catch(() => null);
         if (!target?.isDirectory()) {
           continue;
@@ -495,7 +447,6 @@ const deriveCloneDirectoryName = (remoteUrl) => {
 };
 
 const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots, chatsRoots }) => {
-  // Resolved file targets are exact names, not pasted directory inputs.
   const normalizeReadPath = (value) => (
     value === targetPath && typeof value === 'string' && path.isAbsolute(value)
       ? value
@@ -601,23 +552,17 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveProjectDirectory,
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
-    // Content search needs ripgrep; without a resolver the route answers 501.
     resolveRipgrepBinary = async () => null,
     openchamberUserConfigRoot,
     managedChatsRoot,
     cloneRepository,
     environmentRuntime = null,
-    // The realpath settings store projects under (Node's JS `fs.realpath`): the
-    // native one also resolves Windows `subst` and mapped drives, which settings keep.
     projectRealpath = fsPromises.realpath.bind(fsPromises),
   } = dependencies;
-  // Chat worktrees may live outside every project workspace; both managed
-  // roots stay valid filesystem targets.
   const chatsRoot = typeof managedChatsRoot === 'string' && managedChatsRoot.trim()
     ? path.resolve(managedChatsRoot.trim())
     : path.join(openchamberUserConfigRoot, 'chats');
   const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
-  // A relocated chats root keeps the chats created under the config root valid.
   const chatsRoots = [...new Set([chatsRoot, path.join(openchamberUserConfigRoot, 'chats')])];
   const previewGrants = createPreviewGrants({ crypto });
   const realpathCache = createRealpathCache({
@@ -678,9 +623,6 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   };
 
-  // Insert with LRU (oldest-first) eviction enforcing both count and byte caps.
-  // Map iteration order is insertion order, so deleting+re-setting a key moves
-  // it to the most-recently-used position.
   const setGitReadCacheEntry = (key, result) => {
     gitReadCache.delete(key);
     gitReadCache.set(key, { result, at: Date.now() });
@@ -702,8 +644,6 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   };
 
-  // Runs a command, transparently serving/storing cacheable git-read results.
-  // Non-cacheable commands always execute and are never stored.
   const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
     const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
     const cacheKey = cacheable ? `${resolvedCwd}${normalizeCommand(command)}` : null;
@@ -711,7 +651,6 @@ export const registerFsRoutes = (app, dependencies) => {
     if (cacheKey) {
       const cached = gitReadCache.get(cacheKey);
       if (cached && Date.now() - cached.at < gitReadCacheTtlMs) {
-        // Refresh recency for LRU without altering the entry's age/TTL.
         gitReadCache.delete(cacheKey);
         gitReadCache.set(cacheKey, cached);
         return { ...cached.result, command };
@@ -733,15 +672,11 @@ export const registerFsRoutes = (app, dependencies) => {
       command,
       resolvedCwd,
       spawn,
-      // The user's and the project's variables (lib/environment) on top of
-      // the terminal's PATH. Git reads the UI repeats on its own never run
-      // the project's environment command; anything else may.
       execEnv: environmentRuntime
         ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
         : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
     }))().then((result) => {
-      // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {
         setGitReadCacheEntry(cacheKey, result);
       }
@@ -806,8 +741,6 @@ export const registerFsRoutes = (app, dependencies) => {
       const [canonicalChatsRoot, canonicalLegacyChatsRoot] = await Promise.all([
         canonicalDirectoryPath(chatsRoot, fsPromises, path),
         canonicalDirectoryPath(path.join(home, '.config', 'openchamber', 'chats'), fsPromises, path).catch((error) => {
-          // A relocated root must remain usable if the old root is inaccessible.
-          // Omit only this optional alias; clients retain exact legacy matching.
           console.warn('Failed to resolve legacy chats root:', error);
           return undefined;
         }),
@@ -974,8 +907,6 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     try {
-      // Directory discovery uses the same path policy as /api/fs/list, including
-      // paths outside the current workspace. stat follows symlinks without readdir.
       const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
@@ -996,9 +927,6 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
-  // A bare file name an agent wrote without its folder (`Foo.tsx:12`): the
-  // workspace files with that name. One cached git listing per workspace
-  // answers every name (see workspace-file-names.js).
   const workspaceFileNames = createWorkspaceFileNameIndex({ spawn, resolveGitBinary: resolveGitBinaryForSpawn });
   app.get('/api/fs/find-by-name', async (req, res) => {
     const name = typeof req.query.name === 'string' ? req.query.name.trim() : '';
@@ -1055,11 +983,8 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     const fsSearch = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch: true });
-    // A client that moved on (a new letter, a closed list) ends the walk and its
-    // Git reads instead of letting them finish for nobody.
     const abort = new AbortController();
     res.on('close', () => abort.abort());
-    // A client gone during the checks above has already closed the response.
     if (res.destroyed) abort.abort();
     let results;
     try {
@@ -1085,11 +1010,6 @@ export const registerFsRoutes = (app, dependencies) => {
     return res.json({ files: mapped });
   });
 
-  // Find in files: lines of workspace files containing a text or a regex,
-  // searched by ripgrep (content-search.js). Hitting the limit is a normal
-  // answer with `stopped: 'limit'`; a failed search is never an empty one.
-  // This module loads with Node built-ins only (see the packaged-desktop
-  // module-load test), so the query is read with the shared guards.
   const contentSearch = createContentSearchRuntime({ spawn, path, resolveRipgrepBinary });
   app.get('/api/fs/find-in-files', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -1106,8 +1026,6 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.status(400).json({ error: project.error || 'Active workspace is required' });
     }
 
-    // A client that moved on (a new keystroke, a closed panel) ends the
-    // ripgrep process instead of letting it finish for nobody.
     const abort = new AbortController();
     res.on('close', () => abort.abort());
     const result = await contentSearch.searchFileContents(project.directory, {
@@ -1145,15 +1063,10 @@ export const registerFsRoutes = (app, dependencies) => {
     if (directoryPaths.length === 0) {
       return res.status(400).json({ error: 'paths array is required' });
     }
-    // Match the git project batch's cap so a probe cannot grow without bound.
     if (directoryPaths.length > 200) {
       return res.status(400).json({ error: 'Too many paths' });
     }
 
-    // Same path policy and reason codes as /api/fs/directory-stat, answered for
-    // many directories in one round trip so a project list probe is not one
-    // request per project. Failures are per-path: an unreachable directory
-    // reports `unknown` and never fails the others.
     const results = await Promise.all(directoryPaths.map(async (directoryPath) => {
       try {
         const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
@@ -1161,8 +1074,6 @@ export const registerFsRoutes = (app, dependencies) => {
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }
-        // The path settings store a project under, so a link to an added
-        // project can be recognised before adding it again.
         const realPath = await projectRealpath(resolvedPath).catch(() => null);
         const result = { path: directoryPath, isDirectory: true };
         if (realPath) result.realPath = realPath;
@@ -1275,10 +1186,6 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       let content = await fsPromises.readFile(canonicalPath, 'utf8');
-      // Retry empty reads — concurrent writer may have truncated the file
-      // between our stat and read (O_TRUNC window). If the file existed with
-      // content at stat time but we read nothing, the writer hasn't finished
-      // writing yet.
       if (content.length === 0 && stats.size > 0) {
         for (let attempt = 0; attempt < 3; attempt++) {
           await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
@@ -1345,11 +1252,9 @@ export const registerFsRoutes = (app, dependencies) => {
       const download = req.query.download === 'true';
       if (download) {
         const fileName = path.basename(canonicalPath);
-        // RFC 5987: use filename*= for non-ASCII filenames, with ASCII-only
-        // filename= as fallback for older clients.
+        // external: https://www.rfc-editor.org/rfc/rfc5987 Non-ASCII filenames use filename*= with an ASCII filename= fallback for older clients.
         const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
         const fallback = asciiOnly || 'file';
-        // Percent-encode the raw UTF-8 bytes for filename*=
         const encoded = encodeURIComponent(fileName);
         res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
@@ -1358,21 +1263,16 @@ export const registerFsRoutes = (app, dependencies) => {
       res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('Accept-Ranges', 'bytes');
 
-      // The file is streamed from disk, never read whole: the audio and video
-      // players ask for a span on every seek, and a recording or a PDF can be
-      // hundreds of megabytes the server would otherwise hold in memory.
       const range = resolveByteRange(req.headers?.range, stats.size);
       if (range.kind === 'unsatisfiable') {
         res.setHeader('Content-Range', `bytes */${stats.size}`);
         return res.status(416).end();
       }
       res.type(mimeType);
-      // An empty file has no byte to read, and a read stream over `0..-1` would fail.
       if (stats.size === 0) {
         res.setHeader('Content-Length', '0');
         return res.end();
       }
-      // Opened before any span header is set, so a failed open answers a clean error.
       const handle = await fsPromises.open(canonicalPath, 'r');
       const span = range.kind === 'range' ? range : { start: 0, end: stats.size - 1 };
       if (range.kind === 'range') {
@@ -1380,8 +1280,6 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Range', `bytes ${span.start}-${span.end}/${stats.size}`);
       }
       res.setHeader('Content-Length', String(span.end - span.start + 1));
-      // pipe() leaves the source paused when a media player disconnects.
-      // Destroy it too so autoClose releases the FileHandle before GC.
       try {
         const stream = handle.createReadStream({ start: span.start, end: span.end });
         const onResponseClose = () => stream.destroy();
@@ -1414,12 +1312,8 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
-  // An HTML preview is untrusted content: it runs in an opaque-origin sandbox
-  // and reaches its own files through a grant carried in the URL path, so
-  // relative URLs keep it and no session credential is ever in the page's URL.
   app.post('/api/fs/preview', async (req, res) => {
     try {
-      // The workspace resolver normalizes and rejects a missing or non-string path.
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: req.body?.path,
@@ -1488,15 +1382,10 @@ export const registerFsRoutes = (app, dependencies) => {
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
       const bytes = await fsPromises.readFile(canonicalPath);
-      // Lets the Files view annotate the page; see preview-bridge.js.
       const content = mimeType === 'text/html' ? injectPreviewBridge(bytes) : bytes;
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
-      // Opened directly in a tab, the page is still an opaque-origin sandbox.
       res.setHeader('Content-Security-Policy', PREVIEW_SANDBOX_POLICY);
-      // Embedding (img, stylesheet, classic script) needs no CORS. Reading a
-      // file's bytes from script (fetch, fonts, module scripts) is CORS, and
-      // the opaque page may do that only inside its read root.
       if (isPathWithinRoot(canonicalPath, grant.readRoot, path, os) && !res.getHeader('Access-Control-Allow-Origin')) {
         res.setHeader('Access-Control-Allow-Origin', 'null');
       }
@@ -1557,8 +1446,6 @@ export const registerFsRoutes = (app, dependencies) => {
 
       await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
 
-      // Atomic write: write to temp then rename to avoid concurrent readers
-      // seeing an empty file during the O_TRUNC window of direct writeFile.
       const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       try {
         await fsPromises.writeFile(tmp, content, 'utf8');
@@ -1665,9 +1552,6 @@ export const registerFsRoutes = (app, dependencies) => {
         if (overwrite) {
           await fsPromises.rename(tmp, writePath);
         } else {
-          // A same-directory hard link commits without replacing a target that
-          // appeared after the existence check. The temp file is already fully
-          // flushed, so readers never observe a partial upload.
           await fsPromises.link(tmp, writePath);
           await fsPromises.unlink(tmp).catch(() => {});
         }
@@ -1794,8 +1678,6 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Cannot move a folder into itself' });
       }
 
-      // fs.rename silently replaces an existing file. A destination that is the
-      // source itself is a case-only rename on a case-insensitive filesystem.
       const [sourceStats, destinationStats] = await Promise.all([
         fsPromises.lstat(resolvedOld.resolved),
         fsPromises.lstat(resolvedNew.resolved).catch((error) => {
@@ -1842,8 +1724,6 @@ export const registerFsRoutes = (app, dependencies) => {
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
         const escapedPath = resolved.replace(/'/g, "''");
-        // A folder opens through its default handler, so a replacement file
-        // manager gets it; only Explorer can select a file inside its folder.
         const command = stat.isDirectory()
           ? `Start-Process -FilePath '${escapedPath}'`
           : `Start-Process -FilePath explorer.exe -ArgumentList '/select,${escapedPath}'`;
@@ -2001,10 +1881,6 @@ export const registerFsRoutes = (app, dependencies) => {
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
-    // Logical (requested) path stays in the caller's path space. Realpath is
-    // only used to read directory contents — returning real paths for entries
-    // breaks file-tree expansion when listing through a symlink, because the
-    // UI rejects expanded paths that fall outside the workspace root.
     let requestedPath = '';
     let resolvedPath = '';
 
@@ -2034,7 +1910,6 @@ export const registerFsRoutes = (app, dependencies) => {
                 const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
                   windowsHide: true,
-                  // Diagnostics are unused here. An unread pipe can block Git forever.
                   stdio: ['ignore', 'pipe', 'ignore'],
                 });
 

@@ -178,6 +178,59 @@ twelve children. Workspace search applies the same timeout and fallback to its
 - `index.js` no longer owns FS route handlers or FS exec job state.
 - The composition root passes the Git network operation service's `cloneRepository` adapter. The FS module does not construct or spawn Git for clone.
 
+## Invariants
+
+- Missing chat roots retain the existing ancestor's disk casing, so the first directory creation and later OpenCode sessions address the same root.
+- Watch signals request fingerprint checks. A changed fingerprint is reported only after 2 consecutive equal checks, so callers observe settled changes.
+- An aborted workspace search never publishes results. A killed Git ignore read yields no ignored paths, so publishing that walk could expose an unfiltered answer.
+- Repository discovery skips unreadable descendants while root failures reach the route's shared error mapping. A bad subtree cannot hide other discoverable repositories.
+
+## Decisions
+
+### Why project discovery uses JavaScript realpath and not native realpath
+
+Project probes use the same JavaScript `fs.realpath` as settings. Native realpath also resolves Windows `subst` and mapped drives, changing the identity settings retain and preventing recognition of an already-added project.
+
+### Why Git path reads share a bounded cache and not arbitrary exec results
+
+Repository path metadata stays effectively static during a short TTL, so a shared read absorbs repeated client initialization requests. Only successful allowlisted, side-effect-free `rev-parse` queries enter the cache; transient failures remain retryable, LRU hits preserve the original expiry, and entry-count and byte bounds limit growth in long-lived deployments.
+
+### Why repeated Git reads reuse environment state and not refresh commands
+
+Automatic Git path queries reuse the directory's environment variables without rerunning its environment command. Other exec commands may refresh that state while retaining the terminal's augmented PATH.
+
+### Why raw responses serve single ranges and not multipart bodies
+
+The media viewer's consumers request single spans, so multi-range headers receive the whole file without multipart machinery. Streaming keeps large recordings and PDFs out of server memory; empty files bypass range streams, files open before span headers commit, and response closure destroys the stream because `pipe()` alone can leave a paused source holding its file handle.
+
+### Why file writes publish completed temporary files and not direct truncation
+
+Text writes rename a completed temporary file so concurrent readers avoid the empty `O_TRUNC` window. Reads retry an unexpectedly empty result when the preceding stat reports content because another writer can still truncate between stat and read; new uploads publish a flushed same-directory temporary file through a no-replace hard link so a racing destination remains intact.
+
+### Why content search consumes chunks incrementally and not repeated growing buffers
+
+Minified files can produce lines tens of megabytes long. Pending chunks are joined once per complete line, sorted byte offsets advance through newly decoded bytes only, and stderr keeps draining after the retained diagnostic limit so the child cannot block on a full pipe.
+
+### Why search errors select a diagnostic line and not the whole stderr preamble
+
+Ripgrep's invalid-pattern diagnostics include the pattern and a caret before the useful `error:` line. Search failures show that reason when present and otherwise use the first diagnostic line.
+
+### Why preview annotation uses a parent bridge and byte-preserving injection
+
+The preview's opaque origin prevents direct app access, so only messages from the frame's parent can request evaluation inside the page's existing sandbox permissions. Injection uses a latin1 view to keep byte offsets and preserve ASCII-compatible encodings; placing the script after the document anchor preserves standards mode, and UTF-16 pages remain unchanged.
+
+### Why desktop ripgrep uses a staged binary and not the build host's package
+
+Cross-built desktop apps require the target architecture's staged binary because the optional npm package matches the build host. Failed lookups remain uncached so installing ripgrep makes a later search work without restarting the server.
+
+### Why bare-name lookups share a workspace listing and not one Git process per name
+
+Git startup and Windows untracked-file walks make repeated name lookups expensive, so concurrent requests share a short-lived workspace listing. A deadline and output-size cap bound the work and retained data; Git failure or a non-repository directory yields no match.
+
+### Why Windows folder reveal uses the default handler and not Explorer selection
+
+Opening a folder through its default handler respects replacement file managers. File selection inside a folder remains Explorer-specific.
+
 ## Legacy clone route
 
 `POST /api/fs/clone` remains for existing clients. It requires `unverifiedConfirmed: true` alongside `remoteUrl`, `destinationPath`, and optional `gitIdentityId`. Without explicit confirmation it returns `409 GIT_NETWORK_OPERATION_REQUIRED` before filesystem or Git work. First-party clients use the planned clone intent instead. If `destinationPath` names an existing directory or ends in a path separator, the route appends the repository name inferred from `remoteUrl`. Otherwise it treats the resolved path as the exact clone target.
