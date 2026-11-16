@@ -19,7 +19,6 @@ import {
 
 export type BrowserColorScheme = 'system' | 'light' | 'dark';
 
-/** The preset list's value for "fill the panel". */
 const RESPONSIVE = 'responsive';
 
 const SCHEMES: ReadonlyArray<{ value: BrowserColorScheme; icon: IconName }> = [
@@ -28,22 +27,12 @@ const SCHEMES: ReadonlyArray<{ value: BrowserColorScheme; icon: IconName }> = [
   { value: 'dark', icon: 'moon' },
 ];
 
-/**
- * Size and appearance controls for the previewed page.
- *
- * Shown only when asked for. The width and height boxes are the source of
- * truth; the preset list is a shortcut into them, which is why choosing a
- * preset and then typing a size are the same action from here on. While the
- * page fills the panel, the boxes show the panel's size, muted: typing there
- * starts from what the page has now.
- */
 export const BrowserDeviceBar: React.FC<{
   viewport: BrowserViewport;
   onViewportChange: (viewport: BrowserViewport) => void;
   colorScheme: BrowserColorScheme;
   onColorSchemeChange: (scheme: BrowserColorScheme) => void;
   scale: number;
-  /** The size the page gets while it fills the panel. */
   panelSize: { width: number; height: number };
 }> = ({ viewport, onViewportChange, colorScheme, onColorSchemeChange, scale, panelSize }) => {
   const { t } = useI18n();
@@ -65,7 +54,6 @@ export const BrowserDeviceBar: React.FC<{
     });
   };
 
-  // The two sizes share one field, as one value: a box each read as two separate controls.
   const sizeInputClass = cn(
     'w-11 min-w-0 bg-transparent text-center typography-meta tabular-nums text-foreground outline-none',
     'placeholder:text-muted-foreground',
@@ -114,7 +102,6 @@ export const BrowserDeviceBar: React.FC<{
         disabled={!size}
       />
 
-      {/* Only worth saying when the page is not shown at its real size. */}
       {size && scale < 1 ? (
         <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
           {Math.round(scale * 100)}%
@@ -147,7 +134,6 @@ export const BrowserDeviceBar: React.FC<{
                 className={cn(
                   'h-6 gap-1.5 rounded-md px-2 typography-meta !font-normal',
                   selected
-                    // As the settings chips: the chosen option is raised out of the track.
                     ? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
                     : 'text-muted-foreground hover:bg-transparent hover:text-foreground',
                 )}
