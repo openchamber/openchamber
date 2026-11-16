@@ -27,9 +27,6 @@ const assertBinary = (binaryPath, expectedVersion) => {
     if (actualArchitecture !== target) {
       throw new Error(`Bundled OpenCode CLI architecture mismatch at ${binaryPath}: expected ${target}, got ${actualArchitecture}`);
     }
-    // A Windows build for another architecture is not run here: an x64 runner
-    // cannot start an arm64 executable. prepare-opencode-cli.mjs checked the
-    // package version instead.
     if (target !== process.arch) {
       console.log(`[electron] verified bundled OpenCode CLI is ${target} (not run on this ${process.arch} host): ${binaryPath}`);
       return;

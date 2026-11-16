@@ -1,4 +1,3 @@
-// Chromium's Page Visibility remains visible with backgroundThrottling disabled.
 export const isNativeWindowVisible = (window) => Boolean(
   window && !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
 );

@@ -1,5 +1,3 @@
-// Native shell validation is independent of renderer confirmation. Keep the
-// exclusions aligned with packages/ui/src/lib/url.ts.
 const EXCLUDED_APP_SCHEMES = new Set([
   'mailto', 'tel', 'sms', 'callto', 'cid', 'xmpp', 'irc', 'news', 'nntp', 'feed', 'webcal',
   'javascript', 'data', 'vbscript', 'blob', 'filesystem', 'about',

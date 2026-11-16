@@ -1,6 +1,3 @@
-// Only the embedded managed server has already passed this app's CLI preflight
-// checks. Reuse an in-flight preflight without waiting for server health.
-// External servers and HMR backends need a fresh check.
 export const canReuseManagedOpenCodePreflight = ({ apiBaseUrl, localOrigin, server }) => {
   if (!server || !localOrigin) return false;
   try {
