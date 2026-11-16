@@ -161,6 +161,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
 import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
+import { usePendingSharedDraftContent } from '@/hooks/usePendingSharedDraftContent';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -4482,38 +4483,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Files picked from the attach menu (or VS Code's picker) land as chips at
-    // the caret, as pasted and dropped ones do.
-    const attachFiles = React.useCallback(async (files: FileList | File[]) => {
-        await attachFilesWithCitation(Array.isArray(files) ? files : Array.from(files));
-    }, [attachFilesWithCitation]);
-
-    // What a native share left for this draft (files to attach, text to type) is applied once
-    // the draft's composer is the one on screen. Files take the picked-file path, so the same
-    // type and size checks and the same attachment chips apply; the text is appended to what
-    // the user already typed and is never sent. A request for another draft is left for that
-    // draft, never applied to whatever the user is looking at.
-    const pendingDraftContent = useInputStore((state) => state.pendingDraftContent);
-    React.useEffect(() => {
-        if (pendingDraftContent == null || columnPinned) return;
-        // The draft's id is in the store one commit before the column actually shows it:
-        // `currentSessionId` comes from the column and trails the switch. Applying the share
-        // into that commit files it under the session the user is leaving, which the column
-        // then overwrites when it loads the draft — the share looks like it vanished.
-        if (currentSessionId !== null) return;
-        if (draftSubmitDraftId === null || pendingDraftContent.draftId !== draftSubmitDraftId) return;
-        const content = useInputStore.getState().consumePendingDraftContent(draftSubmitDraftId);
-        if (content === null) return;
-        if (content.files.length > 0) {
-            // The shared text rides along with the citation. Setting it first would be lost:
-            // the citation is inserted into the editor's document, which still holds the text
-            // from before this commit, and that document overwrites the store on the next edit.
-            void attachFilesWithCitation(content.files, content.text ?? '');
-        } else if (content.text) {
-            const current = composerText.get();
-            setMessage(current.trim().length > 0 ? appendWithLineBreaks(current, content.text) : content.text);
-        }
-    }, [attachFilesWithCitation, columnPinned, composerText, currentSessionId, draftSubmitDraftId, pendingDraftContent, setMessage]);
+    usePendingSharedDraftContent(composerText, setMessage, attachFilesWithCitation);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
@@ -4553,13 +4523,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 .filter(Boolean) as File[];
 
             if (asFiles.length > 0) {
-                await attachFiles(asFiles);
+                await attachFilesWithCitation(asFiles);
             }
         } catch (error) {
             console.error('VS Code file pick failed', error);
             toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.vscodePickFailed'));
         }
-    }, [attachFiles, t, vscodeApi]);
+    }, [attachFilesWithCitation, t, vscodeApi]);
 
     const handlePickLocalFiles = React.useCallback(() => {
         if (isVSCodeRuntime()) {
@@ -4572,9 +4542,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleLocalFileSelect = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
         if (!files) return;
-        await attachFiles(files);
+        await attachFilesWithCitation(Array.from(files));
         event.target.value = '';
-    }, [attachFiles]);
+    }, [attachFilesWithCitation]);
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();

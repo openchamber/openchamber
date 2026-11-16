@@ -490,6 +490,23 @@ it renders only when what it shows changes.
 per streamed session update, and sends a text whose Enter lands before any
 render.
 
+### Why a share waits for the draft to be the one on screen
+
+A share (the iOS share extension, the Android share intent) opens a new-session
+draft and leaves files and text in `input-store.pendingDraftContent`, addressed
+by the draft's id. `usePendingSharedDraftContent` applies it from the composer
+that renders that draft, and only once the composer's column shows no session.
+The column renders the deferred selection (`chatColumnSession`,
+`sync/DOCUMENTATION.md` "Session switch commit"), so for one commit after
+`openNewSessionDraft()` it still names the session the user left; taking the
+share there would file its attachments and text under that session's draft and
+the draft would look empty. Files go through `attachFilesWithCitation`, the
+same path a picked file takes, so intake, the size limits and the attachment
+chips apply unchanged. Shared text rides along as that call's `leadingText`
+rather than being set first: the citation is inserted into the editor's
+document, which still holds the text from before the commit, and that document
+overwrites `composerText` on the next edit, so text set first is lost.
+
 ### Why the draft text lives outside React state
 
 As `ChatInput` state, every keystroke rendered the whole composer: about

@@ -46,12 +46,6 @@ interface DeepLinkHandlers {
  */
 type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
 
-/**
- * Text, links and files shared to the app from the system share sheet, on either platform.
- * Like a Shortcuts request it never comes from a URL: the iOS extension writes an App Group
- * inbox, the Android share intent is read off the launch intent, and the plugin hands the page
- * what it staged.
- */
 type SharedFilesIntent = { type: 'shared-files'; files: File[]; text: string | null; rejected: RejectedSharedFile[] };
 
 type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent | SharedFilesIntent;
@@ -82,27 +76,21 @@ const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   useInputStore.getState().requestDraftSubmit(useSessionUIStore.getState().newSessionDraft.draftId, text);
 };
 
-const REJECTED_FILE_REASONS: Record<string, string> = {
-  'too-large': 'too large',
-  'batch-limit': 'share size limit',
-  'too-many': 'too many files',
-  'unsupported-type': 'unsupported type',
-  unreadable: 'unreadable',
-};
+const REJECTED_FILE_REASONS = new Map<string, string>([
+  ['too-large', 'too large'],
+  ['batch-limit', 'share size limit'],
+  ['too-many', 'too many files'],
+  ['unsupported-type', 'unsupported type'],
+  ['unreadable', 'unreadable'],
+]);
 
-/**
- * Opens a draft and leaves what was shared for its composer: files attach and a shared link
- * or paragraph is typed in, once that draft is on screen, so nothing lands on the session the
- * user happened to leave open. Rejected names are reported instead of dropped silently — the
- * same report the file picker gives.
- */
 const openSharedFilesSession = (intent: SharedFilesIntent): void => {
   if (intent.rejected.length > 0) {
     const t = (key: I18nKey, params?: I18nParams): string => (
       formatMessage(useI18nStore.getState().dictionary, key, params)
     );
     const summary = intent.rejected
-      .map((file) => `${file.name}: ${REJECTED_FILE_REASONS[file.reason] ?? file.reason}`)
+      .map((file) => `${file.name}: ${REJECTED_FILE_REASONS.get(file.reason) ?? file.reason}`)
       .join('\n');
     toast.error(t('chat.chatInput.toast.someFilesSkipped', { summary }));
   }
