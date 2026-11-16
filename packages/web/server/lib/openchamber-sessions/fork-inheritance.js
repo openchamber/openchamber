@@ -3,22 +3,7 @@ import { z } from 'zod';
 import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
 import { withoutQuestionDenied } from './create-session.js';
 
-/**
- * What a fork made through the OpenChamber sessions API (CLI, scheduled tasks)
- * keeps from its source session's OpenChamber metadata. Server twin of the UI's
- * `packages/ui/src/lib/sessionForkInheritance.ts`: UI forks call OpenCode
- * directly and repair themselves; forks made here are repaired here.
- *
- * OpenCode 2.x copies the source's `metadata` wholesale into the fork, so the
- * goal already arrives. Two repairs remain:
- *
- * - Source-owned links: the source's btw fork (`btwSessionID`), its review
- *   session (`reviewSessionID`), and the btw marker when the source is itself a
- *   btw side thread.
- * - A file-backed goal objective: the text lives in a file keyed by the session
- *   id, so the fork needs its own copy. When the copy cannot be written the
- *   fork's goal carries the text inline instead.
- */
+// external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode forks copy the source metadata wholesale.
 
 const NamespaceSchema = z.looseObject({
   btwSessionID: z.unknown().optional(),
@@ -33,7 +18,6 @@ const openChamberNamespace = (metadata) => {
   return parsed.success ? parsed.data.openchamber : null;
 };
 
-/** Merge patch (RFC 7386) removing source-owned links; null when there are none. */
 export const sourceOwnedLinksPatch = (metadata) => {
   const namespace = openChamberNamespace(metadata);
   if (!namespace) return null;
@@ -46,14 +30,11 @@ export const sourceOwnedLinksPatch = (metadata) => {
       if (key in namespace) patch[key] = null;
     }
   }
-  // A fork of a scheduled run is the user's own work, In work included.
   if (namespace.kind === 'scheduled') patch.kind = null;
   if (namespace.kind === OPERATOR_CHILD_KIND) {
     patch.kind = null;
     patch.parentID = null;
   }
-  // A fork must not pursue the source's goal in parallel: an active goal
-  // arrives paused and the user resumes it (same rule as UI forks).
   const goal = namespace.goal;
   if (goal && typeof goal === 'object' && !Array.isArray(goal) && goal.status === 'active') {
     patch.goal = { status: 'paused', statusReason: 'paused in fork' };
