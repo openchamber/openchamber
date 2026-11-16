@@ -1,24 +1,28 @@
 /**
  * Which sessions are subsessions, remembered so per-turn work can skip them
- * without asking OpenCode. Whether a session has a parent never changes, so an
- * answer never goes stale; it is learned from `session.created` events (the
- * translated event names the parent) and from any session record a runtime
- * read anyway. Bounded: the oldest entries go first, and a forgotten session
- * is simply unknown again.
+ * without asking OpenCode. A parent changes only when the user takes over an
+ * operator's child session, a metadata write `noteMetadata` hears; it is
+ * learned from `session.created` events (the translated event names the
+ * parent) and from any session record a runtime read anyway. Bounded: the
+ * oldest entries go first, and a forgotten session is simply unknown again.
  */
 import { z } from 'zod';
 
 const DEFAULT_LIMIT = 5000;
 
-const workflowAgentLinkSchema = z.object({
-  metadata: z.object({ openchamber: z.object({ kind: z.literal('workflow-agent'), parentID: z.string().min(1) }) }),
+export const OPERATOR_CHILD_KIND = 'operator-child';
+
+const linkedSessionSchema = z.object({
+  metadata: z.object({ openchamber: z.object({ kind: z.enum(['workflow-agent', OPERATOR_CHILD_KIND]), parentID: z.string().min(1) }) }),
 });
 
 export const sessionParentId = (record) => {
   if (typeof record?.parentID === 'string' && record.parentID) return record.parentID;
-  const link = workflowAgentLinkSchema.safeParse(record);
+  const link = linkedSessionSchema.safeParse(record);
   return link.success ? link.data.metadata.openchamber.parentID : null;
 };
+
+export const isOperatorChildSession = (record) => linkedSessionSchema.safeParse(record).data?.metadata.openchamber.kind === OPERATOR_CHILD_KIND;
 
 const createdSchema = z.object({
   type: z.literal('session.created'),
@@ -58,5 +62,14 @@ export function createSessionLineage({ limit = DEFAULT_LIMIT } = {}) {
   /** True for a known subsession, false for a known top-level session, undefined when unknown. */
   const isChild = (sessionId) => isChildById.get(sessionId);
 
-  return { observe, remember, isChild };
+  const noteMetadata = (sessionId, metadata) => {
+    const parentId = sessionParentId({ metadata });
+    if (parentId) {
+      remember(sessionId, parentId);
+      return false;
+    }
+    return isChildById.get(sessionId) === true && isChildById.delete(sessionId);
+  };
+
+  return { observe, remember, isChild, noteMetadata };
 }

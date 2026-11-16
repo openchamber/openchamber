@@ -34,6 +34,7 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { markOverviewSessionsDone, removeOverviewWorktree, type OverviewRemoveOutcome, type OverviewWorktreeTarget } from './overviewActions';
 import { useOverviewData, useOverviewReviewRequests, type OverviewData, type OverviewWorktree } from './useOverviewData';
 
@@ -384,6 +385,7 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
   };
 
   const markDone = (sessions: Session[]) => run(sessions.map((session) => session.id), async () => {
+    if (!await settleRunningOperatorChildren(sessions.map((session) => session.id))) return;
     const failed = await markOverviewSessionsDone(sessions);
     for (const session of failed) toast.error(t('overview.toast.doneFailed', { title: titleOf(session) }));
   });

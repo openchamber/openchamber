@@ -29,6 +29,7 @@ import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { MobileRowMenu } from './MobileRowMenu';
+import { TakeOverWorktreeItem } from '@/components/session/sidebar/works/TakeOverWorktreeItem';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
@@ -221,6 +222,7 @@ export const MobileWorktreeRow: React.FC<{
           {inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </ContextMenuItem>
       ) : null}
+      {worktree ? <TakeOverWorktreeItem path={work.directory} Item={ContextMenuItem} iconClassName="me-1 size-4" /> : null}
       {work.canRename ? (
         <ContextMenuItem onClick={() => useMobileSidebarRowsStore.getState().startRename(row.key)}>
           <Icon name="edit" className="me-1 size-4" />

@@ -46,6 +46,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - The agent's todo list is not editable from the UI until OpenCode has an API for the current list.
 - VS Code sessions enter In work only by hand.
 - Notes and todos in project files are opt-in.
+- A session an agent creates with `ownWork` is part of that agent's work: it nests under the agent's session in any folder, takes its done state from it, and nobody talks to it (no question tool, no waiting pages). The user takes one over only from the session's or worktree's menu; opening or writing in it changes nothing. Done on the agent while its workers run asks once: stop them or let them finish. Without `ownWork` a dispatched session stays the user's own root.
 
 ## Agent tools
 

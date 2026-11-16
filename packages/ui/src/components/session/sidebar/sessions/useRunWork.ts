@@ -9,6 +9,7 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SessionNode } from '../types';
 import { normalizePath } from '../utils';
@@ -65,6 +66,7 @@ export function useRunWork(run: MultiRunSummary, laneNodes: readonly SessionNode
     setBusy(true);
     try {
       if (inWork) {
+        if (!await settleRunningOperatorChildren(inWorkSessions.map((session) => session.id))) return;
         for (const session of inWorkSessions) {
           await setSessionWorkState(session.id, normalizePath(session.directory ?? null), 'done');
         }

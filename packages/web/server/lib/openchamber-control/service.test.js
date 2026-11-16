@@ -1365,6 +1365,21 @@ describe('render.page with answerLater', () => {
     return { laterPages, posts, dataDir };
   };
 
+  it.each([
+    ['answerLater', { answerLater: true }],
+    ['awaitAnswer', { awaitAnswer: true }],
+  ])('refuses %s in a session an agent started as its own work, and still shows a plain page', async (_label, wait) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service, client } = createService({ laterPages });
+    client.session.get.mockResolvedValue({ id: 'ses_1', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } });
+
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout', ...wait }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining('the user does not interact with it') });
+    expect((await laterPages.snapshot()).pages).toEqual([]);
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout' }, '/repo', call)).resolves.toMatchObject({ shown: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
   it('returns at once and keeps the page open past the end of the turn', async () => {
     const { laterPages, posts, dataDir } = await createLater();
     const onPageWaitChange = vi.fn();
@@ -1955,6 +1970,42 @@ describe('returning a dispatched session result', () => {
     expect(sessionService.create).toHaveBeenCalled();
     expect(result).not.toHaveProperty('resultDelivery');
     expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it('creates an ownWork session under the calling session and brings its answer back by default', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    const result = await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Fix the parser' }), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
+    expect(result.resultDelivery.status).toBe('pending');
+  });
+
+  it('keeps an ownWork session quiet when the agent turns its answer off', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true, returnResult: false }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything(), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it('leaves a session without ownWork to the user', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything());
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['without a calling session', 'session.create', { prompt: 'x', ownWork: true }, {}, 'needs a calling session'],
+    ['on a send', 'session.send', { sessionId: 'ses_child', prompt: 'x', ownWork: true }, { contextSessionId: 'ses_parent' }, 'applies only to session.create'],
+    ['as a string', 'session.create', { prompt: 'x', ownWork: 'true' }, { contextSessionId: 'ses_parent' }, 'ownWork must be a boolean'],
+  ])('refuses ownWork %s before creating anything', async (_label, action, input, options, message) => {
+    const { service, sessionService } = createReturningService();
+    await expect(service.execute(action, input, '/repo', options)).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    expect(sessionService.create).not.toHaveBeenCalled();
+    expect(sessionService.send).not.toHaveBeenCalled();
   });
 
   it('refuses a wait that is not a boolean', async () => {

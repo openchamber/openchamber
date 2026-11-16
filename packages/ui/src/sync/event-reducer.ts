@@ -9,6 +9,7 @@ import {
   type ToolPart,
 } from "@/lib/opencode/model"
 import { Binary } from "./binary"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import { withoutUnshownResult } from "@/lib/opencode/toolContentShells"
 import type { State } from "./types"
 import { dropSessionCaches } from "./session-cache"
@@ -182,7 +183,7 @@ export function reduceGlobalEvent(event: SyncEvent): GlobalEventResult {
 // ---------------------------------------------------------------------------
 
 function applySessionPatch(session: Session, patch: SessionPatch): Session {
-  const next: Session = { ...session }
+  const next: Session = patch.metadata === undefined ? { ...session } : withSessionMetadata(session, patch.metadata)
   if (patch.title !== undefined) next.title = patch.title
   if (patch.directory !== undefined) next.directory = patch.directory
   if (patch.projectID !== undefined) next.projectID = patch.projectID
@@ -196,7 +197,6 @@ function applySessionPatch(session: Session, patch: SessionPatch): Session {
   if (patch.revert === null) delete next.revert
   else if (patch.revert !== undefined) next.revert = patch.revert
   if (patch.outcome !== undefined) next.outcome = patch.outcome
-  if (patch.metadata !== undefined) next.metadata = patch.metadata
   if (patch.time) {
     const { archived, ...rest } = patch.time
     next.time = compact({ ...session.time, ...rest, archived: archived === null ? undefined : (archived ?? session.time.archived) })

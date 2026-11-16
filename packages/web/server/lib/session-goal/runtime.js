@@ -32,7 +32,7 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { sessionParentId } from '../session-lineage.js';
+import { isOperatorChildSession, sessionParentId } from '../session-lineage.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -622,7 +622,7 @@ export const createSessionGoalRuntime = ({
       return;
     }
     attempt.failures = 0;
-    if (sessionParentId(session)) return;
+    if (sessionParentId(session) && !isOperatorChildSession(session)) return;
 
     const goal = await readGoal(sessionId);
     if (!goal || goal.status !== 'active') return;

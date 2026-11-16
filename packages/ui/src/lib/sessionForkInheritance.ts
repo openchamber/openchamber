@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { JsonValue, Metadata, Session } from '@/lib/opencode/model';
+import type { JsonValue, Metadata, PermissionRuleset, Session } from '@/lib/opencode/model';
+import { isOperatorChildSession, permissionsAfterTakeOver } from '@/lib/sessionOperatorChild';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 
 /**
@@ -43,6 +44,10 @@ export function withoutSourceOwnedLinks(metadata: Metadata): Metadata {
   }
   // A fork of a scheduled run is the user's own work, In work included.
   if (next.kind === 'scheduled') delete next.kind;
+  if (next.kind === 'operator-child') {
+    delete next.kind;
+    delete next.parentID;
+  }
   // A fork usually tries another path; it must not pursue the source's goal in
   // parallel, so an active goal arrives paused and the user resumes it.
   const goal = asRecord(next.goal);
@@ -77,6 +82,7 @@ export interface ForkInheritanceDeps {
   readObjective: (sessionId: string) => Promise<string | null>;
   writeObjective: (sessionId: string, content: string) => Promise<boolean>;
   patchMetadata: (sessionId: string, updater: (metadata: Metadata) => Metadata) => Promise<void>;
+  setPermissions: (sessionId: string, permissions: PermissionRuleset) => Promise<void>;
 }
 
 const hasSourceOwnedLinks = (fork: Session): boolean =>
@@ -91,6 +97,10 @@ export async function applyForkInheritance(
   fork: Session,
   deps: ForkInheritanceDeps,
 ): Promise<void> {
+  if (isOperatorChildSession(fork)) {
+    await deps.setPermissions(fork.id, permissionsAfterTakeOver(fork.permissions))
+      .catch((error) => console.warn('[fork] failed to give the fork its question tool back', error));
+  }
   const goal = getSessionGoal(fork);
   let inlineObjective: string | null = null;
   if (goal?.objectiveFile) {

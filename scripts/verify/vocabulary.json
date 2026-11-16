@@ -82,5 +82,10 @@
   "settings.checkboxOff": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"false\"]", "means": "That checkbox cleared."},
   "workflow.card": {"selector": "[data-component=\"workflow-run\"]", "means": "A workflow run's card in the chat; pair it with its state's text (Waiting for you, Running, Stopped, Not run)."},
   "workflow.button": {"selector": "[data-component=\"workflow-run\"] button", "means": "A button on a workflow run's card; pair it with its text (Run workflow, Don't run, Stop)."},
-  "sidebar.settings": {"selector": "button[aria-label=\"Settings\"]", "means": "The gear at the bottom of the left sidebar that opens Settings."}
+  "sidebar.settings": {"selector": "button[aria-label=\"Settings\"]", "means": "The gear at the bottom of the left sidebar that opens Settings."},
+  "sidebar.anyRowInScope": {"selector": "[data-session-row][data-session-scope=\"{scope}\"]", "means": "Any session row under a sidebar section (activity:work is In work); pair it with text."},
+  "sidebar.childCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]", "means": "The count of sessions an agent runs for its own work on its row: how many are running and how many finished."},
+  "sidebar.expandChildren": {"selector": "[data-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]", "means": "The chevron that opens the sessions nested under a row."},
+  "sidebar.anyChildCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running]", "means": "The worker count on an agent's row, whatever it says."},
+  "sidebar.workRow": {"selector": "[role=\"button\"][aria-label^=\"Open {label}\"]", "means": "A worktree's or space's own row in the sidebar, named by its task or branch; the label is the start of that name."}
 }

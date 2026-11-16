@@ -170,13 +170,14 @@ const ALL_PARAMETER_PROPERTIES = {
   goal: { type: 'boolean', description: 'Goal Mode; only when the user asks' },
   goalTokenBudget: { type: 'integer', minimum: 1000, maximum: 100_000_000, description: 'Requires goal' },
   returnResult: { type: 'boolean', description: 'create, send or fork with a prompt: the final answer arrives here as a message when the session finishes. Only when the user wants the outcome or your next step needs it' },
+  ownWork: { type: 'boolean', description: 'session.create: the session is part of your own task, not one the user asked for. It nests under this session in the sidebar, the user does not talk to it, it cannot ask questions with tools, and with a prompt its final answer comes back here unless returnResult is false. Leave it out when the user wants the session for themselves, to follow and talk to' },
   lastAssistant: { type: 'boolean', description: 'Only the last assistant message' },
   limit: { type: 'integer', minimum: 1, description: 'Default 10' },
   all: { type: 'boolean', description: 'Include archived sessions, all messages, or older model versions' },
   query: { type: 'string', description: 'Words to match: model names and ids for models.search, session titles for session.list' },
   inWork: { type: 'boolean', description: 'session.list: only sessions in In work' },
   busy: { type: 'boolean', description: 'session.list: only sessions running now' },
-  children: { type: 'boolean', description: 'session.list: include subagent sessions' },
+  children: { type: 'boolean', description: 'session.list: include subagent sessions and sessions created with ownWork' },
   provider: { type: 'string', description: 'Provider id or name' },
   offset: { type: 'integer', minimum: 0, description: 'Results to skip, for the next page' },
   last: { type: 'boolean', description: 'Only the last matching message' },
@@ -302,7 +303,7 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
   "Wait for the user to choose, fill in fields, or both, on the page. With ui, the form adds its own Send button; add a Button only when the choice is between actions, and any Button sends the whole form. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
-  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do.",
+  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do. In a session another agent started with ownWork nobody answers, so the call is refused; ask in text there.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
@@ -310,7 +311,7 @@ const RENDER_PAGE_AWAIT_DESCRIPTION = [
 // return differs, so this names that and points there.
 const RENDER_PAGE_LATER_DESCRIPTION = [
   "Instead of awaitAnswer, for a decision the rest of your task does not wait on: the call returns at once and the page stays open, across restarts, until the user answers or declines.",
-  "The VS Code extension shows such a page without answer controls, and inside an isolated space the call is refused; there, ask in text.",
+  "The VS Code extension shows such a page without answer controls, and inside an isolated space or a session another agent started with ownWork the call is refused; there, ask in text.",
   "Their answer reaches you later as a message in this session, with the page's title and what it asked, their summary and data: during your turn or as a new turn. Build the page as awaitAnswer's description says; a message the user writes meanwhile does not close it.",
   "What it asked is the page's static text, at most 2,000 characters, so write the question itself in the HTML, near the top, not with a script; the message says when it holds only part of the page.",
 ].join(' ');
@@ -440,7 +441,7 @@ export const managedPermissionRules = ({ includeWorkflow = false } = {}) => (
 // calls for a worktree depends on how the user works, and users ask for a pull
 // request or for work kept apart rather than for a worktree.
 const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. One action per call; projectId or directory scope it, default this session's directory. "
-  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
+  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree. A session you start to get work done and collect its answer takes ownWork, also when the user told you to delegate; smaller pieces go to the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
   + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch, taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along and the branch starts from the default branch. "
   + "This tool cannot delete sessions or worktrees.";
 
@@ -494,8 +495,6 @@ const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task ou
   + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
   + 'One action per call. Check a script with workflow.check, then workflow.run: the run waits for the user to approve it in the chat, or starts at once when they let runs start without approval in Settings, and the report arrives as a message when the run ends. Read script before writing one.';
 
-// A field means the same thing in every tool that declares it, so one set
-// covers them all.
 const BOOLEAN_PARAMETER_NAMES = [...new Set([
   ALL_PARAMETER_PROPERTIES,
   SCHEDULE_PARAMETER_PROPERTIES,

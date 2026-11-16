@@ -1,5 +1,6 @@
 import React from 'react';
 import { PinToMenu } from '../sections/PinToMenu';
+import { TakeOverWorktreeItem } from './TakeOverWorktreeItem';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,
@@ -399,6 +400,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           onUnpin={() => { void work.setPin(false); }}
         />
       ) : null}
+      {worktree ? <TakeOverWorktreeItem path={directory} Item={Slots.Item} /> : null}
       {canFile ? (
         <Slots.Sub>
           <Slots.SubTrigger>

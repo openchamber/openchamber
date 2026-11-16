@@ -39,6 +39,7 @@ import type { SessionNode } from '../types';
 import { listedChildren } from '../listedChildren';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
+import { withOperatorChildrenCount } from './operatorChildrenBadges';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath } from '../utils';
@@ -1177,8 +1178,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       // Only a row that shows a pin gives up width for it: reserving the slot
       // on every project row cut their titles 20px short of the other lists'.
       pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
-      // No date: the list is ordered by recency and the row's tooltip carries
-      // the time. A turn's duration shows while it runs and until it is read.
+      // No date (rows go by recency); a turn's duration shows while it runs and until it is read.
       timeSlot={showActivityDuration && !waitingOnUser
         ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />
         : null}
@@ -1188,7 +1188,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
       marks={guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
-      badges={rowBadges}
+      badges={withOperatorChildrenCount(rowBadges, node.children)}
       doneHint={doneHintBadge()}
       // Grouped rows reserve room for permanent actions on their button.
       metaPaddingClass={isTimelineRow && alwaysShowActions

@@ -686,7 +686,7 @@ const sessionMetadataStore = createSessionMetadataStore({
   // further down and only ever used once a request arrives.
   openCode: {
     read: (...args) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).read(...args),
-    write: (...args) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).write(...args),
+    write: (sessionID, metadata, options) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).write(sessionID, metadata, options).then(() => sessionLineage.noteMetadata(sessionID, metadata) && permissionAutoAcceptRuntime.forgetSession(sessionID)),
   },
 });
 

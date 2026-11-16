@@ -170,7 +170,7 @@ const ACTIONS = {
     if (step.ready !== false) await waitForReady(ctx)
   },
   async click(step, ctx) {
-    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step))
+    const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), step.button === "right" ? "right" : "left")
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
   },
   async hover(step, ctx) {

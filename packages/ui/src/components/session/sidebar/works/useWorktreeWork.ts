@@ -32,6 +32,7 @@ export const toastFinishWorkOutcome = (
 ): void => {
   switch (outcome.kind) {
     case 'done':
+    case 'cancelled':
       break;
     case 'archived':
       toast.success(t('sessions.sidebar.work.archive.done'), { description: label });

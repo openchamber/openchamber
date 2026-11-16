@@ -34,6 +34,7 @@ import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { withUserWorkTitle } from "@/lib/sessionWorkTitle"
 import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
@@ -1393,15 +1394,14 @@ export async function patchSessionMetadata(
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const currentMetadata = getSessionMetadata(current)
   const nextMetadata = updater(currentMetadata)
-  // OpenCode 2.x only accepts metadata at session creation, so OpenChamber
-  // keeps it (see session-archive-batch). The store applies a merge patch, so
+  // The OpenChamber server's metadata store applies a merge patch, so
   // only the difference travels and a key the updater dropped is deleted
   // explicitly. A runtime without that route cannot persist the change, and
   // reporting success would strand a review or btw link that the next load
   // silently drops.
   const result = await requestSessionMetadataUpdate(sessionId, buildMetadataMergePatch(currentMetadata, nextMetadata), targetDirectory)
   if (result.outcome !== "updated") throw new Error(`session metadata update failed: ${result.reason}`)
-  const updated: Session = { ...current, metadata: result.metadata }
+  const updated = withSessionMetadata(current, result.metadata)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = updated.directory || targetDirectory
@@ -3483,9 +3483,8 @@ async function inheritForkState(sourceSessionId: string, forkedSession: Session,
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
     writeObjective: writeGoalObjectiveFile,
-    patchMetadata: async (sessionId, updater) => {
-      await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey)
-    },
+    patchMetadata: async (sessionId, updater) => { await patchSessionMetadata(sessionId, directory, updater, expectedRuntimeKey) },
+    setPermissions: (sessionId, permissions) => opencodeClient.setSessionPermissions(sessionId, permissions, directory),
   })
 }
 

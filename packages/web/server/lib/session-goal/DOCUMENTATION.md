@@ -94,7 +94,9 @@ before touching the filesystem). Rationale: metadata rides every
    ~250ms for an explicit Resume so the nudge feels immediate — since setting
    a goal on an idle session emits no status transition.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
-   - fetch session (skip sub-agent sessions), require an `active` goal.
+   - fetch session (skip sub-agent sessions and workflow agents; a session an
+     agent runs for its own work, `ownWork`, keeps its goal), require an
+     `active` goal.
      A failed session read skips the audit and continuation. It retries after
      15, 30, then 60 seconds. After another failure, it re-reads goal metadata
      and settles a still-active goal as `blocked` with a reason and the usual

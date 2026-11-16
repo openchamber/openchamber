@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
+import { withoutQuestionDenied } from './create-session.js';
+
 /**
  * What a fork made through the OpenChamber sessions API (CLI, scheduled tasks)
  * keeps from its source session's OpenChamber metadata. Server twin of the UI's
@@ -45,6 +48,10 @@ export const sourceOwnedLinksPatch = (metadata) => {
   }
   // A fork of a scheduled run is the user's own work, In work included.
   if (namespace.kind === 'scheduled') patch.kind = null;
+  if (namespace.kind === OPERATOR_CHILD_KIND) {
+    patch.kind = null;
+    patch.parentID = null;
+  }
   // A fork must not pursue the source's goal in parallel: an active goal
   // arrives paused and the user resumes it (same rule as UI forks).
   const goal = namespace.goal;
@@ -70,7 +77,7 @@ const fileBackedGoal = (metadata) => {
  * @param {(sessionID: string, content: string) => Promise<unknown>} options.writeObjective Throws on failure.
  * @param {(sessionID: string, patch: object) => Promise<unknown>} options.writeMetadata
  */
-export const applyForkInheritance = async ({ sourceSessionID, fork, readObjective, writeObjective, writeMetadata }) => {
+export const applyForkInheritance = async ({ sourceSessionID, fork, readObjective, writeObjective, writeMetadata, writePermissions = null }) => {
   const metadata = fork?.metadata;
   const goal = fileBackedGoal(metadata);
   let inlineObjective = null;
@@ -92,6 +99,10 @@ export const applyForkInheritance = async ({ sourceSessionID, fork, readObjectiv
     }
   }
 
+  if (openChamberNamespace(metadata)?.kind === OPERATOR_CHILD_KIND && writePermissions) {
+    await writePermissions(fork.id, withoutQuestionDenied(fork.permissions))
+      .catch((error) => console.warn('[fork] failed to give the fork its question tool back', error?.message ?? error));
+  }
   const namespacePatch = sourceOwnedLinksPatch(metadata) ?? {};
   if (inlineObjective !== null) {
     namespacePatch.goal = { ...namespacePatch.goal, objective: inlineObjective, objectiveFile: false };

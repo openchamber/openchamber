@@ -9,6 +9,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { toggleSessionPin } from '@/sync/session-pins';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -113,7 +114,8 @@ export const toggleWorkCurrentSession = (t: Translate): PaletteCommand => () => 
   if (isSessionPinned(useSessionPinnedStore.getState().ids, directory, sessionId)) return false;
   if (useSessionUIStore.getState().worktreeMetadata.get(sessionId)?.pinnedAt !== undefined) return false;
   const next = isSessionInWork(session) ? 'done' : 'open';
-  void setSessionWorkState(sessionId, directory, next)
+  void Promise.resolve(next === 'done' ? settleRunningOperatorChildren([sessionId]) : true)
+    .then((go) => (go ? setSessionWorkState(sessionId, directory, next) : null))
     .catch(() => toast.error(t('sessions.sidebar.session.work.updateFailed')));
 };
 
