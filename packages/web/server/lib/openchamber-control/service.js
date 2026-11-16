@@ -7,6 +7,7 @@ import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
 import { createTierChooserAction } from './tier-chooser-action.js';
+import { createQuotaFallbackAction } from './quota-fallback-action.js';
 import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -517,16 +518,17 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
-  // `render.tierChooser` (#14 slice 2): the tier card's production
-  // caller — catalog pricing assembled and the card built here; the
-  // agent shows it through render.page's wait and applies the pick.
-  const tierChooser = createTierChooserAction({
-    listModels: async (directory) => {
-      const client = await getClient(asNonEmptyString(directory) || '');
-      const catalog = await client.model.list();
-      return catalog.data;
-    },
-  });
+  // `render.tierChooser` (#14 slice 2) and `render.quotaFallback`
+  // (#14 slice 3): the cards' production callers — catalog pricing
+  // assembled and the cards built here; the agent shows each through
+  // render.page's wait and applies the answer.
+  const listCatalogModels = async (directory) => {
+    const client = await getClient(asNonEmptyString(directory) || '');
+    const catalog = await client.model.list();
+    return catalog.data;
+  };
+  const tierChooser = createTierChooserAction({ listModels: listCatalogModels });
+  const quotaFallback = createQuotaFallbackAction({ listModels: listCatalogModels });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -1178,6 +1180,14 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'render.tierChooser') {
         return await tierChooser(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
+      if (action === 'render.quotaFallback') {
+        return await quotaFallback(input, {
           sessionId: asNonEmptyString(options.contextSessionId),
           callId: asNonEmptyString(options.contextCallId),
           directory: asNonEmptyString(contextDirectory),
