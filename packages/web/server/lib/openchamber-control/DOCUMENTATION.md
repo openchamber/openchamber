@@ -347,9 +347,9 @@ other.
   calling agent's own work (an operator's child), not one the user asked for.
   It needs a calling session (400 without one) and applies to create only.
   The session service creates it with `metadata.openchamber` `{ kind:
-  'operator-child', parentID: <caller> }`, a session permission rule that
-  denies the `question` tool (OpenCode drops a wholly denied tool from the
-  model's list), and, before any prompt, a synthetic message with
+  'operator-child', parentID: <caller> }`, session permission rules that
+  deny the `question` and `openchamber_secret` tools (OpenCode drops a wholly
+  denied tool from the model's list; nobody is there to answer either), and, before any prompt, a synthetic message with
   `resume: false` (`source: 'openchamber-operator-child'`) telling the agent
   that the user does not interact with it, to ask in plain text in its answer
   and that the answer goes to the agent that started it

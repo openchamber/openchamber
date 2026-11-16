@@ -8,6 +8,8 @@ const operatorChildLinkSchema = z.object({
   openchamber: z.object({ kind: z.literal('operator-child'), parentID: z.string().min(1) }),
 });
 
+const OPERATOR_CHILD_DENIED_TOOLS = new Set(['question', 'openchamber_secret']);
+
 const openchamberSchema = z.object({ openchamber: z.record(z.string(), z.json()) });
 
 export const operatorChildParentId = (metadata: Metadata | undefined): string | undefined => (
@@ -24,5 +26,5 @@ export const metadataAfterTakeOver = (metadata: Metadata, now: number): Metadata
 };
 
 export const permissionsAfterTakeOver = (permissions: PermissionRuleset | undefined): PermissionRuleset => (
-  (permissions ?? []).filter((rule) => !(rule.action === 'question' && rule.resource === '*' && rule.effect === 'deny'))
+  (permissions ?? []).filter((rule) => !(OPERATOR_CHILD_DENIED_TOOLS.has(rule.action) && rule.resource === '*' && rule.effect === 'deny'))
 );

@@ -13,7 +13,7 @@ const fakeClient = () => {
 };
 
 describe('createSession', () => {
-  it("creates an operator's child under its operator, without the question tool, and tells it nobody answers before any prompt", async () => {
+  it("creates an operator's child under its operator, without the question and secret tools, and tells it nobody answers before any prompt", async () => {
     const client = fakeClient();
     const sessionID = await createSession({ client, directory: '/repo/wt', title: 'Parser', operatorParentId: 'ses_operator' });
 
@@ -23,7 +23,7 @@ describe('createSession', () => {
       location: { directory: '/repo/wt' },
       title: 'Parser',
       metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } },
-      permissions: [{ action: 'question', resource: '*', effect: 'deny' }],
+      permissions: [{ action: 'question', resource: '*', effect: 'deny' }, { action: 'openchamber_secret', resource: '*', effect: 'deny' }],
     });
     const note = client.session.synthetic.mock.calls[0][0];
     expect(note).toMatchObject({ sessionID: 'ses_new', resume: false, metadata: { source: OPERATOR_CHILD_NOTE_SOURCE, parentSessionID: 'ses_operator' } });
