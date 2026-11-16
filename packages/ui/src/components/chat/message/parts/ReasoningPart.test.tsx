@@ -14,6 +14,7 @@ import { I18nProvider } from '@/lib/i18n';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { loadMarkdownRendererModule } from '../../markdownRendererLoader';
 
 const { TimelineNotice } = await import('../TimelineNotice');
 
@@ -351,6 +352,8 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
   });
 
   test('shows an incomplete reasoning paragraph while it streams', async () => {
+    // The throttle clock does not settle the lazy Markdown module import.
+    await loadMarkdownRendererModule();
     jest.useFakeTimers();
     const dom = installDomStub();
     const root = createRoot(dom.container);
