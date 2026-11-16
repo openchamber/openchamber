@@ -1,13 +1,3 @@
-/**
- * Resolves OpenChamber theme tokens into concrete color strings.
- *
- * The annotation overlay renders inside a page we do not control, so it cannot
- * reference our CSS variables — that page has its own `:root`. Theme tokens can
- * also be authored in any color space, so string-concatenating an alpha suffix
- * onto them is not safe. Both problems go away by letting the browser resolve
- * the values here: a probe element carries the token, and the computed style is
- * always a concrete color the overlay can use verbatim.
- */
 import type { BrowserAnnotationOverlayTheme } from './annotationOverlay';
 
 const FALLBACK: BrowserAnnotationOverlayTheme = {
@@ -52,10 +42,6 @@ const createProbe = (): Probe | null => {
   };
 };
 
-/**
- * Reads the live theme. Returns a usable palette even when probing fails, so a
- * missing token can never leave the overlay invisible against the page.
- */
 export const resolveAnnotationOverlayTheme = (colorScheme: 'light' | 'dark'): BrowserAnnotationOverlayTheme => {
   const probe = createProbe();
   if (!probe) return { ...FALLBACK, colorScheme };
@@ -66,8 +52,6 @@ export const resolveAnnotationOverlayTheme = (colorScheme: 'light' | 'dark'): Br
       probe.read(`color-mix(in srgb, var(${token}) ${percent}%, transparent)`) || fallback
     );
 
-    // The same recipe the app's tooltips and popovers use, resolved here
-    // because the overlay cannot reach our stylesheet from inside the page.
     const glassOpacity = probe.readVariable('--oc-glass-tooltip-opacity') || '62%';
     const blur = probe.readVariable('--oc-glass-blur') || '26px';
     const saturation = probe.readVariable('--oc-glass-saturation') || '1.16';

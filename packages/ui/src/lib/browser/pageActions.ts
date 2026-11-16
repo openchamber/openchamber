@@ -1,54 +1,15 @@
-/**
- * Scripts the agent's browser actions run inside the page.
- *
- * Each builder returns a self-contained expression evaluated in one frame of
- * the page, so none of them may reference anything from this module at
- * runtime. Inputs are embedded with `JSON.stringify`, which is what keeps a
- * selector or a typed value from terminating the expression and becoming code.
- *
- * On the desktop they run in an isolated world of each frame
- * (`packages/electron/browser-panel-driver.mjs`): the page shares the DOM but
- * cannot see or change the scripts' own state. That state is the element
- * registry: a snapshot numbers the elements it lists, and later actions name
- * an element by that number. The registry lives on `window`, which in that
- * world is the scripts' own.
- *
- * Every script resolves to `{ ok, ... }` instead of throwing, so a failed match
- * comes back as an explainable result rather than an opaque evaluation error.
- */
-
-/**
- * Budget caps. The snapshot cost is bounded by these, not by the size of the
- * page: a document with ten thousand nodes returns the same shape as one with
- * two hundred, because only visible interactive elements are collected and both
- * lists are cut off here. What the caps drop is always reported, so a partial
- * answer never reads as a complete one. The caller splits them across frames.
- */
 export const MAX_SNAPSHOT_TEXT_CHARS = 6_000;
 export const MAX_SNAPSHOT_ELEMENTS = 120;
-/** Enough to recognise a control; full labels are what made entries expensive. */
 const MAX_LABEL_CHARS = 80;
-/** Enough to discover a select without letting one control dominate a snapshot. */
 const MAX_OPTION_COUNT = 32;
-/** Longest a scroll waits for paint frames before it reports anyway. */
 const SCROLL_SETTLE_MAX_MS = 100;
 
-/**
- * How an action names its element: a number from the last snapshot of this
- * frame, a CSS selector in the top document, or the visible label of a link
- * or button.
- */
 export type ElementTarget = { id: number; doc: string } | { selector: string } | { text: string };
 
-/** The registry's answer when a numbered element is gone or was never listed. */
 export const STALE_ELEMENT_CODE = 'stale';
 
 const INTERACTIVE_SELECTOR = 'a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="switch"], [role="menuitem"], [role="option"], [role="combobox"], [role="textbox"], [contenteditable="true"], [draggable="true"]';
 
-/**
- * Shared helpers, injected into each script. `cssPath` builds the same kind of
- * selector the actions accept, so a snapshot result is directly usable.
- */
 const HELPERS = `
   var MAX_LABEL_CHARS = ${MAX_LABEL_CHARS};
   var MAX_OPTION_COUNT = ${MAX_OPTION_COUNT};
@@ -268,17 +229,6 @@ const withTarget = (target: ElementTarget, body: string): string => wrap(`
   ${body}
 `);
 
-/**
- * Lists the visible interactive elements of one frame and numbers them for
- * later actions, open shadow roots included. Earlier numbers of this frame
- * stop working. File inputs are listed even when hidden: pages commonly hide
- * them behind a styled button, and an upload needs the input itself.
- *
- * `selector` narrows the snapshot to one subtree. A long page truncates
- * against the caps no matter how they are tuned, which leaves the agent
- * hunting. Scoping answers that directly: ask about the part you mean and the
- * caps stop mattering.
- */
 export const buildSnapshotScript = ({
   selector,
   maxElements = MAX_SNAPSHOT_ELEMENTS,
@@ -391,23 +341,12 @@ export const buildSnapshotScript = ({
   return result;
 `);
 
-/**
- * Finds the link or button with a visible label and numbers it, so the action
- * that asked can reach it the way it reaches a snapshot element. `exact` lets
- * the caller prefer an exact match in a later frame over a partial one here.
- */
 export const buildFindByTextScript = (text: string): string => wrap(`
   var found = findByText(${JSON.stringify(text)});
   if (!found) return { ok: true, found: false };
   return { ok: true, found: true, exact: found.exact, id: register(found.element), doc: registry().doc };
 `);
 
-/**
- * Brings the element on screen and answers the point a pointer should press,
- * in this frame's viewport. Refuses when something else is drawn over that
- * point: a real click would land on the cover, and reporting success there
- * would hide that the page is in the way (a cookie banner, an open menu).
- */
 export const buildPointScript = (target: ElementTarget, { requireEnabled = true }: { requireEnabled?: boolean } = {}): string => withTarget(target, `
   if (${requireEnabled ? 'true' : 'false'} && target.disabled === true) return { ok: false, error: describe(target) + ' is disabled' };
   target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
@@ -427,10 +366,6 @@ export const buildPointScript = (target: ElementTarget, { requireEnabled = true 
   return answer;
 `);
 
-/**
- * Puts the keyboard in a text field with its whole content selected, so the
- * text the driver then inserts replaces what was there.
- */
 export const buildFocusFieldScript = (target: ElementTarget): string => withTarget(target, `
   var tag = target.tagName;
   var editable = tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
@@ -452,17 +387,11 @@ export const buildFocusFieldScript = (target: ElementTarget): string => withTarg
   return answer;
 `);
 
-/** Moves the keyboard to the element, for keys pressed there. */
 export const buildFocusScript = (target: ElementTarget): string => withTarget(target, `
   target.focus();
   return { ok: true };
 `);
 
-/**
- * Whether dragging the element starts an HTML drag: `draggable`, which links
- * and images are by default. Such a drag runs as page events
- * (`buildHtmlDragScript`); anything else gets a real pointer drag.
- */
 export const buildDraggableScript = (target: ElementTarget): string => withTarget(target, `
   var node = target;
   while (node && node.nodeType === 1) {
@@ -472,12 +401,6 @@ export const buildDraggableScript = (target: ElementTarget): string => withTarge
   return { ok: true, draggable: false };
 `);
 
-/**
- * An HTML drag and drop as the page's own events: dragstart on the source,
- * dragenter, dragover and drop on the target, dragend on the source, all with
- * one DataTransfer, so what the source puts in it is what the drop reads.
- * The target accepts only when its dragover is cancelled, as in a browser.
- */
 export const buildHtmlDragScript = (source: ElementTarget, destination: ElementTarget): string => wrap(`
   var from = resolveTarget(${JSON.stringify(source)});
   if (!from.ok) return { ok: false, error: from.error, code: from.code };
@@ -504,13 +427,11 @@ export const buildHtmlDragScript = (source: ElementTarget, destination: ElementT
   return { ok: true, accepted: accepted };
 `);
 
-/** What a text field holds after typing, to report it back. */
 export const buildFieldValueScript = (target: ElementTarget): string => withTarget(target, `
   var value = target.isContentEditable ? String(target.innerText || '') : String(target.value == null ? '' : target.value);
   return { ok: true, value: value.slice(0, 200), valueTruncated: value.length > 200 };
 `);
 
-/** Checks that the element is a file input before files are attached to it. */
 export const buildFileInputScript = (target: ElementTarget): string => withTarget(target, `
   if (!(target.tagName === 'INPUT' && String(target.type).toLowerCase() === 'file')) {
     return { ok: false, error: describe(target) + ' is not a file input. browser.snapshot lists the page\\'s file inputs, hidden ones too.' };
@@ -519,7 +440,6 @@ export const buildFileInputScript = (target: ElementTarget): string => withTarge
   return { ok: true, multiple: target.multiple === true };
 `);
 
-/** The element itself, for the driver to hand to the browser as a node. */
 export const buildElementExpression = (target: ElementTarget): string => wrap(`
   var resolved = resolveTarget(${JSON.stringify(target)});
   return resolved.ok ? resolved.element : null;
@@ -563,17 +483,6 @@ export const buildSelectScript = (target: ElementTarget, { label: optionLabel, v
 `);
 };
 
-/**
- * Scrolling, reported after it has actually happened.
- *
- * Two things made this lie. Pages commonly set `scroll-behavior: smooth`, which
- * turns a programmatic scroll into an animation — so the position read straight
- * afterwards is the position before the scroll, and the result said nothing
- * moved. And a scroll that is already at the end is indistinguishable from one
- * that failed unless the limits are reported too. An agent reading "scrollY: 0"
- * from a scroll that worked learns a superstition it will apply for the rest of
- * the session.
- */
 const SCROLL_SETTLE = `
   // Two frames let the layout catch up, but a page in a hidden background tab
   // is not composited and gets no frames at all while still reporting itself
@@ -626,11 +535,6 @@ export const buildScrollScript = ({ direction }: { direction: string }): string 
   return settle({ direction: direction });
 `);
 
-/**
- * Whether what `browser.wait` waits for is on the page of this frame: text
- * anywhere in it, shadow roots included, or an element by selector or number.
- * A numbered element counts as there while it is connected and drawn.
- */
 export const buildWaitConditionScript = ({ text, target }: { text?: string; target?: ElementTarget }): string => wrap(`
   var wantedText = ${JSON.stringify(text ?? '')};
   var target = ${JSON.stringify(target ?? null)};
@@ -650,19 +554,6 @@ export const buildWaitConditionScript = ({ text, target }: { text?: string; targ
   return { ok: true, present: visible(resolved.element) };
 `);
 
-/**
- * Resolves once the page has gone quiet: no new resource and no change to the
- * DOM tree or its text for `quietMs`, or `maxMs` after it started.
- *
- * The load event says only that the document and its static imports arrived.
- * An app then fetches its lazy chunks and replaces its splash screen, and a
- * screenshot taken in between shows the splash as if it were the page.
- * Attribute changes are left out: hover classes and live styles change on a
- * finished page all the time and would hold every wait to its limit. A
- * running animation that will finish counts as a change: a splash fades out
- * by style alone, and a hidden tab, which gets no frames, starts that fade
- * only once a capture shows it.
- */
 export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: number }): string => wrap(`
   var quietMs = ${JSON.stringify(quietMs)};
   var maxMs = ${JSON.stringify(maxMs)};
@@ -716,7 +607,6 @@ export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: n
   });
 `);
 
-/** Properties that answer "how does this look", without dumping the whole cascade. */
 const INSPECTED_STYLE_PROPS = [
   'color', 'background-color', 'background-image', 'opacity',
   'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align',
@@ -725,15 +615,6 @@ const INSPECTED_STYLE_PROPS = [
   'flex-direction', 'justify-content', 'align-items', 'z-index', 'overflow', 'visibility',
 ];
 
-/**
- * Reads how one element actually renders.
- *
- * The snapshot describes structure, which leaves questions of appearance
- * answerable only by reading the source and hoping the build agrees. Computed
- * styles come from the live page, so a colour reported from here is the colour
- * on screen — and unlike a screenshot it is readable by an agent that cannot
- * see images.
- */
 export const buildInspectScript = (target: ElementTarget): string => withTarget(target, `
   var computed = window.getComputedStyle(target);
   var styles = {};
