@@ -19,7 +19,7 @@ import { createBindingStore } from '../source-control/binding-storage.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { giteaDescriptor } from '../gitea/descriptor.js';
-import { resolveRepositoryIdentity } from '../source-control/repository-identity.js';
+import { resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from '../source-control/repository-identity.js';
 
 const SHA = 'a'.repeat(40);
 const ENDPOINT = 'https://example.com/owner/repository.git';
@@ -2701,6 +2701,78 @@ process.exit(safe ? 0 : 1);
     });
     expect(setupValue.calls.some((call) => call.args.includes('check-attr'))).toBe(false);
   });
+
+  it.each([false, true])('hydrates a contributor worktree with an existing fork remote: %s', async (existingRemote) => {
+    const gitService = await import('./service.js');
+    const { createWorktreeCreation } = await import('./worktree-creation.js');
+    const { createWorktreeBootstrapStore } = await import('./worktree-bootstrap-storage.js');
+    const { parent, directory, env, git } = await createLocalRepository();
+    const childSha = await git('rev-parse', 'HEAD');
+    await git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
+    if (existingRemote) await git('remote', 'add', 'pr-alice', 'https://github.com/alice/app.git');
+    await fs.writeFile(path.join(directory, '.gitmodules'), '[submodule "child"]\npath = vendor/child\nurl = https://github.com/acme/child.git\n');
+    await git('add', '.gitmodules');
+    await git('update-index', '--add', '--cacheinfo', `160000,${childSha},vendor/child`);
+    await git('commit', '-m', 'add child');
+    const headSha = await git('rev-parse', 'HEAD');
+    const repository = await resolveRepositoryIdentity(directory);
+    const childEndpoint = 'https://github.com/acme/child.git';
+    const binding = {
+      repositoryId: repository.repositoryId, revision: 1, state: 'bound', configRevision: repository.configRevision,
+      providers: [], remotes: [], auxiliary: [{ kind: 'submodule', mode: 'system', readiness: 'ready',
+        endpoint: { displayUrl: childEndpoint, fingerprint: fingerprintRemoteUrl(childEndpoint) } }],
+    };
+    const bindings = createBindingService({ store: { read: async () => ({ revision: 1, binding }) },
+      resolveRepository: resolveRepositoryIdentity, resolveTransportRepository: resolvePrivateRepositoryIdentity });
+    const operations = createNetworkOperations({
+      validateGitTransportContext: bindings.validateGitTransportContext,
+      validateGitAuxiliaryContext: bindings.validateGitAuxiliaryContext,
+      credentialResolver: { resolve: async () => ({ mode: 'system' }) },
+      inheritedEnv: env, runtimeIdentity: { id: 'fixture', platform: 'web' },
+      spawnImpl: (binary, args, options) => {
+        const clone = args.indexOf('clone');
+        if (clone >= 0) {
+          const replaced = [...args];
+          replaced[replaced.length - 2] = directory;
+          return spawn(binary, replaced, { ...options, env: { ...options.env, GIT_ALLOW_PROTOCOL: 'file' } });
+        }
+        return spawn(binary, args, options);
+      },
+    });
+    const source = {
+      context: { provider: 'github', instance: 'github.com', directory, repositoryId: repository.repositoryId,
+        accountId: 'account_one', bindingRevision: 1, primaryRemote: 'origin' },
+      targetProject: { id: 'acme/app', owner: 'acme', name: 'app' },
+      sourceProject: { id: 'alice/app', owner: 'alice', name: 'app' },
+      number: 42, headRef: 'refs/heads/feature', headSha,
+      requestedRemoteName: 'pr-alice', endpoint: 'https://github.com/alice/app.git', classification: 'contributor-fork',
+    };
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(parent, 'bootstrap.json') });
+    const creation = createWorktreeCreation({
+      getGitLibraries: async () => gitService,
+      networkOperations: { ...operations, transferContributorHead: async ({ destinationRef }) => {
+        await git('update-ref', destinationRef, headSha);
+        return { state: 'succeeded' };
+      } },
+      getSourceControlBinding: bindings.get,
+      contributorProvenance: { compareAndSwap: async () => ({ revision: 1 }) },
+      resolveChangeRequestSource: async () => source,
+      createHttpsCredentialReference: () => 'credential_reference',
+      resolveSourceControlAccount: async () => ({ credentialId: 'account_one', credentialRevision: 1, providerUserId: 'github.com#1', status: 'valid' }),
+      worktreeBootstrapStore: bootstrapStore,
+    });
+    vi.stubEnv('XDG_DATA_HOME', parent);
+    try {
+      const created = await creation.create(directory, { mode: 'existing', branchName: 'feature', worktreeName: 'feature',
+        returnAfterDirectoryCreated: true, changeRequestSource: { context: source.context } });
+      await gitService.waitForActiveWorktreeBootstrap(created.path);
+      const status = await gitService.getWorktreeBootstrapStatus(created.path, { bootstrapStore });
+      expect(status, JSON.stringify(status)).toMatchObject({ status: 'ready' });
+      expect(await fs.readFile(path.join(created.path, 'vendor/child/README.md'), 'utf8')).toBe('ordinary content\n');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 30_000);
 
   it.each(['ordinary', 'lfs', 'submodule'])('creates a bound local HEAD worktree with truthful $0 hydration', async (kind) => {
     const { createWorktree, getWorktreeBootstrapStatus } = await import('./service.js');

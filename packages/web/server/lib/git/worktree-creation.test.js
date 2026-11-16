@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorktreeCreationError, createWorktreeCreation } from './worktree-creation.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 
 const sourceRequest = {
   context: {
@@ -49,6 +50,33 @@ const setup = (overrides = {}) => {
 const request = { mode: 'existing', branchName: 'feature', worktreeName: 'feature', changeRequestSource: sourceRequest };
 
 describe('worktree creation from a change request', () => {
+  it.each(['new remote', 'existing remote', 'binding changed', 'other remote changed', 'fork endpoint changed'])(
+    'pins hydration authority after fork creation: %s', async (scenario) => {
+      const remote = (name, url) => ({ name, fetch: { fingerprint: fingerprintRemoteUrl(url) }, push: { fingerprint: fingerprintRemoteUrl(url) } });
+      const origin = remote('origin', 'https://github.com/acme/app.git');
+      const fork = remote('pr-alice', resolvedSource.endpoint);
+      const before = [origin, ...(scenario === 'existing remote' ? [fork] : [])];
+      const after = [scenario === 'other remote changed' ? remote('origin', 'https://github.com/other/app.git') : origin,
+        scenario === 'fork endpoint changed' ? remote('pr-alice', 'https://github.com/other/fork.git') : fork];
+      const binding = (remotes, revision, configRevision) => ({ revision, repository: { repositoryId: 'repo_one', configRevision, remotes } });
+      const getSourceControlBinding = vi.fn()
+        .mockResolvedValueOnce(binding(before, 2, 'before'))
+        .mockResolvedValueOnce(binding(after, scenario === 'binding changed' ? 3 : 2, 'after'));
+      const { creation, libraries, dependencies } = setup({ dependencies: { getSourceControlBinding } });
+      await creation.create('/repo', request);
+      const hydrate = libraries.createWorktree.mock.calls[0][2].hydrateCheckout({ directory: '/worktree', parentRemoteName: 'pr-alice' });
+      if (['binding changed', 'other remote changed', 'fork endpoint changed'].includes(scenario)) {
+        await expect(hydrate).rejects.toThrow('Git auxiliary repository authority changed');
+        expect(dependencies.networkOperations.hydrateBoundCheckout).not.toHaveBeenCalled();
+      } else {
+        await hydrate;
+        expect(dependencies.networkOperations.hydrateBoundCheckout).toHaveBeenCalledWith(expect.objectContaining({
+          repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'after' },
+        }));
+      }
+    },
+  );
+
   it('creates a contributor worktree from the server-resolved head only', async () => {
     const { libraries, dependencies, creation } = setup();
 

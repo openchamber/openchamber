@@ -225,12 +225,35 @@ export const createWorktreeCreation = ({
       bindingRevision: bindingRead.revision,
       configRevision: bindingRead.repository.configRevision,
     } : null;
-    const hydrateCheckout = ({ directory: checkoutDirectory, parentRemoteName }) => networkOperations.hydrateBoundCheckout({
-      directory: checkoutDirectory,
-      parentRemoteName,
-      parentEndpoint: source?.endpoint,
-      repositoryAuthority,
-    });
+    const hydrateCheckout = async ({ directory: checkoutDirectory, parentRemoteName }) => {
+      let authority = repositoryAuthority;
+      if (authority && source?.classification === 'contributor-fork') {
+        const current = await getSourceControlBinding(checkoutDirectory);
+        const before = bindingRead.repository.remotes;
+        const after = current.repository.remotes;
+        const fingerprint = fingerprintRemoteUrl(source.endpoint);
+        const oldRemote = before.find((remote) => remote.name === source.requestedRemoteName);
+        const newRemote = after.find((remote) => remote.name === source.requestedRemoteName);
+        const unchanged = (remotes) => JSON.stringify(remotes.map((remote) => ({
+          name: remote.name, fetch: remote.fetch.fingerprint, push: remote.push.fingerprint,
+        })).sort((a, b) => a.name.localeCompare(b.name)));
+        if (current.repository.repositoryId !== authority.repositoryId || current.revision !== authority.bindingRevision
+          || !newRemote || newRemote.fetch.fingerprint !== fingerprint
+          || (!oldRemote && newRemote.push.fingerprint !== fingerprint)
+          || unchanged(before.filter((remote) => remote.name !== source.requestedRemoteName))
+            !== unchanged(after.filter((remote) => remote.name !== source.requestedRemoteName))
+          || (oldRemote && unchanged([oldRemote]) !== unchanged([newRemote]))) {
+          throw new WorktreeCreationError('Git auxiliary repository authority changed', 409, 'SOURCE_CONTROL_BINDING_STALE');
+        }
+        authority = { ...authority, configRevision: current.repository.configRevision };
+      }
+      return networkOperations.hydrateBoundCheckout({
+        directory: checkoutDirectory,
+        parentRemoteName,
+        parentEndpoint: source?.endpoint,
+        repositoryAuthority: authority,
+      });
+    };
     try {
       const result = await createWorktree(directory, input, {
         contributorProvenance,
