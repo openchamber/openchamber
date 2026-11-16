@@ -109,7 +109,9 @@ export const decideManagedOpenCodeLaunch = ({ state, ownsPid, binary, args, fing
 
 // ---- v2 versioned store (issue #82) ----
 // One document { schema_version: 2, generations: [...], handoffs: [...] },
-// written atomically on every transition. Wired into lifecycle.js as a
+// written atomically on each successful transition; store sync is best
+// effort (syncStore in lifecycle.js logs and skips a failed write, so the
+// store can miss a transition). Wired into lifecycle.js as a
 // dual-write with the v1 state.json + draining.json pair (kept for one
 // release): the store is the ownership record for action paths, and the
 // v1 pair is retired once the dual-write release has passed.
