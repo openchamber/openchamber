@@ -49,8 +49,6 @@ describe('standalone bracket math with blank lines', () => {
       '\\[\nA\n\nopenchamber://session/ses_abc\n\\]',
       '\\[\nA\n\n&amp;\n\\]',
       '\\[\nA\n\n---\n\\]',
-      '> \\[\n> x\n>\n> +y\n> \\]',
-      '- item\n\n  \\[\n  x\n\n  +y\n  \\]',
     ]) expect(prepareMarkdownMath(text, true).content).toBe(text);
   });
 
@@ -153,5 +151,85 @@ describe('standalone bracket math with blank lines', () => {
     expect(body.querySelectorAll('.katex-display')).toHaveLength(1);
     expect(body.querySelector('a[href="https://example.test"]')?.textContent).toBe('reference');
     expect(body.textContent).toContain('note');
+  });
+
+  test('renders formulas with blank lines inside lists and block quotes', () => {
+    for (const [source, container] of [
+      ['- item\n\n  \\[\n  x\n\n  +y\n  \\]', 'li'],
+      ['> \\[\n> x \\in [0,1)\n>\n> +y\n> \\]', 'blockquote'],
+      ['> Formula:\n>\n> \\[\n> x\n>\n> +y\n> \\]', 'blockquote'],
+    ]) {
+      const prepared = prepareMarkdownMath(source, true);
+      const html = renderToStaticMarkup(<Streamdown
+        mode="streaming" isAnimating parseIncompleteMarkdown controls={false}
+        plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+        remend={prepared.remend}
+        {...getMarkdownProcessingOptions(false, false)}
+      >{prepared.content}</Streamdown>);
+      const body = new Window().document.createElement('div');
+      body.innerHTML = html;
+      expect(body.querySelectorAll(`${container} .katex-display`)).toHaveLength(1);
+      expect(body.querySelector('annotation')?.textContent).toContain('+y');
+      if (source.includes('[0,1)')) expect(body.querySelector('annotation')?.textContent).toContain('x \\in [0,1)');
+    }
+  });
+
+  test('does not match delimiters across different containers or fenced code', () => {
+    for (const source of [
+      '> \\[\n> x\n\nOutside\n\n> y\n> \\]',
+      '- \\[\n  x\n\n- y\n  \\]',
+      '> \\[\n> x\n>\n> ```\n> \\]\n> ```',
+      '\\[\nx\n\n+\\]\n\n[link](https://example.test)',
+      '\\[\nx\n\n    \\]\n\n[link](https://example.test)',
+      '\\[\nx\n\n\\[escaped\\] text\n\nend\n\\]',
+      '> \\[\n> x\n>\n> \\[escaped\\] text\n>\n> end\n> \\]',
+      '> \\[\n> x\n>\n>    y\n>       \\]\n>\n> [link](https://example.test)',
+      '> \\[\n> x\n>\n> y\n>\t\\]\n>\n> [link](https://example.test)',
+      '> 1.\titem\n>\n>       \\[\n>       x\n>\n>       y\n>         \\]\n>\n>       [link](https://example.test)',
+      '-\n    intro\n\n  \\[\n  x\n\n  y\n      \\]\n\n  [link](https://example.test)',
+      '-   \n  intro\n\n  \\[\n  x\n\n  y\n      \\]\n\n  [link](https://example.test)',
+    ]) expect(prepareMarkdownMath(source, true).content).toBe(source);
+  });
+
+  test('accepts up to three spaces before a standalone close', () => {
+    for (const spaces of ['', ' ', '  ', '   ']) {
+      const source = `\\[\nx\n\ny\n${spaces}\\]`;
+      expect(prepareMarkdownMath(source, false).content).toContain('$$');
+    }
+  });
+
+  test('accepts independent indentation and quote spacing on the close', () => {
+    for (const source of [
+      '\\[\nx\n\n  y\n \\]',
+      '> \\[\n> x\n>\n> y\n>\\]',
+      '- item\n\n    \\[\n    x\n\n    y\n  \\]',
+      '-\n    intro\n\n  \\[\n  x\n\n  y\n  \\]',
+      '-   \n  intro\n\n  \\[\n  x\n\n  y\n  \\]',
+      '-\titem\n\n    \\[\n    x\n\n    y\n    \\]',
+    ]) expect(prepareMarkdownMath(source, false).content).toContain('$$');
+  });
+
+  test('keeps LaTeX line spacing after an escaped backslash', () => {
+    const source = '\\[\n\\begin{aligned}\na &= b \\\\[1em]\n\nc &= d\n\\end{aligned}\n\\]';
+    const prepared = prepareMarkdownMath(source, false);
+    expect(prepared.content).toContain('$$');
+    const html = renderToStaticMarkup(<Streamdown
+      mode="static" parseIncompleteMarkdown={false} controls={false}
+      plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+      {...getMarkdownProcessingOptions(false, false)}
+    >{prepared.content}</Streamdown>);
+    const body = new Window().document.createElement('div');
+    body.innerHTML = html;
+    expect(body.querySelector('.katex-error')).toBeNull();
+    expect(body.querySelector('annotation')?.textContent).toContain('\\\\[1em]');
+  });
+
+  test('keeps a quote formula prepared across streamed quote paragraphs', () => {
+    const prepare = createMarkdownMathPreparer();
+    const source = '> \\[\n> x\n>\n> y\n> \\]\n>\n';
+    const first = prepare(source, true);
+    const next = prepare(`${source}> tail\n>\n`, true);
+    expect(next.remend).toBe(first.remend);
+    expect(next.content).toBe(`${first.content}> tail\n>\n`);
   });
 });

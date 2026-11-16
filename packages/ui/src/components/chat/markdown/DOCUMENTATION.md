@@ -94,7 +94,8 @@ Inline markup needs a sanitizer, and the app has none for SVG: `rehype-sanitize`
 ## Ownership
 
 `remarkMathCompatibility` parses inline and display math.
-`markdownMathBlocks` finds standalone bracket formulas with blank lines at the document root.
+`markdownMathBlocks` finds standalone bracket formulas with blank lines.
+It finds formulas at the document root and inside lists and quotes.
 It uses the shared Markdown parser.
 It prepares formulas before Streamdown completes partial text and divides a document into blocks.
 
@@ -105,7 +106,7 @@ It prepares formulas before Streamdown completes partial text and divides a docu
 - Code fences, links and ordinary bracket prose keep their Markdown behavior.
 - Content inside lists and quotes keeps its Markdown behavior.
 - Incomplete delimiters keep their Markdown behavior.
-- Bracket formulas with blank lines inside lists and quotes are unsupported.
+- Formulas inside a list nested in a quote remain unsupported.
 - If extension identifier rules, repository references or emoji shortcodes are active, the preparer leaves the source unchanged.
 - Numeric single-dollar formulas follow the existing currency rule.
 
