@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import process from "node:process"
 
@@ -12,6 +12,10 @@ import { resolveBunExecutable } from "../lib/bun-executable.mjs"
 const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
+// What the server keeps of the UI's settings: the base file and the
+// per-device profile fields.
+const SETTINGS_FILES = ["settings.json", "preferences.json"]
+const SETTINGS_BASELINE = "settings-baseline"
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Relay Desk",
   GIT_AUTHOR_EMAIL: "dev@relay-desk.test",
@@ -249,6 +253,12 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     })
     await waitUntil(() => portAnswers(`${uiUrl}/`), 120_000, "the UI", ui, serverLog)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
+    // A scenario can change a setting the server keeps (Don't ask again on a
+    // move); the reset puts this copy back so the next one starts the same.
+    mkdirSync(join(root, SETTINGS_BASELINE), { recursive: true })
+    for (const file of SETTINGS_FILES) {
+      if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
+    }
   } catch (error) {
     await stop()
     throw error
@@ -277,6 +287,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
 export const attachKeptStand = async (info) => {
   if (!existsSync(info.project) || !existsSync(info.data)) throw new Error(`The kept stand at ${info.root} is gone; start a new one.`)
   if (!await assertIsolated(info.apiUrl)) throw new Error(`Nothing answers on ${info.apiUrl}; the kept stand has stopped.`)
+  if (!existsSync(join(info.root, SETTINGS_BASELINE))) throw new Error(`The kept stand at ${info.root} has no settings baseline, so its reset cannot undo settings a scenario changes; start a new one.`)
   return attachStand(info)
 }
 
@@ -317,6 +328,11 @@ const attachStand = (info) => {
     for (const session of sessions) {
       const response = await fetch(`${info.apiUrl}/api/session/${encodeURIComponent(session.id)}?directory=${encodeURIComponent(session.directory)}`, { method: "DELETE" })
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
+    }
+    for (const file of SETTINGS_FILES) {
+      const baseline = join(info.root, SETTINGS_BASELINE, file)
+      if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))
+      else rmSync(join(info.data, file), { force: true })
     }
     gitIn(info.project, ["reset", "-q", "--hard", "HEAD"])
     gitIn(info.project, ["clean", "-fdq"])

@@ -122,7 +122,9 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
   const page = await browser.newPage()
   await page.client.send("Page.addScriptToEvaluateOnNewDocument", { source: "try { localStorage.setItem('pwa-install-toast-dismissed', 'true') } catch {}" })
   await page.client.send("Browser.grantPermissions", { permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"], origin: stand.uiUrl, browserContextId: page.browserContextId }).catch(() => undefined)
-  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, shots: 0, artifacts: [], defaultModel: DEFAULT_MODEL }
+  const downloadDir = join(dir, "downloads")
+  await page.allowDownloads(downloadDir)
+  const ctx = { page, stand, vocabulary, vars: { project: stand.project }, background: [], dir, downloadDir, shots: 0, artifacts: [], defaultModel: DEFAULT_MODEL }
   const startedAt = Date.now()
   const result = { id: scenario.id, title: scenario.title, ok: true, seconds: 0, failure: null, artifacts: ctx.artifacts, dir: relative(REPO_ROOT, dir) }
   for (const [index, step] of scenario.steps.entries()) {

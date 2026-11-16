@@ -74,13 +74,18 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `session.create` `as`, `title` | Creates a session in the project; `as` names the variable holding its id |
 | `session.send` `session`, `prompt`, `model`, `wait` | Sends a prompt as another client would; waits for the answer unless `wait` is false |
 | `session.idle`, `session.busy` `session` | Waits for the session's status |
-| `file.write` `path`, `content`; `file.delete` `path` | Changes the project on disk; `content` may be an array of lines |
-| `file.expect` `path`, `contains` or `equals` | Waits for the file's content |
+| `file.write` `path`, `content`, `times`; `file.delete` `path` | Changes the project on disk; `content` may be an array of lines; with `times` it writes that many files, `{n}` in the path numbered 01, 02, ... |
+| `file.expect` `path`, `contains`, `equals` or `exists` | Waits for the file's content, or for the path to exist (`true`) or be gone (`false`) |
 | `open` `session`, `phone` | Loads the app, at that session when given; `"phone": true` loads the phone layout (`/mobile.html`) at a phone's size with touch, and every later click is a tap |
 | `reload` `ready` | Reloads the page and waits for the composer; `"ready": false` does not wait, for a reload while the server is stopped |
-| `click`, `hover` `on` | Moves the real mouse to the element's centre, once it stands still and nothing covers it; `"button": "right"` on a click opens a context menu, `"button": "long"` presses a finger for 0.8 s (a phone row's menu); fails when something still covers it at the timeout |
+| `click`, `hover` `on`; `button`, `clicks` on a click | Moves the real mouse to the element's centre, once it stands still and nothing covers it; `"button": "right"` opens a context menu, `"button": "long"` presses a finger for 0.8 s (a phone row's menu), `"clicks": 2` double-clicks; fails when something still covers it at the timeout |
 | `drag` `on`, `to` | Presses on the element, moves to the centre of `to` (an object with its own `on`, `text`, `index`) with the button held, and releases there; both ends must be on screen together |
-| `wheel` `on`, `dy`, `times` | Scrolls with the wheel over the element |
+| `wheel` `on`, `dy`, `dx`, `times` | Scrolls with the wheel over the element, down by `dy` and sideways by `dx` |
+| `dragStart` `on` or `files` | Starts a native HTML drag from the element, or holds `files` (`name`, `content`) as if dragged in from the desktop |
+| `dragOver`, `drop` `on` | Moves the drag over the element; drops it there |
+| `dragCancel` `on` | Ends a row's drag over the element without a drop, as Escape or a release outside a target does |
+| `chooseFiles` `files` | The next file picker the page opens gets these files (`name`, `content`) as if the user chose them |
+| `download` `name`, `contains` | Waits for the browser to finish downloading a file of that name and checks its content |
 | `type` `text`; `press` `key`, `mods`, `times` | Types into the focused element; presses a key (`mods`: `shift`, `alt`, `ctrl`, `meta`, `mod` for Cmd on macOS and Ctrl elsewhere) |
 | `see` `on`, `count`, `disabled`, `inView` | Waits until the element shows (exactly `count` of them; `count: 0` asserts none; `inView` on screen: some innermost element holding `text` intersects the viewport) |
 | `gone` `on` | Waits until no such element shows |
@@ -102,7 +107,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell, so no provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
-- Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, the user's profile settings (Settings > Chat and the like) dropped back to the stand's, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back.
+- Every scenario starts from the same state: all sessions deleted, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file: that one asks, so a scenario can raise a permission request by having the agent read such a file.
 - A stopped run leaves nothing: the dev server's process group, the fixture, Chrome and its profile, the stand folder and the Vite cache of its port are removed on exit, on failure, and on Ctrl-C or SIGTERM, startup included.
@@ -138,3 +143,11 @@ Every check polls until it holds or times out, and clicks wait until the target 
 ### Why a setting is a precondition and not clicks in Settings
 
 Some chat behavior shows only with a setting on (changed files under a turn, reasoning traces). The scenario is about the chat, so the `settings` step saves the setting through the server the way another window would, and the page reads it when it opens. Clicking through Settings in every such scenario would tie chat scenarios to the Settings page's markup and test it many times over; Settings gets its own zone when it needs one.
+
+### Why native drags are intercepted
+
+A row drag (move a file, attach it to the chat) and a drop from the desktop are HTML drag and drop, which a headless browser cannot run from mouse events alone: Chrome starts its own drag loop and waits for the operating system. `dragStart` has Chrome hand the drag data to the runner instead, after the page's own `dragstart` ran, and `dragOver`, `drop` and `dragCancel` deliver it as the browser would. A drop from the desktop needs no source in the page, so `dragStart` with `files` only builds the data. The `drag` step stays for pointer gestures inside the page, such as selecting diff rows.
+
+### Why the reset restores settings
+
+Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's settings files once it is up and the reset copies them back, so a scenario's choice ends with it.

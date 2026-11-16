@@ -157,7 +157,7 @@ export class Page {
   }
 
   async mouse(type, point, extra = {}) {
-    await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra })
+    await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra }, { timeoutMs: 30_000 })
   }
 
   // A point another element still covers when the wait ends comes back
@@ -182,7 +182,9 @@ export class Page {
     await this.client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
   }
 
-  async click(target, timeoutMs, button = "left") {
+  // `count` 2 is a double-click: two press-release pairs, the second counted
+  // as the second click, which is what fires dblclick.
+  async click(target, timeoutMs, { button = "left", count = 1 } = {}) {
     if (this.phone || button === "long") {
       const point = await this.point(target, timeoutMs)
       if (point?.hits) await this.touch(point, button === "long" ? 800 : 40)
@@ -190,9 +192,66 @@ export class Page {
     }
     const point = await this.hover(target, timeoutMs)
     if (!point?.hits) return point
-    await this.mouse("mousePressed", point, { button, buttons: button === "right" ? 2 : 1, clickCount: 1 })
-    await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount: 1 })
+    const buttons = button === "right" ? 2 : 1
+    for (let clickCount = 1; clickCount <= count; clickCount += 1) {
+      await this.mouse("mousePressed", point, { button, buttons, clickCount })
+      await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount })
+    }
     return point
+  }
+
+  // A native HTML drag: Chrome hands the drag data to the client instead of
+  // running its own drag loop, which a headless browser cannot finish. The
+  // source still gets dragstart; dragOver and drop then deliver the data to
+  // the page as the browser would.
+  async startHtmlDrag(from) {
+    await this.client.send("Input.setInterceptDrags", { enabled: true })
+    const intercepted = this.client.once("Input.dragIntercepted", 15_000).then(({ data }) => data, () => null)
+    try {
+      await this.mouse("mouseMoved", from)
+      await this.mouse("mousePressed", from, { button: "left", buttons: 1, clickCount: 1 })
+      for (let move = 1; move <= 6; move += 1) {
+        await this.client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + move * 4, y: from.y + move * 3, button: "left", buttons: 1 }, { timeoutMs: 10_000 })
+      }
+    } catch {
+      return null
+    }
+    return intercepted
+  }
+
+  async dragEvent(type, point, data, modifiers = 0) {
+    await this.client.send("Input.dispatchDragEvent", { type, x: point.x, y: point.y, data, modifiers }, { timeoutMs: 10_000 })
+  }
+
+  async endHtmlDrag(point) {
+    await this.mouse("mouseReleased", point, { button: "left", buttons: 0, clickCount: 1 })
+    await this.client.send("Input.setInterceptDrags", { enabled: false })
+  }
+
+  // The next file picker the page opens gets `paths` as if the user chose them.
+  async armFileChooser(paths) {
+    this.fileChooserError = null
+    await this.client.send("Page.setInterceptFileChooserDialog", { enabled: true })
+    const off = this.client.on("Page.fileChooserOpened", ({ backendNodeId }) => {
+      off()
+      this.client.send("DOM.setFileInputFiles", { files: paths, backendNodeId })
+        .catch((error) => { this.fileChooserError = error.message })
+        .finally(() => this.client.send("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => undefined))
+    })
+  }
+
+  // Downloads land in `dir`; `downloads` lists them by the name the page gave
+  // them, with their state.
+  async allowDownloads(dir) {
+    this.downloads = new Map()
+    this.client.on("Page.downloadWillBegin", ({ guid, suggestedFilename }) => {
+      this.downloads.set(guid, { name: suggestedFilename, state: "inProgress" })
+    })
+    this.client.on("Page.downloadProgress", ({ guid, state }) => {
+      const download = this.downloads.get(guid)
+      if (download) download.state = state
+    })
+    await this.client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: dir })
   }
 
   // Presses at `from`, moves to `to` in small steps with the button held, and
