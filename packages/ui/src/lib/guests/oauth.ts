@@ -18,7 +18,6 @@ const statusSchema = z.object({
   account: z.string(),
   hasClient: z.boolean(),
   settings: z.record(z.string().regex(SETTING_KEY), z.string()),
-  // Ids of the secret fields with a stored value; the values stay on the server.
   secretsSet: z.array(z.string()).optional().default([]),
   redirectUri: z.string().optional(),
 });

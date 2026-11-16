@@ -4,11 +4,6 @@ import { z } from 'zod';
 
 import { proxyGuestServiceRequest } from './service';
 
-/**
- * Why a source section shows no fresh view: the service did not answer with a
- * success (`unreachable`), or answered with something that is not a view the
- * host can draw (`invalid`).
- */
 export type GuestStatusViewFailure = 'unreachable' | 'invalid';
 
 export type GuestStatusViewRead =
@@ -17,16 +12,12 @@ export type GuestStatusViewRead =
 
 type GuestStatusActionResult =
   | { ok: true }
-  /** `message` is the service's own explanation when it gave one. */
   | { ok: false; message: string | null };
 
 const actionFailureSchema = z.object({ message: z.string().trim().min(1).max(300) });
 
-/** What the service is told about where the section shows. */
 type GuestStatusContext = {
-  /** The project the Work Status panel shows; absent without one. */
   directory: string | null;
-  /** The app's language, so the service can format numbers and words for it. */
   locale: string;
 };
 
@@ -47,7 +38,6 @@ const parseView = (body: string): GuestStatusView | null => {
   }
 };
 
-/** Tells the service a control was activated. */
 export const postGuestStatusAction = async (
   guestId: string,
   path: string,
@@ -68,13 +58,6 @@ export const postGuestStatusAction = async (
   }
 };
 
-/**
- * Reads a source section, keeping what did not change. An answer identical to
- * the last one returns the last view itself, unparsed; otherwise each row and
- * the header controls keep their previous objects while unchanged. Rows are
- * memoized by identity, so a sample that moves one number redraws one row and
- * leaves the header alone.
- */
 export const createGuestStatusViewReader = (
   guestId: string,
   path: string,
@@ -112,7 +95,6 @@ export const createGuestStatusViewReader = (
   };
 };
 
-/** Whether anyone can see the app, and a way to hear when they can again. */
 export type StatusViewVisibility = {
   isHidden: () => boolean;
   onVisible: (listener: () => void) => () => void;
@@ -130,11 +112,6 @@ const documentVisibility = (): StatusViewVisibility => ({
 });
 
 export type StatusViewPoller = {
-  /**
-   * Read now, as after an action; a read in flight is followed by one more.
-   * Resolves once a read that started after the call has been delivered, so
-   * the caller knows the view it shows reflects what happened before.
-   */
   refresh: () => Promise<void>;
   stop: () => void;
 };
@@ -148,12 +125,6 @@ type StatusViewPolling = {
   cancel?: (id: number) => void;
 };
 
-/**
- * Reads a source section now and then every `interval` after the previous
- * read finished, so a slow service is never asked twice at once. Nothing is
- * read while the document is hidden; the next read happens when it shows.
- * Results that arrive after `stop` are dropped.
- */
 export const startStatusViewPolling = ({
   read,
   interval,
@@ -166,7 +137,6 @@ export const startStatusViewPolling = ({
   let running = false;
   let again = false;
   let timer: number | null = null;
-  // Reads are numbered as they start; a waiter wants one numbered at least `from`.
   let started = 0;
   let waiters: Array<{ from: number; resolve: () => void }> = [];
 
