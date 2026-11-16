@@ -3,8 +3,6 @@ import { readDiskCache, writeDiskCache } from './disk-cache.js';
 const GITHUB_API_BASE = 'https://api.github.com';
 const CACHE_TTL_MS = 3 * 60 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 5 * 60 * 1000;
-// Keep well under the catalog route's client request deadline so optional
-// metadata enrichment can never abort catalog loading.
 const FETCH_TIMEOUT_MS = 1500;
 const DISK_CACHE_FILE = 'skills-github-meta.json';
 
@@ -88,8 +86,6 @@ const fetchRepoMeta = async (normalizedRepo) => {
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!response.ok) {
-        // Cache failures briefly so repeated catalog loads do not re-hit a
-        // rate-limited or failing API for the same repository.
         metaCache.set(normalizedRepo, {
           expiresAt: Date.now() + FAILURE_CACHE_TTL_MS,
           value: { stars: null, repoUpdatedAt: null },
@@ -120,18 +116,12 @@ const fetchRepoMeta = async (normalizedRepo) => {
   return run;
 };
 
-/**
- * Fetch GitHub repository metadata (stars, last push) for a list of
- * `owner/repo` strings. Best-effort: failed lookups resolve to null and
- * never block the catalog response.
- */
 export async function fetchGitHubRepoMetas(normalizedRepos) {
   const unique = [...new Set(normalizedRepos.filter(Boolean))];
   const entries = await Promise.all(unique.map(async (repo) => [repo, await fetchRepoMeta(repo)]));
   return Object.fromEntries(entries);
 }
 
-/** For tests only: clear the in-memory repository metadata cache. */
 export function clearGitHubMetaCache() {
   metaCache.clear();
   inFlight.clear();

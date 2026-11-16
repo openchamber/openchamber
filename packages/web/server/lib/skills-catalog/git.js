@@ -28,9 +28,6 @@ const isolatedGitEnvironment = (allowedProtocol) => {
   env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
   env.GIT_ALLOW_PROTOCOL = allowedProtocol;
   if (allowedProtocol === 'https') {
-    // Git's Curl transport also consults netrc outside Git configuration; an
-    // ambient ~/.netrc entry must not authenticate as another account than
-    // the selected one. SSH keeps HOME for known_hosts.
     for (const name of Object.keys(env)) {
       if (['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'HOMEDRIVE', 'HOMEPATH'].includes(name.toUpperCase())) delete env[name];
     }
@@ -121,7 +118,6 @@ export async function runGit(args, options = {}) {
         '-c', 'fetch.recurseSubmodules=false',
       );
     } else if (identity) {
-      // A selected identity that names no credential never falls back to System Git.
       return { ok: false, stdout: '', stderr: '', message: 'Selected Git identity is unavailable' };
     }
 

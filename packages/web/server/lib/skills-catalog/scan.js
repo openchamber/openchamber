@@ -39,7 +39,6 @@ function parseSkillMd(content) {
 }
 
 async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref = null }) {
-  // A `#ref` on the source picks the branch or tag; otherwise the default branch.
   const branch = ref ? ['--branch', ref] : [];
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, tempDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, tempDir];
@@ -79,8 +78,6 @@ export async function scanSkillsRepository({
 
   const effectiveSubpath = parsed.effectiveSubpath || (typeof defaultSubpath === 'string' && defaultSubpath.trim() ? defaultSubpath.trim() : null);
   const cloneUrl = identity?.transport === 'ssh' ? parsed.cloneUrlSsh : parsed.cloneUrlHttps;
-  // Only commands that reach the remote get the identity: the clone, and the
-  // checkout or `show` that lazily fetch blobs from the partial clone.
   const remoteGitOptions = { identity, credentialResolver };
 
   void removeStaleCatalogFolders();
@@ -104,17 +101,12 @@ export async function scanSkillsRepository({
 
     let skillMdPaths = null;
 
-    // Fast path: sparse checkout only SKILL.md files, then parse from disk.
-    // This avoids one `git show` per skill.
     const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
     if (sparseInit.ok) {
       const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
       if (sparseSet.ok) {
         const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { ...remoteGitOptions, timeoutMs: 60_000 });
         if (checkout.ok) {
-          // The index also lists the files the sparse checkout left out, and
-          // each of those would cost a `git show` below; the subpath limits
-          // the list to what is on disk, as `ls-tree` does in the fallback.
           const lsFilesArgs = ['-C', tempBase, 'ls-files'];
           if (effectiveSubpath) {
             lsFilesArgs.push('--', effectiveSubpath);
@@ -131,7 +123,6 @@ export async function scanSkillsRepository({
       }
     }
 
-    // Fallback: list tree and read SKILL.md blobs via git.
     if (!Array.isArray(skillMdPaths)) {
       const listArgs = ['-C', tempBase, 'ls-tree', '-r', '--name-only', 'HEAD'];
       if (effectiveSubpath) {
@@ -140,7 +131,6 @@ export async function scanSkillsRepository({
 
       const listResult = await runGit(listArgs, { timeoutMs: 30_000 });
       if (!listResult.ok) {
-        // If subpath doesn't exist, treat as empty scan.
         return {
           ok: true,
           normalizedRepo: parsed.normalizedRepo,
@@ -156,7 +146,6 @@ export async function scanSkillsRepository({
         .filter((p) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
     }
 
-    // Root-level SKILL.md doesn't map cleanly to OpenCode's "skill name == folder name" convention.
     const uniqueSkillDirs = Array.from(
       new Set(
         skillMdPaths
@@ -178,7 +167,6 @@ export async function scanSkillsRepository({
         const warnings = [];
         let skillMdContent = '';
 
-        // Prefer filesystem reads when sparse checkout succeeded.
         const filePath = toFsPath(skillMdPath);
         try {
           skillMdContent = await fs.promises.readFile(filePath, 'utf8');
@@ -217,7 +205,6 @@ export async function scanSkillsRepository({
 
     await Promise.all(Array.from({ length: Math.min(maxParallel, uniqueSkillDirs.length || 1) }, () => worker()));
 
-    // Stable ordering for UX
     items.sort((a, b) => a.skillName.localeCompare(b.skillName));
 
     return {
