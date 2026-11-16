@@ -1,24 +1,12 @@
 import { OpenCode } from '@opencode/client';
 import { asNonEmptyString } from '../shared/guards.js';
 
-// The running OpenCode instance is the only transport this module has. It is
-// wired once from `server/index.js`, and re-read on every call because the
-// port and the server password both move across an OpenCode restart.
 let connection = null;
 
-/**
- * Wires this module to the running OpenCode instance. Pass `null` to detach.
- * Until it is wired, every lookup answers "no client", which the callers
- * report as "no small model available" rather than guessing.
- */
 export function configureOpenCodeRuntimeProviders(next) {
   connection = next ?? null;
 }
 
-/**
- * Drops anything cached about the running instance. An OpenCode restart can
- * change the port, the password and the model list.
- */
 export function resetOpenCodeRuntimeProviders() {
   modelCache = null;
   modelCacheKey = '';
@@ -27,25 +15,15 @@ export function resetOpenCodeRuntimeProviders() {
 
 const stripTrailingSlash = (value) => value.replace(/\/+$/, '');
 
-/**
- * A `@opencode/client` bound to the running instance and scoped to
- * `directory`, or `null` when OpenCode is not reachable yet.
- *
- * Built per call on purpose: `OpenCode.make` only closes over a base URL and
- * headers, and both change when OpenCode restarts.
- */
 export function getSmallModelClient(directory) {
   if (!connection) return null;
   let baseUrl;
   try {
     baseUrl = stripTrailingSlash(connection.buildOpenCodeUrl('', ''));
   } catch {
-    // The port is not known yet — OpenCode has not finished starting.
     return null;
   }
   const headers = { ...connection.getOpenCodeAuthHeaders() };
-  // Model and provider lists are read through a location; without a directory
-  // OpenCode would start its own working directory, MCP servers included.
   const requested = typeof directory === 'string' ? directory.trim() : '';
   const scope = requested || connection.getDefaultDirectory?.() || null;
   if (scope) {
@@ -78,26 +56,12 @@ let modelCacheAt = 0;
 
 const unwrap = (payload) => (Array.isArray(payload?.data) ? payload.data : []);
 
-// The SDK wraps errors from our fetch hook in `cause`; service callers may
-// already receive the unwrapped refusal. Return it so its fields stay together.
 export function getTrustRefusal(error) {
   if (error?.code === 'opencode_trust_required') return error;
   if (error?.cause?.code === 'opencode_trust_required') return error.cause;
   return null;
 }
 
-/**
- * Every model the running OpenCode knows about for `directory`.
- *
- * Cached briefly: a generation needs the model's context and output limits,
- * and paying a round trip for them on every title or summary would be the
- * wrong trade. An empty array means "asked and got nothing", so callers fall
- * back to conservative defaults rather than refusing.
- *
- * An empty answer is not cached: OpenCode 2 answers with an empty catalog
- * while it is still starting, and keeping that would hide every provider from
- * the pickers until the cache expired.
- */
 export async function listModelInfos(client, directory) {
   const key = typeof directory === 'string' ? directory : '';
   if (modelCache && modelCacheKey === key && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) {
@@ -113,8 +77,6 @@ export async function listModelInfos(client, directory) {
   } catch (error) {
     const refusal = getTrustRefusal(error);
     if (refusal) throw refusal;
-    // Keep the previous answer for this directory when there is one: a
-    // momentarily unreachable OpenCode must not retract model limits.
     return modelCacheKey === key && modelCache ? modelCache : [];
   }
 }
@@ -129,9 +91,6 @@ export async function listProviderInfos(client) {
   }
 }
 
-/**
- * The model OpenCode would pick on its own, or `null` when it cannot say.
- */
 export async function getDefaultModelInfo(client) {
   try {
     const payload = await client.model.default();
@@ -144,13 +103,6 @@ export async function getDefaultModelInfo(client) {
   }
 }
 
-/**
- * The model and thinking variant the user configured for OpenCode's hidden
- * `title` agent, or `null` when there is none. OpenCode 2 merges
- * `agents.title.model` and the v1 `small_model` (migrated onto that agent)
- * across every config layer, and its own session titles run on this model
- * before any family scan.
- */
 export async function getConfiguredSmallModelRef(client) {
   try {
     const { model } = (await client.agent.get({ agentID: 'title' })).data;
@@ -162,17 +114,10 @@ export async function getConfiguredSmallModelRef(client) {
   } catch (error) {
     const refusal = getTrustRefusal(error);
     if (refusal) throw refusal;
-    // No `title` agent (removed in config, or a cold location still loading
-    // its agents) or OpenCode unreachable: nothing configured to honor.
     return null;
   }
 }
 
-/**
- * The model entry for a `provider/model` reference. `id` is the catalog key a
- * reference holds; `modelID` is the provider API name, shared by derived
- * entries (`gpt-6-luna` and `gpt-6-luna-fast`), so an exact `id` match wins.
- */
 export function findModelInfo(models, providerID, modelID) {
   const ofProvider = models.filter((model) => model?.providerID === providerID);
   return ofProvider.find((model) => model.id === modelID)
