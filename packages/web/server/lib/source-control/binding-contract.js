@@ -1,25 +1,16 @@
 import { isProviderId, isProviderUserId, isProviderUsername } from './provider-id.js';
 
-// Persisted parsers validate a provider id's syntax only; the provider
-// registry decides at read time whether that provider is available. A record
-// written by a provider this build does not know therefore parses, survives
-// every write untouched, and never fails the whole store.
 const plain = (value) => value !== null && Object.prototype.toString.call(value) === '[object Object]'
   && Object.getPrototypeOf(value) === Object.prototype;
 const string = (value) => Object.prototype.toString.call(value) === '[object String]';
 const text = (value) => string(value) && value.length > 0;
 const safePresentationText = (value, maximum = 512) => text(value) && value.length <= maximum
   && value.trim() === value && !/[\0\r\n]/.test(value);
-// The same rule as `isLoopbackHost` in `../git/loopback-http.js` (localhost,
-// 127.0.0.0/8, ::1), inlined because this file is bundled into the web client
-// and stays dependency-free; `binding-contract.test.js` holds the two equal.
 const LOOPBACK_V4 = /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 const isPresentationLoopbackHost = (hostname) => {
   const value = hostname.toLowerCase();
   return value === 'localhost' || value === '::1' || value === '[::1]' || LOOPBACK_V4.test(value);
 };
-// An instance is either a bare lowercase hostname (GitHub's form) or a
-// normalized origin (GitLab's form): HTTPS, or HTTP on a loopback host.
 const normalizedPresentationInstance = (value) => {
   if (!value.instance.includes('://')) {
     return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value.instance);
@@ -93,8 +84,6 @@ const validateBinding = (value, allowPresentation = false) => {
       || !(entry.endpoint === null && entry.readiness !== 'ready' || endpoint(entry.endpoint))) throw invalid();
   }
   for (const entry of value.remotes) {
-    // `inherited` marks a grant derived from the repository's identity in a
-    // response; persisted records never carry it.
     if (!keys(entry, ['name', 'fetch', 'push', 'mode', 'readiness'], [
       'credentialId', ...(allowPresentation && entry.mode === 'managed' ? ['presentation'] : []),
       ...(allowPresentation ? ['inherited'] : []),
@@ -152,8 +141,6 @@ export const resolveBindingReadiness = (binding, repository) => {
       || entry.push.fingerprint !== current.push.fingerprint) ? { ...entry, readiness: 'config-changed' } : entry;
   });
   const result = { ...binding, providers, remotes: grants };
-  // The summary follows what the grants still authorize: a remote added beside
-  // the bound ones changes the config revision but nothing the binding relies on.
   result.state = bindingSummary(result);
   return result;
 };

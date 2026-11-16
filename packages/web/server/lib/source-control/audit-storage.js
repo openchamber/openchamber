@@ -17,13 +17,10 @@ const GIT_OPERATIONS = new Set([
   'contributor-fetch', 'checkout-hydration', 'checkout-actions',
 ]);
 const PROVIDER_OPERATIONS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
-// What a provider write acts on: `issue-*` names an issue, `discussion-*` a discussion, everything else a change request.
 export const providerTargetKind = (operation) => {
   if (operation.startsWith('issue-')) return 'issue';
   return operation.startsWith('discussion-') ? 'discussion' : 'change-request';
 };
-// Both vocabularies grow with each feature, so a record can name an operation
-// this build does not know yet; it stays readable without being interpreted.
 const isKnownOperation = (operation) => PROVIDER_OPERATIONS.has(operation) || GIT_OPERATIONS.has(operation);
 const isUnknownOperation = (value, allowUnknownVocabulary) => allowUnknownVocabulary
   && isString(value.operation) && !isKnownOperation(value.operation);
@@ -53,8 +50,6 @@ const isOpaqueReference = (value, max = 1024) => isBoundedText(value, max)
 const isFingerprint = (value) => isString(value) && /^[A-Za-z0-9_-]{43}$/.test(value);
 const isNullableText = (value) => value === null || isSafeText(value);
 const isNullableAccountId = (value) => value === null || isBoundedText(value);
-// A name this build does not know is printed in a warning, so it carries no
-// path, scheme or userinfo: lowercase words joined by '-' or ':'.
 const isVocabularyName = (value, max) => isBoundedText(value, max) && /^[a-z][a-z0-9:-]*$/.test(value);
 
 const invalidStore = () => Object.assign(new Error('Source control audit storage is invalid'), {
@@ -143,8 +138,6 @@ const hydrationTransportMatchesTarget = (reference, target, allowUnknownVocabula
       ? isPlainObject(reference) && reference.kind === 'sync'
       : isSingleTransportReference(reference);
   }
-  // A name this build cannot read may need no transport at all, but a grant it
-  // records still may claim only the endpoints the target recorded for it.
   if (target.auxiliaries === undefined) {
     return isSingleTransportReference(reference)
       || (unknownOperation && (reference === null || reference.kind === 'sync'));
@@ -199,8 +192,6 @@ const foreignNames = (record) => {
 const parseState = (value, onForeignRecords) => {
   if (!isPlainObject(value) || !hasExactKeys(value, ['version', 'records'])
     || value.version !== VERSION || !isPlainObject(value.records)) throw invalidStore();
-  // A record from a build with a wider operation vocabulary is kept verbatim: it
-  // must stay readable, and dropping it here would erase it on the next write.
   const foreign = [];
   const records = Object.fromEntries(Object.entries(value.records).map(([id, record]) => {
     if (!isRecord(record, id)) {
@@ -236,8 +227,6 @@ export function createSourceControlAuditStore({
     throw new TypeError('Invalid source control audit store options');
   }
   let writes = Promise.resolve();
-  // Holds only the foreign records of the latest read, so it stays as small as
-  // the file and a record still in it is reported once per store instance.
   let reportedForeignRecords = new Set();
   const reportForeignRecords = (foreign) => {
     for (const [id, record] of foreign) {
@@ -271,11 +260,6 @@ export function createSourceControlAuditStore({
       throw error;
     }
   };
-  // A Git operation plan that never started is a record of nothing: the
-  // registry cancels unstarted plans after 15 minutes and a restart cancels
-  // them at once, and neither ever starts again. Such a record would otherwise
-  // stay `planned` forever and hold a capacity slot; an hour is well past
-  // any plan that could still start. Running records keep their uncertainty.
   const prune = (state, timestamp) => {
     for (const [id, record] of Object.entries(state.records)) {
       if (TERMINAL_STATES.has(record.state) && record.expiresAt <= timestamp) delete state.records[id];

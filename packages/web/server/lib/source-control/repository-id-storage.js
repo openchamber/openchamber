@@ -14,7 +14,6 @@ const sameDirectory = (record, stats) => record?.ino === String(stats.ino) && re
 const hasBirthtime = (stats) => Number.isFinite(stats.birthtimeMs) && stats.birthtimeMs > 0;
 const legacyId = (directory, stats) => `repo_${digest(directory, String(stats.dev), String(stats.ino))}`;
 
-/** Keep the established ID while the same Git directory survives a remount. */
 export async function resolveRepositoryFilesystemId(commonDirectory, { fsImpl = fs } = {}) {
   const stats = await fsImpl.stat(commonDirectory);
   const dataDir = process.env.OPENCHAMBER_DATA_DIR
@@ -44,14 +43,11 @@ export async function resolveRepositoryFilesystemId(commonDirectory, { fsImpl = 
     const current = await read();
     if (sameDirectory(current, currentStats)) return current.repositoryId;
     if (!await birthtimeHoldsStill(fsImpl, path, commonDirectory, currentStats)) {
-      // A reused inode must not restore the first repository's legacy grant.
       if (current) throw Object.assign(new Error('Repository directory identity cannot be verified'), {
         code: 'UNVERIFIABLE_REPOSITORY_IDENTITY',
       });
       return legacyId(commonDirectory, currentStats);
     }
-    // First adoption keeps every existing binding, revision and receipt valid.
-    // A replacement gets a new ID even if the filesystem reused the inode.
     const repositoryId = current
       ? `repo_${digest('repository-v3', commonDirectory, String(currentStats.ino), String(currentStats.birthtimeMs))}`
       : legacyId(commonDirectory, currentStats);
