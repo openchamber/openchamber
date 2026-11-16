@@ -162,6 +162,7 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
  */
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
   { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
+  { action: 'render.tierChooser', title: 'Ask for a model tier', description: 'Build the tier chooser card (tiers: [{ tier, model }]); returns the page html to show with render.page awaitAnswer — the pick returns as that call\'s answer { tier, model }' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
