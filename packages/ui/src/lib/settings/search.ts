@@ -11,11 +11,6 @@ import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
 
-/**
- * A title is a translated key, or a literal for an entry named after a
- * product the server describes (a source-control provider's label), since
- * product names stay untranslated in every locale.
- */
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
   | { literalTitle: string; titleKey?: never; titleParams?: never };
@@ -40,15 +35,11 @@ export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContex
     'showMessageTTSButtons' | 'autoReadAloudEnabled' | 'voiceProvider' | 'dictationEnabled' | 'sttProvider'>;
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
-  // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
-  // Windows desktop shell — for controls that only render on win32.
   isWindows: boolean;
-  // Linux desktop shell — for controls that only render on linux.
   isLinux: boolean;
 }
 
-/** The search target (and highlight anchor) of one shortcut row on the Shortcuts page. */
 export const shortcutSearchItemId = (actionId: string): string => `shortcuts.action.${actionId}`;
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -112,8 +103,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.dockBadge',
     descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
     keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
-    // Exactly matches the render guard in DesktopAppSettings: any darwin
-    // Electron shell (isMac already implies isDesktopShell), local or remote host.
     isAvailable: (ctx) => ctx.isMac,
   },
   {
@@ -122,7 +111,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.mobileApp.keepScreenAwake.label',
     descriptionKey: 'settings.mobileApp.keepScreenAwake.info',
     keywords: ['screen', 'display', 'sleep', 'lock', 'awake', 'wake lock', 'timeout', 'battery', 'phone'],
-    // Same guard as MobileAppSettings: the native app, on a WebView with the Screen Wake Lock API.
     isAvailable: () => canKeepScreenAwake(),
   },
   {
@@ -134,7 +122,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    // VS Code has no Panels section in General, so the checkbox stays on Appearance there.
     id: 'appearance.scrollbars-vscode',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.alwaysShowScrollbars',
@@ -243,7 +230,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.inputBarOffset',
     descriptionKey: 'settings.openchamber.visual.field.inputBarOffsetTooltip',
     keywords: ['input', 'home bar', 'offset'],
-    // Only the mobile composer applies this offset (ChatInput gates on isMobile).
     isAvailable: (ctx) => ctx.isMobile,
   },
   {
@@ -373,7 +359,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.sessionReviewOffer',
     descriptionKey: 'settings.openchamber.visual.field.sessionReviewOfferInfo',
     keywords: ['review', 'walkthrough', 'changes', 'diff', 'jev', 'classification'],
-    // Jev runs on the OpenChamber server; VS Code has no such offer.
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -703,7 +688,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.sessions.permissions.defaultMode',
     descriptionKey: 'settings.sessions.permissions.defaultModeInfo',
     keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
-    // The server writes the default onto new sessions; VS Code has none.
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -753,7 +737,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.finishedWorktrees.field.archiveOnDone',
     descriptionKey: 'settings.openchamber.finishedWorktrees.info',
     keywords: ['done', 'finish', 'in work', 'worktree', 'archive', 'cleanup', 'remove'],
-    // The section renders everywhere but VS Code, which has no archives.
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -762,7 +745,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.mergedWorktreeCleanup.field.enable',
     descriptionKey: 'settings.openchamber.finishedWorktrees.info',
     keywords: ['pr', 'pull request', 'merged', 'worktree', 'branch', 'archive', 'cleanup', 'remove'],
-    // The section renders everywhere but VS Code, which has no archives.
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -777,7 +759,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.sessionRetention.field.includeInWork',
     descriptionKey: 'settings.openchamber.sessionRetention.field.includeInWorkInfo',
     keywords: ['in work', 'done', 'cleanup', 'retention', 'archive', 'delete'],
-    // The checkbox shows only while sessions in work are on.
     isAvailable: () => useUIStore.getState().sessionWorkEnabled,
   },
   {
@@ -917,8 +898,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.spaces.field.enabled',
     descriptionKey: 'settings.openchamber.spaces.field.enabledInfo',
     keywords: ['isolated', 'space', 'spaces', 'container', 'docker', 'sandbox', 'agent'],
-    // Never in VS Code: the feature has no entry point there (decision 16 of the design).
-    // Before the feature's first release only with the key on, like the page itself.
     isAvailable: (ctx) => !ctx.isVSCode && isIsolatedSpacesPageVisible(),
   },
   {
@@ -927,7 +906,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.spaces.idleStop.enabled',
     descriptionKey: 'settings.openchamber.spaces.idleStop.enabledInfo',
     keywords: ['idle', 'stop', 'space', 'spaces', 'container', 'hours', 'timeout', 'sleep'],
-    // Rendered only while the switch is on, and never in VS Code.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().isolatedSpacesEnabled,
   },
   {
@@ -936,7 +914,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.spaces.places.machine.label',
     descriptionKey: 'settings.openchamber.spaces.places.machine.info',
     keywords: ['machine', 'ssh', 'remote', 'docker', 'space', 'spaces', 'host', 'server'],
-    // Rendered only while the switch is on, and never in VS Code.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().isolatedSpacesEnabled,
   },
   {
@@ -1340,7 +1317,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['add provider', 'connect provider', 'credentials'],
   },
   {
-    // Opens the Classification providers sub-page (SettingsView sets the request).
     id: 'providers.classification',
     page: 'providers',
     titleKey: 'settings.classification.page.title',
@@ -1465,8 +1441,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.keyboardShortcuts.tooltip',
     keywords: ['keyboard', 'hotkeys', 'bindings'],
   },
-  // Every in-app shortcut the Shortcuts page lists, by its own name. The
-  // system-wide ones (category `desktop`) live on General.
   ...getCustomizableShortcutActions()
     .filter((action) => action.category !== 'desktop')
     .map((action): SettingsSearchItem => ({
@@ -1679,7 +1653,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 ] as const;
 
-/** Static anchors used to seed the first-install baseline. */
 export const SETTINGS_ANCHOR_PAGES: ReadonlyMap<string, SettingsPageSlug> = new Map(
   SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item.page] as const),
 );
@@ -1690,10 +1663,6 @@ export const getAvailableSettingsAnchorPages = (ctx: SettingsSearchAvailabilityC
 
 const SETTINGS_SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
 
-/**
- * One anchor's availability, the same test `getAvailableSettingsAnchorPages`
- * runs, read at render: some items depend on live store state (a tool that is on).
- */
 export const isSettingsAnchorAvailable = (anchorId: string, ctx: SettingsSearchAvailabilityContext): boolean => {
   const item = SETTINGS_SEARCH_ITEMS_BY_ID.get(anchorId);
   if (!item) return false;
@@ -1707,9 +1676,7 @@ interface BuildSettingsSearchResultsOptions {
   visiblePageSlugs?: SettingsPageSlug[];
   t: (key: I18nKey, params?: I18nParams) => string;
   getPageTitle: (slug: SettingsPageSlug) => string;
-  /** The trackers the connected server serves; each adds its own entries. */
   trackers?: readonly TrackerDescriptor[];
-  /** The source-control providers the connected server serves; each adds its card and connect entries. */
   sourceControlProviders?: readonly SourceControlProviderDescriptor[];
 }
 
@@ -1719,12 +1686,6 @@ const CHANGE_REQUEST_SEARCH_NOUNS = {
   change: ['change', 'code review', 'patchset'],
 } satisfies Record<ChangeRequestTerm, string[]>;
 
-/**
- * Each served source-control provider's entries on the Integrations page: its
- * card, `integrations.source-control.<id>`, and the connect block inside it,
- * `.connect`. The card is the anchor `SourceControlProviderCard` renders, so a
- * provider the server adds is searchable with no entry of its own here.
- */
 function sourceControlSearchItems(providers: readonly SourceControlProviderDescriptor[]): SettingsSearchItem[] {
   const notInVSCode = (ctx: SettingsSearchAvailabilityContext) => !ctx.isVSCode;
   return providers.flatMap((descriptor) => {
@@ -1761,12 +1722,6 @@ function sourceControlSearchItems(providers: readonly SourceControlProviderDescr
   });
 }
 
-/**
- * Each served tracker's entries on the Integrations page: the tracker itself,
- * adding an account and its project mapping where its capabilities offer
- * them. Ids are `integrations.<tracker>[.add-workspace|.mapping]`, the ids
- * Linear's entries always had. A tracker without words of its own has none.
- */
 function trackerSearchItems(trackers: readonly TrackerDescriptor[]): SettingsSearchItem[] {
   const notInVSCode = (ctx: SettingsSearchAvailabilityContext) => !ctx.isVSCode;
   return trackers.flatMap((descriptor) => {

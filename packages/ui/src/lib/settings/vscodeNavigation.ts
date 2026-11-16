@@ -2,7 +2,6 @@ import { z } from 'zod';
 
 const navigationString = z.string().trim().min(1).max(4096);
 
-/** Navigation intent sent through the extension host to its Settings tab. */
 export const vscodeSettingsNavigationSchema = z.object({
   page: navigationString,
   itemId: navigationString.nullish(),
