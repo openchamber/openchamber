@@ -1,6 +1,5 @@
 import type { CSSProperties } from 'react';
 
-/** How a PR is coloured: the theme's `--pr-<state>` token. */
 export type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
 type PrVisualInput = {
@@ -11,13 +10,6 @@ type PrVisualInput = {
   mergeableState: string | null | undefined;
 };
 
-/**
- * The one PR colour rule, shared by the sidebar, the Git view and the
- * reference picker. Orange (`blocked`) means something to fix: failed checks
- * or a conflict. Checks still running keep the open colour, and so does
- * GitHub's `blocked` merge state alone, which usually means a missing
- * required review.
- */
 export const prVisualStateOf = (pr: PrVisualInput): PrVisualState => {
   if (pr.state === 'merged') return 'merged';
   if (pr.state === 'closed') return 'closed';
@@ -26,8 +18,4 @@ export const prVisualStateOf = (pr: PrVisualInput): PrVisualState => {
   return pr.checksState === 'failure' || conflicting ? 'blocked' : 'open';
 };
 
-/**
- * Inline style for an element with the `oc-ref-tint` class: the state colour
- * a PR or issue reference rests muted from and shows in full on hover.
- */
 export const refTintStyle = (color: string): CSSProperties & { '--oc-ref-tint': string } => ({ '--oc-ref-tint': color });
