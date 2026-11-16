@@ -17,18 +17,14 @@ import { receivedPageId } from './received-store.js';
 
 const RECEIVED_ID_PATTERN = /^rp_[0-9a-f]{32}$/;
 const PIN_PATTERN = /^\d{6}$/;
-// What the relay's viewer lets a page send (viewer.ts): the summary is cut,
-// data past this is refused.
 const MAX_ANSWER_SUMMARY_LENGTH = 500;
 const MAX_ANSWER_DATA_LENGTH = 16_000;
-// The page source the agent reads; a page past this is cut, never refused.
 const MAX_SOURCE_LENGTH = 200_000;
 
 const ENTERPRISE_ERROR = 'Opening shared pages is not available in enterprise mode without a relay the policy allows.';
 const enterpriseRefusal = () => new OpenChamberControlError(ENTERPRISE_ERROR, 403, { code: 'enterprise_mode' });
 const relayUnreachable = (error) => new OpenChamberControlError(`Could not reach the share relay: ${error?.message ?? 'unknown error'}`, 502);
 
-// The sealed document: { v: 1, title, html, source? } (the sharing side's runtime.js).
 const documentSchema = z.object({
   v: z.literal(1),
   title: z.string().catch(''),
@@ -41,13 +37,6 @@ const documentSchema = z.object({
 });
 
 
-/**
- * Pages other people shared by link and PIN, opened in this app. The UI hands the link over once; the key stays in this server's
- * store and every relay call goes from here, since the relay sends no CORS
- * headers and the enterprise policy has to hold where the request leaves.
- * The opening counts as the recipient's, as in the browser viewer, and the
- * answer goes to the relay sealed the same way the viewer seals it.
- */
 export const createReceivedPagesRuntime = ({
   crypto,
   store,
@@ -99,10 +88,6 @@ export const createReceivedPagesRuntime = ({
     if (!isAvailable()) throw enterpriseRefusal();
   };
 
-  /**
-   * A record stays usable on the relay it came from; only enterprise mode
-   * narrows that to the pinned relay, like the sharing side's groups.
-   */
   const findRecord = async (id) => {
     requireAvailable();
     if (!isString(id) || !RECEIVED_ID_PATTERN.test(id)) throw new OpenChamberControlError('No such shared page', 404);
@@ -112,12 +97,7 @@ export const createReceivedPagesRuntime = ({
     return record;
   };
 
-  /** What the relay says about the share, before or after the PIN. */
-  // `state` is the relay's public view as `relay-client.js` parsed it; a reply
-  // without one never gets here (the client throws).
   const applyPublicState = (record, { state }) => {
-    // An answer this app sent stays the record's state whatever the relay
-    // reports later: the author collecting it deletes the relay's copy.
     if (!record.answer) record.status = state.status;
     if (state.kind !== undefined) record.kind = state.kind;
     if (state.wantsAnswer !== undefined) record.wantsAnswer = state.wantsAnswer;
@@ -138,13 +118,6 @@ export const createReceivedPagesRuntime = ({
     return { available: true, bases: await allowedBases() };
   };
 
-  /**
-   * Takes a pasted link: checks it and keeps its key here, without waiting on
-   * the relay, so the page has its id as soon as the link leaves the
-   * composer; `refreshStatus` reads the share's state next. The same link
-   * again finds its record; a key that differs from the one kept replaces it
-   * only while the page was never opened.
-   */
   const register = async (url) => {
     requireAvailable();
     let link;
@@ -198,12 +171,6 @@ export const createReceivedPagesRuntime = ({
 
   const get = async (id) => viewOf(await findRecord(id));
 
-  /**
-   * Every page this server received, newest first, for the `pages` surface's
-   * list: what a row shows, without the page's source or the answer's data.
-   * Pages are this server's, not a project's: a link from another person
-   * names no folder. In enterprise mode only pages on the pinned relay.
-   */
   const list = async () => {
     requireAvailable();
     const bases = isEnterpriseMode() ? await allowedBases() : null;
@@ -228,12 +195,6 @@ export const createReceivedPagesRuntime = ({
     ? { format: source.format, text: source.text.slice(0, MAX_SOURCE_LENGTH), summary: source.summary ? source.summary.slice(0, 500) : null }
     : null);
 
-  /**
-   * Proves the PIN to the relay and decrypts the page. A wrong PIN answers
-   * the share's state with `pinRejected`, so the chip can show the attempts
-   * left; a share that is locked, expired, answered or withdrawn answers its
-   * state. Opening twice answers the page already opened.
-   */
   const open = async (id, pin) => {
     if (!isString(pin) || !PIN_PATTERN.test(pin)) throw new OpenChamberControlError('pin must be six digits', 400);
     const record = await findRecord(id);
@@ -282,7 +243,6 @@ export const createReceivedPagesRuntime = ({
     return { summary, data: JSON.parse(encoded) };
   };
 
-  /** Seals the answer for the author, as the viewer does, and posts it. One answer per page. */
   const answer = async (id, input) => {
     const record = await findRecord(id);
     const { summary, data } = readAnswerInput(input);
@@ -299,7 +259,6 @@ export const createReceivedPagesRuntime = ({
         throw relayUnreachable(error);
       }
       if (!sent.ok) {
-        // 409 answered or withdrawn, 410 expired, 423 locked: the page's state says why.
         if (![409, 410, 423].includes(sent.httpStatus)) {
           throw new OpenChamberControlError(`The share relay refused the answer (${sent.httpStatus})`, 502);
         }

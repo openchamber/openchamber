@@ -24,19 +24,13 @@ export const SHARE_MAX_SUMMARY_LENGTH = 200;
 export const SHARE_MIN_HOURS = 1;
 const SHARE_ANSWER_SOURCE = 'openchamber-share-answer';
 
-// The relay takes at most 32 MiB of ciphertext per share.
 const MAX_SEALED_BYTES = 32 * 1024 * 1024;
-// The relay refuses a share that expires within five minutes.
 const MIN_REMAINING_MS = 5 * 60_000;
 const POLL_INTERVAL_MS = 60_000;
-// A heartbeat this often notices a wake from sleep: an interval that fires
-// much later than scheduled means the clock jumped, and the poll runs at once.
 const HEARTBEAT_MS = 15_000;
 const WAKE_GAP_MS = 45_000;
 const DELIVERY_ATTEMPTS = 4;
 const DELIVERY_BASE_DELAY_MS = 2_000;
-// The relay keeps an expired share's state a week (TOMBSTONE_MS there); past
-// that, a share it never reported on is expired here too.
 const RELAY_FORGETS_AFTER_MS = 8 * 24 * 60 * 60_000;
 const MAX_ANSWER_SUMMARY_LENGTH = 500;
 const MAX_ANSWER_DATA_LENGTH = 16_000;
@@ -44,11 +38,6 @@ const MAX_ANSWER_DATA_LENGTH = 16_000;
 const ENTERPRISE_ERROR = 'Sharing pages is not available in enterprise mode without a relay the policy allows.';
 const enterpriseRefusal = () => new OpenChamberControlError(ENTERPRISE_ERROR, 403, { code: 'enterprise_mode' });
 
-/**
- * The tool's `share` input. A model sometimes sends the object as JSON text,
- * which is read once; anything else that is not the documented shape is a
- * usage error naming the field.
- */
 const shareInputSchema = z.object({
   recipients: z.array(z.string().trim()).min(1),
   summary: z.string().optional(),
@@ -94,8 +83,6 @@ export const parseShareRequest = (raw) => {
   return { recipients, summary: summary || null, expectAnswer: expectAnswer !== false, expiresInHours };
 };
 
-// What the page is made from, for a recipient's agent: the `ui` program, or
-// the agent's own HTML and its share summary. Anything else is left out.
 const documentSourceSchema = z.object({
   format: z.enum(['ui', 'html']),
   text: z.string().min(1),
@@ -124,10 +111,8 @@ const needsWork = (recipient) => (
   || isClosable(recipient)
 );
 
-// JSON in the message can never close the envelope early.
 const safeJson = (value) => JSON.stringify(value ?? null).replace(/</g, '\\u003c');
 
-/** The message the agent reads when one recipient answered. */
 const buildShareAnswerText = (group, recipient) => {
   const { summary, data } = recipient.answer;
   let dataText = safeJson(data);
@@ -143,7 +128,6 @@ const buildShareAnswerText = (group, recipient) => {
   ].join('\n');
 };
 
-// What the viewer seals: { v: 1, data, summary, submittedAt }.
 const answerSchema = z.object({
   v: z.literal(1),
   summary: z.string().optional(),
@@ -160,19 +144,11 @@ const readAnswer = (value) => {
   };
 };
 
-/**
- * Pages an agent shares with other people through the relay: one group per
- * `openchamber_render` call, one relay share per recipient. The group is made
- * when the call runs; the chat builds the document and posts it, and this
- * runtime seals it per recipient, uploads it, follows each share until it is
- * answered, delivers the answer into the session and acknowledges it.
- */
 export const createSharePagesRuntime = ({
   crypto,
   store,
   relay,
   postSynthetic,
-  // Hears each answer OpenCode admitted into its session (the user's notification).
   onAnswerDelivered = () => {},
   broadcast = () => {},
   isAvailable,
@@ -184,7 +160,6 @@ export const createSharePagesRuntime = ({
   logger = console,
 }) => {
   const locks = new Map();
-  /** Runs `task` after every earlier task of the same group. */
   const withLock = (groupId, task) => {
     const previous = locks.get(groupId) ?? Promise.resolve();
     const run = previous.then(task);
@@ -229,9 +204,6 @@ export const createSharePagesRuntime = ({
     })),
   });
 
-  // Every card route goes through here: while sharing is unavailable, or the
-  // group lives on a relay the policy no longer allows, the card has nothing
-  // to show or do.
   const findGroup = async (sessionId, callId) => {
     if (!isString(sessionId) || !isString(callId) || !sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
@@ -245,10 +217,6 @@ export const createSharePagesRuntime = ({
     return group;
   };
 
-  /**
-   * Makes the group for a render call that shares its page. The same call
-   * again finds the group it made. No link or PIN leaves through the result.
-   */
   const createGroup = async ({ sessionId, callId, title, share }) => {
     if (!isAvailable()) throw enterpriseRefusal();
     if (!sessionId || !callId) {
@@ -323,18 +291,11 @@ export const createSharePagesRuntime = ({
     }
   };
 
-  /**
-   * Seals the chat's document for every recipient still without a share (new
-   * or failed before) and uploads it; one failed upload leaves the others.
-   * The first document is kept as the local preview and reused by retries,
-   * so every recipient gets the same page.
-   */
   const uploadDocument = async (sessionId, callId, input = {}) => {
     const group = await findGroup(sessionId, callId);
     return withLock(group.id, () => uploadPending(group, input, ['preparing', 'failed']));
   };
 
-  /** Uploads to the recipients in `statuses` still without a share; called under the group's lock. */
   const uploadPending = async (group, input, statuses) => {
     const pending = group.recipients.filter((recipient) => !recipient.shareId && statuses.includes(recipient.status));
     if (pending.length === 0) throw new OpenChamberControlError('Every recipient already has this page', 409);
@@ -351,7 +312,6 @@ export const createSharePagesRuntime = ({
     }
     const title = (isString(input.title) && input.title.trim()) || group.title;
     if (firstDocument) group.documentSource = readDocumentSource(input.source);
-    // The source lets a recipient's own agent read the page; the relay's viewer ignores it.
     const document = group.documentSource ? { v: 1, title, html, source: group.documentSource } : { v: 1, title, html };
     if (Buffer.byteLength(JSON.stringify(document)) + SEAL_OVERHEAD_BYTES > MAX_SEALED_BYTES) {
       throw new OpenChamberControlError('The page is larger than the 32 MB a shared page can be', 413);
@@ -369,22 +329,11 @@ export const createSharePagesRuntime = ({
     return viewOf(group);
   };
 
-  /**
-   * Applies what the relay reports about one share. An answer is decrypted
-   * and kept here, with a message id minted for its delivery.
-   */
   const applyState = async (group, recipient, state) => {
-    // A state read before another path settled this recipient (a cancel that
-    // took the answer) must not mint a second delivery for the same answer.
     if (!LIVE_STATUSES.has(recipient.status)) return;
     await commit(group, recipient, () => mergeState(group, recipient, state));
   };
 
-  /**
-   * Runs `mutate` on the recipient and saves the group. A failed save puts
-   * the recipient back as it was, so an answer and its message id are never
-   * delivered or acknowledged before they are on disk.
-   */
   const commit = async (group, recipient, mutate) => {
     const before = structuredClone(recipient);
     await mutate();
@@ -397,7 +346,6 @@ export const createSharePagesRuntime = ({
     }
   };
 
-  /** Decrypts an answer ciphertext into the recipient, with a message id for its delivery. */
   const recordAnswer = async (recipient, ciphertext, answeredAt) => {
     recipient.answeredAt = answeredAt ?? now();
     try {
@@ -436,7 +384,6 @@ export const createSharePagesRuntime = ({
         }
         break;
       default:
-        // `unavailable`: another identity owns it now (a reset); nothing to learn.
         break;
     }
   };
@@ -457,7 +404,6 @@ export const createSharePagesRuntime = ({
         await postSynthetic(group.sessionId, message);
         admitted = true;
       } catch (error) {
-        // 409: this id was admitted before; 404: the session is gone.
         if (error?.status !== 409 && error?.status !== 404) {
           logger.warn(`[share-pages] delivering an answer of ${group.id} failed:`, error?.message ?? error);
           if (attempt < DELIVERY_ATTEMPTS) await sleep(DELIVERY_BASE_DELAY_MS * 2 ** (attempt - 1));
@@ -468,8 +414,6 @@ export const createSharePagesRuntime = ({
         delivery.delivered = true;
         await persist(group);
       });
-      // Announced once, by the attempt OpenCode admitted: a 409 is an earlier
-      // attempt's, a 404 reached no session.
       if (admitted) onAnswerDelivered({ sessionId: group.sessionId, label: recipient.label, title: group.title, summary: recipient.answer.summary });
       return;
     }
@@ -488,11 +432,6 @@ export const createSharePagesRuntime = ({
     await withLock(group.id, () => commit(group, recipient, () => keepClosedAnswer(recipient, closed)));
   };
 
-  /**
-   * The close deleted the relay's copy of any answer and handed it back: one
-   * this host never stored (it arrived after the last read) is recorded and
-   * delivered like a polled answer.
-   */
   const keepClosedAnswer = async (recipient, closed) => {
     recipient.relayClosed = true;
     if (closed?.answer && !recipient.answer && recipient.status !== 'failed') {
@@ -546,7 +485,6 @@ export const createSharePagesRuntime = ({
   let ticking = null;
   let rerun = false;
   let lastPollAt = 0;
-  /** One poll at a time; a request during a poll runs one more after it. */
   const poll = () => {
     if (ticking) {
       rerun = true;
@@ -579,10 +517,6 @@ export const createSharePagesRuntime = ({
     heartbeat.unref?.();
   }
 
-  /**
-   * Withdraws one recipient's link. An answer that already arrived is kept:
-   * the state is read first, and an answered share is never cancelled.
-   */
   const cancelRecipient = async (sessionId, callId, recipientId) => {
     const group = await findGroup(sessionId, callId);
     const recipient = group.recipients.find((entry) => entry.recipientId === recipientId);
@@ -604,7 +538,6 @@ export const createSharePagesRuntime = ({
           if (error?.status === 404) return null;
           throw new OpenChamberControlError(`Could not reach the relay: ${error?.message ?? 'unknown error'}`, 502);
         });
-        // They submitted between the read and the close: the close hands the answer back.
         if (closed?.status === 'answered') {
           await commit(group, recipient, async () => {
             await keepClosedAnswer(recipient, closed);
@@ -619,14 +552,12 @@ export const createSharePagesRuntime = ({
     });
   };
 
-  /** The relay's control socket says a share changed: read it now. */
   const handleShareState = async (shareId) => {
     if (!isString(shareId)) return;
     const known = (await store.list()).some((group) => group.recipients.some((recipient) => recipient.shareId === shareId));
     if (known) await poll();
   };
 
-  /** Loads the groups and polls at once; answers left undelivered go out with it. */
   const start = async () => {
     await store.load();
     ensureHeartbeat();
@@ -634,11 +565,6 @@ export const createSharePagesRuntime = ({
     await poll();
   };
 
-  /**
-   * Uploads a restart interrupted: the document is on disk, some recipients
-   * never got their share. The card only posts while the document is
-   * preparing, so nobody else would finish them.
-   */
   const resumeUploads = async () => {
     for (const group of await store.list()) {
       if (group.documentState !== 'ready' || !isAvailable() || !isRelayBaseAllowed(group.relayBase)) continue;

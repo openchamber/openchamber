@@ -3,8 +3,6 @@ import { z } from 'zod';
 const DIRECTORY_NAME = 'share-pages';
 const FILE_VERSION = 1;
 const GROUP_ID_PATTERN = /^sp_[0-9a-f]{32}$/;
-// Finished groups beyond this many are removed, oldest first, with their
-// local page copy (up to ~32 MB each); a group still in play is never removed.
 const MAX_GROUPS = 100;
 const FINAL_STATUSES = new Set(['answered', 'expired', 'cancelled', 'failed']);
 
@@ -17,7 +15,6 @@ const RECIPIENT_STATUSES = ['preparing', 'open', 'locked', 'answered', 'expired'
 const recipientSchema = z.object({
   recipientId: z.string().min(1),
   label: z.string().min(1),
-  // Both secrets stay in this file and the card; never in a log, the tool result or the relay.
   pin: z.string().regex(/^\d{6}$/),
   linkKey: z.string().min(1),
   shareId: z.string().nullable(),
@@ -26,9 +23,7 @@ const recipientSchema = z.object({
   opens: z.array(z.number()),
   answeredAt: z.number().nullable(),
   answer: z.object({ summary: z.string(), data: z.unknown(), submittedAt: z.number().nullable() }).nullable(),
-  // Minted before the first attempt, so a retry never posts the answer twice.
   delivery: z.object({ messageId: z.string(), delivered: z.boolean() }).nullable(),
-  // The relay dropped the page and the answer (collected or withdrawn).
   relayClosed: z.boolean(),
   error: z.string().nullable(),
 });
@@ -44,26 +39,16 @@ const groupSchema = z.object({
   summary: z.string().nullable(),
   createdAt: z.number(),
   expiresAt: z.number(),
-  // HTTP origin of the relay the shares live on, fixed at creation.
   relayBase: z.string().min(1),
   documentState: z.enum(['preparing', 'ready']),
-  // The page's source for recipients' agents, sealed with the document; groups from before it have none.
   documentSource: z.object({ format: z.enum(['ui', 'html']), text: z.string(), summary: z.string().nullable() }).nullable().optional(),
   recipients: z.array(recipientSchema).min(1),
 });
 
-/** One group per tool call; the id is a hash, so any session or call id makes a safe file name. */
 export const shareGroupId = (crypto, sessionId, callId) => (
   `sp_${crypto.createHash('sha256').update(`${sessionId}\u0000${callId}`).digest('hex').slice(0, 32)}`
 );
 
-/**
- * Share groups on disk under `<dataDir>/share-pages/`: `<id>.json` for the
- * group and `<id>.html` for the document the recipients got, the author's
- * local preview. Owner-readable only, written atomically through one chain.
- * A file that does not parse is moved aside and the rest load; a failed
- * directory read keeps writes off until a load succeeds.
- */
 export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
   const groups = new Map();
@@ -116,7 +101,6 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     return run;
   };
 
-  // Oldest first; the group just saved stays, so a late answer is never dropped as it lands.
   const prune = async (savedId) => {
     const finished = [...groups.values()]
       .filter((group) => group.id !== savedId && isFinished(group))
@@ -128,14 +112,12 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     }
   };
 
-  /** Saves a snapshot taken now; the working object is published only once it is on disk. */
   const save = async (group) => {
     const snapshot = JSON.stringify(groupSchema.parse(group));
     await load();
     return enqueue(async () => {
       await writeAtomic(jsonFile(group.id), snapshot);
       groups.set(group.id, group);
-      // Retention cannot turn a committed save into a failed one.
       await prune(group.id).catch((error) => {
         console.warn('[share-pages] failed to prune groups:', error?.message ?? error);
       });
@@ -156,7 +138,6 @@ export const createSharePageStore = ({ fsPromises, path, dataDir, now = Date.now
     }
   };
 
-  // Mutable working references, not proof of a successful save.
   const get = async (id) => {
     await load();
     return groups.get(id) ?? null;
