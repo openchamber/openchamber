@@ -50,10 +50,7 @@ export function createGlobalMessageStreamWsBridge({
     const replay = globalHub.replayAfter(requestedLastEventId);
     const ready = { type: 'ready', scope: 'global' };
     if (replay === null) ready.replayReset = true;
-    // The events after the client's cursor follow in full: it missed nothing.
     else if (requestedLastEventId) ready.replayed = true;
-    // No replay follows, so the client resumes from here: one that receives
-    // no event before its next reconnect still has a cursor to name.
     if (!ready.replayed) ready.cursor = globalHub.cursor();
     const sent = sendMessageStreamWsFrame(socket, ready);
     if (!sent) {
@@ -91,8 +88,6 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
-  // Browser clients take the events of isolated spaces too: each frame carries its directory,
-  // and a space's directory is one more project directory to the UI.
   const unsubscribeEvent = globalHub.subscribeEvent((event) => {
     const { payload } = event;
     for (const socket of Array.from(clients)) {
