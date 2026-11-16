@@ -206,12 +206,19 @@ const readLocalCredentialEntries = (db, dbPath) => {
 /**
  * OpenCode's credential store read straight from its database file, with
  * no server in between: the same rows `openCodeCredentialSource` asks the
- * running OpenCode for, in the same shape. A fallback for readers on the
- * same machine (the quota CLI) when no server is listening. Read-only —
- * no create/remove — and it has no launch environment, so variable keys
- * stay unknown exactly as they are for an external OpenCode.
+ * running OpenCode for, in the same shape. This is the quota surfaces'
+ * single credential source (code#2490, #2282): the quota CLI wires it
+ * directly rather than composing it behind the running-server source,
+ * so the CLI and the aggregator gatherer resolve credentials from the
+ * one store the same way. Read-only — no create/remove — and it has no
+ * launch environment, so variable keys stay unknown exactly as they
+ * are for an external OpenCode.
  */
 export const openCodeLocalCredentialSource = ({ env = process.env, dbPath, openDatabase } = {}) => ({
+  // True by construction: this source IS the local store, which is
+  // what credentialSourceUsesLocalStore() gates on (the antigravity
+  // provider's direct-store read).
+  usesLocalStore: () => true,
   list: async () => {
     const resolvedPath = dbPath ?? resolveOpenCodeDbPath(env);
     if (!fs.existsSync(resolvedPath)) {

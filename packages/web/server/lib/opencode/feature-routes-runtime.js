@@ -107,14 +107,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
 
-  let quotaProviders = null;
-  const getQuotaProviders = async () => {
-    if (!quotaProviders) {
-      quotaProviders = await import('../quota/index.js');
-    }
-    return quotaProviders;
-  };
-
   let smallModelService = null;
   const getSmallModelService = async () => {
     if (!smallModelService) {
@@ -455,7 +447,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
 
-    registerQuotaRoutes(app, { getQuotaProviders });
+    registerQuotaRoutes(app);
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();

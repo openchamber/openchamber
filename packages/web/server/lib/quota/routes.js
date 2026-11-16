@@ -5,6 +5,29 @@ import { fetchExeDevUsage } from './providers/exe-dev.js';
 import { validateOpenDesignCredential } from './providers/opendesign.js';
 import { aliases as zaiAliases, giftResetTypes as zaiGiftResetTypes, useZaiGiftReset } from './providers/zai.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
+import {
+  listConfiguredQuotaProviders,
+  fetchQuotaForProvider,
+  fetchQuotaForProviderInstances,
+} from './index.js';
+
+// The endpoint resolves its providers from the quota module itself —
+// the same module the CLI reads through (code#2490, #2282) — rather
+// than through an injected resolver. registerQuotaRoutes still
+// accepts a getQuotaProviders override, but only as a thin
+// pass-through for tests that stub the provider set.
+const defaultQuotaProviders = {
+  listConfiguredQuotaProviders,
+  fetchQuotaForProvider,
+  fetchQuotaForProviderInstances,
+};
+
+const resolveQuotaProviders = async (getQuotaProviders) => {
+  if (typeof getQuotaProviders === 'function') {
+    return getQuotaProviders();
+  }
+  return defaultQuotaProviders;
+};
 
 // Keyed by the same provider ids as `normalizers`: a provider with a normalizer
 // but no validator would be stored without ever being checked.
@@ -32,10 +55,10 @@ const credentialError = (res, error) => res.status(400).json({
   error: error instanceof Error ? error.message : 'Credential validation failed',
 });
 
-export function registerQuotaRoutes(app, { getQuotaProviders }) {
+export function registerQuotaRoutes(app, { getQuotaProviders } = {}) {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
-      const { listConfiguredQuotaProviders } = await getQuotaProviders();
+      const { listConfiguredQuotaProviders } = await resolveQuotaProviders(getQuotaProviders);
       res.json({ providers: await listConfiguredQuotaProviders() });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
@@ -96,7 +119,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
     try {
       const { providerId } = req.params;
       if (!providerId) return res.status(400).json({ error: 'Provider ID is required' });
-      const { fetchQuotaForProvider, fetchQuotaForProviderInstances } = await getQuotaProviders();
+      const { fetchQuotaForProvider, fetchQuotaForProviderInstances } = await resolveQuotaProviders(getQuotaProviders);
       // Per-credential providers answer one labeled result per stored
       // credential (#474); the web route must carry all of them, not just the
       // active credential (#481). A single result keeps the long-standing
