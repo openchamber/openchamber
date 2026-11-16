@@ -1,9 +1,3 @@
-/**
- * Keeps the routing store current: one read of `/api/routing` per runtime, then
- * the control-stream events. When Jev could not be reached, the request waits
- * for the user and a toast says so with the actual error. The request itself
- * reaches the user through the sync layer (`openchamber.permission-left-for-user`).
- */
 import React from 'react';
 
 import { toast } from '@/components/ui';
