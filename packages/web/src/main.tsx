@@ -85,8 +85,8 @@ const unregisterDevelopmentServiceWorkers = (): void => {
 const start = async (): Promise<void> => {
   window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
-  // Reload into the other app shell when the viewport crosses the phone
-  // threshold after boot (no-op in fixed shells and with ?surface= overrides).
+
+
   watchHostedSurfaceViewport();
 
   if (hostedSurface === 'mobile') {
@@ -95,11 +95,11 @@ const start = async (): Promise<void> => {
     return;
   }
 
-  // Hold the render until a desktop relay-host restore has picked its transport.
+
   await getDesktopRelayRestoreReady();
-  // A module of the app that failed to load (a dropped connection while the
-  // dev server compiles, a chunk replaced by an update) left an empty page
-  // for good; it is tried again, then the page reloads once.
+
+
+
   await importWithChunkRecovery(() => import('@openchamber/ui/main'));
 };
 

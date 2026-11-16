@@ -1,13 +1,4 @@
-/**
- * The source-control providers the connected server serves, for the UI's
- * provider registry.
- *
- * A server older than `GET /api/source-control/providers` answers 404; it
- * serves exactly GitHub and GitLab, so this adapter answers with their
- * descriptors instead. They live here, in the web runtime's wire adapter
- * that talks to that server, so `packages/ui` never names a provider. Keep
- * them identical to the server's built-in GitHub and GitLab descriptors.
- */
+
 import { z } from 'zod';
 import type { SourceControlIdentity } from '@openchamber/ui/lib/api/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
@@ -19,8 +10,8 @@ import {
 
 type ProvidersFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 
-// Exactly what the server publishes for them: the change-review features are
-// published only where declared, and the UI schema reads their absence.
+
+
 const BUILT_IN_FEATURES_OFF = {
   referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
   startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
@@ -100,17 +91,13 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
   },
 ];
 
-/** Where one provider's routes live: every provider read and mutation goes through its own prefix. */
+
 export const providerPath = (identity: SourceControlIdentity, path: string): string => `/api/source-control/${identity.provider}${path}`;
 
 const providersResponseSchema = z.object({ providers: z.array(z.unknown()) });
 const errorSchema = z.object({ error: z.string() });
 
-/**
- * The server's providers; GitHub and GitLab on a server that predates the
- * route. Throws on any other failure, and when the server listed providers
- * but none of them could be read: that answer is unreadable, not empty.
- */
+
 export const fetchSourceControlProviders = async (fetch: ProvidersFetch): Promise<SourceControlProviderDescriptor[]> => {
   const response = await fetch('/api/source-control/providers', { headers: { Accept: 'application/json' } });
   if (response.status === 404) return sourceControlProviderListSchema.parse(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
