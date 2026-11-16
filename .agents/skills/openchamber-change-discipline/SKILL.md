@@ -132,7 +132,7 @@ A split, move or rewrite of a large file keeps behavior identical. `bun run veri
 3. Give each behavior your change touches and no scenario plays a scenario now, green on the old code (format in `scripts/verify/DOCUMENTATION.md`).
 4. After the change, run the same command. Done means the same scenarios green. A red one is a behavior change, so fix the code. Edit a scenario only when the markup it points at moved, and then the selector in `vocabulary.json`, with the step's meaning unchanged.
 
-While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome): one at a time per machine.
+While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome). Runs in separate worktrees do not disturb each other; how many fit at once depends on the machine.
 
 ## Test Design
 
