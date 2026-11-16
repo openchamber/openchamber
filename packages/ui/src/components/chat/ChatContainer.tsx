@@ -184,6 +184,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
+        restoreSnapshot,
         onTimelineDataChange,
         goToBottom,
         scrollToBottomOnSend,
@@ -198,7 +199,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         checkLinkedMessage,
         handleLinkedMessageMissing,
     } = useColumnTimelineScroll({
-        active,
         pinned,
         currentSessionId,
         currentSessionKey,
@@ -267,6 +267,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         effectiveSessionDirectory,
         sync,
         ensureSessionRenderable,
+        currentSessionKey,
+        onManualNavigation,
+        restoreSnapshot,
         hasRenderableSessionSnapshot,
         loadStatus: sessionMessageLoadState.status,
     });

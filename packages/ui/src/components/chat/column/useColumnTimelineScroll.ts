@@ -15,7 +15,6 @@ const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
  * `loadHistoryUntilMessageRef`, which the controller's owner fills in.
  */
 export const useColumnTimelineScroll = ({
-    active,
     pinned,
     currentSessionId,
     currentSessionKey,
@@ -25,7 +24,6 @@ export const useColumnTimelineScroll = ({
     sessionIsWorking,
     revealGate,
 }: {
-    active: boolean;
     pinned: boolean;
     currentSessionId: string | null;
     currentSessionKey: string | null;
@@ -74,7 +72,7 @@ export const useColumnTimelineScroll = ({
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
     });
-    const { goToBottom, onManualNavigation, restoreSnapshot } = scroll;
+    const { goToBottom } = scroll;
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -90,29 +88,6 @@ export const useColumnTimelineScroll = ({
             window.removeEventListener(CHAT_FORCE_SCROLL_BOTTOM_EVENT, handleForceScrollBottom as EventListener);
         };
     }, [currentSessionId, goToBottom]);
-
-    const lastScrolledSessionKeyRef = React.useRef<string | null>(null);
-    React.useEffect(() => {
-        if (!active || !currentSessionId) return;
-        if (lastScrolledSessionKeyRef.current === currentSessionKey) return;
-
-        const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-        lastScrolledSessionKeyRef.current = currentSessionKey;
-        if (hasHashTarget) {
-            // Hash navigation handler will scroll to target; we just release auto-follow.
-            onManualNavigation();
-            return;
-        }
-
-        const run = () => {
-            void restoreSnapshot();
-        };
-        if (typeof window === 'undefined') {
-            run();
-        } else {
-            window.requestAnimationFrame(run);
-        }
-    }, [active, currentSessionId, currentSessionKey, onManualNavigation, restoreSnapshot]);
 
     return {
         ...scroll,
