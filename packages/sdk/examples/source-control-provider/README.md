@@ -10,8 +10,9 @@ board and its badges from that description, without starting the service.
 The service (`service/main.ts`, built to `service/main.js`) answers each call
 OpenChamber forwards at `POST /source-control` by talking to a subset of
 Gitea's REST v1. Pointing it at a real Gitea 1.21 or newer works for that
-subset: pull requests (list, read, create, edit, merge), issues (list, read),
-comments, close and reopen, branches, the live state of tracked items, and a
+subset: pull requests (list, read, create, edit, merge, change base, update
+branch), issues (list, read, assign), comments, close and reopen, branches,
+the live state of tracked items, and a
 pull request's diff and both sides of a changed file for the Changes view and
 walkthroughs (`changeRequestPatch`). A
 pull request opens on the project's bound remote; its head can come from
@@ -59,7 +60,8 @@ installs there once `package.json` says 2.5.1 or newer.
    address and a token with the `write:repository`, `write:issue` and
    `read:user` scopes.
 3. Open a project whose remote is on that server. Its pull requests and issues
-   show on the Issues and PRs board; comment, close, reopen or merge from there.
+   show on the Issues and PRs board; comment, close, reopen, assign or merge
+   from there.
 
 The service runs `git remote get-url` in the project to find the repository,
 which is why the manifest lists `git` under `permissions.exec`.
@@ -161,8 +163,13 @@ mutation reached the forge exactly once.
 `packages/sdk/scripts/source-control-example.test.ts` runs the built service
 against it through a stand-in for OpenChamber's outbound proxy.
 
+The service is two bundles: `service/main.ts` serves the calls and loads
+`service/mutations.ts` at runtime, which keeps both under the repository's
+source size limit.
+
 Rebuild after editing the service or the SDK:
 
 ```bash
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/mutations.ts packages/sdk/examples/source-control-provider/service/mutations.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/main.ts packages/sdk/examples/source-control-provider/service/main.js
 ```

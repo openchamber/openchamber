@@ -24,6 +24,7 @@ type ForgeItem = {
   body: string;
   state: 'open' | 'closed';
   comments: ForgeComment[];
+  assignees: string[];
   /** `headRepo` is the id of the repository the head branch lives in. */
   pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean };
 };
@@ -44,6 +45,8 @@ export type FakeForge = {
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
+/** Where a branch update lands, as a merge commit would. */
+const UPDATED_HEAD = 'f'.repeat(40);
 /** Every branch here starts from `main`'s first commit, so that is every pull request's merge base. */
 const MERGE_BASE = SHA_A;
 
@@ -71,7 +74,7 @@ const fileDiff = (path: string, before: string, after: string): string => {
 /** The files `head` changed from `base`, in path order. */
 const changedPaths = (base: Tree, head: Tree) => [...head.keys()].sort().filter((path) => base.get(path) !== head.get(path));
 
-type RequestBody = { [key: string]: string | number | boolean | null | undefined };
+type RequestBody = { [key: string]: string | number | boolean | null | undefined | string[] };
 
 const readBody = async (request: http.IncomingMessage): Promise<RequestBody> => {
   const chunks: Buffer[] = [];
@@ -92,13 +95,14 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   const trees = new Map<string, Tree>([[SHA_A, MAIN_TREE], [SHA_B, FEATURE_TREE]]);
   const treeAt = (sha: string) => trees.get(sha) ?? MAIN_TREE;
   const items: ForgeItem[] = [
-    { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], pull: null },
-    { number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [], pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false } },
+    { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], assignees: [], pull: null },
+    { number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [], assignees: [], pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false } },
   ];
   let commentId = 100;
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
+  const octo = { id: 8, login: FAKE_FORGE_FORK.owner, full_name: 'Octo Cat', email: 'octo@example.com', avatar_url: '' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
     default_branch: string; fork: boolean; parent: RepoJson | null;
@@ -128,7 +132,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     html_url: `${origin}/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/${item.pull ? 'pulls' : 'issues'}/${item.number}`,
     user,
     labels: [],
-    assignees: [],
+    assignees: item.assignees.map((login) => (login === octo.login ? octo : user)),
     created_at: '2026-10-01T10:00:00Z',
     updated_at: '2026-10-02T10:00:00Z',
     pull_request: item.pull ? { merged: item.pull.merged } : null,
@@ -201,6 +205,9 @@ export const startFakeForge = async (): Promise<FakeForge> => {
     if (method === 'GET' && collection === 'branches' && rest.length === 1) {
       return { status: 200, body: page([...branches].map(([name, sha]) => ({ name, commit: { id: sha } })), url, response) };
     }
+    if (method === 'GET' && (collection === 'collaborators' || collection === 'assignees') && rest.length === 1) {
+      return { status: 200, body: page([user, octo], url, response) };
+    }
     if (collection === 'pulls') {
       if (method === 'GET' && rest.length === 1) {
         const list = items.filter((item) => item.pull && stateFilter(url)(item)).reverse();
@@ -221,7 +228,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
           return { status: 409, body: { message: 'pull request already exists for these targets' } };
         }
         const item: ForgeItem = {
-          number: items.length + 1, title, body: textOf(body.body), state: 'open', comments: [],
+          number: items.length + 1, title, body: textOf(body.body), state: 'open', comments: [], assignees: [],
           pull: { head, headRepo, base, sha: headSha, merged: false },
         };
         items.push(item);
@@ -248,12 +255,25 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
-        const title = textOf(body.title);
-        if (!title) return { status: 422, body: { message: 'title is required' } };
-        item.title = title;
+        if (body.title !== undefined) {
+          const title = textOf(body.title);
+          if (!title) return { status: 422, body: { message: 'title is required' } };
+          item.title = title;
+        }
+        if (body.base !== undefined) {
+          const base = textOf(body.base);
+          if (!branches.has(base)) return { status: 422, body: { message: 'base branch is unknown' } };
+          item.pull.base = base;
+        }
         if (body.body !== undefined) item.body = textOf(body.body);
         writes.push({ method, path });
         return { status: 201, body: pullJson(item) };
+      }
+      if (method === 'POST' && action === 'update' && rest.length === 3) {
+        if (item.state !== 'open' || item.pull.merged) return { status: 405, body: { message: 'pull request is not open' } };
+        item.pull.sha = UPDATED_HEAD;
+        writes.push({ method, path });
+        return { status: 200, body: null };
       }
       if (method === 'POST' && action === 'merge' && rest.length === 3) {
         const body = await readBody(request);
@@ -297,6 +317,11 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
+        if (Array.isArray(body.assignees)) {
+          item.assignees = body.assignees.map((entry) => String(entry));
+          writes.push({ method, path });
+          return { status: 201, body: issueJson(item) };
+        }
         if (body.state !== 'open' && body.state !== 'closed') return { status: 422, body: { message: 'state is open or closed' } };
         if (item.pull?.merged) return { status: 422, body: { message: 'a merged pull request cannot change state' } };
         item.state = body.state;

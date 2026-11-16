@@ -318,6 +318,45 @@ describe('source-control provider example', () => {
     expect(field(context, 'changeRequest', 'body')).toBe('More docs');
   });
 
+  test('assigns people, changes a base and updates a branch, reconciling each from the forge', async () => {
+    const before = forge.writes.length;
+    const step = async (kind: string, route: string, input: SourceControlJsonObject, context: SourceControlJsonObject) => {
+      const resolved = await data('mutation.resolveTarget', { context: mutationContext(context), kind, input });
+      return { route, kind, input, resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') } };
+    };
+    const forgeJson = async (path: string) => (await fetch(`${forge.origin}/api/v1${path}`, { headers: { authorization: 'token good' } })).json();
+
+    // An assignee arrives as the id the picker read; Gitea takes the login.
+    const assignees = await step('issue-assignees', '/issues/assignees', { names: ['7'] }, { number: 1 });
+    expect(await call('mutation.reconcile', assignees)).toMatchObject({ ok: true, data: { state: 'outcome-unknown' } });
+    expect(await data('mutation.perform', assignees)).toEqual({});
+    expect(forge.writes.length).toBe(before + 1);
+    expect(await data('mutation.reconcile', assignees)).toEqual({ state: 'succeeded', result: {} });
+    expect((await forgeJson('/repos/mona/teapot/issues/1')).assignees).toMatchObject([{ login: 'mona' }]);
+
+    // An id nobody in the repository can take is refused before anything is written.
+    const unknown = await step('issue-assignees', '/issues/assignees', { names: ['9'] }, { number: 1 });
+    expect(await call('mutation.perform', unknown)).toMatchObject({ ok: false, error: { status: 422 } });
+    expect(forge.writes.length).toBe(before + 1);
+
+    // The base changes, and a read-back names it.
+    const base = await step('change-request-base', '/pr/base', { base: 'feature' }, { number: 3 });
+    expect(await data('mutation.perform', base)).toEqual({});
+    expect(forge.writes.length).toBe(before + 2);
+    expect(await data('mutation.reconcile', base)).toEqual({ state: 'succeeded', result: {} });
+    expect(field(await data('changeRequestContext', { ...read(), number: 3, includeDiff: false, includeCIDetails: false, includeTimeline: false }), 'changeRequest', 'base')).toBe('feature');
+
+    // The branch update refuses a head that moved since the user looked, then lands on the one they saw.
+    const update = await step('change-request-update-branch', '/pr/update-branch', { expectedHeadSha: 'd'.repeat(40) }, { number: 3 });
+    const stale = { ...update, input: { expectedHeadSha: 'c'.repeat(40) } };
+    expect(await call('mutation.perform', stale)).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' } });
+    expect(forge.writes.length).toBe(before + 2);
+    expect(await call('mutation.reconcile', update)).toMatchObject({ ok: true, data: { state: 'outcome-unknown' } });
+    expect(await data('mutation.perform', update)).toEqual({});
+    expect(forge.writes.length).toBe(before + 3);
+    expect(await data('mutation.reconcile', update)).toEqual({ state: 'succeeded', result: {} });
+  });
+
   test('opens a pull request from a fork remote as owner:branch, and refuses a remote outside the network', async () => {
     const before = forge.writes.length;
     const input = { title: 'From the fork', draft: false, headRemote: 'fork' };

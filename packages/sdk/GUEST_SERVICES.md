@@ -427,12 +427,15 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 |---|---|---|---|
 | `changeRequests` | `/pr/create` | `change-request-create` | `{ title, draft, body?, remote?, headRemote? }`. `remote` is where the pull request opens and `headRemote` where its head branch lives; either left out means the context's `primaryRemote`. A head on another remote is usually a fork: name its branch the way the forge expects (Gitea and GitHub take `owner:branch`) and refuse a remote that is not in the target's network |
 | `changeRequests` | `/pr/update` | `change-request-update` | `{ title, body? }`: a new title, and a new body when given |
+| `changeRequests` | `/pr/base` | `change-request-base` | `{ base }`: the branch the change request is compared against |
+| `changeRequests` | `/pr/update-branch` | `change-request-update-branch` | `{ expectedHeadSha }`: bring the head up to date with the base, refusing when the head is no longer that sha |
 | `merge` | `/pr/merge` | `change-request-merge` | `{ method }`, one of the declared `merge.methods` |
 | `draftChangeRequests` | `/pr/ready` | `change-request-ready` | `{}` |
 | `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
 | `commentEdit` | `/pr/comment/update`, `/pr/comment/delete`, `/issues/comment/update`, `/issues/comment/delete` | `change-request-comment-update`, `change-request-comment-delete`, `issue-comment-update`, `issue-comment-delete` | `{ commentId, body }` for update, `{ commentId }` for delete. The service checks the comment sits on the resolved item before it writes: an id is only unique per repository on most hosts |
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
+| `issues` | `/issues/assignees` | `issue-assignees` | `{ names }`: the whole set, as the assignee candidates name it |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
 | `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |
 

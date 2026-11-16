@@ -878,139 +878,21 @@ var resolveTarget = async (call, input) => {
     target: mutationTarget(context, project, { number, head: pull.head.ref, base: pull.base.ref, headSha: pull.head.sha })
   });
 };
-var readResolved = (input) => {
-  const resolved = objectOf(input, "resolved");
-  const providerTarget = objectOf(resolved, "providerTarget");
-  return {
-    providerTarget: {
-      repoId: integer(providerTarget, "repoId"),
-      owner: text(providerTarget, "owner"),
-      name: text(providerTarget, "name"),
-      number: integer(providerTarget, "number") || undefined,
-      sourceRepoId: integer(providerTarget, "sourceRepoId") || undefined,
-      sourceOwner: text(providerTarget, "sourceOwner") || undefined
-    },
-    target: objectOf(resolved, "target")
-  };
-};
-var itemCommentPath = async (call, providerTarget, commentId) => {
-  const path = `${repoPath(providerTarget)}/issues/comments/${seg(commentId)}`;
-  const { data } = await api(call, "GET", path);
-  const href = (data.issue_url || data.pull_request_url || "").toLowerCase();
-  const item = `${call.identity.instance.replace(/\/+$/, "")}/${providerTarget.owner}/${providerTarget.name}`.toLowerCase();
-  const match = href.startsWith(`${item}/`) ? /^\/(?:issues|pulls)\/(\d+)\/?$/.exec(href.slice(item.length)) : null;
-  if (!match || Number(match[1]) !== providerTarget.number) {
-    throw new CallError("The comment is not on this item", 409, "SOURCE_CONTROL_MUTATION_TARGET_INVALID");
-  }
-  return path;
-};
-var perform = async (call, input) => {
-  const kind = text(input, "kind");
-  const normalized = objectOf(input, "input");
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case "change-request-create": {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const fork = sourceRepoId !== providerTarget.repoId;
-      const head = text(target, "head");
-      const payload = {
-        head: fork ? `${providerTarget.sourceOwner}:${head}` : head,
-        base: text(target, "base"),
-        title: text(normalized, "title")
-      };
-      const body = text(normalized, "body");
-      if (body)
-        payload.body = body;
-      const { data } = await api(call, "POST", `${repo}/pulls`, { body: payload });
-      if (branchRepoId(data.base) !== providerTarget.repoId || branchRepoId(data.head) !== sourceRepoId) {
-        throw new CallError("The forge opened the pull request somewhere other than asked", 502);
-      }
-      return { number: data.number };
-    }
-    case "change-request-update": {
-      const payload = { title: text(normalized, "title") };
-      if (Object.hasOwn(normalized, "body"))
-        payload.body = text(normalized, "body");
-      await api(call, "PATCH", `${repo}/pulls/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case "issue-update": {
-      const payload = { title: text(normalized, "title") };
-      if (Object.hasOwn(normalized, "body"))
-        payload.body = text(normalized, "body");
-      await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: payload });
-      return {};
-    }
-    case "change-request-merge": {
-      const payload = { Do: text(normalized, "method") || "merge" };
-      const headSha = text(target, "headSha");
-      if (headSha)
-        payload.head_commit_id = headSha;
-      await api(call, "POST", `${repo}/pulls/${providerTarget.number}/merge`, { body: payload });
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return { merged: pull.merged === true };
-    }
-    case "change-request-comment":
-    case "issue-comment":
-      await api(call, "POST", `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, "body") } });
-      return {};
-    case "change-request-comment-update":
-    case "issue-comment-update":
-      await api(call, "PATCH", await itemCommentPath(call, providerTarget, text(normalized, "commentId")), { body: { body: text(normalized, "body") } });
-      return {};
-    case "change-request-comment-delete":
-    case "issue-comment-delete":
-      await api(call, "DELETE", await itemCommentPath(call, providerTarget, text(normalized, "commentId")));
-      return {};
-    case "change-request-state":
-    case "issue-state": {
-      const state = text(normalized, "state");
-      const { data } = await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: { state } });
-      if (data.state !== state)
-        throw new CallError("The forge did not change the state", 502);
-      return { state };
-    }
-    default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, "UNSUPPORTED");
-  }
-};
-var NOT_APPLIED = { state: "failed", result: { failureStatus: 409, failureCode: "SOURCE_CONTROL_MUTATION_NOT_APPLIED" } };
-var reconcile = async (call, input) => {
-  const kind = text(input, "kind");
-  const normalized = objectOf(input, "input");
-  const { providerTarget, target } = readResolved(input);
-  const repo = repoPath(providerTarget);
-  switch (kind) {
-    case "change-request-create": {
-      const sourceRepoId = providerTarget.sourceRepoId ?? providerTarget.repoId;
-      const { data } = await api(call, "GET", `${repo}/pulls`, { query: { state: "all", sort: "recentupdate", limit: String(SCAN_SIZE) } });
-      const matches = data.filter((pull) => pull.head.ref === text(target, "head") && pull.base.ref === text(target, "base") && branchRepoId(pull.head) === sourceRepoId && branchRepoId(pull.base) === providerTarget.repoId);
-      return matches.length === 1 ? { state: "succeeded", result: { number: matches[0].number } } : { state: "outcome-unknown" };
-    }
-    case "change-request-update": {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      const landed = pull.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (pull.body ?? "") === text(normalized, "body"));
-      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
-    }
-    case "issue-update": {
-      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
-      const landed = data.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (data.body ?? "") === text(normalized, "body"));
-      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
-    }
-    case "change-request-merge": {
-      const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
-      return pull.merged ? { state: "succeeded", result: { merged: true } } : NOT_APPLIED;
-    }
-    case "change-request-state":
-    case "issue-state": {
-      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
-      return data.state === text(normalized, "state") ? { state: "succeeded", result: { state: data.state } } : NOT_APPLIED;
-    }
-    default:
-      return { state: "outcome-unknown" };
-  }
-};
+var mutationsPath = `./mutations${".js"}`;
+var { createMutations } = await import(mutationsPath);
+var { perform, reconcile } = createMutations({
+  api,
+  CallError,
+  repoPath,
+  seg,
+  text,
+  integer,
+  objectOf,
+  readPull,
+  branchRepoId,
+  scanSize: SCAN_SIZE,
+  fileScanPages: FILE_SCAN_PAGES
+});
 var failureOf = (error) => {
   const message = error.message.slice(0, SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX) || "Unexpected failure";
   if (error instanceof SourceControlForgeError)
