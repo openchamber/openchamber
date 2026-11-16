@@ -987,6 +987,23 @@ describe("messages and config", () => {
     expect(modelList?.url.searchParams.getAll("types")).toEqual(["chat", "image"])
   })
 
+  test("getProvidersForConfig names the Zen provider OpenCode Zen, whatever Console workspace OpenCode puts in front", async () => {
+    const providers = [
+      { id: "opencode", integrationID: "opencode", name: "Personal OC / OpenCode" },
+      { id: "opencode-go", integrationID: "opencode", name: "OpenCode Go" },
+      { id: "console-google", integrationID: "opencode", name: "Personal OC / Google" },
+    ]
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: providers })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [] })
+          : json({ location: {}, data: null })
+    responses.push(answer, answer, answer)
+    const catalog = await opencodeClient.getProvidersForConfig("/repo/zen")
+    expect(catalog.providers?.map((provider: { name: string }) => provider.name)).toEqual(["OpenCode Zen", "OpenCode Go", "Personal OC / Google"])
+  })
+
   for (const { label, variants } of [
     { label: "missing", variants: undefined },
     { label: "null", variants: null },

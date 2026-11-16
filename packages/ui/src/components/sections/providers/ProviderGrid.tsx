@@ -4,7 +4,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import type { Model, Provider } from '@/lib/opencode/model';
@@ -143,6 +143,15 @@ const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
 
 type GridProvider = Provider & { models: Model[] };
 
+/**
+ * One OpenCode Console sign-in connects both Zen and Go, so their cards say how
+ * each one bills; otherwise the pair reads as the same provider twice.
+ */
+const BILLING_KEY_BY_PROVIDER = new Map<string, I18nKey>([
+  ['opencode', 'settings.providers.card.billing.payPerUse'],
+  ['opencode-go', 'settings.providers.card.billing.subscription'],
+]);
+
 interface ProviderGridProps {
   providers: readonly GridProvider[];
   /** Null while the integration list is loading; cards then show no status. */
@@ -262,11 +271,13 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             machineCredentials: usesMachineCredentials(provider),
             noModels: provider.models.length === 0,
           });
+          const billingKey = BILLING_KEY_BY_PROVIDER.get(provider.id);
           return (
             <SettingsCard
               key={provider.id}
               icon={<ProviderLogo providerId={provider.id} className="size-5" />}
               title={provider.name || provider.id}
+              description={billingKey ? t(billingKey) : undefined}
               badges={status ? <StatusPill status={status} /> : null}
               footer={(
                 <>

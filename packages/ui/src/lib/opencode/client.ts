@@ -74,6 +74,7 @@ import { runningShellFromWire, shellCancellationNote, type RunningShell, type Sh
 import { runningImageJobFromWire, type RunningImageJob } from "./background-image"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
+import { withZenName } from "./providerDisplayName"
 import { readMessageThroughAncestors } from "./message-ownership"
 import {
   deniesAnyProvider,
@@ -2302,7 +2303,7 @@ class OpencodeService {
         call("provider.list", () => providerClient.provider.list().then((r) => r.data)),
       ])
       return compact({
-        providers,
+        providers: providers.map(withZenName),
         models: models.map((model) => (
           Array.isArray(model.variants) ? model : { ...model, variants: [] }
         )),

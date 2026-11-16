@@ -38,6 +38,18 @@ second catalog change arriving during that request. Catalog invalidations
 coalesce by resource revision above this adapter. Reconnect clears the request map;
 obsolete completions cannot remove the replacement runtime's entries.
 
+### Why the Zen provider is renamed in the provider read
+
+OpenCode names the `opencode` provider "OpenCode", or "<workspace> / OpenCode"
+after a Console sign-in, and the same sign-in also connects `opencode-go`, so
+users read the pair as one provider listed twice. `getProvidersForConfig`
+renames it to "OpenCode Zen", which reaches every surface that shows provider
+names: Settings, the model pickers, Context and usage. A label on the Settings
+card alone was rejected because the pickers would keep the confusing name. The
+workspace name stays visible on the provider's Console account. Other Console
+providers keep OpenCode's name, where the workspace prefix tells them apart
+from a provider connected with the user's own key.
+
 ### Why a missing agent stops the send instead of being skipped
 
 OpenCode records any agent name and fails only the next turn, so the send has
