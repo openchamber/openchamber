@@ -242,6 +242,25 @@ The record stays until the folder is gone or a session is found in it; a list
 that cannot load, a failed read and a runtime switch keep both for the next
 start. A live sending page never gets here (its record is skipped).
 
+A Chat draft prepares its folder when its first character is typed, and an
+unsent draft's folder outlives a reload too: the page that prepared it is gone,
+and the next page prepares its own. `prepareChatDraftDirectory` therefore
+records each prepared folder under the page that prepared it
+(`trackPreparedChatFolder`), and recovery treats a dead page's folder by the
+same two-start rule: the first start takes it over, a later one deletes it
+when the global session list holds no session in it, and drops the record
+when one does (the draft's first send made it a session's folder). A live
+page's folder, the draft on screen included, is never touched; a folder the
+store already removed (draft closed, switched to a project) answers 404 to the
+delete and its record goes. A folder a send record still names waits until
+that record is settled, so the send's own grace start is never skipped, and a
+session list that does not load keeps both folder and record.
+
+No folder is ever deleted without Web Locks. There the records live in the
+tab's `sessionStorage`, which a duplicated tab copies, so a record's owner
+cannot be told dead: prepared folders are not recorded, and a send's leftover
+folder is left on disk.
+
 ### Why a left-behind chat folder waits a whole start before it goes
 
 A page that dies does not take back a create request already on its way: the

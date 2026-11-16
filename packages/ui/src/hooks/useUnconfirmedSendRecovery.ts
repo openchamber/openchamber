@@ -34,6 +34,7 @@ const serverOfThisRuntime = (): UnconfirmedSendServer => ({
     hasSessionsIn: async (directory) => {
         const sessions = useGlobalSessionsStore.getState();
         if (!sessions.hasLoaded) await sessions.loadSessions();
+        if (!useGlobalSessionsStore.getState().hasLoaded) throw new Error('The session list did not load');
         return isChatDirectoryStillReferenced(directory, new Set());
     },
     deleteChatDirectory,

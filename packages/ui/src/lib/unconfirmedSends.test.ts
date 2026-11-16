@@ -1,17 +1,29 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
 import type { ChatDraftIdentity } from './chatDraftPersistence';
-import {
+import type { UnconfirmedSend, UnconfirmedSendServer } from './unconfirmedSends';
+import { getSafeSessionStorage, getSafeStorage, listStorageKeys } from '@/stores/utils/safeStorage';
+
+const heldLocks = new Set<string>();
+const fakeLocks = {
+  request: <T>(name: string, callback: () => T | Promise<T>): Promise<T> => {
+    heldLocks.add(name);
+    return Promise.resolve(callback()).finally(() => heldLocks.delete(name));
+  },
+  query: async () => ({ held: [...heldLocks].map((name) => ({ name })) }),
+};
+const withoutLocks: typeof import('./unconfirmedSends') = await import(`./unconfirmedSends?without-web-locks=${Date.now()}`);
+Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { ...globalThis.navigator, locks: fakeLocks } });
+const {
+  PREPARED_CHAT_FOLDER_KEY_PREFIX,
   UNCONFIRMED_SEND_KEY_PREFIX,
   draftRestoreTarget,
   recoverUnconfirmedSends,
+  trackPreparedChatFolder,
   trackUnconfirmedSend,
-  type UnconfirmedSend,
-  type UnconfirmedSendServer,
-} from './unconfirmedSends';
-import { getSafeSessionStorage, getSafeStorage, listStorageKeys } from '@/stores/utils/safeStorage';
+} = await import('./unconfirmedSends');
 
-const storage = globalThis.navigator?.locks ? getSafeStorage() : getSafeSessionStorage();
+const storage = getSafeStorage();
 let runtimeCounter = 0;
 
 const nextRuntime = () => `runtime-${runtimeCounter += 1}`;
@@ -35,6 +47,8 @@ const record = (runtimeKey: string, change: Partial<UnconfirmedSend> = {}): Unco
   };
 };
 
+const folderKeys = () => listStorageKeys(storage).filter((key) => key.startsWith(PREPARED_CHAT_FOLDER_KEY_PREFIX));
+const folders = () => folderKeys().map((key) => JSON.parse(storage.getItem(key) ?? 'null'));
 const keys = () => listStorageKeys(storage).filter((key) => key.startsWith(UNCONFIRMED_SEND_KEY_PREFIX));
 const store = (...records: UnconfirmedSend[]) => {
   for (const entry of records) storage.setItem(`${UNCONFIRMED_SEND_KEY_PREFIX}${entry.id}`, JSON.stringify(entry));
@@ -80,6 +94,7 @@ const recoverInto = async (runtimeKey: string, server: UnconfirmedSendServer, sh
 describe('unconfirmedSends', () => {
   beforeEach(() => {
     for (const key of keys()) storage.removeItem(key);
+    for (const key of folderKeys()) storage.removeItem(key);
   });
 
   test('a send whose request never left comes back to its session without asking the server', async () => {
@@ -345,6 +360,114 @@ describe('unconfirmedSends', () => {
       storage.setItem(`${UNCONFIRMED_SEND_KEY_PREFIX}older`, JSON.stringify(older));
 
       expect((await recoverInto(runtime, fakeServer().server)).map((entry) => entry.text)).toEqual(['the prompt']);
+    });
+  });
+  describe('the folder an unsent Chat draft prepared', () => {
+    const folder = '/chats/2026-11-16/session-draft';
+    const deadFolder = (runtime: string, seen = false) => storage.setItem(
+      `${PREPARED_CHAT_FOLDER_KEY_PREFIX}dead-${runtime}`,
+      JSON.stringify({ id: `dead-${runtime}`, pageId: 'dead-page', runtimeKey: runtime, directory: folder, seen }),
+    );
+
+    test('of a dead page is marked on the first start and removed on the next one', async () => {
+      const runtime = nextRuntime();
+      deadFolder(runtime);
+      const { server, deleted } = fakeServer();
+
+      await recoverInto(runtime, server);
+      expect(deleted).toEqual([]);
+      expect(folders()).toMatchObject([{ seen: true, directory: folder }]);
+      expect(folders()[0].pageId).not.toBe('dead-page');
+
+      const next = nextRuntime();
+      for (const entry of folders()) storage.setItem(`${PREPARED_CHAT_FOLDER_KEY_PREFIX}${entry.id}`, JSON.stringify({ ...entry, pageId: 'dead-page', runtimeKey: next }));
+      await recoverInto(next, server);
+      expect(deleted).toEqual([folder]);
+      expect(folders()).toEqual([]);
+    });
+
+    test('of the live draft on this page is never touched', async () => {
+      const runtime = nextRuntime();
+      trackPreparedChatFolder(runtime, folder);
+      const { server, deleted } = fakeServer();
+
+      await recoverInto(runtime, server);
+      expect(deleted).toEqual([]);
+      expect(folders()).toMatchObject([{ seen: false, directory: folder }]);
+    });
+
+    test('of another open window is never touched', async () => {
+      const runtime = nextRuntime();
+      heldLocks.add('openchamber.page.other-window');
+      storage.setItem(`${PREPARED_CHAT_FOLDER_KEY_PREFIX}other`, JSON.stringify({ id: 'other', pageId: 'other-window', runtimeKey: runtime, directory: folder, seen: true }));
+      const { server, deleted } = fakeServer();
+
+      await recoverInto(runtime, server);
+      heldLocks.delete('openchamber.page.other-window');
+      expect(deleted).toEqual([]);
+      expect(folders()).toMatchObject([{ pageId: 'other-window', seen: true }]);
+    });
+
+    test('that a session now lives in stays and its record goes', async () => {
+      const runtime = nextRuntime();
+      deadFolder(runtime, true);
+      const { server, deleted } = fakeServer({ usedDirectories: [folder] });
+
+      await recoverInto(runtime, server);
+      expect(deleted).toEqual([]);
+      expect(folders()).toEqual([]);
+    });
+
+    test('stays, with its record, when the sessions cannot be read or the runtime changed', async () => {
+      const runtime = nextRuntime();
+      deadFolder(runtime, true);
+      await recoverInto(runtime, fakeServer({ usageUnknown: true }).server);
+      const other = nextRuntime();
+      deadFolder(other, true);
+      const { server, deleted } = fakeServer({ current: () => false });
+      await recoverInto(other, server);
+
+      expect(deleted).toEqual([]);
+      expect(folders()).toHaveLength(2);
+    });
+
+    test('of another runtime is left alone', async () => {
+      const runtime = nextRuntime();
+      deadFolder('runtime-other', true);
+      const { server, deleted } = fakeServer();
+
+      await recoverInto(runtime, server);
+      expect(deleted).toEqual([]);
+      expect(folders()).toHaveLength(1);
+    });
+  });
+  test('a folder a send record still holds waits for that record', async () => {
+    const runtime = nextRuntime();
+    const directory = '/chats/2026-11-16/session-shared';
+    store(record(runtime, { identity: { runtimeKey: runtime, directory: '__chat__', sessionId: null }, sessionId: 'ses_minted', chatDirectory: directory, orphanSeen: false }));
+    storage.setItem(`${PREPARED_CHAT_FOLDER_KEY_PREFIX}shared`, JSON.stringify({ id: 'shared', pageId: 'dead-page', runtimeKey: runtime, directory, seen: true }));
+    const { server, deleted } = fakeServer();
+
+    await recoverInto(runtime, server);
+    expect(deleted).toEqual([]);
+    expect(folders()).toMatchObject([{ seen: true, pageId: 'dead-page' }]);
+  });
+
+  describe('without Web Locks', () => {
+    const tabStorage = getSafeSessionStorage();
+    const tabKeys = () => listStorageKeys(tabStorage).filter((key) => key.startsWith(UNCONFIRMED_SEND_KEY_PREFIX) || key.startsWith(PREPARED_CHAT_FOLDER_KEY_PREFIX));
+
+    test('no prepared folder is recorded and no folder is ever deleted', async () => {
+      const runtime = nextRuntime();
+      withoutLocks.trackPreparedChatFolder(runtime, '/chats/2026-11-16/session-tab');
+      expect(tabKeys()).toEqual([]);
+      const directory = '/chats/2026-11-16/session-copied';
+      tabStorage.setItem(`${UNCONFIRMED_SEND_KEY_PREFIX}copied`, JSON.stringify(record(runtime, { id: 'copied', identity: { runtimeKey: runtime, directory: '__chat__', sessionId: null }, sessionId: 'ses_minted', chatDirectory: directory, textReturned: true, orphanSeen: true })));
+      const { server, deleted } = fakeServer();
+
+      await withoutLocks.recoverUnconfirmedSends(runtime, { shown: () => null, restore: () => undefined, discardDraft: () => undefined }, server);
+      expect(deleted).toEqual([]);
+      expect(tabKeys()).toEqual([]);
     });
   });
 });
