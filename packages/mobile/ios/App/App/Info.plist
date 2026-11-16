@@ -85,7 +85,7 @@
 			<key>UIApplicationShortcutItemUserInfo</key>
 			<dict>
 				<key>url</key>
-				<string>openchamber://new-session</string>
+				<string>openchamber://new</string>
 			</dict>
 		</dict>
 		<dict>

@@ -13,7 +13,7 @@
             android:action="android.intent.action.VIEW"
             android:targetPackage="com.openchamber.app"
             android:targetClass="com.openchamber.app.MainActivity"
-            android:data="openchamber://new-session" />
+            android:data="openchamber://new" />
     </shortcut>
     <shortcut
         android:shortcutId="attention"

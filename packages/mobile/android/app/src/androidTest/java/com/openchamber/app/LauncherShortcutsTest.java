@@ -66,7 +66,7 @@ public class LauncherShortcutsTest {
 
         assertEquals(Arrays.asList("new-session", "attention"), ids);
         assertEquals(Arrays.asList(
-            "openchamber://new-session",
+            "openchamber://new",
             "openchamber://sessions?filter=attention"), deepLinks);
 
         Resources resources = context.getResources();
