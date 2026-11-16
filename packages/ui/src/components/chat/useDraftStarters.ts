@@ -70,6 +70,7 @@ export function useDraftStarters(): UseDraftStartersResult {
     const { t } = useI18n();
     const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
     const globalRaw = useUIStore((s) => s.globalDraftStarters);
+    const goalModeEnabled = useUIStore((s) => s.sessionGoalEnabled);
     const target = useComposerConfigDirectory(useEffectiveDirectory());
     const directory = target.status === 'resolved' ? target.directory : null;
     const commands = useCommandsStore((s) => selectCommandsForComposer(s, target));
@@ -175,7 +176,7 @@ export function useDraftStarters(): UseDraftStartersResult {
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
         for (const c of commands) {
-            if (c.isBuiltIn || c.source === 'skill' || getBuiltInStarter(c.name) || !isCommandOfferedInComposer(c)) continue;
+            if (c.isBuiltIn || c.source === 'skill' || getBuiltInStarter(c.name) || !isCommandOfferedInComposer(c, goalModeEnabled)) continue;
             items.push({ type: 'command', name: c.name, label: normalizeStarterLabel(c.name), icon: COMMAND_FALLBACK_ICON, section: 'command', scope: c.scope === 'project' ? 'project' : 'user' });
         }
         for (const sk of skills) {
@@ -183,7 +184,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
         // Only offer items that are not already pinned (removed built-ins reappear here).
         return items.filter((item) => !pinnedKeys.has(`${item.type}:${item.name}`));
-    }, [t, commands, skills, pinnedKeys, isVSCode]);
+    }, [t, commands, skills, pinnedKeys, isVSCode, goalModeEnabled]);
 
     const persistGlobal = React.useCallback((next: DraftStarterRef[]) => {
         useUIStore.getState().setGlobalDraftStarters(next);

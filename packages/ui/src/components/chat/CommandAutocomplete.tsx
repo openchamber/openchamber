@@ -58,6 +58,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
   const isMobile = useUIStore((state) => state.isMobile);
+  const goalModeEnabled = useUIStore((state) => state.sessionGoalEnabled);
   const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
 
   // Commands belong to the directory the composer sends to — the session's
@@ -117,7 +118,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   // The list depends on the registries, not on what is typed: it is built
   // once per registry change, and only the ranking follows the query.
   const allCommands = React.useMemo<CommandInfo[]>(() => {
-    const customCommands: CommandInfo[] = commandsWithMetadata.filter(isCommandOfferedInComposer).map((cmd, index) => ({
+    const customCommands: CommandInfo[] = commandsWithMetadata.filter((cmd) => isCommandOfferedInComposer(cmd, goalModeEnabled)).map((cmd, index) => ({
       id: `opencode:${cmd.scope ?? 'global'}:${cmd.name}:${cmd.agent ?? ''}:${cmd.model ?? ''}:${index}`,
       name: cmd.name,
       source: 'opencode',
@@ -204,7 +205,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       ...mergeCommandAutocompleteItems(builtInCommands, customCommands),
       ...extensionCommands,
     ];
-  }, [hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, guestCommands, t]);
+  }, [hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, goalModeEnabled, guestCommands, t]);
   const commands = React.useMemo(
     () => rankCommandAutocompleteItems(allCommands, searchQuery),
     [allCommands, searchQuery],

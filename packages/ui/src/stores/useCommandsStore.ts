@@ -113,12 +113,12 @@ export const isCommandBuiltIn = (command: Command): boolean => {
 };
 
 // OpenCode's own `/goal` (2.2.1+) duplicates Goal Mode, so the composer does
-// not offer it. A user's own `goal` command, or one whose metadata read
-// failed, stays.
+// not offer it while Goal Mode is on. A user's own `goal` command, or one
+// whose metadata read failed, stays.
 const HIDDEN_OPENCODE_COMMAND_NAMES = new Set(['goal']);
 
-export const isCommandOfferedInComposer = (command: Command): boolean => {
-  return !(command.fromOpenCode && !command.scope && HIDDEN_OPENCODE_COMMAND_NAMES.has(command.name));
+export const isCommandOfferedInComposer = (command: Command, goalModeEnabled = true): boolean => {
+  return !(goalModeEnabled && command.fromOpenCode && !command.scope && HIDDEN_OPENCODE_COMMAND_NAMES.has(command.name));
 };
 
 const CONFIG_EVENT_SOURCE = "useCommandsStore";

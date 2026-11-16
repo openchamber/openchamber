@@ -417,4 +417,9 @@ describe('isCommandOfferedInComposer', () => {
     expect(isCommandOfferedInComposer({ name: 'goal' })).toBe(true);
     expect(isCommandOfferedInComposer({ name: 'review' })).toBe(true);
   });
+
+  test('offers OpenCode\'s own /goal when Goal Mode is off', () => {
+    expect(isCommandOfferedInComposer({ name: 'goal', fromOpenCode: true }, true)).toBe(false);
+    expect(isCommandOfferedInComposer({ name: 'goal', fromOpenCode: true }, false)).toBe(true);
+  });
 });
