@@ -35,11 +35,6 @@ const skipBlank = (source, index) => {
   return position;
 };
 
-/**
- * The end of the object literal that starts at `start`: braces are counted
- * outside strings, template literals and comments. The literal is evaluated
- * on its own afterwards, so this only has to find where it stops.
- */
 const objectLiteralEnd = (source, start) => {
   let depth = 0;
   let position = start;
@@ -66,9 +61,6 @@ const objectLiteralEnd = (source, start) => {
 const readMeta = (literal) => {
   let value;
   try {
-    // A fresh context and a short timeout: meta is a plain literal, so
-    // anything that needs more than that is not one. It crosses back as JSON,
-    // so the object belongs to this realm and holds only literal values.
     value = JSON.parse(vm.runInNewContext(`JSON.stringify(${literal})`, {}, { timeout: 50 }) ?? 'null');
   } catch (error) {
     throw new WorkflowScriptError(`meta must be a plain object literal: ${error instanceof Error ? error.message : String(error)}`);
@@ -91,14 +83,8 @@ const readMeta = (literal) => {
   return { name, description, phases: phases.map((phase) => phase.trim()) };
 };
 
-/** The body as the sandbox runs it: an async function, so it can await and return. */
 export const wrapWorkflowBody = (body) => `(async () => {\n${body}\n})()`;
 
-/**
- * Splits a workflow script into its `meta` and the body the sandbox runs, and
- * checks that the body compiles. Throws WorkflowScriptError with a message
- * written for the agent that wrote the script.
- */
 export const parseWorkflowScript = (source) => {
   if (!isString(source) || !source.trim()) {
     throw new WorkflowScriptError('script is required: export const meta = { name, description, phases } followed by the body');
@@ -132,7 +118,6 @@ export const parseWorkflowScript = (source) => {
   return { meta, body };
 };
 
-/** Literal phase("...") titles in the body, for the plan the user approves. */
 const findPhaseCalls = (body) => {
   const titles = [];
   for (const match of body.matchAll(/\bphase\(\s*(["'`])((?:(?!\1).)+)\1\s*\)/g)) {
@@ -141,5 +126,4 @@ const findPhaseCalls = (body) => {
   return titles;
 };
 
-/** The phases the user is shown before a run: meta's list, else the literal phase() calls. */
 export const plannedPhases = ({ meta, body }) => (meta.phases.length > 0 ? meta.phases : findPhaseCalls(body));

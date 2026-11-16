@@ -1,6 +1,5 @@
 import { WorkflowAgentStopped } from './agent-session.js';
 
-/** A small counting semaphore; waiters give up when the run stops. */
 export const createLimiter = (limit) => {
   let active = 0;
   const queue = [];

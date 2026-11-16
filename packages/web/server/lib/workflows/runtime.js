@@ -12,9 +12,6 @@ import { runWorkflowSandbox } from './sandbox.js';
 import { WorkflowScriptError, parseWorkflowScript, plannedPhases } from './script.js';
 import { isWorkflowRunId } from './store.js';
 
-// How many agents of one run work at once, and how many one run may start in
-// all. A script with a loop must not be able to spend a subscription in a
-// minute; a run that needs more is split into several.
 export const MAX_CONCURRENT_AGENTS = 8;
 export const MAX_AGENTS_PER_RUN = 200;
 const SCHEMA_ATTEMPTS = 3;
@@ -42,7 +39,6 @@ const readAgentOptions = (raw) => {
   const label = asNonEmptyString(source.label);
   const agent = asNonEmptyString(source.agent);
   const model = asNonEmptyString(source.model);
-  // Only the options given: the replay key hashes this object.
   const options = {};
   if (label) options.label = label.trim().slice(0, 120);
   if (agent) options.agent = agent.trim();
@@ -59,12 +55,6 @@ const schemaInstruction = (schema) => [
   '```',
 ].join('\n');
 
-/**
- * What the answer tool received, as the values to check, best first: the
- * value an object-only tool input wraps as { value } for a schema that is not
- * an object, then JSON text parsed (a model that sent text anyway), then the
- * input as it came, so "42" still answers a schema that wants a string.
- */
 const submittedAnswerCandidates = (raw, schema) => {
   const candidates = [];
   if (schema?.type !== 'object' && isPlainObject(raw) && Object.hasOwn(raw, 'value')) candidates.push(raw.value);
@@ -76,21 +66,6 @@ const submittedAnswerCandidates = (raw, schema) => {
   return candidates;
 };
 
-/**
- * What the UI and the status action show of a run: everything but the script
- * and the full results. It always travels as JSON, which leaves out the fields
- * a run or an agent does not have yet.
- */
-/**
- * What the store keeps in memory of a run nothing works on any more (finished,
- * report delivered): enough for `summarizeRun` to give the same summary, the
- * rest read from its file when asked for. Prompts, the script and agents'
- * full answers were most of a server's workflow memory (10 MB for 38 runs).
- * A result keeps one character past the preview limit, so `truncate` still
- * adds its ellipsis exactly when the full text would have.
- */
-// A slice of a long string keeps the whole string alive in V8; the preview is
-// copied out so the full answer can go.
 const preview = (value) => JSON.parse(JSON.stringify(asText(value).slice(0, PREVIEW_CHAR_LIMIT + 1)));
 
 export const lightenWorkflowRun = (run) => ({
@@ -165,18 +140,10 @@ const isPidAlive = (pid) => {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM: the process exists but belongs to someone else.
     return error?.code === 'EPERM';
   }
 };
 
-/**
- * Workflow runs: scripts an agent writes that fan work out to many agents,
- * run here in OpenChamber's server so the agent that asked stays free. The
- * user approves each run's plan before it starts, unless their settings let it
- * start at once; when it ends the report is delivered into the asking session
- * like a dispatched session's result.
- */
 export const createWorkflowRuntime = ({
   store,
   agentSessions,
@@ -194,10 +161,7 @@ export const createWorkflowRuntime = ({
   isProcessAlive = isPidAlive,
   readProcessStart = readWorkflowProcessStart,
 }) => {
-  // Run id -> { controller, terminate, sessions: Set<sessionId> } while it runs.
   const active = new Map();
-  // Agent session id -> { schema, submitted, value } for an agent asked for a
-  // schema answer, from its session's creation until its call settles.
   const answerSlots = new Map();
   const broadcastTimers = new Map();
 
@@ -217,8 +181,6 @@ export const createWorkflowRuntime = ({
     broadcastTimers.set(run.id, timer);
   };
 
-  // Runs the user deleted. A report delivery or an agent still settling holds
-  // the run object, and its next save must not bring the file back.
   const removedRuns = new Set();
 
   const persist = async (run, options) => {
@@ -232,8 +194,6 @@ export const createWorkflowRuntime = ({
     announce(run, options);
   };
 
-  // Admission changes only top-level fields. Copy logs before appending so a
-  // failed checkpoint can restore their original contents and all shared refs.
   const withRollback = async (run, transition) => {
     const before = { ...run };
     try {
@@ -294,7 +254,6 @@ export const createWorkflowRuntime = ({
 
   const readArgs = (raw) => {
     if (raw === undefined) return undefined;
-    // The plugin forwards raw JSON, and an object can arrive stringified.
     let value = raw;
     if (isString(raw) && /^\s*[[{]/.test(raw)) {
       try {
@@ -309,16 +268,8 @@ export const createWorkflowRuntime = ({
     return JSON.parse(serialized);
   };
 
-  // --- report ----------------------------------------------------------------
-
-  // get/list expose working state, so a newly minted report must remain
-  // ineligible even while its terminal checkpoint is still pending.
   const uncommittedReports = new WeakSet();
 
-  /**
-   * Sends the run's report. A report a resume replaced (or one already sent)
-   * is left alone, so a retry never sends a stale report or marks a new one.
-   */
   const deliverReport = async (run) => {
     const report = run.report;
     if (!report || report.delivered || uncommittedReports.has(report)) return;
@@ -335,16 +286,12 @@ export const createWorkflowRuntime = ({
       try {
         await postSynthetic(run.parentSessionId, message);
       } catch (error) {
-        // 409: this id was admitted before; 404: the session is gone.
         if (error?.status !== 409 && error?.status !== 404) {
           console.warn(`[workflows] delivering the report of ${run.id} failed:`, error?.message ?? error);
           await sleep(DELIVERY_BASE_DELAY_MS * 2 ** (attempt - 1));
           continue;
         }
       }
-      // Another delivery of the same report may have finished first and saved
-      // its marker; this object may since have been replaced by a resume, so
-      // saving it again would put the old terminal state back.
       if (run.report !== report || report.delivered) return;
       report.delivered = true;
       await persist(run, { immediate: true }).catch((error) => {
@@ -354,7 +301,6 @@ export const createWorkflowRuntime = ({
     }
   };
 
-  /** Records how the run ended, with its report still to be sent. */
   const settleRun = async (run, state, { error, result, resume }) => {
     run.state = state;
     run.endedAt = now();
@@ -364,13 +310,9 @@ export const createWorkflowRuntime = ({
     const report = { messageId: createMessageId(now()), delivered: false, resume };
     uncommittedReports.add(report);
     run.report = report;
-    // On failure, retain this undelivered report to protect the last durable
-    // snapshot from retention. Its WeakSet membership still forbids delivery.
     await persist(run, { immediate: true });
     uncommittedReports.delete(report);
   };
-
-  // --- running ---------------------------------------------------------------
 
   const log = (run, message, notify = true) => {
     run.logs.push({ at: now(), message: truncate(message, 2_000) });
@@ -378,7 +320,6 @@ export const createWorkflowRuntime = ({
     if (notify) announce(run);
   };
 
-  /** One agent() call: replayed from the last attempt when it asked the same, else run. */
   const runAgent = async (run, execution, { prompt, options: rawOptions, phase }) => {
     const options = readAgentOptions(rawOptions);
     const base = callKey(prompt, options);
@@ -401,7 +342,6 @@ export const createWorkflowRuntime = ({
       label,
       phase: phase ?? null,
       prompt: truncate(prompt, STORED_PROMPT_LIMIT),
-      // Saved as JSON, which leaves out the options not given.
       agent: options.agent,
       model: options.model,
       schema: options.schema,
@@ -420,8 +360,6 @@ export const createWorkflowRuntime = ({
     let counted = false;
     try {
       release = await execution.limiter.acquire(signal);
-      // Counted when an agent starts, across attempts: a call still queued
-      // when the run stopped spent nothing, and resuming does not reset it.
       const started = run.agentsStarted ?? 0;
       if (started >= maxAgentsPerRun) {
         Object.assign(record, { state: 'failed', endedAt: now(), error: `A run starts at most ${maxAgentsPerRun} agents across its attempts` });
@@ -430,17 +368,12 @@ export const createWorkflowRuntime = ({
       }
       run.agentsStarted = started + 1;
       counted = true;
-      // An agent filed under a phase moves the run there, so a pipeline that
-      // names phases per agent shows where it is like one that calls phase().
       if (record.phase) {
         run.currentPhase = record.phase;
         if (!run.phases.includes(record.phase)) run.phases.push(record.phase);
       }
       Object.assign(record, { state: 'running', startedAt: now() });
-      // Saved before the session exists: a restart while it works must still
-      // count it against the limit and show it as stopped, not forget it.
       await persist(run);
-      // A stop that came during the save: no session is made after it.
       if (signal.aborted) throw new WorkflowAgentStopped();
       const text = options.schema ? `${prompt}\n${schemaInstruction(options.schema)}` : prompt;
       const slot = options.schema ? { schema: options.schema, submitted: false, value: undefined } : null;
@@ -456,19 +389,12 @@ export const createWorkflowRuntime = ({
         onSession: async (id) => {
           record.sessionId = id;
           execution.sessions.add(id);
-          // At once, not throttled: the chat leaves workflow agents out of its
-          // subagent rows by this id, and it must know before the agent works.
-          // Saved too, so a restart knows which session to report as stopped.
           await persist(run, { immediate: true });
           if (slot) answerSlots.set(id, slot);
         },
       });
       let current = outcome;
       let value = current.text;
-      // An answer the tool accepted is the answer, after the first turn or a
-      // correction, even when that turn then ended in an error; only a stop of
-      // the run discards it. The final text is the fallback for an agent that
-      // did not have or use the tool.
       for (let attempt = 1; slot; attempt += 1) {
         if (slot.submitted && !signal.aborted) {
           current = { state: 'completed', text: current.text, errorMessage: '' };
@@ -501,7 +427,6 @@ export const createWorkflowRuntime = ({
           endedAt: now(),
           error: current.errorMessage || (current.state === 'cancelled' ? 'The agent was stopped' : 'The agent failed'),
         });
-        // A stop of the run ends every agent at once; only an agent's own end is worth a line.
         if (!signal.aborted) log(run, `${label} ${record.state === 'stopped' ? 'stopped' : 'failed'}: ${record.error}`);
         return null;
       }
@@ -522,8 +447,6 @@ export const createWorkflowRuntime = ({
       if (record.sessionId) {
         execution.sessions.delete(record.sessionId);
         answerSlots.delete(record.sessionId);
-        // What the agent ran on and spent; the session keeps it, so a failed
-        // read only leaves the panel without the numbers.
         const read = await agentSessions.readUsage({ directory: run.directory, sessionId: record.sessionId }).catch(() => null);
         if (read?.model) record.modelUsed = read.model;
         if (read) record.usage = read.usage;
@@ -534,18 +457,12 @@ export const createWorkflowRuntime = ({
     }
   };
 
-  /**
-   * The answer tool: checks a workflow agent's answer against the schema its
-   * call asked for and keeps the last accepted one. A mismatch is an error the
-   * agent reads and fixes in the same turn.
-   */
   const answer = (input, { sessionId }) => {
     const slot = answerSlots.get(sessionId);
     if (!slot) {
       throw new OpenChamberControlError(`${WORKFLOW_ANSWER_TOOL} is only for a workflow agent whose prompt asks for a schema answer`, 403);
     }
     if (input.answer === undefined) throw new OpenChamberControlError('answer is required: your answer as a JSON object', 400);
-    // JSON text parsed first; a schema that wants a string still takes "42" as the string it is.
     const candidates = submittedAnswerCandidates(input.answer, slot.schema);
     const value = candidates.find((candidate) => !validateJsonSchema(slot.schema, candidate));
     if (value === undefined) {
@@ -556,15 +473,6 @@ export const createWorkflowRuntime = ({
     return { accepted: true, note: 'Accepted as your answer. End your turn now; nothing else you write is read.' };
   };
 
-  /**
-   * Runs the script for `run`, reusing the agents of earlier attempts that
-   * completed. Resolves when the run has ended and its report is on its way.
-   *
-   * The run is in `active` from the first moment it is `running`, so a stop
-   * that arrives before the sandbox exists is recorded and honoured as soon as
-   * it does. It leaves `active` when the worker ends, even if its terminal
-   * checkpoint fails; such a failure withholds the report.
-   */
   const execute = async (run, execution, body) => {
     const { completed } = execution;
     let ending;
@@ -595,24 +503,18 @@ export const createWorkflowRuntime = ({
           : { state: 'failed', error: error instanceof Error ? error.message : String(error), resume: true }),
       );
     } catch (error) {
-      // The worker could not start: the run fails instead of staying running.
       ending = { state: 'failed', error: error instanceof Error ? error.message : String(error), resume: true };
     }
 
     try {
-      // Agents the script did not wait for, or that were running when it was
-      // stopped, end with the run; the report counts them as stopped.
       execution.controller.abort();
       await Promise.allSettled([...execution.sessions].map((sessionId) => agentSessions.interrupt(run.directory, sessionId)));
       await Promise.allSettled([...execution.inflight]);
-      // Answers this attempt did not get to stay for the next one.
       for (const [key, agent] of completed) {
         if (!execution.consumed.has(key)) run.agents.push(agent);
       }
       await settleRun(run, ending.state, ending);
     } catch (error) {
-      // The worker ended. Keep its truthful working state while disk retains
-      // the last successful snapshot; no report may describe an unsaved end.
       console.warn(`[workflows] run ${run.id} ended; completion report withheld:`, error?.message ?? error);
       log(run, 'Could not save workflow completion; completion report withheld.');
       announce(run, { immediate: true });
@@ -663,9 +565,6 @@ export const createWorkflowRuntime = ({
     });
   };
 
-  // --- actions ---------------------------------------------------------------
-
-  /** Checks a script without running it: what the user would approve. */
   const check = async (input, { directory } = {}) => {
     await assertEnabled();
     const parsed = parse(await readScript(input, directory));
@@ -677,17 +576,10 @@ export const createWorkflowRuntime = ({
     };
   };
 
-  /**
-   * Proposes a run; it starts when the user approves it in the chat, or at
-   * once when `approved` says the user's settings already did.
-   */
-  // `scriptDirectory`: where a saved workflow named in `input` is read, when the
-  // user runs one of the project's from a worktree session (default: `directory`).
   const propose = async (input, { sessionId, directory, scriptDirectory = directory }, { approved = false } = {}) => {
     await assertEnabled();
     if (!sessionId) throw new OpenChamberControlError('workflow.run needs the calling session', 400);
     if (!directory) throw new OpenChamberControlError('workflow.run needs the session directory', 400);
-    // One level only: an agent of a run doing its piece does not fan out again.
     if ([...active.values()].some((execution) => execution.sessions.has(sessionId))) {
       throw new OpenChamberControlError('An agent of a workflow cannot start another workflow; do your piece of the work and answer', 403);
     }
@@ -702,7 +594,6 @@ export const createWorkflowRuntime = ({
       description: parsed.meta.description,
       phases: plannedPhases(parsed),
       script,
-      // Saved as JSON, which leaves args out when none were given.
       args: readArgs(input.args),
       state: 'awaiting-approval',
       attempt: 0,
@@ -753,7 +644,6 @@ export const createWorkflowRuntime = ({
       throw new OpenChamberControlError(`The run is ${run.state}, not running`, 409);
     }
     execution.stopReason ??= sessionId ? 'The agent stopped the workflow.' : 'The user stopped the workflow.';
-    // Before the sandbox exists, execute() honours the reason once it does.
     execution.sandbox?.terminate();
     return { runId: run.id, state: 'stopping' };
   };
@@ -772,19 +662,8 @@ export const createWorkflowRuntime = ({
 
   const status = async ({ runId }, { sessionId } = {}) => summarizeRun(await requireRun(runId, sessionId));
 
-  /**
-   * The user's delete: a finished run leaves the server, its report included
-   * if it never went out. A run that is running or waiting is stopped or
-   * declined first. The agents' sessions stay, as any subagent's would.
-   */
   const remove = async ({ runId }) => {
     const run = await requireRun(runId);
-    // The run's state is the rule ("stop or decline first"), not the active
-    // set: an execution leaves `active` only once its end save resolves
-    // (execute's finally), so for a moment after the end is saved the run is
-    // finished yet still listed there. Deleting in that overlap is safe — the
-    // deletion drops an undelivered report and the `removedRuns` guards keep
-    // the run from coming back.
     if (run.state === 'running' || run.state === 'awaiting-approval') {
       throw new OpenChamberControlError('Stop or decline the run before deleting it', 409);
     }
@@ -798,20 +677,17 @@ export const createWorkflowRuntime = ({
       if (report) run.report = report;
       throw error;
     }
-    // A throttled update still on its way would bring the run back on screen.
     clearTimeout(broadcastTimers.get(run.id));
     broadcastTimers.delete(run.id);
     broadcast({ type: 'openchamber:workflow-run-removed', properties: { runId: run.id, parentSessionId: run.parentSessionId } });
     return { runId: run.id, removed: true };
   };
 
-  /** What the panel shows of one run beyond its summary: every log line, the script and the result. */
   const detail = async ({ runId }) => {
     const run = await requireRun(runId);
     return { runId: run.id, logs: run.logs, script: run.script, args: run.args, result: run.result };
   };
 
-  /** One agent's prompt and full answer, for the panel's agent row. */
   const agentDetail = async ({ runId, key }) => {
     const run = await requireRun(runId);
     const record = run.agents.find((candidate) => candidate.key === key);
@@ -819,7 +695,6 @@ export const createWorkflowRuntime = ({
     return { key: record.key, prompt: record.prompt, schema: record.schema, result: record.result, error: record.error };
   };
 
-  /** The whole result, or one agent's full answer by its key or session id. */
   const result = async ({ runId, agent }, { sessionId } = {}) => {
     const run = await requireRun(runId, sessionId);
     const wanted = asNonEmptyString(agent);
@@ -839,22 +714,12 @@ export const createWorkflowRuntime = ({
     return runs.filter((run) => run.parentSessionId === sessionId).map(summarizeRun);
   };
 
-  /**
-   * The runs of every session in some directories, for the Workflows panel's
-   * project view: a project's own folder and its worktrees.
-   */
   const listByDirectory = async ({ directories }) => {
     const wanted = new Set(directories);
     const runs = await store.list();
     return runs.filter((run) => wanted.has(run.directory)).map(summarizeRun);
   };
 
-  /**
-   * The user's Run on a saved workflow: the run belongs to `sessionId`, or to
-   * a new session made for it when none is open (a draft), and starts at once,
-   * since the click is the approval. Like a run its agent proposed, its report
-   * comes back into that session and wakes it.
-   */
   const startSaved = async ({ directory, scriptDirectory, sessionId, name, args }) => {
     await assertEnabled();
     if (!directory) throw new OpenChamberControlError('directory is required', 400);
@@ -865,7 +730,6 @@ export const createWorkflowRuntime = ({
     return { runId: proposed.runId, sessionId: owner };
   };
 
-  /** Saves a script as a command-like workflow of the project, under .openchamber/workflows/. */
   const save = async (input, { directory }) => {
     await assertEnabled();
     if (!directory) throw new OpenChamberControlError('workflow.save needs the session directory', 400);
@@ -902,10 +766,6 @@ export const createWorkflowRuntime = ({
 
   let delivering = null;
   let restored = Promise.resolve();
-  /**
-   * Sends every report that has not gone out; safe to call again while it
-   * runs. Waits for start(), so the reports of runs it just marked go too.
-   */
   const deliverPending = () => {
     delivering ??= restored
       .then(() => store.list())
@@ -919,13 +779,6 @@ export const createWorkflowRuntime = ({
     return delivering;
   };
 
-  /**
-   * After a restart the scripts that were running are gone: each such run is
-   * marked stopped and says so. Reports go out with deliverPending once
-   * OpenCode answers. A run whose server process is still alive is left
-   * alone: a second OpenChamber over the same data directory (a dev server
-   * started next to the desktop app) must not stop another server's run.
-   */
   const start = () => {
     restored = (async () => {
       for (const run of await store.list()) {
@@ -936,8 +789,6 @@ export const createWorkflowRuntime = ({
             if (run.ownerStartedAt && !startedAt) {
               console.warn(`[workflows] Cannot verify process start time for owner PID ${run.ownerPid} of run ${run.id}; preserving the live owner's run`);
             }
-            // Legacy records and inaccessible process metadata retain PID-only
-            // protection so another server's live work is never stopped blindly.
             if (!run.ownerStartedAt || !startedAt || startedAt === run.ownerStartedAt) {
               console.info(`[workflows] Skipping run ${run.id}: owner PID ${run.ownerPid} is alive${!run.ownerStartedAt || !startedAt ? ' according to a PID-only check' : ' with matching process start time'}`);
               continue;
@@ -963,10 +814,6 @@ export const createWorkflowRuntime = ({
     }
   };
 
-  /**
-   * The agent tool's workflow.* actions. The calling session scopes every run
-   * action: an agent reads and stops only the runs it proposed.
-   */
   const executeAction = async (action, input, { sessionId, directory }) => {
     if (!sessionId) throw new OpenChamberControlError('Workflow actions need the calling session', 400);
     const scope = { sessionId, directory };
