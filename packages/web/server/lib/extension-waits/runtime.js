@@ -15,8 +15,8 @@
 // the cadence and the backoff. The service only answers start and check
 // requests, so it may stop between checks.
 //
-// Delivery follows `../pr-watch`: the message waits until the session and its
-// subagents are idle, its id is minted and saved before the first attempt,
+// Delivery follows `../pr-watch`: the message waits until the session's turn
+// is over, its id is minted and saved before the first attempt,
 // and OpenCode refusing a second admission of that id counts as delivered.
 
 import fs from 'fs';
@@ -39,7 +39,10 @@ import { waitArgsSchema, waitCheckOutcomeSchema, waitCheckResultSchema, waitStar
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
-import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
+import { createMessageId } from '../dispatch-results/runtime.js';
+import { EXTENSION_WAIT_SOURCE, buildWakeMessage, subjectOf } from './wake-message.js';
+
+export { EXTENSION_WAIT_SOURCE };
 
 const FILE_NAME = 'extension-waits.json';
 const FILE_VERSION = 1;
@@ -47,7 +50,6 @@ const MAX_WAITS = 200;
 const MAX_WAITS_PER_SESSION = 20;
 // Idle events arrive in bursts around a turn boundary.
 const QUIET_MS = 500;
-const SUBAGENT_RECHECK_MS = 5_000;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 // A wake that keeps failing is given up, so a broken session does not retry forever.
@@ -60,7 +62,6 @@ const CHECK_FAILURE_LIMIT_MS = 6 * 60 * 60_000;
 // The guest proxy stops a service after this long without a request.
 const SERVICE_IDLE_STOP_MS = 10 * 60_000;
 const RESPONSE_MAX = 256 * 1024;
-export const EXTENSION_WAIT_SOURCE = 'openchamber-wait';
 
 // The built-in source. Extension sources always hold a slash, so the bare name cannot collide.
 const TIMER_SOURCE = 'timer';
@@ -151,49 +152,6 @@ const sourceOf = (wait) => (isTimer(wait) ? TIMER_SOURCE : `${wait.guestId}/${wa
 
 const minutesText = (minutes) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
 
-/**
- * The extension's text goes into the agent's context: nothing in it may close
- * the envelope, and the envelope names who wrote it.
- */
-const cleanText = (text) => text.replace(/[<>]/g, '').trim();
-
-// The label is the service's text at start time, never shown at approval.
-const subjectOf = (wait) => (wait.label ? `${cleanText(wait.title)} (${cleanText(wait.label)})` : cleanText(wait.title));
-
-/** The synthetic message that wakes the agent. */
-const buildWakeMessage = (wait) => {
-  const subject = subjectOf(wait);
-  const summary = cleanText(wait.wake.summary);
-  const fired = wait.wake.outcome === 'fired';
-  // The timer's summary is the host's own text; an extension's is quoted as its words.
-  const report = isTimer(wait)
-    ? [`${subject} fired: ${summary}`]
-    : [`${subject} fired. What the extension "${wait.guestId}" reports, its own words and not the user's:`, summary];
-  const lines = fired
-    ? [...report, 'The wait is over. Act on it; call wait.start again when you need to wait once more.']
-    : [
-      `${subject} ended without firing: ${summary}.`,
-      'Nothing will wake you for it any more. Go on without it, or start it again once the extension is back.',
-    ];
-  const firstLine = summary.split('\n')[0].slice(0, 160);
-  return {
-    text: `<openchamber-wait source="${escapeAttribute(sourceOf(wait))}" wait="${escapeAttribute(wait.id)}" outcome="${wait.wake.outcome}">\n${lines.join('\n')}\n</openchamber-wait>`,
-    description: fired ? `${subject}: ${firstLine}` : `${subject} ended: ${firstLine}`,
-    metadata: {
-      source: EXTENSION_WAIT_SOURCE,
-      waitId: wait.id,
-      extension: wait.guestId,
-      type: wait.type,
-      title: wait.title,
-      label: wait.label,
-      outcome: wait.wake.outcome,
-      // The chat row's title and body: the description holds only the summary's first line.
-      subject,
-      summary,
-    },
-  };
-};
-
 const toPublicWait = (wait) => ({
   waitId: wait.id,
   sessionID: wait.sessionID,
@@ -236,7 +194,6 @@ export function createExtensionWaitsRuntime({
   timers = { setTimeout, clearTimeout },
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
-  subagentRecheckMs = SUBAGENT_RECHECK_MS,
   warn = (...args) => console.warn(...args),
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
@@ -655,10 +612,6 @@ export function createExtensionWaitsRuntime({
     if (!isCurrent(wait)) return undefined;
     if (!statuses) return retry(wait, 'OpenCode could not be asked');
     if (statuses[sessionID]) return undefined; // its idle event arms the next attempt
-    const subagents = await activityProbe.hasWorkingChildren(sessionID, statuses);
-    if (!isCurrent(wait)) return undefined;
-    if (subagents === null) return retry(wait, 'OpenCode could not be asked');
-    if (subagents) return arm(sessionID, subagentRecheckMs);
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(wait)) return undefined;
     if (archived) return settle(wait, ...waitsOf(sessionID));
@@ -683,7 +636,7 @@ export function createExtensionWaitsRuntime({
     try {
       await openCodeRequest(`/api/session/${encodeURIComponent(sessionID)}/synthetic`, {
         method: 'POST',
-        body: { id: wait.wake.messageID, ...buildWakeMessage(wait), delivery: 'steer', resume: true },
+        body: { id: wait.wake.messageID, ...buildWakeMessage(wait, sourceOf(wait), isTimer(wait)), delivery: 'steer', resume: true },
       });
     } catch (error) {
       // 409: an earlier attempt landed. 404: nobody is left to wake.

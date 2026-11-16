@@ -416,8 +416,11 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('label');
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('value');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('selector');
-    // The control tool's own `url` names the pull request pr.watch follows, not a page.
-    expect(tool.openchamber.input.properties.parameters.properties.url.description).toContain('pr.watch');
+    // The control tool's own `url` names the link session.unlink removes, not a page.
+    expect(tool.openchamber.input.properties.parameters.properties.url.description).toContain('session.unlink');
+    // A pull request is waited on through wait.start; pr.watch stays off the agent's list.
+    expect(controlActions).toContain('wait.start');
+    expect(controlActions).not.toContain('pr.watch');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('sessionId');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('path');
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).not.toContain('path');

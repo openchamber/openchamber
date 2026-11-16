@@ -10,6 +10,11 @@ import { z } from 'zod';
  * working. Kept free of the transport (`extension-waits-sync.ts`), the way
  * `pr-watch.ts` is.
  */
+export const waitArgsSchema = z.object({
+  minutes: z.number().optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+});
+
 const waitSchema = z.object({
   waitId: z.string().min(1),
   sessionID: z.string().min(1),
@@ -18,6 +23,7 @@ const waitSchema = z.object({
   extension: z.string().min(1),
   title: z.string().min(1),
   label: z.string().min(1).nullable(),
+  args: waitArgsSchema.optional().catch(undefined),
   startedAt: z.number(),
   status: z.enum(['waiting', 'waking']),
 });

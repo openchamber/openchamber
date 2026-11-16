@@ -32,7 +32,6 @@ import {
     scheduleRanSchema,
     fileOpenedSchema,
     workNamedSchema,
-    prWatchedSchema,
     sessionMessagesSchema,
     sessionStatusSchema,
     memoryReadSchema,
@@ -61,6 +60,7 @@ import { GeneratedImages } from './GeneratedImages';
 import { RawToggleContext, usePanelsAvailable } from './toolResultContext';
 import { Actions, Field, List, ListRow, Section, SessionLinkRow, Warning, WebLinkRow, type OpenActionInput } from './ToolResultParts';
 import type { ToolPopupContent } from '../types';
+import { PrWatchedBody, WaitListedBody, WaitStartedBody } from './WaitToolOutput';
 
 /**
  * Whether the call worked on the chat's own project. A panel shows the chat's
@@ -580,29 +580,6 @@ const SessionMessagesBody: React.FC<{ data: unknown }> = ({ data }) => {
     );
 };
 
-const PR_STATUS_KEYS = {
-    waking: 'chat.toolPart.openchamber.pr.status.waking',
-    unknown: 'chat.toolPart.openchamber.pr.status.unknown',
-    pending: 'chat.toolPart.openchamber.pr.status.pending',
-    passed: 'chat.toolPart.openchamber.pr.status.passed',
-    failed: 'chat.toolPart.openchamber.pr.status.failed',
-    open: 'chat.toolPart.openchamber.pr.status.open',
-} as const;
-
-const PrWatchedBody: React.FC<{ data: unknown }> = ({ data }) => {
-    const { t } = useI18n();
-    const parsed = prWatchedSchema.safeParse(data);
-    if (!parsed.success) return null;
-    const { url, number, title, status } = parsed.data.watching;
-    const label = [number ? `#${number}` : undefined, title || undefined].filter(Boolean).join(' ');
-    return (
-        <>
-            <WebLinkRow url={url} icon="git-pull-request" primary={label || url} secondary={status ? t(PR_STATUS_KEYS[status]) : undefined} />
-            <Actions />
-        </>
-    );
-};
-
 const WorkNamedBody: React.FC<{ data: unknown }> = ({ data }) => {
     const { t } = useI18n();
     const parsed = workNamedSchema.safeParse(data);
@@ -930,7 +907,10 @@ const OpenChamberView: React.FC<{
         case 'session.status': return <SessionStatusBody data={data} />;
         case 'session.messages': return <SessionMessagesBody data={data} />;
         case 'pr.watch': return <PrWatchedBody data={data} />;
+        case 'wait.start': return <WaitStartedBody data={data} />;
+        case 'wait.list': return <WaitListedBody data={data} />;
         case 'pr.unwatch':
+        case 'wait.stop':
         case 'browser.close': return <Actions />;
         case 'work.name': return <WorkNamedBody data={data} />;
         case 'file.open': return <FileOpenedBody data={data} />;

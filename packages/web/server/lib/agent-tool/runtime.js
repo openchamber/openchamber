@@ -229,12 +229,12 @@ const CONTROL_PARAMETER_PROPERTIES = {
       && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
     )),
   ),
-  // The web tool's `url` is a page to load; here it names what pr.watch
-  // follows or which link session.unlink removes.
-  url: { type: 'string', description: 'pr.watch, pr.unwatch: the pull or merge request address. session.unlink: the address of the link to remove' },
+  // The web tool's `url` is a page to load; here it names which link
+  // session.unlink removes.
+  url: { type: 'string', description: 'session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
-  source: { type: 'string', description: 'wait.start: "timer", or <extension>/<wait> as wait.list names it' },
-  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 }' },
+  source: { type: 'string', description: 'wait.start: "timer", "pr", or <extension>/<wait> as wait.list names it' },
+  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
   waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
