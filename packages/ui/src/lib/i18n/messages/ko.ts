@@ -2720,6 +2720,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.planSaved': '플랜이 저장되었습니다',
   'chat.messageBody.toast.imageSaved': '이미지 저장된',
   'chat.messageBody.toast.markdownSaved': 'Markdown 저장됨',
+  'chat.messageBody.toast.markdownSaveFailed': 'Markdown 저장 실패',
   'chat.messageBody.toast.generateImageFailed': '이미지 생성 실패',
   'chat.chatInput.actions.commands': '명령',
   'chat.chatInput.actions.attachFiles': '파일 첨부',

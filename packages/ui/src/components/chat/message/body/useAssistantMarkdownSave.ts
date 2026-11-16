@@ -28,7 +28,15 @@ export const useAssistantMarkdownSave = ({
     const saveTurnAsMarkdown = React.useCallback(async () => {
         const text = buildTurnMarkdown(earlierAssistantText, assistantTextParts);
         if (text.length === 0) return;
-        await saveFile(new File([text], buildTurnMarkdownFilename(messageId), { type: 'text/markdown' }));
+        try {
+            await saveFile(new File([text], buildTurnMarkdownFilename(messageId), { type: 'text/markdown' }));
+        } catch (error) {
+            // A dismissed share sheet or save dialog is not a failure: stay silent.
+            if (error instanceof DOMException && error.name === 'AbortError') return;
+            console.error('Failed to save Markdown:', error);
+            toast.error(t('chat.messageBody.toast.markdownSaveFailed'));
+            return;
+        }
         toast.success(t('chat.messageBody.toast.markdownSaved'));
     }, [assistantTextParts, earlierAssistantText, messageId, t]);
 

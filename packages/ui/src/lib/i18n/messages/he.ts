@@ -2620,6 +2620,7 @@ export const dict = {
   'chat.messageBody.toast.planSaved': 'התוכנית נשמרה',
   'chat.messageBody.toast.imageSaved': 'התמונה נשמרה',
   'chat.messageBody.toast.markdownSaved': 'ה-Markdown נשמר',
+  'chat.messageBody.toast.markdownSaveFailed': 'לא ניתן היה לשמור את ה-Markdown',
   'chat.messageBody.toast.generateImageFailed': 'לא ניתן היה ליצור את התמונה',
   'chat.chatInput.actions.commands': 'פקודות',
   'chat.chatInput.actions.attachFiles': 'צרף קבצים',

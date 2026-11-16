@@ -2553,6 +2553,7 @@ export const dict = {
   'chat.messageBody.toast.planSaved': 'Plan kaydedildi',
   'chat.messageBody.toast.imageSaved': 'Görsel kaydedildi',
   'chat.messageBody.toast.markdownSaved': 'Markdown kaydedildi',
+  'chat.messageBody.toast.markdownSaveFailed': 'Markdown kaydedilemedi',
   'chat.messageBody.toast.generateImageFailed': 'Görsel oluşturulamadı',
   'chat.chatInput.actions.commands': 'Komutlar',
   'chat.chatInput.actions.attachFiles': 'Dosya ekle',

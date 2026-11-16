@@ -2720,6 +2720,7 @@ export const dict = {
   'chat.messageBody.toast.planSaved': 'Plan saved',
   'chat.messageBody.toast.imageSaved': 'Image saved',
   'chat.messageBody.toast.markdownSaved': 'Markdown saved',
+  'chat.messageBody.toast.markdownSaveFailed': 'Failed to save Markdown',
   'chat.messageBody.toast.generateImageFailed': 'Failed to generate image',
   'chat.chatInput.actions.commands': 'Commands',
   'chat.chatInput.actions.attachFiles': 'Attach files',

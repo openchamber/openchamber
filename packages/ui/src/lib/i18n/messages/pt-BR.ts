@@ -2688,6 +2688,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.toast.planSaved": "Plano salvo",
   "chat.messageBody.toast.imageSaved": "Imagem salva",
   "chat.messageBody.toast.markdownSaved": "Markdown salvo",
+  "chat.messageBody.toast.markdownSaveFailed": "Não foi possível salvar o Markdown",
   "chat.messageBody.toast.generateImageFailed": "Não foi possível gerar a imagem",
   "chat.chatInput.actions.commands": "Comandos",
   "chat.chatInput.actions.attachFiles": "Anexar arquivos",

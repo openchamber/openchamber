@@ -1269,6 +1269,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.planSaved': 'Plan zapisany',
   'chat.messageBody.toast.imageSaved': 'Obraz zapisany',
   'chat.messageBody.toast.markdownSaved': 'Markdown zapisany',
+  'chat.messageBody.toast.markdownSaveFailed': 'Nie udało się zapisać Markdown',
   'chat.messageBody.toast.generateImageFailed': 'Nie udało się wygenerować obrazu',
   'miniChat.header.newSession': 'Nowa sesja',
   'miniChat.header.session': 'Sesja',

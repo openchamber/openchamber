@@ -2621,6 +2621,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.toast.planSaved': 'تم حفظ الخطة',
   'chat.messageBody.toast.imageSaved': 'تم حفظ الصورة',
   'chat.messageBody.toast.markdownSaved': 'تم حفظ Markdown',
+  'chat.messageBody.toast.markdownSaveFailed': 'تعذّر حفظ Markdown',
   'chat.messageBody.toast.generateImageFailed': 'تعذّر إنشاء الصورة',
   'chat.chatInput.actions.commands': 'الأوامر',
   'chat.chatInput.actions.attachFiles': 'إرفاق ملفات',

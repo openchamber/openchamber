@@ -2421,6 +2421,7 @@ export const dict = {
   'chat.messageBody.toast.planSaved': 'Plan enregistré',
   'chat.messageBody.toast.imageSaved': 'Image enregistrée',
   'chat.messageBody.toast.markdownSaved': 'Markdown enregistré',
+  'chat.messageBody.toast.markdownSaveFailed': 'Échec de l\'enregistrement du Markdown',
   'chat.messageBody.toast.generateImageFailed': 'Échec de la génération de l\'image',
   'chat.chatInput.actions.commands': 'Commandes',
   'chat.chatInput.actions.attachFiles': 'Joindre des fichiers',
