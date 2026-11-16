@@ -138,7 +138,6 @@ export const registerGenerateCommitMessageCommand = (
                 apiUrl,
                 authHeaders: manager.getOpenCodeAuthHeaders(),
                 settings: readSettings(),
-                // The repository's own project, never the project the UI has selected.
                 promptOverrides: await magicPrompts.overridesForDirectory(directory),
                 execGit,
               });

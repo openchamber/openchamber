@@ -1,15 +1,3 @@
-// The two settings files and how a merged document is split between them.
-//
-// `settings.json` holds instance facts (and, untouched, whatever legacy keys
-// older builds left there). `preferences.json` holds the user's profile: the
-// keys the settings registry marks `profile`, each with the time the store
-// last accepted a new value for it. Device keys never reach either file.
-//
-// Mirrors the server implementation in
-// `packages/web/server/lib/opencode/settings-files.js`; both sides must write
-// byte-compatible files, so keep format changes in sync.
-//
-// Kept free of `vscode` imports so it is unit-tested directly.
 import * as path from 'path';
 import { SETTINGS_REGISTRY_FIELDS } from './settings-registry-gate';
 
@@ -21,12 +9,9 @@ const SETTINGS_SURFACES: readonly SettingsSurface[] = ['web', 'desktop', 'vscode
 // SAFETY: widening the tuple to `readonly string[]` only for the membership test; the guard's result is what narrows.
 const isSettingsSurface = (value: string): value is SettingsSurface => (SETTINGS_SURFACES as readonly string[]).includes(value);
 
-/** The extension host is always the VS Code surface kind. */
 export const VSCODE_SETTINGS_SURFACE: SettingsSurface = 'vscode';
 
-// Boundary parser: values are whatever JSON the file (or the webview) carries.
 type SurfaceValue = { value: unknown; updatedAt: number };
-// The base value is optional: a per-surface key first set from one surface kind has none.
 type PreferenceField = { value?: unknown; updatedAt: number; surfaces?: Partial<Record<SettingsSurface, SurfaceValue>> };
 export type PreferenceFields = Record<string, PreferenceField>;
 
@@ -34,13 +19,11 @@ type ParsedPreferencesDocument =
   | { ok: true; fields: PreferenceFields }
   | { ok: false; reason: string };
 
-/** The registry scope for a key, or `null` when the registry does not know it. */
 const getSettingsScope = (key: string): string | null =>
   Object.prototype.hasOwnProperty.call(SETTINGS_REGISTRY_FIELDS, key) ? SETTINGS_REGISTRY_FIELDS[key].scope : null;
 
 export const isProfileSettingsKey = (key: string): boolean => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key: string): boolean => getSettingsScope(key) === 'device';
-/** Profile keys the owner chose to store per surface kind. */
 export const isPerSurfaceSettingsKey = (key: string): boolean =>
   Object.prototype.hasOwnProperty.call(SETTINGS_REGISTRY_FIELDS, key) && SETTINGS_REGISTRY_FIELDS[key].perSurface === true;
 
@@ -58,11 +41,6 @@ const sameValue = (left: unknown, right: unknown): boolean => {
   return JSON.stringify(left) === JSON.stringify(right);
 };
 
-/**
- * Parse the text of a preferences file. A missing file is the caller's case
- * (ENOENT); anything that is not a version-1 document with a `fields` object
- * is a failure, never an empty profile.
- */
 export const parsePreferencesDocument = (raw: string): ParsedPreferencesDocument => {
   let parsed: unknown;
   try {
@@ -98,11 +76,6 @@ export const parsePreferencesDocument = (raw: string): ParsedPreferencesDocument
 export const serializePreferencesDocument = (fields: PreferenceFields): string =>
   JSON.stringify({ version: PREFERENCES_DOCUMENT_VERSION, fields }, null, 2);
 
-/**
- * The plain key → value view of preference fields as one surface kind sees it:
- * that surface's own value first, the base value otherwise; a key with neither
- * is absent (the webview keeps what it holds, or its default).
- */
 export const flattenPreferences = (fields: PreferenceFields, surface: SettingsSurface | null = null): Record<string, unknown> => {
   const values: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(fields)) {
@@ -116,13 +89,6 @@ export const flattenPreferences = (fields: PreferenceFields, surface: SettingsSu
   return values;
 };
 
-/**
- * The next preference fields for a merged document: every profile key it
- * carries, stamped `now` when its value differs from what the file held and
- * keeping the earlier stamp otherwise. Profile keys the document no longer
- * carries are dropped (that is how a cleared key leaves the file), except a
- * per-surface key the writer's view never held: it stays as it was.
- */
 export const buildPreferencesFields = (
   previousFields: PreferenceFields,
   document: Record<string, unknown>,
@@ -135,9 +101,6 @@ export const buildPreferencesFields = (
   for (const [key, value] of Object.entries(document)) {
     if (value === undefined || !isProfileSettingsKey(key)) continue;
     const previous = previousFields[key];
-    // Per-surface keys: a surface's write lands under its own entry and leaves
-    // the base as it was; a key the write did not change keeps its whole entry
-    // (the document only carries this surface's resolved view of it).
     if (surface && isPerSurfaceSettingsKey(key)) {
       if (changed && !changed.has(key)) {
         if (previous) fields[key] = previous;
@@ -157,9 +120,6 @@ export const buildPreferencesFields = (
       fields[key] = { ...(previous ?? {}), value, updatedAt: now };
     }
   }
-  // A per-surface key the writer's view never held (no base value and no
-  // entry of its own surface) is absent from its document without being
-  // cleared: it keeps the other surfaces' values.
   for (const [key, previous] of Object.entries(previousFields)) {
     if (key in fields || !isPerSurfaceSettingsKey(key)) continue;
     const visibleToWriter = 'value' in previous || Boolean(surface && previous.surfaces?.[surface]);
@@ -168,11 +128,6 @@ export const buildPreferencesFields = (
   return fields;
 };
 
-/**
- * The part of a merged document that belongs in `settings.json`: everything
- * that is not a profile key. Device keys are already filtered by the registry
- * gate on the write path; ones older builds persisted stay in place.
- */
 export const instancePartOf = (document: Record<string, unknown>): Record<string, unknown> => {
   const instance: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(document)) {
@@ -182,8 +137,6 @@ export const instancePartOf = (document: Record<string, unknown>): Record<string
   return instance;
 };
 
-/** The profile keys of a document, as they would seed a fresh preferences file. */
-/** The profile keys of a document (the part `instancePartOf` leaves out). */
 export const profilePartOf = (document: Record<string, unknown>): Record<string, unknown> => {
   const profile: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(document)) {
@@ -192,12 +145,6 @@ export const profilePartOf = (document: Record<string, unknown>): Record<string,
   return profile;
 };
 
-/**
- * What `settings.json` holds after a write: the instance part plus a copy of
- * the profile's base values, so a build from before the split (which reads
- * only this file) still finds the user's preferences. Current builds ignore
- * the copy: `preferences.json` wins in the merged read.
- */
 export const legacySettingsDocumentOf = (
   document: Record<string, unknown>,
   preferenceFields: PreferenceFields,

@@ -9,22 +9,8 @@ type BridgeMessageInput = {
   payload?: unknown;
 };
 
-// A removal should not hang on an unresponsive OpenCode server: disposal is
-// best-effort and `gitService.removeWorktree` swallows its failure.
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 
-/**
- * Builds the best-effort disposal hook for the extension's active runtime. The
- * API URL and auth headers are read at call time, and the client is created
- * per call so a restarted managed process is always addressed correctly.
- *
- * A session of a project opened on a folder of its repository runs in that
- * folder of the worktree (`<worktree>/ai`), which is a location of its own, so
- * every running location inside the worktree is evicted along with its root.
- * When the location list cannot be read, the root is still evicted and the
- * list error is rethrown for the removal wrapper to log. The web server's git
- * routes do the same.
- */
 const toLocationKey = (directory: string): string => directory.replace(/\\/g, '/').replace(/\/+$/, '');
 
 const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
@@ -33,8 +19,6 @@ const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
     if (!apiUrl) {
       throw new Error('OpenCode API URL is not available');
     }
-    // OpenCode 2 has no instance route; evicting the location drops its cached
-    // services (file watchers, LSP, MCP), which is what held the folder.
     const client = OpenCode.make({
       baseUrl: apiUrl.replace(/\/+$/, ''),
       headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},

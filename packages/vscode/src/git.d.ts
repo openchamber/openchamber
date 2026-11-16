@@ -1,8 +1,4 @@
-/**
- * VS Code Git Extension API type definitions
- * Based on the vscode.git extension API
- * @see https://github.com/microsoft/vscode/blob/main/extensions/git/src/api/git.d.ts
- */
+// external: https://github.com/microsoft/vscode/blob/main/extensions/git/src/api/git.d.ts VS Code Git API declarations follow the built-in extension.
 
 import type { Uri, Event, Disposable } from 'vscode';
 
