@@ -1114,7 +1114,11 @@ command can leave the queue untouched and delivery can take only part of it.
   the origin from `ComposerDictation`'s `onStart`, and a transcript whose
   origin is no longer the rendered draft is appended to the origin's draft
   through `restoreDraft`. It is not inserted or sent in the visible session,
-  including for **Insert and send**, and a toast says where it went.
+  including for **Insert and send**, and a toast says where it went. The origin
+  is the rendered draft, not the live store selection, so a draft the store has
+  just opened must render in the same commit
+  (`useShownSessionSelection`, see `sync/DOCUMENTATION.md`, "Session switch
+  commit"): a deferred draft recorded the session still on screen (#6927).
   The dictation shortcut starts in the focused composer's form, falling back
   to the main chat when no form has focus. Mobile mic triggers explicitly
   address their own form. One mounted dictation engine owns capture and

@@ -861,6 +861,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const liveSessionId = pinned ? (pinnedSessionDirectory ? pinnedSelection?.sessionId ?? null : null) : globalSessionId;
     const liveSessionDirectory = pinned ? pinnedSessionDirectory : globalSessionDirectory;
     const materializedDraftSessionId = useSessionUIStore((s) => (pinned ? null : s.materializedDraftSessionId));
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+    // The new-session draft is the main chat's; a pinned column never shows it.
+    const draftOpen = !pinned && Boolean(newSessionDraft?.open);
     const liveSelection = React.useMemo(
         () => ({ sessionId: liveSessionId, directory: liveSessionDirectory }),
         [liveSessionId, liveSessionDirectory],
@@ -886,12 +889,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         return () => window.clearTimeout(timer);
     }, [holdPreviousTimeline, liveSessionId]);
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection, draftOpen);
     shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
 
     const clearMaterializedDraftSession = useSessionUIStore((s) => s.clearMaterializedDraftSession);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
 
     // Sync actions
     const sync = useSync();
@@ -1154,8 +1156,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
-    // The new-session draft is the main chat's; a pinned column never shows it.
-    const draftOpen = !pinned && Boolean(newSessionDraft?.open);
     const isManagedChatContext = draftOpen
         ? newSessionDraft?.target === 'chat'
         : isChatDirectoryPath(effectiveSessionDirectory);

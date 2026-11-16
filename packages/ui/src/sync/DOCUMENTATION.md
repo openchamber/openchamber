@@ -1720,14 +1720,18 @@ the deferred one still names the previous session for one commit. A selection
 arriving from nothing (a draft just submitted, an empty chat) is not deferred:
 there is no previous conversation to keep, and a deferred `null` beside the
 already-closed draft rendered the empty state for a commit, remounting the
-whole column, composer and work-status card included. The same session in
-another directory is not deferred either, whatever changed it: the old
-directory no longer holds the session or was only a guess (the directory
-adopted at startup, a runtime switch, following the chat to its archive, a
-new worktree session), so reading the session there is wrong. A move is the
-main case: it already took the session out of the old directory's store, and a
-commit still naming that directory had the chat's load effect read the session
-and its transcript back into it.
+whole column, composer and work-status card included. Opening a new-session
+draft is not deferred either: a draft has nothing to load, and a commit still
+naming the previous session had the composer build its draft identity from that
+session, so a dictation started in that window recorded the previous session as
+the transcript's origin (#6927). The same session in another directory is not
+deferred either, whatever changed it: the old directory no longer holds the
+session or was only a guess (the directory adopted at startup, a runtime
+switch, following the chat to its archive, a new worktree session), so reading
+the session there is wrong. A move is the main case: it already took the
+session out of the old directory's store, and a commit still naming that
+directory had the chat's load effect read the session and its transcript back
+into it.
 
 A session whose messages are not in memory at the click keeps the previous
 timeline on screen while they load (up to 400ms), then swaps straight to the

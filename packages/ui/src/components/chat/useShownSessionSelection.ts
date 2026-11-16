@@ -19,9 +19,18 @@ type SessionSelection = { sessionId: string | null; directory: string | null };
  * case: it has already taken the session out of the old directory's store,
  * and a deferred old directory had the chat find it missing there and read
  * it back into the directory it left.
+ *
+ * A new-session draft is taken at once as well (`newSessionDraftOpen`): a
+ * draft has nothing to load, and a commit still naming the previous session
+ * had the composer build its draft identity from that session, so a dictation
+ * started in that window recorded the previous session as its origin (#6927).
  */
-export const useShownSessionSelection = <T extends SessionSelection>(target: T): T => {
+export const useShownSessionSelection = <T extends SessionSelection>(
+    target: T,
+    newSessionDraftOpen = false,
+): T => {
     const deferred = React.useDeferredValue(target);
     if (deferred.sessionId === target.sessionId) return target;
+    if (newSessionDraftOpen && target.sessionId === null) return target;
     return deferred.sessionId === null && target.sessionId !== null ? target : deferred;
 };
