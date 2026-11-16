@@ -2268,7 +2268,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         // the chat can switch to it and show the message at once; the server
         // creates the session under this id while the message is on screen.
         const sessionId = descendingId("ses")
-        options?.progress?.sessionMinted?.(sessionId)
+        options?.progress?.sessionMinted?.(sessionId, draft.target === "chat" ? sessionDirectory : null)
         const draftAgent = saveDraftSessionSelection(sessionId, selection)
         openPendingSessionTranscript(sessionId, sessionDirectory)
         get().setCurrentSession(sessionId, sessionDirectory, { transition: "submitted-draft" })

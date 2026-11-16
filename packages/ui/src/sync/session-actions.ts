@@ -1765,7 +1765,7 @@ function planChatDirectoryCleanup(sessionId: string, snapshot: Session | null, d
  * global cache cannot prove that, so it keeps the directory: a leaked scratch
  * directory is recoverable, a stranded session is not.
  */
-function isChatDirectoryStillReferenced(directory: string, excludedIds: ReadonlySet<string>): boolean {
+export function isChatDirectoryStillReferenced(directory: string, excludedIds: ReadonlySet<string>): boolean {
   const global = useGlobalSessionsStore.getState()
   if (!global.hasLoaded) return true
   const normalized = normalizePath(directory)

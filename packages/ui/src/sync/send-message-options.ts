@@ -14,7 +14,7 @@ type CapturedSendTarget = {
 }
 
 export type SendProgress = {
-  sessionMinted?: (sessionId: string) => void
+  sessionMinted?: (sessionId: string, chatDirectory: string | null) => void
   messageMinted?: (messageId: string) => void
   requestLeaving?: () => void
 }

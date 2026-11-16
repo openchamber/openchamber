@@ -258,8 +258,40 @@ without asking anything; one that left comes back only when the server answers
 that it has no message with that id, and a command or shell line that left
 (no client-side id) is dropped. A server that cannot answer keeps the record
 for the next start, and so does a runtime switch while the server is asked:
-the answer came from another server. Files stay in memory, so only their names come back, as
-the dashed chips a reloaded draft draws.
+the answer came from another server. Files stay in memory, so only their
+names come back, as the dashed chips a reloaded draft draws.
+
+A new Chat's first send also leaves its prepared chat folder behind when the
+page dies before the session exists. The record carries that folder
+(`progress.sessionMinted` names it for a Chat draft only, never for a project
+folder). A first send that failed while the page lived but before its request
+left (the server down, say) leaves it too: the store's own removal waits in
+memory for the next connection and dies with the page, so `settle` keeps such
+a record, marked `textReturned` because the failure path already put the text
+back. A send whose request left has its session and settles without a trace.
+
+The folder goes on the start after the one that first found the minted
+session missing (`orphanSeen`). The page that found it takes the record over
+(its own page id, under its own lock), so a second client starting at the
+same moment, the desktop window and Mini Chat say, leaves it until that page
+is gone too. The folder goes once the server still answers 404 for it and
+the global session list, loaded for the check, holds no session in it
+(`isChatDirectoryStillReferenced`, the rule a deleted chat's folder follows).
+The record stays until the folder is gone or a session is found in it; a list
+that cannot load, a failed read and a runtime switch keep both for the next
+start. A live sending page never gets here (its record is skipped).
+
+### Why a left-behind chat folder waits a whole start before it goes
+
+A page that dies does not take back a create request already on its way: the
+server can still make the session after the next start has read 404, and a
+session whose folder is gone fails every prompt. No read on the client closes
+that window, so the first start only notes the folder and the next one, a page
+lifetime later, deletes it if the session is still missing. A leaked scratch
+folder for one more start costs nothing; a stranded session cannot be
+repaired. The global session list is the authority instead of a session list
+scoped to the folder, because a scoped read makes OpenCode start a location in
+a folder that is about to go.
 
 ### Why an unconfirmed send is its own record and not the draft left in place
 
