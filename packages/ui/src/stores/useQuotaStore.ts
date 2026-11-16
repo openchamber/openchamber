@@ -55,7 +55,6 @@ interface QuotaStore extends QuotaSettingsState {
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
   setProviderInDropdown: (providerId: QuotaProviderId, shown: boolean) => string[];
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
-  toggleModelSelected: (providerId: string, modelName: string) => void;
   setExpandedFamilies: (providerId: string, familyIds: string[]) => void;
   toggleFamilyExpanded: (providerId: string, familyId: string) => void;
   applyDefaultSelections: (providerId: string, availableModels: string[]) => void;
@@ -371,19 +370,6 @@ export const useQuotaStore = create<QuotaStore>()(
         set((state) => ({
           selectedModels: { ...state.selectedModels, [providerId]: modelNames }
         }));
-      },
-
-      toggleModelSelected: (providerId, modelName) => {
-        set((state) => {
-          const currentSelected = state.selectedModels[providerId] ?? [];
-          const isSelected = currentSelected.includes(modelName);
-          const nextSelected = isSelected
-            ? currentSelected.filter((m) => m !== modelName)
-            : [...currentSelected, modelName];
-          return {
-            selectedModels: { ...state.selectedModels, [providerId]: nextSelected }
-          };
-        });
       },
 
       setExpandedFamilies: (providerId, familyIds) => {

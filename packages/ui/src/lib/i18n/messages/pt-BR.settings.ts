@@ -1543,7 +1543,6 @@ export const settingsDict = {
   "settings.usage.pace.rate": "Velocidade: {rate}",
   "settings.usage.pace.waitSeparator": " · Aguarder ",
   "settings.usage.pace.predictionLabel": "Prede.: ",
-  "settings.usage.card.showInHeaderAria": "Mostrar no menu do cabeçalho",
   "settings.usage.card.resetsAt": "Redefine {time}",
   "settings.usage.card.bar.used": "usado",
   "settings.usage.card.bar.remaining": "restante",
