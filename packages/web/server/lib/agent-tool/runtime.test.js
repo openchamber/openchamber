@@ -91,6 +91,7 @@ describe('agent tool action allowlist', () => {
     'session.messages',
     'session.markDone',
     'session.track',
+    'session.archive',
     'schedule.list',
     'schedule.create',
     'schedule.run',
