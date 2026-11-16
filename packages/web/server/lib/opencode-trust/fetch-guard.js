@@ -6,10 +6,8 @@ const headersOf = (input, init) => {
   return Object.fromEntries(headers);
 };
 
-/** The JSON body of a request, read without using up the one that goes out. */
 const jsonBodyOf = async (input, init) => {
   if (init?.body !== undefined && init?.body !== null) {
-    // A stream read here would be gone when the request is sent.
     if (init.body instanceof ReadableStream) throw new Error('Cannot read a streamed body');
     return JSON.parse(await new Response(init.body).text());
   }
@@ -17,15 +15,6 @@ const jsonBodyOf = async (input, init) => {
   return undefined;
 };
 
-/**
- * `fetch` for the server process with the folder trust check in front of
- * every request to the running OpenCode. Server features call OpenCode with
- * folders the UI hands them (session titles, routing, dispatched sessions,
- * scheduled runs), each through its own client; checking here keeps all of
- * them, and any added later, from opening a folder the user has not trusted.
- * Requests anywhere else pass untouched. A refused request answers the same
- * 403 the proxy gives the UI.
- */
 export const guardOpenCodeFetch = ({ fetchImpl, openCodeTrust, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders });
 
@@ -33,7 +22,6 @@ export const guardOpenCodeFetch = ({ fetchImpl, openCodeTrust, buildOpenCodeUrl,
     try {
       return new URL(buildOpenCodeUrl('/', '')).origin;
     } catch {
-      // OpenCode has no port yet; nothing can reach it.
       return null;
     }
   };

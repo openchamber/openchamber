@@ -12,17 +12,10 @@ export const OPENCODE_TRUST_ROUTE = '/api/opencode/trust';
 
 const TRUST_REQUIRED_ERROR = 'OpenCode is paused for this folder until you trust the plugins and commands in its configuration';
 
-// A burst of requests for one folder (the UI opening it fires dozens) reads
-// its configuration once.
 const ASSESSMENT_CACHE_MS = 2000;
 const ASSESSMENT_CACHE_LIMIT = 200;
 const SEED_PROJECT_TIMEOUT_MS = 2000;
 
-// Reads that never start a location in OpenCode, so they run for a folder
-// nobody has trusted: a paused folder still lists and shows its sessions. The
-// proxy lets the same reads through for a worktree whose checkout failed.
-// Everything else that names a folder is checked, including routes added
-// later, which start out checked.
 const GLOBAL_READS = [
   /^\/api\/session$/,
   /^\/api\/session\/active$/,
@@ -32,31 +25,22 @@ const GLOBAL_READS = [
   /^\/api\/(?:global\/)?event$/,
   /^\/api\/credential(?:\/|$)/,
 ];
-// Mutations that never start a location: deleting a session, marking it
-// viewed, and unloading a location.
 const GLOBAL_MUTATIONS = [
   { method: 'DELETE', pattern: /^\/api\/session\/[^/]+$/ },
   { method: 'POST', pattern: /^\/api\/session\/[^/]+\/view$/ },
   { method: 'DELETE', pattern: /^\/api\/debug\/location$/ },
 ];
-// Moving a session opens the folder it moves into, named in the body, and
-// the folder it leaves while that folder exists, which the session check
-// covers. A folder that is gone opens nothing, so moving sessions out of
-// deleted folders still passes.
 const SESSION_MOVE = /^\/api\/session\/([^/]+)\/move$/;
 const MOVE_BODY_ERROR = 'A session move needs a JSON body naming its directory';
 const moveBodySchema = z.object({ directory: z.string() });
 
 const SESSION_SCOPED = /^\/api\/(?:experimental\/)?session\/([^/]+)\/.+$/;
-// OpenCode files MCP elicitation forms under this owner, which is not a
-// session: its routes run in the folder the request names.
 const LOCATION_SCOPED_FORM_OWNER = 'global';
 
 const trustQuerySchema = z.object({ directory: z.string().trim().min(1) });
 const trustAnswerSchema = z.object({ directory: z.string().trim().min(1), fingerprint: z.string().nullable() });
 const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
 
-/** Whether OpenCode answers this read without starting a location. */
 export const isGlobalRead = (method, pathname) => (
   (method === 'GET' || method === 'HEAD') && GLOBAL_READS.some((pattern) => pattern.test(pathname))
 );
@@ -66,7 +50,6 @@ const isGlobalRoute = (method, pathname) => (
     || GLOBAL_MUTATIONS.some((route) => route.method === method && route.pattern.test(pathname))
 );
 
-/** The folders a request names, decoded the way OpenCode reads them. */
 const directoriesNamedBy = (url, headers) => {
   const directories = [...url.searchParams.getAll('directory'), ...url.searchParams.getAll('location[directory]')];
   const header = headers['x-opencode-directory'];
@@ -92,7 +75,6 @@ const bodyOrNothing = async (readBody) => {
   }
 };
 
-/** The session a request moves, decoded, or null when it is no move. */
 export const sessionMoveOf = (method, pathname) => {
   if (String(method || '').toUpperCase() !== 'POST') return null;
   const sessionID = SESSION_MOVE.exec(pathname)?.[1];
@@ -100,18 +82,10 @@ export const sessionMoveOf = (method, pathname) => {
   try {
     return decodeURIComponent(sessionID);
   } catch {
-    // Not a session OpenCode knows; its lookup answers 404.
     return sessionID;
   }
 };
 
-/**
- * The folder a move opens, read from its body and resolved the way OpenCode
- * resolves it: `~` from home, a relative path from the session's current
- * folder. `destination` is null for a relative path of a session OpenCode
- * does not know, which it answers 404 without opening anything. A body that
- * names no directory answers a 400 refusal.
- */
 export const readMoveDestination = async (readBody, sessionDirectory, homeDirectory = os.homedir()) => {
   const parsed = moveBodySchema.safeParse(await bodyOrNothing(readBody));
   if (!parsed.success) return { refusal: { status: 400, body: { error: MOVE_BODY_ERROR } } };
@@ -134,21 +108,8 @@ const publicAssessment = (assessment, trusted) => ({
   items: assessment.items.map(({ kind, source, name, detail }) => ({ kind, source, name, detail })),
 });
 
-/**
- * Whether OpenCode may open a folder. OpenCode imports a folder's plugins and
- * starts its MCP servers the moment a request first names that folder, before
- * any prompt, so a cloned repository or a pull request checked out for review
- * would run its own code unasked. Every runtime that forwards requests to
- * OpenCode asks `refusalFor` first; a folder whose configuration runs code is
- * refused until the user trusts exactly that configuration, and asked again
- * when it changes.
- */
 export const createOpenCodeTrust = ({
   storePath,
-  // The folders of the projects the user already has. The first time this
-  // check runs, their configuration as it is now counts as trusted: OpenCode
-  // ran it before the check existed, and a prompt for each of them would
-  // protect nothing. Later changes to them still ask.
   listKnownDirectories = null,
   homeDirectory = os.homedir(),
   fsPromises = fs.promises,
@@ -158,9 +119,6 @@ export const createOpenCodeTrust = ({
   const cache = new Map();
 
   let seeding = null;
-  // Every check waits for the seeding, so one project on a network share
-  // that stopped answering must not hold the app: past the limit it is left
-  // out and asks when opened.
   const assessWithin = (directory) => Promise.race([
     assessOpenCodeConfig(directory, { fsPromises, homeDirectory }).catch(() => null),
     new Promise((resolve) => { setTimeout(resolve, SEED_PROJECT_TIMEOUT_MS, null).unref?.(); }),
@@ -172,8 +130,6 @@ export const createOpenCodeTrust = ({
       .filter((assessment) => assessment?.fingerprint)
       .map((assessment) => [assessment.repositoryKey, assessment.fingerprint]));
   };
-  // A failed seeding (settings not readable) records nothing and is tried
-  // again on the next start.
   const ensureSeeded = () => {
     seeding ??= seedKnown().catch((error) => {
       console.warn('[opencode-trust] Could not trust the existing projects:', error?.message ?? error);
@@ -188,11 +144,6 @@ export const createOpenCodeTrust = ({
     return { assessment, trusted };
   };
 
-  // The check matters when OpenCode opens a folder: once open, OpenCode
-  // reloads its plugins itself and nothing here can stop that. So while the
-  // runtime reports OpenCode closing folders (`forget`), a trusted answer
-  // holds until OpenCode closes that folder. Without those reports, and for
-  // folders not trusted, an answer holds for one burst of requests.
   let followsLocations = false;
 
   const isFresh = (entry) => (
@@ -214,7 +165,6 @@ export const createOpenCodeTrust = ({
     return result;
   };
 
-  /** OpenCode closed `directory`: its next opening is checked again. */
   const forget = async (directory) => {
     const resolved = await fsPromises.realpath(directory).catch(() => directory);
     for (const [key, entry] of cache) {
@@ -222,16 +172,11 @@ export const createOpenCodeTrust = ({
     }
   };
 
-  /**
-   * Whether the runtime reports every folder OpenCode closes. Turning it on
-   * forgets every answer, since closings may have gone unreported before.
-   */
   const followLocations = (following) => {
     if (following) cache.clear();
     followsLocations = following;
   };
 
-  /** The first of `directories` OpenCode may not open yet, or null. */
   const firstUntrusted = async (directories) => {
     for (const directory of new Set(directories)) {
       const { assessment, trusted } = await assess(directory);
@@ -242,10 +187,6 @@ export const createOpenCodeTrust = ({
 
   const isTrusted = async (directory) => (await assess(directory)).trusted;
 
-  /**
-   * Record trust for the configuration the user was shown. When it changed
-   * since, nothing is recorded and the current one comes back to be shown.
-   */
   const trust = async (directory, fingerprint) => {
     const { assessment, trusted } = await assess(directory, { fresh: true });
     if (assessment.fingerprint !== fingerprint) {
@@ -256,14 +197,6 @@ export const createOpenCodeTrust = ({
     return { ok: true, assessment: publicAssessment(assessment, true) };
   };
 
-  /**
-   * The answer for a request OpenCode must not receive yet, or null to
-   * forward it. `resolveSessionDirectory` names the folder of a session whose
-   * route runs in that session's own location; it answers null for a session
-   * that does not exist and throws when it cannot tell. `readBody` returns
-   * the request's JSON body; it is called only for a route whose folder is in
-   * the body (a session move), and a body it cannot read refuses the request.
-   */
   const refusalFor = async ({ method, path: requestPath, headers, resolveSessionDirectory, readBody }) => {
     const url = new URL(requestPath, 'http://opencode.invalid');
     const normalizedMethod = String(method || 'GET').toUpperCase();
@@ -274,8 +207,6 @@ export const createOpenCodeTrust = ({
     let sessionDirectory = null;
     if (sessionID && sessionID !== LOCATION_SCOPED_FORM_OWNER && resolveSessionDirectory) {
       try {
-        // A move's destination resolves against where the session is now,
-        // which an earlier move may have changed.
         sessionDirectory = await resolveSessionDirectory(decodeURIComponent(sessionID), { fresh: isMove });
       } catch {
         return { status: 503, body: { error: 'Could not check whether this session\'s folder is trusted' } };
@@ -296,7 +227,6 @@ export const createOpenCodeTrust = ({
     };
   };
 
-  /** `GET` and `POST` on {@link OPENCODE_TRUST_ROUTE}, shared by every runtime. */
   const handleRoute = async ({ method, query, body }) => {
     const normalizedMethod = String(method || 'GET').toUpperCase();
     if (normalizedMethod === 'GET') {
