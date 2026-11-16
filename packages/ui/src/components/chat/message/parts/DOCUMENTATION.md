@@ -679,6 +679,17 @@ size and depends on frame timing.
 
 A page waited whenever its call was `running`. A call stays `running` in OpenCode's storage when OpenCode is stopped under it, so after an app restart the page still offered its buttons and every answer came back as "This page is no longer waiting for an answer". Now such a page reads "Not answered" when the server does not list its call as waiting (`useIsCallWaiting`, the list the answer route itself checks) and its session no longer runs (`livePageAsk`). Requiring the server's announcement alone was rejected: it arrives a moment after the call starts, and after a reload only through the host's snapshot, which a client that cannot place the session yet skips, so a page that really waits would come up without buttons.
 
+### Why a quoted image path may hold the other quote characters
+
+`renderPageImages.ts` stops a quoted path only at the quote that opened it, so a
+Windows folder named `chef's` keeps its image; the server's copy in
+`packages/web/server/lib/openchamber-control/render-page.js` matches, because the
+grant route allows exactly the paths the chat reads. The rule used to stop at
+every quote character, which dropped such a path without even a "not shown"
+note. A character class cannot express "any character but the one in this
+backreference", so the body tests each character against `\1`; a later reader
+could otherwise simplify that back into the bug (#6806).
+
 ### Why a running shell row reads its output only while expanded
 
 OpenCode has no output event, so every running row that shows output costs one

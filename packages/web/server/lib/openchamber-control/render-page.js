@@ -23,7 +23,7 @@ const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 // (packages/ui/src/components/chat/message/parts/renderPageImages.ts).
 // A quoted path may hold spaces (macOS names screenshots that way); an
 // unquoted url() ends at the first space or parenthesis.
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 // How much the local images a page shows may weigh together, in file bytes.
 // The chat reads each one into the page as a data URL, and the browser holds
 // it decoded on top, so the weight of a page is what bounds the chat's memory.

@@ -796,3 +796,15 @@ titles and cursor controls for the panel to redraw, which a model would read as
 noise. It lives in memory, so the copy cannot block the PTY or move
 `lastActivity`.
 
+### Why a quoted image path may hold the other quote characters
+
+A page names a local image in a quoted string: an `src` attribute, a CSS
+`url("...")`, or a string in its script. The rule used to stop at every quote
+character, so a Windows folder named `chef's` made the whole path unreadable and
+the page showed no image, not even the "not shown" note. It now stops only at
+the quote that opened the string, which a character class cannot express: the
+body tests each character against `\1`. The chat's copy in
+`packages/ui/src/components/chat/message/parts/renderPageImages.ts` carries the
+same rule, because the grant route allows exactly the paths the chat reads
+(#6806).
+

@@ -16,7 +16,7 @@ import {
 // way); an unquoted one ends at the first space or parenthesis. The server
 // authorizes the same paths with the same rule (renderPageImageSources in
 // packages/web/server/lib/openchamber-control/render-page.js).
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 // VS Code has no image grant route to weigh a page, so the chat keeps the
 // server's budget there itself (RENDER_PAGE_IMAGE_BUDGET_BYTES in
 // packages/web/server/lib/openchamber-control/render-page.js).
