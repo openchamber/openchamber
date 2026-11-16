@@ -25,7 +25,8 @@ const SHARE_METRICS: HtmlRenderMetrics = {
 
 // The page fills the viewer on the theme's own background at full width; an
 // html page sets its own reading width, as it does in the chat column.
-const SHARE_PAGE_CSS = 'html{background:var(--background)}body{box-sizing:border-box;margin:0;padding:24px 16px 40px}';
+const SHARE_PAGE_CSS = 'html{background:var(--background);overflow-y:auto!important}'
+    + 'body{box-sizing:border-box;margin:0;padding:24px 16px 40px;overflow-y:visible!important}';
 
 // `openchamber.submit(data, summary)` sends the answer to the viewer and
 // settles on its reply, one answer on its way at a time, none after one went

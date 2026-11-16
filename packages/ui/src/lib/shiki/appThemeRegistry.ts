@@ -61,7 +61,7 @@ const digest = (text: string): string => {
  * the highlighter workers and diff caches key on the name, so a custom theme
  * edited on disk keeps the same ID but must render under a new name.
  */
-export const getThemeRenderName = (theme: Theme): string => {
+const getThemeRenderName = (theme: Theme): string => {
   let name = renderNames.get(theme);
   if (!name) {
     name = `${theme.metadata.id}@${digest(getThemeContentSignature(theme))}`;

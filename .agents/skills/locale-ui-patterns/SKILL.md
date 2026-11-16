@@ -26,6 +26,7 @@ If you genuinely cannot translate a language, say so explicitly to the user inst
 3. In components, call `const { t } = useI18n()` from `@/lib/i18n` and render `t('key')`.
 4. For locale names or language picker labels, use `label(locale)` from `useI18n()`.
 5. Keep locale state in `packages/ui/src/lib/i18n/*`; do not add locale fields to broad stores like `useUIStore`.
+   A feature string file (`messages/<feature>.i18n.ts`) holds one `export const xI18n = { en: {...}, uk: {...}, ... }` and nothing else, and only locale dictionaries import it, each spreading its own locale. The web build gives each dictionary only that locale (`packages/web/vite-locale-slices.ts`); a file of another shape, or one imported from elsewhere, ships every locale in the startup chunk (several MB of the window's memory).
 6. Do not remount the app to update language. Components must re-render through `useI18n()`.
 
 ## Component Usage Rules

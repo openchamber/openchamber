@@ -22,6 +22,11 @@ export const providerTargetKind = (operation) => {
   if (operation.startsWith('issue-')) return 'issue';
   return operation.startsWith('discussion-') ? 'discussion' : 'change-request';
 };
+// Both vocabularies grow with each feature, so a record can name an operation
+// this build does not know yet; it stays readable without being interpreted.
+const isKnownOperation = (operation) => PROVIDER_OPERATIONS.has(operation) || GIT_OPERATIONS.has(operation);
+const isUnknownOperation = (value, allowUnknownVocabulary) => allowUnknownVocabulary
+  && isString(value.operation) && !isKnownOperation(value.operation);
 const RESULT_STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
   'fetch:succeeded', 'fetch:skipped', 'fetch:conflicted', 'fetch:failed', 'fetch:cancelled',
@@ -48,6 +53,9 @@ const isOpaqueReference = (value, max = 1024) => isBoundedText(value, max)
 const isFingerprint = (value) => isString(value) && /^[A-Za-z0-9_-]{43}$/.test(value);
 const isNullableText = (value) => value === null || isSafeText(value);
 const isNullableAccountId = (value) => value === null || isBoundedText(value);
+// A name this build does not know is printed in a warning, so it carries no
+// path, scheme or userinfo: lowercase words joined by '-' or ':'.
+const isVocabularyName = (value, max) => isBoundedText(value, max) && /^[a-z][a-z0-9:-]*$/.test(value);
 
 const invalidStore = () => Object.assign(new Error('Source control audit storage is invalid'), {
   code: 'INVALID_SOURCE_CONTROL_AUDIT',
@@ -95,53 +103,65 @@ const isAuxiliaryTarget = (value) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'endpointFingerprint'])
   && ['submodule', 'lfs'].includes(value.kind)
   && isFingerprint(value.endpointFingerprint);
-const isGitTarget = (value) => isPlainObject(value)
+const isGitTarget = (value, allowUnknownVocabulary = false) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'operation', 'remotes'], ['destination', 'fetchScope', 'force', 'auxiliaries'])
   && value.kind === 'git-network'
-  && GIT_OPERATIONS.has(value.operation)
+  && (GIT_OPERATIONS.has(value.operation)
+    || (isUnknownOperation(value, allowUnknownVocabulary) && isVocabularyName(value.operation, 128)))
   && Array.isArray(value.remotes) && value.remotes.length <= 2 && value.remotes.every(isRemoteTarget)
-  && (value.auxiliaries === undefined || (value.operation === 'checkout-hydration'
+  && (value.auxiliaries === undefined || ((value.operation === 'checkout-hydration'
+      || isUnknownOperation(value, allowUnknownVocabulary))
     && value.remotes.length === 0 && Array.isArray(value.auxiliaries) && value.auxiliaries.length <= 256
     && value.auxiliaries.every(isAuxiliaryTarget)
     && new Set(value.auxiliaries.map((entry) => `${entry.kind}\0${entry.endpointFingerprint}`)).size === value.auxiliaries.length))
   && (value.fetchScope === undefined ? value.force === undefined
-    : value.operation === 'fetch' && value.fetchScope === 'remote'
+    : (value.operation === 'fetch' || isUnknownOperation(value, allowUnknownVocabulary))
+      && value.fetchScope === 'remote'
       && (value.force === true || value.force === false) && value.destination === undefined
       && value.remotes.length === 1 && value.remotes[0].role === 'operation'
       && value.remotes[0].sourceRef === undefined && value.remotes[0].destinationRef === undefined)
   && (value.destination === undefined || (isPlainObject(value.destination)
     && hasExactKeys(value.destination, ['displayName', 'fingerprint'])
     && isSafeText(value.destination.displayName) && isSafeText(value.destination.fingerprint, 1024)));
-const isProviderTarget = (value) => isPlainObject(value)
+const isProviderTarget = (value, allowUnknownVocabulary = false) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'operation', 'projectId'], ['number', 'head', 'base', 'headSha'])
-  && PROVIDER_OPERATIONS.has(value.operation)
+  && (PROVIDER_OPERATIONS.has(value.operation)
+    || (isUnknownOperation(value, allowUnknownVocabulary) && isVocabularyName(value.operation, 128)))
   && value.kind === providerTargetKind(value.operation)
   && isSafeText(value.projectId, 1024)
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isSafeText(value.head, 1024))
   && (value.base === undefined || isSafeText(value.base, 1024))
   && (value.headSha === undefined || isSafeText(value.headSha, 1024));
-const isTarget = (value) => isGitTarget(value) || isProviderTarget(value);
-const hydrationTransportMatchesTarget = (reference, target) => {
+const isTarget = (value, allowUnknownVocabulary = false) => isGitTarget(value, allowUnknownVocabulary)
+  || isProviderTarget(value, allowUnknownVocabulary);
+const hydrationTransportMatchesTarget = (reference, target, allowUnknownVocabulary = false) => {
   if (target.kind !== 'git-network') return false;
-  if (target.operation !== 'checkout-hydration') {
+  const unknownOperation = isUnknownOperation(target, allowUnknownVocabulary);
+  if (!unknownOperation && target.operation !== 'checkout-hydration') {
     return target.operation === 'sync'
       ? isPlainObject(reference) && reference.kind === 'sync'
       : isSingleTransportReference(reference);
   }
-  if (target.auxiliaries === undefined) return isSingleTransportReference(reference);
+  // A name this build cannot read may need no transport at all, but a grant it
+  // records still may claim only the endpoints the target recorded for it.
+  if (target.auxiliaries === undefined) {
+    return isSingleTransportReference(reference)
+      || (unknownOperation && (reference === null || reference.kind === 'sync'));
+  }
   if (reference === null) return true;
-  if (reference.kind !== 'auxiliary') return false;
-  const targets = new Set((target.auxiliaries ?? []).map((entry) => `${entry.kind}\0${entry.endpointFingerprint}`));
+  if (reference.kind !== 'auxiliary') return unknownOperation && isSingleTransportReference(reference);
+  const targets = new Set(target.auxiliaries.map((entry) => `${entry.kind}\0${entry.endpointFingerprint}`));
   return reference.entries.every((entry) => targets.has(`${entry.kind}\0${entry.endpointFingerprint}`));
 };
-const isResult = (value) => isPlainObject(value)
+const isResult = (value, allowUnknownVocabulary = false) => isPlainObject(value)
   && hasExactKeys(value, ['state', 'errorCode', 'steps'])
   && STATES.has(value.state) && !['planned', 'running'].includes(value.state)
   && isNullableText(value.errorCode)
   && Array.isArray(value.steps) && value.steps.length <= 32
-  && value.steps.every((step) => RESULT_STEPS.has(step));
-const isRecord = (value, id) => {
+  && value.steps.every((step) => RESULT_STEPS.has(step)
+    || (allowUnknownVocabulary && isVocabularyName(step, 64)));
+const isRecord = (value, id, allowUnknownVocabulary = false) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, [
       'id', 'initiator', 'executorKind', 'runtime', 'repositoryId', 'providerAccountId',
@@ -150,12 +170,11 @@ const isRecord = (value, id) => {
     || value.id !== id || !isOpaqueReference(value.id) || value.initiator !== 'user'
     || !EXECUTORS.has(value.executorKind) || !isRuntime(value.runtime)
     || !isNullableText(value.repositoryId) || !isNullableAccountId(value.providerAccountId)
-    || !isTransportReference(value.transportReference) || !isTarget(value.target)
-    || (value.executorKind === 'provider-api' && (value.transportReference !== null || !isProviderTarget(value.target)))
+    || !isTransportReference(value.transportReference) || !isTarget(value.target, allowUnknownVocabulary)
+    || (value.executorKind === 'provider-api' && (value.transportReference !== null || !isProviderTarget(value.target, allowUnknownVocabulary)))
     || (value.executorKind === 'openchamber-server-git' && (value.target.kind !== 'git-network'
-      || !hydrationTransportMatchesTarget(value.transportReference, value.target)))
-    || (value.target.kind === 'git-network' && value.target.operation === 'checkout-hydration'
-      && value.target.auxiliaries !== undefined
+      || !hydrationTransportMatchesTarget(value.transportReference, value.target, allowUnknownVocabulary)))
+    || (value.target.kind === 'git-network' && value.target.auxiliaries !== undefined
       && value.providerAccountId !== null)
     || !STATES.has(value.state) || !isTimestamp(value.plannedAt)
     || (value.startedAt !== null && (!isTimestamp(value.startedAt) || value.startedAt < value.plannedAt))
@@ -164,16 +183,34 @@ const isRecord = (value, id) => {
   }
   if (value.state === 'planned') return value.startedAt === null && value.finishedAt === null && value.result === null && value.expiresAt === null;
   if (value.state === 'running') return value.startedAt !== null && value.finishedAt === null && value.result === null && value.expiresAt === null;
-  if (value.finishedAt === null || !isResult(value.result) || value.result.state !== value.state) return false;
+  if (value.finishedAt === null || !isResult(value.result, allowUnknownVocabulary) || value.result.state !== value.state) return false;
   return TERMINAL_STATES.has(value.state)
     ? isTimestamp(value.expiresAt) && value.expiresAt >= value.finishedAt
     : value.expiresAt === null;
 };
-const parseState = (value) => {
+const foreignNames = (record) => {
+  const operation = record?.target?.operation;
+  const steps = Array.isArray(record?.result?.steps) ? record.result.steps.filter((step) => !RESULT_STEPS.has(step)) : [];
+  return [
+    ...(isKnownOperation(operation) ? [] : [`operation ${operation}`]),
+    ...steps.map((step) => `step ${step}`),
+  ].join(', ');
+};
+const parseState = (value, onForeignRecords) => {
   if (!isPlainObject(value) || !hasExactKeys(value, ['version', 'records'])
     || value.version !== VERSION || !isPlainObject(value.records)) throw invalidStore();
-  for (const [id, record] of Object.entries(value.records)) if (!isRecord(record, id)) throw invalidStore();
-  return value;
+  // A record from a build with a wider operation vocabulary is kept verbatim: it
+  // must stay readable, and dropping it here would erase it on the next write.
+  const foreign = [];
+  const records = Object.fromEntries(Object.entries(value.records).map(([id, record]) => {
+    if (!isRecord(record, id)) {
+      if (!isRecord(record, id, true)) throw invalidStore();
+      foreign.push([id, record]);
+    }
+    return [id, record];
+  }));
+  onForeignRecords?.(foreign);
+  return { version: VERSION, records };
 };
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const sameImmutableRecord = (left, right) => JSON.stringify({
@@ -199,6 +236,16 @@ export function createSourceControlAuditStore({
     throw new TypeError('Invalid source control audit store options');
   }
   let writes = Promise.resolve();
+  // Holds only the foreign records of the latest read, so it stays as small as
+  // the file and a record still in it is reported once per store instance.
+  let reportedForeignRecords = new Set();
+  const reportForeignRecords = (foreign) => {
+    for (const [id, record] of foreign) {
+      if (reportedForeignRecords.has(id)) continue;
+      console.warn(`[source-control] audit record ${id} is kept verbatim; this build does not know its ${foreignNames(record)}`);
+    }
+    reportedForeignRecords = new Set(foreign.map(([id]) => id));
+  };
   const enqueue = (operation) => {
     const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
     writes = next.then(() => undefined, () => undefined);
@@ -206,7 +253,7 @@ export function createSourceControlAuditStore({
   };
   const readState = async () => {
     try {
-      return parseState(JSON.parse(await fsImpl.readFile(filePath, 'utf8')));
+      return parseState(JSON.parse(await fsImpl.readFile(filePath, 'utf8')), reportForeignRecords);
     } catch (error) {
       if (error?.code === 'ENOENT') return emptyState();
       throw error;

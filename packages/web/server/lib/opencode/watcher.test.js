@@ -307,4 +307,46 @@ describe('createOpenCodeWatcherRuntime', () => {
 
     expect(onConnect).toHaveBeenCalledTimes(2);
   });
+  it('reports stream loss and hands on raw payloads the translation drops', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const events = new Set();
+    const statuses = new Set();
+    const globalEventHub = {
+      start() {},
+      stop() {},
+      isConnected: () => false,
+      subscribeEvent(subscriber) {
+        events.add(subscriber);
+        return () => events.delete(subscriber);
+      },
+      subscribeStatus(subscriber) {
+        statuses.add(subscriber);
+        return () => statuses.delete(subscriber);
+      },
+    };
+    const onDisconnect = vi.fn();
+    const onWirePayload = vi.fn();
+    const onPayload = vi.fn();
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload,
+      onDisconnect,
+      onWirePayload,
+    });
+
+    await watcher.start();
+    const messageWrite = { id: 'evt-1', type: 'session.message.updated', data: { sessionID: 'ses_1' } };
+    for (const subscriber of events) subscriber({ payload: { payload: messageWrite } });
+    for (const subscriber of statuses) subscriber({ type: 'disconnect', reason: 'closed' });
+    for (const subscriber of statuses) subscriber({ type: 'error', error: new Error('reset') });
+    watcher.stop();
+
+    expect(onWirePayload).toHaveBeenCalledWith(messageWrite, { spaceId: null });
+    expect(onPayload).not.toHaveBeenCalled();
+    expect(onDisconnect).toHaveBeenCalledTimes(2);
+  });
 });

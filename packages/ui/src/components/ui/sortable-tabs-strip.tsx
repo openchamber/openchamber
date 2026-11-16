@@ -27,6 +27,7 @@ import { Icon } from "@/components/icon/Icon";
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { scrollTabsWithWheel } from './tab-strip-wheel';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -63,6 +64,7 @@ type SortableTabsStripProps = {
   onReorder?: (activeId: string, overId: string) => void;
   onDoubleClickTab?: (id: string) => void;
   layoutMode?: 'scrollable' | 'fit';
+  scrollWithWheel?: boolean;
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
@@ -163,6 +165,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   onReorder,
   onDoubleClickTab,
   layoutMode = 'scrollable',
+  scrollWithWheel = false,
   variant = 'default',
   activePillInsetClassName,
   activePillButtonClassName,
@@ -504,6 +507,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
       ) : null}
       <div
         ref={scrollRef}
+        onWheel={isScrollable && scrollWithWheel ? scrollTabsWithWheel : undefined}
         className={cn(
           'relative flex h-full min-w-0 flex-1',
           usesActivePillIndicator ? 'items-center overflow-x-hidden overflow-y-hidden' : 'items-stretch',

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { VSCodeAPI } from '@/lib/api/types';
 import { vscodeSettingsNavigationSchema, type VSCodeSettingsNavigation } from '@/lib/settings/vscodeNavigation';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { applyVSCodeSettingsNavigation, connectVSCodeSettingsNavigation } from './vscodeSettingsNavigation';
@@ -9,6 +10,7 @@ import { applyVSCodeSettingsNavigation, connectVSCodeSettingsNavigation } from '
 const originalUI = useUIStore.getState();
 const originalProjects = useProjectsStore.getState();
 const originalSnippets = useSnippetsStore.getState();
+const originalSkills = useSkillsStore.getState();
 let disconnect: (() => void) | undefined;
 
 afterEach(() => {
@@ -17,6 +19,7 @@ afterEach(() => {
   useUIStore.setState(originalUI, true);
   useProjectsStore.setState(originalProjects, true);
   useSnippetsStore.setState(originalSnippets, true);
+  useSkillsStore.setState(originalSkills, true);
 });
 
 const connect = (executeCommand: VSCodeAPI['executeCommand']) => {
@@ -77,6 +80,24 @@ describe('VS Code Settings navigation', () => {
     applyVSCodeSettingsNavigation({ page: 'snippets', snippetDraft: { name: 'new-snippet', scope: 'project' } });
     expect(useSnippetsStore.getState().selectedSnippetName).toBe('new-snippet');
     expect(useSnippetsStore.getState().snippetDraft).toEqual({ name: 'new-snippet', scope: 'project' });
+  });
+
+  test('opens the Settings tab on the skill a chat entry point selected', () => {
+    const requests: VSCodeSettingsNavigation[] = [];
+    connect(async (_command, input) => { requests.push(vscodeSettingsNavigationSchema.parse(input)); });
+    useSkillsStore.getState().setSelectedSkill('OpenCode');
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsJumpRequest: null, settingsPage: 'skills.installed' });
+    useUIStore.getState().setSettingsDialogOpen(true);
+    // Another page carries no skill, whatever was selected before.
+    useUIStore.setState({ settingsPage: 'mcp' });
+    useUIStore.getState().setSettingsDialogOpen(true);
+    expect(requests.map((request) => request.skillName)).toEqual(['OpenCode', undefined]);
+
+    // The Settings tab has its own stores: the request selects the skill there.
+    useSkillsStore.getState().setSelectedSkill(null);
+    applyVSCodeSettingsNavigation(requests[0]);
+    expect(useSkillsStore.getState().selectedSkillName).toBe('OpenCode');
+    expect(useUIStore.getState().settingsPage).toBe('skills.installed');
   });
 
   test('reports a failed native request and leaves its intent available for retry', async () => {

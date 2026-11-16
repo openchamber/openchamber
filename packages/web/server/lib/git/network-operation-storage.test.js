@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGitNetworkOperationStore } from './network-operation-storage.js';
 
 const directories = [];
@@ -132,6 +132,160 @@ describe('Git network operation storage', () => {
     await expect(restarted.claim(snapshot('git_new'))).rejects.toMatchObject({
       code: 'GIT_NETWORK_OPERATION_CAPACITY',
     });
+  });
+
+  it('keeps a record naming an operation this build does not know, and still refuses a malformed known one', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup();
+    await store.claim(snapshot('git_foreign'));
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    stored.records.git_foreign.snapshot.target.operation = 'mirror-push';
+    stored.records.git_foreign.owner.pid = 999999999;
+    await fs.writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+    const recovered = await createGitNetworkOperationStore({ filePath }).recover();
+    expect(recovered).toEqual([expect.objectContaining({
+      operationId: 'git_foreign',
+      state: 'cancelled',
+      target: expect.objectContaining({ operation: 'mirror-push' }),
+    })]);
+    // The record survived the rewrite that recovery performs.
+    const after = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(after.records.git_foreign.snapshot.target.operation).toBe('mirror-push');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('mirror-push'));
+    warn.mockRestore();
+
+    // A name this build cannot read is still a name, and a target it cannot
+    // shape still may not carry an endpoint, a path or process output.
+    for (const foreignTarget of [
+      { kind: 'git-network', operation: 'https://token@example.com/op', projectId: 'repository_one' },
+      { kind: 'git-network', operation: 'mirror-push', endpoint: 'https://token@example.com/repo.git' },
+      { kind: 'git-network', operation: 'mirror-push', destination: '/private/repository' },
+      {
+        kind: 'git-network', operation: 'mirror-push',
+        extra: { url: 'https://user:secret@example.com/repo', keyPath: '/private/key', processOutput: 'private output' },
+      },
+    ]) {
+      after.records.git_foreign.snapshot.target = foreignTarget;
+      await fs.writeFile(filePath, JSON.stringify(after), { mode: 0o600 });
+      await expect(createGitNetworkOperationStore({ filePath }).recover())
+        .rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
+    }
+
+    after.records.git_foreign.snapshot.target = { kind: 'git-network', operation: 'mirror-push', sourceRef: 'refs/heads/main' };
+    after.records.git_foreign.snapshot.stepResults = [
+      { step: 'fetch', status: 'succeeded' },
+      { step: 'pull', status: 'failed', error: { code: 'FUTURE_FAILURE', message: 'Failed' } },
+      { step: 'push', status: 'skipped' },
+    ];
+    await fs.writeFile(filePath, JSON.stringify(after), { mode: 0o600 });
+    await expect(createGitNetworkOperationStore({ filePath }).read('git_foreign'))
+      .resolves.toMatchObject({ state: 'cancelled', stepResults: expect.any(Array) });
+
+    after.records.git_foreign.snapshot.target = { kind: 'git-network', operation: 'push', sourceRef: 'not-a-ref' };
+    delete after.records.git_foreign.snapshot.stepResults;
+    await fs.writeFile(filePath, JSON.stringify(after), { mode: 0o600 });
+    await expect(createGitNetworkOperationStore({ filePath }).recover())
+      .rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
+  });
+
+  it('keeps an arbitrary code inside a foreign target without printing it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { filePath, store } = await setup();
+    await store.claim(snapshot('git_foreign_code'));
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    const escape = '\u001b]0;owned\u0007\u001b[31mINJECTED';
+    stored.records.git_foreign_code.snapshot.target = {
+      operation: 'mirror-push',
+      detail: { code: escape, nested: [{ code: 'NOT_A_REAL_ERROR' }] },
+    };
+    await fs.writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+    const restarted = createGitNetworkOperationStore({ filePath });
+    await expect(restarted.read('git_foreign_code')).resolves.toMatchObject({
+      target: { operation: 'mirror-push', detail: { code: escape } },
+    });
+    await restarted.read('git_foreign_code');
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message] = warn.mock.calls[0];
+    expect(message).toContain('operation mirror-push');
+    expect(message).not.toContain('\u001b');
+    expect(message).not.toContain('INJECTED');
+    expect(message).not.toContain('NOT_A_REAL_ERROR');
+    const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(persisted.records.git_foreign_code.snapshot.target.detail.code).toBe(escape);
+    warn.mockRestore();
+  });
+
+  it('keeps a record naming a step this build does not know, and never writes one', async () => {
+    const { filePath, store } = await setup();
+    const planned = snapshot('git_foreign_step');
+    await store.claim(planned);
+    await store.update('git_foreign_step', { snapshot: { ...planned, state: 'running' } });
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    const record = stored.records.git_foreign_step;
+    record.completedSteps = ['validated', 'verified-remote'];
+    record.snapshot.completedSteps = ['validated', 'verified-remote'];
+    record.owner.pid = 999999999;
+    await fs.writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+    const recovered = await createGitNetworkOperationStore({ filePath }).recover();
+    expect(recovered).toEqual([expect.objectContaining({
+      operationId: 'git_foreign_step',
+      state: 'outcome-unknown',
+      completedSteps: ['validated', 'verified-remote'],
+    })]);
+
+    const strict = snapshot('git_foreign_step_write');
+    strict.completedSteps = ['verified-remote'];
+    await expect(store.claim(strict)).rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
+  });
+
+  it('keeps an inner code this build does not know inside a hydration part, and never writes one', async () => {
+    const { filePath, store } = await setup({ now: () => 100 });
+    const planned = snapshot('git_foreign_part', 'checkout-hydration');
+    planned.target = {
+      operation: 'checkout-hydration', repositoryId: 'repository_one', bindingRevision: 2,
+      configRevision: 'config_one', remote: snapshot('unused').target.remote,
+      requirements: [{
+        kind: 'submodule', path: 'vendor/module',
+        endpoint: { displayUrl: 'https://modules.example/module.git', fingerprint: 'module_fingerprint' },
+      }],
+    };
+    await store.claim(planned);
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    const record = stored.records.git_foreign_part;
+    const part = { path: 'vendor/module', status: 'failed', error: { code: 'FUTURE_FAILURE', message: 'Failed' } };
+    record.state = 'failed';
+    record.completedSteps = ['validated'];
+    record.finishedAt = 110;
+    record.expiresAt = 1_000;
+    record.snapshot = {
+      ...record.snapshot,
+      state: 'failed',
+      completedSteps: ['validated'],
+      error: { code: 'TRANSPORT_FAILED', message: 'Git transport failed' },
+      hydration: { status: 'failed', submodules: [part], lfs: [] },
+    };
+    await fs.writeFile(filePath, JSON.stringify(stored), { mode: 0o600 });
+
+    const restarted = createGitNetworkOperationStore({ filePath, now: () => 100 });
+    await expect(restarted.read('git_foreign_part')).resolves.toMatchObject({
+      state: 'failed',
+      hydration: expect.objectContaining({ status: 'failed' }),
+    });
+    // Writing one stays refused: this build records only codes it can classify.
+    const plannedWrite = snapshot('git_foreign_part_write', 'checkout-hydration');
+    plannedWrite.target = planned.target;
+    await store.claim(plannedWrite);
+    await expect(store.update('git_foreign_part_write', { snapshot: {
+      ...plannedWrite,
+      state: 'failed',
+      completedSteps: ['validated'],
+      error: { code: 'TRANSPORT_FAILED', message: 'Git transport failed' },
+      hydration: { status: 'failed', submodules: [part], lfs: [] },
+    } })).rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
   });
 
   it('uses mode 0600 atomic storage, omits private fields, and rejects cross-process ID collisions', async () => {

@@ -1497,7 +1497,7 @@ describe('contributes.sourceControl', () => {
     const parsed = result.manifest.contributes.sourceControl;
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
-      ci: false, comments: false, reviews: false, state: false, labels: false, reviewers: false,
+      ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
       changeRequestPatch: false, liveSummaries: true,
     });
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
@@ -1568,6 +1568,18 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('an edit-capable host declares issueEdit and changeRequestEdit', () => {
+    const result = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { issueEdit: true, changeRequestEdit: true } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.sourceControl?.presentation.features)
+      .toMatchObject({ issueEdit: true, changeRequestEdit: true });
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
   test('submit is the only merge method when present', () => {

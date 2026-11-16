@@ -70,6 +70,7 @@ unchanged; raw global session records remain available for cleanup.
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
+  - Reads `worktree.directory` through the web server's `shared.js` reader on the canonical checkout. Both runtimes merge ancestor files and checkout-local configs in OpenCode order, with project files overriding `OPENCODE_CONFIG`; malformed or unreadable configs fail creation before choosing a folder.
   - Preview and creation follow the [worktree path identity rule](../../web/server/lib/git/DOCUMENTATION.md#why-preview-and-creation-resolve-the-parent-after-creating-it), returning canonical paths. Workspace admission stays unchanged.
   - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository', message }`. Their bridge handlers were dead surface (DiffView is not mounted in VS Code) and are gone; `getGitDiff` remains on the host only for the SCM commit-message generator, and the gitPathDiff contract is covered by `gitPathDiff.test.ts`.
   - `api:git/status` rows carry a rename's or copy's source as `previousPath`, as the web server's status does: from the Git API change's `originalUri`, or from the source entry `git status -z` lists after the destination in the raw fallback. The Changes view that reads it is not mounted here; the field keeps the status contract the same on every runtime.
@@ -145,6 +146,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
 
 - `bridge-system-runtime.ts`
+  - Cursor Enterprise quota shares `providers/cursor-summary.js` with the web server for individual dollar allowances when the older APIs expose no billing-cycle meter. Cookie handling, personal scope and cents conversion follow the quota module's "Cursor individual dollar allowance fallback" contract.
   - System/editor/provider/quota/notification/update-check message handlers.
   - `api:notifications:show` hands the webview's notification to `openchamber.internal.showNotification` in `extension.ts`, which shows it through `sessionNotifications.ts` and answers `{ shown }`. Chromium never displays a `new Notification()` from a webview frame, so the extension host is the only place a VS Code notification can come from.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories). A busy entry also carries how long its turn has been running, measured by the extension host, so a webview that attaches later counts the sidebar timer from the turn's start instead of from the moment it opened.
@@ -231,6 +233,10 @@ session's directory cannot select the wrong mode.
 The editor-panel host owns a singleton Settings tab separately from its session panels. `openchamber.showSettings` reveals that tab, including when the sidebar has never resolved or no folder is open. Settings receives theme, connection, settings-save and permission-policy broadcasts through the same panel bridge, but is excluded from chat attention, attachment routing and active-editor selection broadcasts. Closing or reloading its webview aborts only its own SSE streams.
 
 A settings-save broadcast invalidates the recipient's cached server document before its existing settings synchronization runs. Reusing the short-lived GET cache hid a peer's save from an already-open tab. Synchronization keeps its normal mutation reconciliation and preserves the webview's editor-derived theme. Pending bridge replies post only while their original panel owner remains current; disposal cleanup uses the webview reference captured while the panel was alive, because VS Code's panel getter throws after disposal.
+
+### Why the Settings command accepts null without relaxing navigation validation
+
+VS Code can pass `null` as the view-title action context, so the command treats it like an omitted argument. Other supplied values still pass through the navigation schema: silently discarding malformed navigation would open the wrong settings page and hide a caller error.
 
 ### Why Settings uses a separate panel and not the sidebar view
 

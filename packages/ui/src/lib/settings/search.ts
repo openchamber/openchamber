@@ -1,5 +1,6 @@
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
+import { canKeepScreenAwake } from '@/lib/platform';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -115,6 +116,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMac,
   },
   {
+    id: 'general.keep-screen-awake',
+    page: 'general',
+    titleKey: 'settings.mobileApp.keepScreenAwake.label',
+    descriptionKey: 'settings.mobileApp.keepScreenAwake.info',
+    keywords: ['screen', 'display', 'sleep', 'lock', 'awake', 'wake lock', 'timeout', 'battery', 'phone'],
+    // Same guard as MobileAppSettings: the native app, on a WebView with the Screen Wake Lock API.
+    isAvailable: () => canKeepScreenAwake(),
+  },
+  {
     id: 'appearance.scrollbars',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.alwaysShowScrollbars',
@@ -205,6 +215,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.terminalCloseOnExitInfo',
     keywords: ['terminal', 'exit', 'close', 'tab', 'shell'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'appearance.terminal-open-on-project-action',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.terminalOpenOnProjectAction',
+    descriptionKey: 'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo',
+    keywords: ['terminal', 'project action', 'run', 'open', 'panel', 'dev server'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
   {
     id: 'appearance.editor-font-size',
@@ -423,10 +441,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['collapse', 'expand', 'clamp', 'long messages', 'user messages'],
   },
   {
-    id: 'chat.wide-layout',
+    id: 'chat.width',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.wideChatLayout',
-    keywords: ['layout', 'wide', 'messages'],
+    titleKey: 'settings.openchamber.visual.field.chatWidth',
+    descriptionKey: 'settings.openchamber.visual.field.chatWidthInfo',
+    keywords: ['layout', 'wide', 'wider', 'full', 'width', 'column', 'messages'],
   },
   {
     id: 'chat.message-appearance',
@@ -537,6 +556,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.section.followUpBehavior',
     descriptionKey: 'settings.openchamber.visual.field.followUpBehaviorDescription',
     keywords: ['follow up', 'queue', 'steer', 'send immediately'],
+  },
+  {
+    id: 'chat.questions-placement',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.questionsPlacement',
+    descriptionKey: 'settings.openchamber.visual.field.questionsPlacementInfo',
+    keywords: ['question', 'form', 'ask', 'pop-up', 'popup', 'dock', 'inline', 'in the chat'],
   },
   {
     id: 'chat.input-history-scope',
@@ -942,6 +968,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-terminal-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentTerminalTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentTerminalToolSummary',
+    keywords: ['agent', 'tool', 'terminal', 'shell', 'output', 'command', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-image-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentImageTool',
@@ -1207,6 +1241,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'projects.notes-todos.repository',
+    page: 'projects',
+    titleKey: 'settings.projects.notesTodos.inRepository',
+    descriptionKey: 'settings.projects.notesTodos.inRepositoryDescription',
+    keywords: ['notes', 'todos', 'repository', 'git', 'sync', '.openchamber', 'notes-todos.json'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'projects.shared',
     page: 'projects',
     titleKey: 'settings.projects.team.title',
@@ -1443,7 +1485,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.classification.page.title',
     descriptionKey: 'settings.classification.page.description',
-    keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion', 'off', 'disable', 'privacy', 'custom endpoint', 'base url', 'openai-compatible', 'system one', 'self-hosted', 'proxy'],
+    keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion', 'off', 'disable', 'privacy', 'custom endpoint', 'base url', 'openai-compatible', 'system one', 'self-hosted', 'proxy', 'gemini', 'google', 'decisions'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {

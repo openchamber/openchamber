@@ -23,6 +23,7 @@ const FALLBACK: BrowserAnnotationOverlayTheme = {
   border: 'rgba(255, 255, 255, 0.14)',
   text: 'rgb(244, 244, 245)',
   mutedText: 'rgba(244, 244, 245, 0.62)',
+  danger: 'rgb(229, 72, 77)',
 };
 
 type Probe = {
@@ -85,6 +86,7 @@ export const resolveAnnotationOverlayTheme = (colorScheme: 'light' | 'dark'): Br
       border: read('--border', FALLBACK.border),
       text: read('--foreground', FALLBACK.text),
       mutedText: read('--muted-foreground', FALLBACK.mutedText),
+      danger: read('--status-error', FALLBACK.danger),
     };
   } catch {
     return { ...FALLBACK, colorScheme };

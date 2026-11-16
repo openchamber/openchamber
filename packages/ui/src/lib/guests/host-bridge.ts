@@ -54,6 +54,9 @@ type HostBridgeEffects = {
   shellsUnsubscribe: (subscriptionId: string) => void;
   shellOutput: (request: GuestShellOutputRequest) => Promise<GuestShellOutputResult>;
   shellStop: (request: { shellId: string }) => Promise<GuestShellStopResult>;
+  /** Start capturing for this frame at the frame's rate; the pane checks the `microphone` grant. Resolves once audio flows. */
+  microphoneOpen: (sampleRate: number) => Promise<void>;
+  microphoneClose: () => void;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   setStatusControls: (controls: GuestStatusControl[]) => void;
   openSession: (sessionId: string) => void;
@@ -274,6 +277,8 @@ export const answerGuestMessage = async (
     case 'shells-unsubscribe': effects.shellsUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
     case 'shell-output': return okResult(message.id, await effects.shellOutput(message.payload));
     case 'shell-stop': return okResult(message.id, await effects.shellStop(message.payload));
+    case 'microphone-open': await effects.microphoneOpen(message.payload.sampleRate); return okResult(message.id, { opened: true });
+    case 'microphone-close': effects.microphoneClose(); return okResult(message.id);
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);

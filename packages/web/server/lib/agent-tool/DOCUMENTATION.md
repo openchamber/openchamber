@@ -57,7 +57,10 @@ the user can want independently:
   read paths assembled at runtime. The description gives the authoring pattern.
   It also names the temporary directory to save a screenshot in
   (`os.tmpdir()/opencode`) so it stays out of the project. How
-  to ask on a page is the `awaitAnswer` input's description.
+  to ask on a page is the `awaitAnswer` input's description; `answerLater`,
+  a boolean the plugin normalizes like `awaitAnswer`, returns at once and is
+  not a wait here (no call registration, no `timeout: false`), see
+  `../openchamber-control/DOCUMENTATION.md`.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can
   find the waiting call when the chat answers it, and copies the answer into
@@ -66,11 +69,38 @@ the user can want independently:
   since Bun's fetch otherwise ends a request with no response after about six
   minutes. While the call waits, OpenCode holds any chat message
   for that session until the call returns, so the plugin registers a
-  `session.prompt` hook: a prompt for the session, from any sender, aborts the
+  `session.prompt` hook: the user's prompt for the session aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
-  agent reads the message next. A message sent before the page appeared
-  fired the hook too early; the server finds it in the inbox instead
-  (`render-page.js`).
+  agent reads the message next. Two kinds of prompt leave the wait running.
+  The first is an agent's: its metadata names a sending session in the
+  `openchamber.promptedBy` record `session.send` writes (a non-empty
+  `sessionID`), or it is a run of OpenCode's own scheduler
+  (`experimental.schedules`), an ordinary steer prompt marked
+  `schedule: { id }` with a non-empty `id` (`isAgentPrompt` in `render-page.js`, embedded with
+  `toString()`). The second has `delivery: "queue"`, which OpenCode delivers
+  only after the turn. The user can still move an undelivered prompt between
+  queue and steer, also one sent as a steer before the page appeared, and
+  OpenCode does that without running the prompt hook again. So the plugin
+  remembers the inbox ids of all the user's prompts until they are delivered
+  and follows the inbox events (`ctx.event.subscribe`):
+  `session.inbox.delivery.changed` to `"steer"` for one of them ends the wait,
+  `session.inbox.delivered` or `session.inbox.cancelled` forgets it, and
+  `session.deleted` forgets all of that session's. Every other prompt, the TUI's and the
+  API's included, counts as the user's. OpenChamber's own background wakes
+  (extension waits, dispatch results, pull request watches, restart resumes)
+  arrive as synthetic messages, which never reach this hook. Known limits:
+  - An agent's `session.send` whose prompt is a slash command (`/review`) goes
+    to `client.session.command` (`dispatchPrompt` in
+    `../openchamber-sessions/routes.js`), which sends no sender metadata, and
+    OpenCode's command endpoint has no metadata field. The command's prompt
+    therefore counts as the user's and ends the wait.
+  - The user's undelivered prompts are remembered in the plugin's memory
+    only. When OpenCode reloads the plugin while a prompt is queued, moving
+    that prompt to steer later leaves the wait running until the user answers
+    the page.
+
+  A message sent before the page appeared fired the hook too early; the
+  server finds it in the inbox instead (`render-page.js`).
   With `share` the page also goes to other people by link and PIN through the
   relay, and their answers come back later as messages
   (`../share-pages/DOCUMENTATION.md`). The `share` input and the description's
@@ -101,7 +131,9 @@ the user can want independently:
   card where the user types one secret the agent asked for (`label`, `reason`,
   optional `placeholder`). Both wait, with the same plugin machinery as a page
   with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
-  that ends the wait when the user writes in the chat, and the inbox check
+  that ends the wait when the user writes in the chat and leaves it running
+  for an agent's or a queued prompt, the inbox events for the user's prompt
+  moved to steer, and the inbox check
   for a message sent before the card appeared). The value never
   travels through the call: the chat posts it to the server, which writes it
   to a private file, and the call returns only `{ status, file }`
@@ -120,6 +152,19 @@ the user can want independently:
   sits behind Code Mode like notify, since the chat draws nothing from its
   call, and its catalog line says to read it when the user asks about limits
   or a model choice depends on them, never before every task.
+- `openchamber_terminal` — `terminal.list` and `terminal.read`, the terminal
+  panel read-only (`../openchamber-control/terminal-read.js`): the terminals
+  open in the session's folder and one's retained output as plain text. Off by
+  default: enabled only while `agentTerminalToolEnabled` is `true`, and the
+  action reads the setting on every call and refuses while it is not. A read
+  copies the replay the panel's `attach` snapshot sends
+  (`../terminal/runtime.js`), never raw PTY bytes, converted to plain text
+  without colour or other control sequences, and the runtime caps it
+  (512 KiB retained, at most 256 KiB of text per read); nothing is typed,
+  started or stopped. Only this callback reaches the actions: the ordinary
+  control route refuses `terminal.*`. VS Code has no such tool, since the
+  plugin is not injected there. It sits behind Code Mode like usage, and its catalog line says to
+  read it when the answer is in a terminal the user is looking at.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
   default: enabled only while `agentWorkflowToolEnabled` is `true`, and the
@@ -353,6 +398,21 @@ it, and with the rule in the session context the next agent linked the issue
 first thing (2026-10-02). The tool descriptions carried a second copy of each
 trigger, which cost about 2,000 characters per request and pushed two of them
 past the 2048-character cut.
+
+### Why the terminal is its own tool, off by default
+
+A terminal is the one surface here whose content the user did not write for the
+agent: it may hold a token they pasted, a password prompt, or a log line from a
+service they are debugging. Leaving it inside `openchamber` would hand it to
+every session the moment that tool was on, which is on by default. Its own row
+makes the trade visible and reversible, the same shape `openchamber_image`,
+`openchamber_notify` and `openchamber_usage` use, and the setting is read again
+on each call so a materialized plugin cannot outlive the decision.
+
+It sits behind Code Mode like usage: two actions with a short result are worth
+one namespace line in the catalog, and the catalog line says when to read it —
+the answer is in a terminal the user is looking at — so an agent does not
+sample the panel on every task.
 
 ## Security invariants
 

@@ -1,6 +1,6 @@
 /**
  * The chat column's registry of chat-quote marks: the quotes waiting in the
- * composer's context chips, published there and read by
+ * composer's context rows, published there and read by
  * `message/ChatQuoteHighlightLayer.tsx`, which paints and hit-tests them. The
  * store lives outside React state so publishing, chip hover and popover
  * activity never re-render the chat column itself.

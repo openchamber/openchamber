@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
+import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
@@ -188,6 +189,10 @@ const shellStopResultPayloadSchema = z.object({
   stopped: z.literal(true),
 });
 
+const microphoneOpenResultPayloadSchema = z.object({
+  opened: z.literal(true),
+});
+
 const hostResultPayloadSchema = z.union([
   guestStorageResultSchema,
   guestWorkspaceSnapshotSchema,
@@ -202,6 +207,7 @@ const hostResultPayloadSchema = z.union([
   fileListResultPayloadSchema,
   fileStatResultPayloadSchema,
   generateResultPayloadSchema,
+  microphoneOpenResultPayloadSchema,
 ]);
 
 const attachPayloadSchema = z.object({
@@ -312,6 +318,7 @@ const readyPayloadSchema = z.object({
     statusControls: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
+    microphone: z.literal(true).optional(),
   }).optional(),
   device: deviceContextSchema.optional(),
 });
@@ -497,6 +504,12 @@ export const hostMessageSchema = z.union([
     payload: z.object({ version: z.string().max(GUEST_FILE_EDITOR_VERSION_MAX) }),
   }),
   z.object({ ...envelope, type: z.literal('generate-late'), payload: lateGenerateResultSchema }),
+  z.object({
+    ...envelope,
+    type: z.literal('microphone-audio'),
+    payload: z.object({ samples: z.instanceof(Float32Array).refine((samples) => samples.length <= GUEST_MICROPHONE_FRAME_MAX) }),
+  }),
+  z.object({ ...envelope, type: z.literal('microphone-ended'), payload: z.object({ reason: z.enum(GUEST_MICROPHONE_END_REASONS) }) }),
 ]);
 
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
@@ -745,6 +758,13 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('file-save') }),
   z.object({ ...envelope, type: z.literal('file-unsupported') }),
   z.object({ ...envelope, type: z.literal('generate-late-listen') }),
+  z.object({
+    ...envelope,
+    type: z.literal('microphone-open'),
+    id: z.string().min(1),
+    payload: z.object({ sampleRate: z.number().int().min(GUEST_MICROPHONE_SAMPLE_RATE_MIN).max(GUEST_MICROPHONE_SAMPLE_RATE_MAX) }).strict(),
+  }),
+  z.object({ ...envelope, type: z.literal('microphone-close'), id: z.string().min(1) }),
 ]);
 
 type ParsedHostMessage = z.infer<typeof hostMessageSchema>;

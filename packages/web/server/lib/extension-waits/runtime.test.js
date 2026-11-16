@@ -69,14 +69,18 @@ const createService = ({ start = () => ({ ok: true, state: { checks: 0 }, label:
   return { calls, proxyServiceRequest };
 };
 
-const createRuntime = async ({ dataDir, catalog = [guest()], service = createService(), openCode = createOpenCode(), timers } = {}) => {
+const createRuntime = async ({ dataDir, catalog = [guest()], service = createService(), openCode = createOpenCode(), timers, insideSpace } = {}) => {
   let eventHandler = () => {};
   const clock = { now: 1_000_000 };
-  const state = { catalog };
+  // `catalogError` set: the catalog read fails with it.
+  const state = { catalog, catalogError: null };
   const broadcasts = [];
   const runtime = createExtensionWaitsRuntime({
     broadcastUiEvent: (event) => broadcasts.push(event),
-    listGuests: async () => state.catalog,
+    listGuests: async () => {
+      if (state.catalogError) throw state.catalogError;
+      return state.catalog;
+    },
     proxyServiceRequest: service.proxyServiceRequest,
     persistPath: '/extensions.json',
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
@@ -89,6 +93,7 @@ const createRuntime = async ({ dataDir, catalog = [guest()], service = createSer
     subagentRecheckMs: 5,
     warn: () => {},
     ...(timers ? { timers } : {}),
+    insideSpace,
   });
   runtimes.push(runtime);
   runtime.start({
@@ -220,7 +225,7 @@ describe('createExtensionWaitsRuntime', () => {
     const { runtime } = await createRuntime({ service, catalog: [guest(), guest({ id: 'unapproved', capabilityGrants: ['service'] })] });
     const start = (input) => runtime.startWait({ sessionID: SESSION, directory: DIRECTORY, ...input });
 
-    await expect(start({ source: 'timer', args: {} })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('<extension>/<wait>') });
+    await expect(start({ source: 'alarm', args: {} })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('<extension>/<wait>') });
     await expect(start({ source: 'wait-kit/alarm', args: {} })).rejects.toMatchObject({ status: 404 });
     await expect(start({ source: 'unapproved/timer', args: { seconds: 5 } })).rejects.toMatchObject({ status: 404 });
     await expect(start({ source: 'wait-kit/timer', args: { seconds: 'five' } })).rejects.toMatchObject({ status: 400, message: 'Argument "seconds" must be a number' });
@@ -518,5 +523,139 @@ describe('createExtensionWaitsRuntime', () => {
     refuse = false;
     for (let index = 0; index < 20; index += 1) await start();
     expect((await runtime.listWaits(SESSION)).waiting).toHaveLength(20);
+  });
+
+  describe('the built-in timer', () => {
+    const MINUTE = 60_000;
+    const startTimer = (runtime, args, sessionID = SESSION) => runtime.startWait({ sessionID, directory: DIRECTORY, source: 'timer', args });
+
+    it('wakes the session once after its minutes, with no extension installed', async () => {
+      const { runtime, service, openCode, advance } = await createRuntime({ catalog: [] });
+
+      const answer = await startTimer(runtime, { minutes: 5 });
+      expect(answer.waiting).toMatchObject({ source: 'timer', extension: 'OpenChamber', title: 'Timer', label: '5 min', args: { minutes: 5 }, status: 'waiting' });
+      expect(answer.next).toContain('in 5 minutes');
+
+      await advance(4 * MINUTE);
+      expect(openCode.state.admitted).toHaveLength(0);
+      await advance(MINUTE);
+      expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+      expect(openCode.state.admitted[0]).toMatchObject({
+        sessionID: SESSION,
+        delivery: 'steer',
+        resume: true,
+        description: 'Timer (5 min): 5 minutes passed.',
+        metadata: { source: EXTENSION_WAIT_SOURCE, outcome: 'fired', subject: 'Timer (5 min)', summary: '5 minutes passed.' },
+      });
+      expect(openCode.state.admitted[0].text).toContain('<openchamber-wait source="timer"');
+      expect(openCode.state.admitted[0].text).toContain('Timer (5 min) fired: 5 minutes passed.');
+      expect(await until(() => runtime.snapshot().waits.length === 0)).toBe(true);
+      expect(service.calls).toHaveLength(0);
+    });
+
+    it('refuses minutes that are not whole, in range and alone, and keeps nothing', async () => {
+      const { runtime } = await createRuntime({ catalog: [] });
+      const refusals = [
+        [{ minutes: 0 }, 'minutes must be a whole number from 1 to 1440'],
+        [{ minutes: -1 }, 'minutes must be a whole number from 1 to 1440'],
+        [{ minutes: 1.5 }, 'minutes must be a whole number from 1 to 1440'],
+        [{ minutes: 1441 }, 'minutes must be a whole number from 1 to 1440'],
+        [{ minutes: '5' }, 'Argument "minutes" must be a number'],
+        [{}, 'Argument "minutes" is required'],
+        [{ minutes: 5, seconds: 1 }, 'Unknown argument "seconds"; this wait takes minutes'],
+      ];
+      for (const [args, message] of refusals) {
+        await expect(startTimer(runtime, args)).rejects.toMatchObject({ status: 400, message });
+      }
+      expect(runtime.snapshot().waits).toHaveLength(0);
+    });
+
+    it('is a source wait.list names, beside the extensions\' ones', async () => {
+      const timerSource = { source: 'timer', extension: 'OpenChamber', title: 'Timer', params: { minutes: { type: 'number', required: true } } };
+      const alone = await createRuntime({ catalog: [] });
+      expect((await alone.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource]);
+      const beside = await createRuntime();
+      expect((await beside.runtime.listWaits(SESSION)).sources).toMatchObject([timerSource, { source: 'wait-kit/timer' }]);
+    });
+
+    it('is refused and not offered inside an isolated space', async () => {
+      const { runtime } = await createRuntime({ catalog: [], insideSpace: true });
+      await expect(startTimer(runtime, { minutes: 5 })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('isolated space') });
+      expect((await runtime.listWaits(SESSION)).sources).toEqual([]);
+    });
+
+    it('is not ended by a catalog change, and fires on time', async () => {
+      const { runtime, openCode, state, advance } = await createRuntime();
+      await startTimer(runtime, { minutes: 1 });
+
+      state.catalog = [];
+      await runtime.reconcile();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(openCode.state.admitted).toHaveLength(0);
+      expect(runtime.snapshot().waits).toMatchObject([{ source: 'timer', status: 'waiting' }]);
+
+      await advance(MINUTE);
+      expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+      expect(openCode.state.admitted[0]).toMatchObject({ metadata: { outcome: 'fired' } });
+    });
+
+    it('fires while the catalog cannot be read, and only the extension wait is put off', async () => {
+      const { runtime, service, openCode, state, advance } = await createRuntime();
+      await runtime.startWait({ sessionID: 'ses_extension', directory: DIRECTORY, source: 'wait-kit/timer', args: { seconds: 5 } });
+      await startTimer(runtime, { minutes: 1 });
+
+      state.catalogError = new Error('catalog unreadable');
+      await advance(MINUTE);
+      expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+      expect(openCode.state.admitted[0]).toMatchObject({ sessionID: SESSION, metadata: { outcome: 'fired', subject: 'Timer (1 min)' } });
+      expect(runtime.snapshot().waits).toMatchObject([{ sessionID: 'ses_extension', source: 'wait-kit/timer', status: 'waiting' }]);
+      expect(service.calls.filter((call) => call.path === '/waits/check')).toHaveLength(0);
+
+      // The extension wait is checked again a minute later, not at its own interval.
+      state.catalogError = null;
+      await advance(30_000);
+      expect(service.calls.filter((call) => call.path === '/waits/check')).toHaveLength(0);
+      await advance(30_000);
+      expect(service.calls.filter((call) => call.path === '/waits/check')).toHaveLength(1);
+      expect(openCode.state.admitted).toHaveLength(1);
+    });
+
+    it('fires once after a restart, from the saved file', async () => {
+      const dataDir = await makeDataDir();
+      const first = await createRuntime({ dataDir, catalog: [] });
+      await startTimer(first.runtime, { minutes: 1 });
+      first.runtime.stop();
+      await first.runtime.flush();
+
+      const openCode = createOpenCode();
+      const second = await createRuntime({ dataDir, catalog: [], openCode });
+      await second.advance(MINUTE);
+      expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+      expect(await until(() => second.runtime.snapshot().waits.length === 0)).toBe(true);
+      second.runtime.stop();
+      await second.runtime.flush();
+
+      const third = await createRuntime({ dataDir, catalog: [], openCode });
+      await third.advance(MINUTE);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(openCode.state.admitted).toHaveLength(1);
+      expect(third.runtime.snapshot().waits).toHaveLength(0);
+    });
+
+    it('stops with wait.stop, and then never wakes', async () => {
+      const { runtime, openCode, advance } = await createRuntime({ catalog: [] });
+      const started = await startTimer(runtime, { minutes: 1 });
+      expect(await runtime.stopWaits(SESSION, started.waiting.waitId)).toMatchObject({ stopped: 1, waiting: [] });
+      await advance(2 * MINUTE);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(openCode.state.admitted).toHaveLength(0);
+    });
+
+    it('counts against the per-session cap', async () => {
+      const { runtime } = await createRuntime({ catalog: [] });
+      for (let index = 0; index < 20; index += 1) await startTimer(runtime, { minutes: 1 + index });
+      await expect(startTimer(runtime, { minutes: 30 })).rejects.toMatchObject({ status: 409 });
+      expect(runtime.snapshot().waits).toHaveLength(20);
+    });
   });
 });

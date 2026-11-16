@@ -23,6 +23,7 @@ const CAPABILITY_ROWS = {
   files: { icon: 'file-text', titleKey: 'settings.extensions.capability.files', detailKey: 'settings.extensions.capability.files.detail' },
   model: { icon: 'sparkling', titleKey: 'settings.extensions.capability.model', detailKey: 'settings.extensions.capability.model.detail' },
   shells: { icon: 'terminal-box', titleKey: 'settings.extensions.capability.shells', detailKey: 'settings.extensions.capability.shells.detail' },
+  microphone: { icon: 'mic', titleKey: 'settings.extensions.capability.microphone', detailKey: 'settings.extensions.capability.microphone.detail' },
   conversation: { icon: 'chat-history', titleKey: 'settings.extensions.capability.conversation', detailKey: 'settings.extensions.capability.conversation.detail' },
   filesystem: { icon: 'hard-drive-2', titleKey: 'settings.extensions.capability.filesystem', detailKey: 'settings.extensions.capability.filesystem.detail' },
   opencode: { icon: 'plug', titleKey: 'settings.extensions.capability.opencode', detailKey: 'settings.extensions.capability.opencode.detail' },

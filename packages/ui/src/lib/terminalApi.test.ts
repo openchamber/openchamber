@@ -18,6 +18,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 type WireMessage = {
   t: string;
+  z?: number;
   s?: string;
   q?: number;
   v?: number;
@@ -179,6 +180,29 @@ describe('terminal transport', () => {
     const thirdEvents: string[] = [];
     transport.subscribe('term-1', { onEvent: (event) => thirdEvents.push(`${event.type}:${event.data ?? ''}`) });
     expect(thirdEvents).toEqual(['snapshot:prompt next']);
+    transport.dispose();
+  });
+
+  test('asks for a gzipped snapshot and applies it before the output that arrived behind it', async () => {
+    const socket = new FakeSocket();
+    const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });
+    const events: string[] = [];
+    transport.subscribe('term-1', { onEvent: (event) => events.push(`${event.type}:${event.data ?? ''}`) });
+    await tick();
+    socket.open();
+    await tick();
+    expect(socket.sent.filter((message) => message.t === 'attach')).toEqual([{ t: 'attach', v: 3, s: 'term-1', z: 1 }]);
+
+    const json = JSON.stringify({ t: 'snapshot', v: 3, s: 'term-1', q: 4, history: 'prompt', status: 'running' });
+    const gzipped = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+    const tagged = new Uint8Array(gzipped.length + 1);
+    tagged[0] = 2;
+    tagged.set(gzipped, 1);
+    socket.onmessage?.({ data: tagged.buffer });
+    socket.emit({ t: 'output', v: 3, s: 'term-1', q: 5, d: ' next' });
+    expect(events).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(events).toEqual(['snapshot:prompt', 'data: next']);
     transport.dispose();
   });
 

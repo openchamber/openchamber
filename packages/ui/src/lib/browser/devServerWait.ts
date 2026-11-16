@@ -27,6 +27,13 @@ export const DEV_SERVER_WAIT_MS = 40_000;
  */
 export const DEV_SERVER_FIRST_RETRY_MS = 500;
 export const DEV_SERVER_MAX_RETRY_MS = 4_000;
+/**
+ * How long the retries go on after the project action that serves the address
+ * stopped running. A start script that brings its servers up in the background
+ * and exits leaves them listening a moment later, and the retry that was
+ * pending when it exited would otherwise be the one that is never made.
+ */
+export const DEV_SERVER_AFTER_ACTION_MS = 3_000;
 
 /** Tab ids repeat across projects (`browser:<url>`), so every key carries its directory. */
 const tabKey = (directory: string, tabID: string): string => `${directory}\n${tabID}`;
@@ -120,6 +127,11 @@ type FailedLoadPlan =
  * The pause grows with the time the run has lasted rather than with a count of
  * failures, so deciding again about the same failure gives the same answer.
  *
+ * `actionRunning` is true while a project action that opened this address is
+ * still running. Its server may take any time to come up, so the wait has no
+ * limit until the action stops. `actionStoppedAt` is when it was seen to stop:
+ * quick retries go on for {@link DEV_SERVER_AFTER_ACTION_MS} after that.
+ *
  * A tab nobody is watching does not retry: `watched` is false for a tab that
  * is not on screen, unless an agent is working it. The retry is held back
  * instead, and comes as soon as the tab is watched again, even if the wait ran
@@ -129,16 +141,26 @@ type FailedLoadPlan =
  */
 export const planFailedLoadRetry = (
   failure: FailedLoad,
-  { run, restored, watched, now }: { run: DevServerWaitRun | null; restored: boolean; watched: boolean; now: number },
+  { run, restored, watched, now, actionRunning = false, actionStoppedAt = null }: {
+    run: DevServerWaitRun | null;
+    restored: boolean;
+    watched: boolean;
+    now: number;
+    actionRunning?: boolean;
+    actionStoppedAt?: number | null;
+  },
 ): FailedLoadPlan => {
   if (restored || !isStartingServerFailure(failure.code, failure.url)) {
     return { next: 'stop', run };
   }
   const current = run?.url === failure.url ? run : { url: failure.url, startedAt: now, paused: false };
   const waited = now - current.startedAt;
-  if (!current.paused && waited > DEV_SERVER_WAIT_MS) return { next: 'stop', run: current };
+  const afterAction = !actionRunning && actionStoppedAt !== null && now - actionStoppedAt <= DEV_SERVER_AFTER_ACTION_MS;
+  if (!current.paused && waited > DEV_SERVER_WAIT_MS && !actionRunning && !afterAction) return { next: 'stop', run: current };
   if (!watched) return { next: 'pause', run: { ...current, paused: true } };
   if (current.paused) return { next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run: { ...current, paused: false } };
+  // The action just stopped: its servers are either up by now or not coming.
+  if (afterAction) return { next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run: current };
   const delayMs = Math.min(DEV_SERVER_MAX_RETRY_MS, Math.max(DEV_SERVER_FIRST_RETRY_MS, waited / 2));
   return { next: 'retry', delayMs, run: current };
 };

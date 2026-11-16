@@ -6,7 +6,7 @@ import { linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { createTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 
 import type { ComposerReference } from './composerReferences';
-import { findReferenceLinks, referenceLinkChip, referenceLinksInText } from './referenceLinks';
+import { findReferenceLinks, referenceLinkChip, referenceLinksInText, referencesLinkedIn, referenceTextLink, withMissingReferenceLinks, withoutSharedPageLinks } from './referenceLinks';
 
 const urls = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor()], []);
 const trackers = createTrackerUrlMatcher([linearLikeTrackerDescriptor()]);
@@ -64,5 +64,29 @@ describe('referenceLinkChip', () => {
             kind: 'change-request', provider: 'gitlab', number: 7, title: 'Fix', url: 'https://gitlab.com/group/sub/app/-/merge_requests/7', head: 'a', base: 'b', includeDiff: false, contextText: '',
         };
         expect(referenceLinkChip(mergeRequest, urls)).toMatchObject({ label: '!7 Fix', iconHref: '#oc-git-pull-request' });
+    });
+});
+
+describe('items as links in the composer text', () => {
+    const issue = { kind: 'repository-issue', number: 7, title: 'Bug', url: 'https://github.com/o/r/issues/7', contextText: '' } as const;
+    const page = { kind: 'shared-page', shareKey: 'relay.dev/abc', receivedId: null, host: 'relay.dev', title: null, opened: false, contextText: '', link: 'https://relay.dev/p/abc' } as const;
+
+    test('an item goes only while the text holds its link', () => {
+        expect(referencesLinkedIn('see https://github.com/o/r/issues/7.', [issue, page])).toEqual([issue]);
+    });
+
+    test('putting items back appends the links the text lacks', () => {
+        expect(withMissingReferenceLinks('look https://relay.dev/p/abc', [issue, page]))
+            .toBe('look https://relay.dev/p/abc https://github.com/o/r/issues/7');
+    });
+
+    test('a page chip built before pages had their link falls back to its host and id', () => {
+        expect(referenceTextLink({ ...page, link: undefined })).toBe('https://relay.dev/p/abc');
+    });
+
+    test('a shared page leaves the sent text, the rest stays', () => {
+        expect(withoutSharedPageLinks('read https://relay.dev/p/abc and https://github.com/o/r/issues/7', [issue, page]))
+            .toBe('read and https://github.com/o/r/issues/7');
+        expect(withoutSharedPageLinks('https://relay.dev/p/abc', [page])).toBe('');
     });
 });

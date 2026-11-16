@@ -194,10 +194,12 @@ type RowProps = {
   leading?: React.ReactNode;
   label: React.ReactNode;
   value?: React.ReactNode;
+  detail?: React.ReactNode;
   muted?: boolean;
   /** Turns the row into a button; the caller decides what it opens. */
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   ariaLabel?: string;
+  expanded?: boolean;
   tooltip?: React.ReactNode;
   className?: string;
   /**
@@ -218,15 +220,18 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   leading,
   label,
   value,
+  detail,
   muted,
   onClick,
   ariaLabel,
+  expanded,
   tooltip,
   className,
   labelDir,
 }) => {
   const labelId = React.useId();
   const touch = React.useContext(WorkStatusTouchContext);
+  const twoLines = detail !== undefined && detail !== null;
   const leadingNode = leading ?? (icon ? (
     <Icon
       name={icon}
@@ -234,13 +239,13 @@ export const WorkStatusRow: React.FC<RowProps> = ({
       style={iconColor ? { color: iconColor } : undefined}
     />
   ) : null);
-  const body = (
+  const leadingSlot = touch && leadingNode ? (
+    // The phone's icon column: 20px wide, every glyph in it at 16px, so
+    // the status glyphs sections centre in a 13px slot line up as well.
+    <span className="flex size-5 shrink-0 items-center justify-center [&>span]:size-5 [&_svg]:size-4">{leadingNode}</span>
+  ) : leadingNode;
+  const firstLine = (
     <>
-      {touch && leadingNode ? (
-        // The phone's icon column: 20px wide, every glyph in it at 16px, so
-        // the status glyphs sections centre in a 13px slot line up as well.
-        <span className="flex size-5 shrink-0 items-center justify-center [&>span]:size-5 [&_svg]:size-4">{leadingNode}</span>
-      ) : leadingNode}
       <span id={labelId} dir={labelDir} className={cn('min-w-0 flex-1 truncate', labelDir && 'oc-ui-start-align', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
         {label}
       </span>
@@ -251,11 +256,28 @@ export const WorkStatusRow: React.FC<RowProps> = ({
       ) : null}
     </>
   );
+  const body = twoLines ? (
+    <>
+      {leadingSlot ? <span className={cn('flex shrink-0 items-center', touch ? 'h-6' : 'h-5')}>{leadingSlot}</span> : null}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={cn('flex min-w-0 items-center', touch ? 'h-6 gap-3' : 'h-5 gap-2')}>{firstLine}</span>
+        <span className={cn('min-w-0 truncate text-muted-foreground', touch ? 'typography-meta' : 'text-[0.6875rem] leading-4')}>{detail}</span>
+      </span>
+    </>
+  ) : (
+    <>
+      {leadingSlot}
+      {firstLine}
+    </>
+  );
 
   const shared = cn(
-    'flex w-full items-center text-start text-muted-foreground',
+    'flex w-full text-start text-muted-foreground',
+    twoLines ? 'items-start' : 'items-center',
     // 26px, a heading's height with its gap, so rows and headings keep one pitch.
-    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-[1.625rem] gap-2 rounded-md px-1',
+    touch
+      ? cn('min-h-11 gap-3 rounded-xl px-2.5', twoLines && 'py-1.5')
+      : cn('gap-2 rounded-md px-1', twoLines ? 'py-[3px]' : 'h-[1.625rem]'),
     className,
   );
 
@@ -270,9 +292,10 @@ export const WorkStatusRow: React.FC<RowProps> = ({
         // The label no longer sits inside the button, so it names it here.
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : labelId}
+        aria-expanded={expanded}
         className="absolute inset-0 rounded-[inherit] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]"
       />
-      <div className={cn('pointer-events-none relative flex min-w-0 flex-1 items-center [&_a]:pointer-events-auto [&_button]:pointer-events-auto', touch ? 'gap-3' : 'gap-2')}>
+      <div className={cn('pointer-events-none relative flex min-w-0 flex-1 [&_a]:pointer-events-auto [&_button]:pointer-events-auto', twoLines ? 'items-start' : 'items-center', touch ? 'gap-3' : 'gap-2')}>
         {body}
       </div>
     </div>

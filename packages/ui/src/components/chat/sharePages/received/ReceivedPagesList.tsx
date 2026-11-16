@@ -10,7 +10,7 @@ import { reloadReceivedPages, useReceivedPages } from './receivedPagesStore';
 import { receivedStatusLook } from './status';
 
 /**
- * The pages other people shared with this user (decision 0018), newest first:
+ * The pages other people shared with this user, newest first:
  * what each is, who it came from, where it stands. A row opens the page. The
  * `pages` surface shows it when no page tab is open; the phone's workspace
  * drawer shows it as a tab.

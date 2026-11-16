@@ -311,7 +311,6 @@ button,
 .markdown-content :where(
   pre, code, kbd, samp,
   [data-streamdown="code-block"],
-  [data-streamdown="table-wrapper"],
   [data-streamdown="mermaid-block"],
   .katex,
   [data-openchamber-file-link="true"],
@@ -365,6 +364,14 @@ button,
    comments on. A diff passes its selected row's own fill instead. */
 .oc-inline-comment-band {
   background-color: var(--interactive-selection);
+}
+
+/* With wrapping off the editor scrolls sideways and a block widget is as wide
+   as the longest line. Its content stays at the visible left edge, past the
+   fixed gutter, so a comment field or card never scrolls out of view. */
+.oc-block-widget > * {
+  position: sticky;
+  left: var(--oc-editor-gutter-width, 0px);
 }
 
 .pierre-diff-wrapper {
@@ -627,6 +634,52 @@ div[data-chat-input-footer="true"] {
   --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
+/* The same two bands for any other scroller that sits on an opaque surface
+   (`surface` on ScrollShadow, `scrollShadowSurface` on ScrollableOverlay): a
+   mask costs the GPU a texture the size of the scroller for as long as it is
+   on screen, about 15 MB for the two side panels of a desktop window. A
+   scroller on glass keeps the mask below, since no single colour is behind
+   it. The bands are later siblings of the scroller inside its positioned
+   frame and follow its scroll-shadow attributes, as the chat's do. */
+.scroll-fade-band {
+  display: none;
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* The mask made the scroller a stacking context, which kept its sticky
+   headers (z-index of their own) inside it and so under the fade. */
+[data-scroll-fade-bands] {
+  isolation: isolate;
+}
+
+/* Capped at half the frame, so in a scroller shorter than two fades the bands
+   meet instead of stacking their opacity. */
+.scroll-fade-band--top {
+  top: 0;
+  height: min(var(--scroll-shadow-top-size, var(--scroll-shadow-size)), 50%);
+  background-image: linear-gradient(
+    to bottom,
+    var(--scroll-fade-surface) var(--scroll-shadow-top-clear-size, 0px),
+    transparent 100%
+  );
+}
+
+.scroll-fade-band--end {
+  bottom: 0;
+  height: min(var(--scroll-shadow-size), 50%);
+  background-image: linear-gradient(to bottom, transparent, var(--scroll-fade-surface));
+}
+
+[data-scroll-fade-bands][data-top-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-bottom-scroll="true"] ~ .scroll-fade-band--end,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--end {
+  display: block;
+}
+
 [data-scroll-shadow="true"][data-orientation="vertical"] {
   mask-mode: alpha;
   -webkit-mask-repeat: no-repeat;
@@ -635,7 +688,7 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -654,7 +707,7 @@ div[data-chat-input-footer="true"] {
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -694,7 +747,7 @@ div[data-chat-input-footer="true"] {
   pointer-events: auto;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -885,6 +938,16 @@ svg.animate-spin {
 
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Clips an element to its own box and rounded corners without making it a
+   scroll container. `overflow: hidden` does, and the touch rules in
+   styles/mobile.css turn every such element into a vertical scroller, where a
+   drag that starts inside it scrolls it instead of the list around it. Without
+   `clip` support the `hidden` line applies, as it did before. */
+.oc-row-clip {
+  overflow: hidden;
+  overflow: clip;
 }
 
 /* Fully hidden scrollbar for small mobile overlays (session switcher etc.)
@@ -2132,6 +2195,8 @@ diffs-container {
   max-width: 100%;
   min-width: 0;
   margin: var(--markdown-paragraph-spacing) 0;
+  margin-inline-end: auto;
+  unicode-bidi: isolate;
   padding: 0;
   gap: 0.5rem;
   border: 0;
@@ -2396,35 +2461,11 @@ diffs-container {
   overflow-wrap: normal;
 }
 
-/* First uncached open of a session shows a hydration skeleton; the real
-   timeline replacing it fades in once instead of popping. Cached session
-   switches never carry this class and stay instant. */
-@keyframes oc-chat-hydration-reveal {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.oc-chat-hydration-reveal,
-[data-timeline-reveal='fading'] {
-  animation: oc-chat-hydration-reveal 100ms ease-out both;
-}
-
 /* Timeline root while a freshly opened session is still being put in place
    (see timelineRevealGate.ts): hidden until every hold releases and the list
    heights settle, then revealed as a whole. */
 [data-timeline-reveal='pending'] {
   opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .oc-chat-hydration-reveal,
-  [data-timeline-reveal='fading'] {
-    animation: none;
-  }
 }
 
 /* A block committed mid-stream fades in where it stands. Text never moves on

@@ -9,6 +9,7 @@ export const useClassifierSourceName = (source: ClassifierSource | null): string
   if (source === 'zen-key') return t('settings.classification.source.zenKey.name');
   if (source === 'openrouter') return t('settings.classification.source.openrouter.name');
   if (source === 'vercel') return t('settings.classification.source.vercel.name');
+  if (source === 'gemini') return t('settings.classification.source.gemini.name');
   if (source === 'typesafe') return t('settings.classification.source.typesafe.name');
   if (source === 'custom') return t('settings.classification.source.custom.name');
   return null;

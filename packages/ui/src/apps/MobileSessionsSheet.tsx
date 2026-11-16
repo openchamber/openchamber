@@ -47,7 +47,8 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessionsWhenShown, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS } from '@/hooks/useGlobalSessionsPolling';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -259,12 +260,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       return;
     }
     setOpenId((id) => id + 1);
-    // The mobile shell has no global poller, so this load is also where the
-    // host seed runs, as the poller runs it after each load elsewhere: a
+    // The mobile shell has no global poller, so the list is read here: its
+    // head on most openings, the complete snapshot once it is ten minutes old
+    // (`refreshGlobalSessionsWhenShown`). This is also where the host seed
+    // runs, as the poller runs it after each load elsewhere: a
     // question or permission already waiting at startup is otherwise missing
     // from the cross-directory index the rows read. The seed resolves
     // directories from the list just loaded, so it runs after it.
-    void refreshGlobalSessions(liveSessions).then(() => seedGlobalSessionStatusFromHost());
+    void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS, liveSessions).then(() => seedGlobalSessionStatusFromHost());
     // intentionally only on open transition — session events keep the list current after that
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [listActive]);
@@ -278,7 +281,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const reconnected = previousConnectionPhaseRef.current === 'reconnecting' && connectionPhase === 'connected';
     previousConnectionPhaseRef.current = connectionPhase;
     if (!reconnected || !listActive) return;
-    void refreshGlobalSessions(liveSessions).then(() => seedGlobalSessionStatusFromHost());
+    void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS, liveSessions).then(() => seedGlobalSessionStatusFromHost());
     // only on the reconnect edge
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionPhase]);

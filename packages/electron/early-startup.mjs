@@ -101,7 +101,7 @@ export const settingsFilePath = () => {
   if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim()) {
     return path.join(process.env.OPENCHAMBER_DATA_DIR.trim(), 'settings.json');
   }
-  return path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+  return path.join(os.homedir(), '.config', app.isPackaged ? 'openchamber' : 'openchamber-dev', 'settings.json');
 };
 
 const readJsonFile = (filePath) => {
@@ -213,14 +213,21 @@ const clampWindowBoundsToVisibleWorkArea = (bounds) => {
   }
 };
 
+let cachedMacosMajorVersion = null;
+
+// Asked several times before the first window exists. Electron knows the
+// version without a child process; `sw_vers` remains for a plain Node run.
 export const macosMajorVersion = () => {
   if (process.platform !== 'darwin') return 0;
-  const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' });
-  const raw = (result.stdout || '').trim();
+  if (cachedMacosMajorVersion !== null) return cachedMacosMajorVersion;
+  const raw = typeof process.getSystemVersion === 'function'
+    ? process.getSystemVersion()
+    : (spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' }).stdout || '').trim();
   const [majorRaw, minorRaw] = raw.split('.');
   const major = Number.parseInt(majorRaw || '0', 10);
   const minor = Number.parseInt(minorRaw || '0', 10);
-  return major === 10 ? minor : major;
+  cachedMacosMajorVersion = major === 10 ? minor : major;
+  return cachedMacosMajorVersion;
 };
 
 let cachedMacTrafficLightPosition = null;

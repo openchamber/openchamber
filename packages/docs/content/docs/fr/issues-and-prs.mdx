@@ -27,12 +27,14 @@ Les commentaires, labels, reviewers et merges s'appliquent au dépôt auquel app
 
 Sur **Linear**, le sélecteur de projet devient un sélecteur d'équipe : choisis **All teams** ou une équipe. Pour un projet qui n'a que **Linear**, le sélecteur de projet reste à côté du sélecteur d'équipe, pour que tu puisses passer à un autre projet. Si tu as connecté plus d'un espace de travail Linear, change d'espace depuis le même menu. La connexion à Linear est décrite dans [Intégrations](/fr/integrations/).
 
-La recherche accepte un titre, un numéro ou un lien collé. Le menu des filtres reste ouvert pendant que tu choisis, tu peux donc combiner les filtres.
+La recherche accepte un titre, un numéro ou un lien collé. Le menu des filtres reste ouvert pendant que tu choisis, tu peux donc combiner les filtres. Sur GitHub, le champ accepte aussi ses propres qualificatifs (`is:closed`, `label:bug`, `author:@me`), qui l'emportent sur le menu.
 
 Pour GitHub, GitLab, Gitea, Forgejo et Gerrit :
 
 - Statut : **Open**, **Closed**, **All**, et **Merged** pour les pull requests
 - Personnes : **Anyone**, **Assigned to me**, **Created by me**, et **Review requested** pour les pull requests
+
+Le menu **Filter** liste aussi les labels du dépôt, avec une recherche et une case à cocher par label ; chaque coche restreint aussitôt la liste. Le filtre est retenu pour chaque dépôt et chaque onglet.
 
 Pour Linear :
 
@@ -46,6 +48,8 @@ L'aperçu montre la description, les labels et les commentaires. Sur une issue L
 
 La ligne **Labels** a un bouton crayon qui ouvre la liste des labels du dépôt, avec une recherche. Coche ou décoche-les. La modification est enregistrée quand tu fermes la liste, donc plusieurs clics comptent pour une seule modification. Une pull request ouverte (merge request sur GitLab) a aussi une ligne **Reviewers** qui fonctionne de la même façon, avec les personnes qui peuvent faire une review dans le dépôt. Sur GitHub, l'auteur de la pull request n'est pas proposé. Les issues Linear n'ont aucune de ces lignes.
 
+Un crayon à côté du titre modifie le titre et la description ensemble. <kbd>⌘</kbd>+<kbd>Enter</kbd> enregistre (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> sous Windows et Linux), <kbd>Esc</kbd> annule, et l'aperçu affiche ensuite ce que l'hébergeur a stocké. Un élément ouvert par un lien n'a pas de crayon, et un hébergeur qui ne peut pas modifier le texte non plus.
+
 ## Commenter et faire une review
 
 Sous l'activité d'une issue ou d'une pull request se trouve une zone de commentaire. **Comment** publie ton texte sur l'hébergeur du dépôt, tout comme <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> sous Windows et Linux). Le texte reste dans la zone jusqu'à sa publication, donc un envoi raté ne fait rien perdre. Passer à un autre élément vide la zone. Les issues Linear n'en ont pas.
@@ -53,6 +57,8 @@ Sous l'activité d'une issue ou d'une pull request se trouve une zone de comment
 Une pull request ouverte (merge request sur GitLab) a aussi **Approve** et **Request changes**, et le texte de la zone part avec la review. **Request changes** demande un texte qui dit quoi changer. La review porte sur les commits affichés dans l'aperçu. Si quelqu'un a poussé depuis, elle est refusée et l'aperçu se rafraîchit pour que tu puisses regarder à nouveau. Sur GitLab, **Request changes** fonctionne si tu es reviewer de la merge request, et le texte de la review est publié comme un commentaire séparé. Si seul ce commentaire échoue, la review compte quand même et ton texte reste dans la zone.
 
 Un changement Gerrit a une ligne pour chacun des labels du projet, comme Code-Review et Verified, avec les notes que tu as le droit de donner ; choisis-les et choisis **Voter**. Ton texte part avec les votes comme message. Les votes portent sur le dernier patchset, ils ne sont donc pas proposés pendant que tu en lis un plus ancien.
+
+Un commentaire que tu as écrit a un menu à côté de son bouton d'envoi : **Edit** le réécrit sur place, **Delete** le supprime après confirmation. Une réponse se modifie et se supprime de la même façon. Les deux agissent sur l'hébergeur, donc le commentaire change pour tout le monde.
 
 ## Démarrer le travail
 

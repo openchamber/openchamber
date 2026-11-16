@@ -5,6 +5,7 @@ import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import { Icon } from '@/components/icon/Icon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { forgetLabelWrite } from '@/components/references/labelWrites';
 import { REFERENCE_META_TEXT, referenceNumberLabel } from '@/components/references/referencePickerItems';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
@@ -258,6 +259,7 @@ export const SourceBoardActions: React.FC<{
                 method: mergeMethod,
             });
             const { merged, outcome, message } = receipt.result;
+            if (merged) forgetLabelWrite(openPull);
             // One volley more than a push, plus one for each layer of a stack landing with it.
             if (merged) triggerFireworks({ kind: 'merge', volleys: 2 + landsBelow.length, origin });
             if (submits) {
@@ -604,6 +606,7 @@ const DiscussionStateMenuItems: React.FC<{
                 target: { project: { owner: discussion.sourceRepo.owner, name: discussion.sourceRepo.repo }, number: discussion.number },
             };
             await sourceControl.discussionSetState(input.state === 'closed' ? { ...base, state: 'closed', reason: input.reason } : { ...base, state: 'open' });
+            forgetLabelWrite(discussion);
             toast.success(t(input.state === 'closed' ? 'sourceBoard.toast.closed' : 'sourceBoard.toast.reopened', { reference: label }));
         } catch (error) {
             toast.error(
@@ -684,6 +687,7 @@ const ItemStateMenuItems: React.FC<{
             };
             if (repositoryItem.kind === 'pull') await sourceControl.changeRequestSetState(payload);
             else await sourceControl.issueSetState(payload);
+            forgetLabelWrite(repositoryItem);
             toast.success(t(nextState === 'closed' ? 'sourceBoard.toast.closed' : 'sourceBoard.toast.reopened', { reference: label }));
         } catch (error) {
             toast.error(

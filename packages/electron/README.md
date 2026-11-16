@@ -30,6 +30,11 @@ runtime rather than inlining it, or the handoff would see two copies.
 Window state is saved only while the main window is not minimized, so transient
 minimized bounds cannot replace the last normal size or maximized state.
 
+Linux startup enables Chromium's speech-dispatcher backend before `ready` for
+Browser read-aloud. It uses the host's `libspeechd` and speech-dispatcher service
+with an installed synthesis module, such as espeak-ng. The shell does not install
+or manage those system services. Windows and macOS keep their native speech backends.
+
 Login-shell environment discovery starts as soon as `main.mjs` runs and
 proceeds asynchronously, so shell startup files run while the window comes up.
 Startup callers share one probe and await its result before reading
@@ -63,6 +68,11 @@ request headers) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
 has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
 after parsing ends, so no application code runs before the values are set.
+The entry loads the application with a dynamic import, which the document's
+own preload list does not follow, so the web build adds the application's
+chunks to a preload list that applies on this scheme only
+(`packages/web/vite-preload-app-graph.ts`): they are fetched during the wait
+instead of after it.
 Remote, SSH, environment-target, HMR and background launches keep the previous
 order: resolve, then navigate, with the splash reporting the connection attempt.
 
@@ -275,6 +285,10 @@ bun run electron:dev
 
 `bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/entry.mjs`. An in-app restart under this script skips `app.relaunch()`: Electron exits with the code the script passes in `OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE`, and the script starts Electron again while the HMR server keeps running. On Windows, the HMR launcher resolves npm's `bun.cmd` shim to the underlying `bun.exe` before spawning Bun child processes.
 
+Unpackaged desktop and its HMR server default to `~/.config/openchamber-dev` for OpenChamber data. An explicit `OPENCHAMBER_DATA_DIR` takes precedence. OpenCode's own data is unchanged. The existing custom-data-directory migration copies projects, themes and speech models when they are absent from the new directory; it does not copy `settings.json`.
+
+The HMR launcher starts the Electron splash while it resolves the login-shell environment and starts the dev server. It passes the resolved data directory through a temporary start file after the API is healthy. Electron waits for that file before loading main, so its settings and the HMR server use the same directory without racing an in-process fallback server.
+
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
 Electron's postinstall (`node install.js`) is run by `bun install` with the system Node. Older Electron releases bundled `extract-zip@2.0.1`, which under Node 24 silently unpacked only the first entry of the Electron zip, leaving `dist/` without the binary and `path.txt` missing. Electron 43+ ships its own fixed extractor (`@electron-internal/extract-zip`), but to keep interrupted or wrong-architecture installs from blocking desktop work:
@@ -473,6 +487,9 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 
 - Floating Mini Chat windows. Each new one opens pinned on top of other
   windows; its pin button unpins that window only, and nothing is persisted.
+  The window is shown the moment it is created, in the theme colour
+  (`resolveSplashBackgroundColor`, as the main window), and its document
+  paints into it; it does not wait for `ready-to-show`.
 - Quake Mode (Windows Terminal-style): one configurable global hotkey
   (``Ctrl+` `` by default, deliberately without the Win key) toggles the existing
   main window between hidden and a top-attached dropdown on the display holding
@@ -519,6 +536,7 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - Tunnel lifecycle integration through the web server runtime.
 - Remote dev-server previews use a direct WebSocket tunnel when the instance has an HTTP address. Relay-only instances keep the encrypted relay transport in the renderer and bridge its raw bytes to the browser panel through a local Electron listener.
 - Auto-update checks, downloads, and restart/apply flow.
+- Browser keys and mouse buttons for a page in the browser panel (`browser-panel-navigation.mjs`): Cmd+R (Ctrl+R off macOS) reloads the page, with Shift past the cache, and a mouse's side buttons go back and forward in that page's history. A focused page takes the keyboard before the app's shortcuts and menu, so main reads these on the page's own `before-input-event` and `before-mouse-event`. The toolbar's Cmd+R is handled in the renderer (`BrowserPane.tsx`). Off macOS the View menu's Reload still reloads the whole window when the focus is outside the page.
 - The browser panel's own session (`persist:openchamber-browser`): its storage is
   cleared only through the scoped clear-data command, and camera, microphone,
   location, and device-picker requests from pages shown there are denied. A focused

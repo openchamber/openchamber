@@ -70,6 +70,16 @@ export const OPENROUTER_JEV_MODEL = 'jev-latest';
 export const VERCEL_JEV_API_URL = 'https://ai-gateway.vercel.sh/typesafe/v1/systemone';
 export const VERCEL_JEV_MODEL = 'typesafe-ai/jev';
 
+/**
+ * Google's Decisions API on the Gemini Developer API, billed to the Google
+ * account behind the key. Not a System One endpoint: `jev.js` maps the request
+ * to Google's shape (`toGeminiDecisionsRequest`); the answers come back in the
+ * same shape. It answers 401 to a bearer key, so the key goes in
+ * `x-goog-api-key` (checked live 2026-11-14).
+ */
+export const GEMINI_DECISIONS_API_URL = 'https://generativelanguage.googleapis.com/v1beta/decisions';
+export const GEMINI_DECISIONS_MODEL = 'gemini-decision-1';
+
 /** Per-attempt timeout; the lab measured 250–700 ms warm, ~1 s on a cold TLS handshake. */
 export const JEV_TIMEOUT_MS = 4000;
 

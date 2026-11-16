@@ -16,6 +16,15 @@ export type ReferenceCommentItem = {
     location: string | null;
     /** The lines a review comment sits on, for a suggestion in it to be drawn against. */
     excerpt?: ReviewCommentExcerpt;
+    /**
+     * The host's id for a conversation comment, where an edit or delete names
+     * it. Absent on a review or line comment, which these routes do not change.
+     */
+    id?: string;
+    /** Whether this account may replace the comment; absent when the host does not say. */
+    canUpdate?: boolean;
+    /** Whether this account may remove the comment; absent when the host does not say. */
+    canDelete?: boolean;
     /** Set when the comment opens a review thread, or a discussion comment's replies; its replies are not entries of their own. */
     thread?: ReferenceCommentThread;
     /** A discussion comment in a category that takes answers: whether it is the answer, and whether this account may change that. */

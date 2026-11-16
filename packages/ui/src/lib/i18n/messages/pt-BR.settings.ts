@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -551,6 +552,10 @@ export const settingsDict = {
   "settings.projects.shared.actions.hide": "Ocultar para mim",
   "settings.projects.shared.replaceMode": "Usar apenas meus comandos de configuração e ignorar os do repositório",
   "settings.projects.shared.toast.shareFailed": "Falha ao atualizar a configuração no repositório",
+  "settings.projects.notesTodos.title": "Notas e tarefas pendentes",
+  "settings.projects.notesTodos.inRepository": "Manter notas e tarefas pendentes no repositório",
+  "settings.projects.notesTodos.inRepositoryDescription": "Esta máquina as lê e salva em .openchamber/notes-todos.json, para que o Git possa sincronizá-las. Ativar move suas notas e tarefas para o arquivo; desativar copia as entradas do arquivo de volta para esta máquina.",
+  "settings.projects.notesTodos.toast.saveFailed": "Falha ao mudar onde as notas e tarefas pendentes são salvas",
   "settings.projects.actions.state.loading": "Carregando...",
   "settings.projects.actions.state.noDesktopSshForwards": "Não há encaminhamentos SSH locais habilitados disponíveis.",
   "settings.projects.actions.field.selectIconAria": "Selecionar ícone",
@@ -1226,6 +1231,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyTool": "Ferramenta de notificação do agente",
   "settings.openchamber.tools.field.agentNotifyToolAria": "Ferramenta de notificação do agente",
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Os agentes avisam quando terminam ou ficam bloqueados.",
+  'settings.openchamber.tools.field.agentTerminalTool': 'Painel de terminal',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': 'Permite que o agente liste os terminais desta pasta e leia o que eles imprimiram. Um terminal guarda tudo o que foi digitado nele, inclusive segredos, então isto fica desativado até você ativá-lo.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "Ferramenta de conhecimento do projeto",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Ferramenta de conhecimento do projeto",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Os agentes leem e atualizam as notas, tarefas e planos do projeto.",
@@ -2401,6 +2408,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.terminalQuickKeysTooltip": "Mostrar Esc, Ctrl e flechas na vista do terminal",
   "settings.openchamber.visual.field.terminalCloseOnExit": "Fechar a aba quando o shell encerrar",
   "settings.openchamber.visual.field.terminalCloseOnExitInfo": "Vale para terminais e ações do projeto. Desativado, a aba mantém a saída, como o log de um servidor de desenvolvimento depois que ele para.",
+  "settings.openchamber.visual.field.terminalOpenOnProjectAction": "Abrir o terminal quando uma ação do projeto iniciar",
+  "settings.openchamber.visual.field.terminalOpenOnProjectActionInfo": "Desativado, a ação inicia sem trocar o painel lateral. A saída fica na aba da ação no terminal.",
   "settings.openchamber.visual.field.fileEditorKeymap": "Mapa de teclas do editor de arquivos",
   "settings.openchamber.visual.option.fileEditorKeymap.default": "Padrão",
   "settings.openchamber.visual.option.fileEditorKeymap.vim": "Vim",
@@ -2459,8 +2468,11 @@ export const settingsDict = {
   "settings.openchamber.visual.field.fileTreeSide": "Lado da árvore de arquivos",
   "settings.openchamber.visual.option.fileTreeSide.left": "Esquerda",
   "settings.openchamber.visual.option.fileTreeSide.right": "Direita",
-  "settings.openchamber.visual.field.wideChatLayoutAria": "Layout de chat amplo",
-  "settings.openchamber.visual.field.wideChatLayout": "Layout de chat amplo",
+  "settings.openchamber.visual.field.chatWidth": "Largura do chat",
+  "settings.openchamber.visual.field.chatWidthInfo": "Padrão e Mais larga mantêm as mensagens numa coluna centralizada. Total usa o chat inteiro para as mensagens, e o campo de mensagem fica com a largura de Mais larga.",
+  "settings.openchamber.visual.option.chatWidth.default.label": "Padrão",
+  "settings.openchamber.visual.option.chatWidth.wider.label": "Mais larga",
+  "settings.openchamber.visual.option.chatWidth.full.label": "Total",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Ações inline do assistente",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Ações inline do assistente",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip": "Mostra Copiar resposta, Salvar como imagem e Ler em voz alta em blocos de texto do assistente que aparecem antes de chamadas de ferramenta posteriores na mesma resposta.",
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['pt-BR'],
   ...extensionsSettingsI18n['pt-BR'],
   ...settingsLayoutI18n['pt-BR'],
+  ...mobileAppSettingsI18n['pt-BR'],
   'settings.page.integrations.title': 'Integrações',
   'settings.agents.page.field.steps': 'Passos máximos',
   'settings.agents.page.field.stepsTooltip': 'Quantos passos de ferramenta o agente pode dar em um turno antes de precisar parar.',

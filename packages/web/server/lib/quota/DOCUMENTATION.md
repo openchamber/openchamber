@@ -165,7 +165,9 @@ Both runtimes read the same Console contract. Sharing the reader keeps provider 
 
 ## Codex credit balance semantics
 
-Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Electron and VS Code expose it as a plain numeric `credits_balance.valueLabel` under the UI's localized Credits Balance title, without a currency symbol or two-decimal money rounding. Numeric strings are accepted; zero, unlimited, and unavailable balances retain their existing handling. Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync. The separate business-account `spend_control.individual_limit` window is unchanged.
+Codex `credits.balance` is an OpenAI credit count, not a dollar amount. Web/Electron and VS Code expose it as a `credits_balance.valueLabel` under the UI's localized Credits Balance title, rendered the way Copilot credits are: at most one decimal, thousands separated, no currency symbol. The endpoint's float tail is rounded away instead of printed. Numeric strings are accepted; zero, unlimited, and unavailable balances retain their existing handling. Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync.
+
+For `spend_control.individual_limit`, an explicit `unit: "usd"` produces a `usage` window with dollar signs and cents, using the existing localized Usage label. Other or missing units keep the `credits` window and its integer formatting. The unit comes from the response; no plan, organization or credit conversion is inferred.
 
 A Codex usage 401 whose body has `error.type: "rejected_by_access_enforcement"` is OpenCode's `chatgpt-token-sharing` sign-in ("Sign in with ChatGPT"). Its token is minted for `https://api.openai.com/v1` with the `chatgpt.tokens.use.direct` scope, which OpenAI admits only on the Responses route, and OpenAI publishes no usage endpoint for that sign-in. The numbers then come from the Codex CLI's own sign-in on the same machine (`providers/codex-cli.js`): `$CODEX_HOME/auth.json` (`~/.codex` by default), `tokens.access_token` and `tokens.account_id`, which the usage endpoint accepts because the CLI signs in with OpenAI's app client. Without that file, with an API-key CLI sign-in, or when the endpoint refuses the CLI token as well, both runtimes say that OpenAI shows usage for this sign-in only at `chatgpt.com/settings/usage` and name the legacy Codex sign-ins as the ones that show it in the app. Any other 401 reads as an expired session. The CLI read is tried only after that exact refusal: a legacy sign-in never consults the CLI, and `isConfigured` still answers from OpenCode alone. Web and VS Code keep this branch identical.
 
@@ -435,7 +437,30 @@ The primary path reads `GetCurrentPeriodUsage` `planUsage` (Pro/Ultra). Enterpri
 
 `GetAggregatedUsageEvents` dollar totals are deliberately not used for the UI; they reflect internal token cost, not the dashboard request/on-demand meters. `spendCents` from `GetTeamSpend` is the member's on-demand spend and matches the dashboard meter; `includedSpendCents` from the same response is the internal included-pool usage and is not shown. `packages/web/server/lib/quota/providers/cursor.js` and `packages/vscode/src/quotaProviders.ts` implement the same fallback chain and verified-meter semantics — keep them in sync.
 
+#### Cursor individual dollar allowance fallback
+
+When the legacy Enterprise readers produce no billing-cycle meter, the server
+and VS Code both call `providers/cursor-summary.js`. It reads the fixed
+`https://cursor.com/api/usage-summary` endpoint using the existing access token
+in the dashboard's `WorkosCursorSessionToken` cookie. Redirects are refused and
+the request has a 15-second deadline. There is at most one additional request
+per refresh; Pro and usable request-based Enterprise meters do not call it.
+
+`individualUsage.overall` supplies the individual's used and limit amounts in
+cents. Only an explicitly enabled bucket with nonnegative usage and a positive
+limit becomes a billing-cycle window, with the summary's billing-cycle end. A
+blank or whitespace-only `used` or `limit` is missing data, never zero.
+Team pools and team on-demand spending are never substituted for this personal
+allowance. An absent bucket or a failed request leaves the legacy result intact.
+
+#### Why the dashboard fallback is shared
+
+Both runtimes need the same cookie construction, cents conversion and personal
+scope. Sharing this reader keeps those rules equal without changing the older
+provider-specific request and on-demand meters.
+
 ## Notes for contributors
+
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.

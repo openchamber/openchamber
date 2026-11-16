@@ -791,7 +791,9 @@ export const useProjectActionsRunner = ({
       if (!discovered) return;
 
       const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
-      const revealTerminal = !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID;
+      const revealTerminal = !hasCustomOpenUrl
+        && action.id !== AUTO_DISCOVER_ACTION_ID
+        && useUIStore.getState().terminalOpenOnProjectAction;
       const launchContextHostDirectory = contextHostDirectoryRef.current || normalizedDirectory;
       const { executionDirectory, key, tabId } = await getOrCreateActionTab(discovered);
       const normalizedCommand = normalizeProjectActionCommand(discovered.command);

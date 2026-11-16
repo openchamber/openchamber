@@ -78,9 +78,19 @@ const isFinished = (run) => run.state !== 'running' && run.state !== 'awaiting-a
  * directory read keeps writes off until a load succeeds, so it can never pass
  * for "no runs" and be overwritten.
  */
-export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now }) => {
+export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.now, lighten = null }) => {
   const directory = path.join(dataDir, DIRECTORY_NAME);
   const runs = new Map();
+  // A run nothing works on any more (finished, report delivered) is held as
+  // `lighten(run)`, enough to list it; `get` reads the whole run from its file.
+  const lightRuns = new WeakSet();
+  const isSettled = (run) => isFinished(run) && (!run.report || run.report.delivered);
+  const held = (run) => {
+    if (!lighten || !isSettled(run)) return run;
+    const light = lighten(run);
+    lightRuns.add(light);
+    return light;
+  };
   let loadPromise = null;
   let writeChain = Promise.resolve();
 
@@ -99,7 +109,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
       const filePath = path.join(directory, name);
       const parsed = runSchema.safeParse(await fsPromises.readFile(filePath, 'utf8').then(JSON.parse).catch(() => null));
       if (parsed.success) {
-        runs.set(parsed.data.id, parsed.data);
+        runs.set(parsed.data.id, held(parsed.data));
       } else {
         const aside = `${filePath}.corrupt-${now()}`;
         await fsPromises.rename(filePath, aside).catch(() => undefined);
@@ -142,7 +152,7 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     await load();
     const writing = writeChain.then(async () => {
       await writeRun(snapshot);
-      runs.set(snapshot.id, run);
+      runs.set(snapshot.id, held(run));
       // Retention cannot turn a committed snapshot into a failed save.
       await prune(snapshot.id).catch((error) => {
         console.warn('[workflows] failed to prune runs:', error?.message ?? error);
@@ -154,12 +164,35 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     return writing;
   };
 
-  // These are mutable working references, not evidence of a successful save.
-  const get = async (id) => {
-    await load();
-    return runs.get(id) ?? null;
+  const readRun = async (id) => {
+    const parsed = runSchema.safeParse(await fsPromises.readFile(fileFor(id), 'utf8').then(JSON.parse).catch(() => null));
+    return parsed.success ? parsed.data : null;
   };
 
+  // These are mutable working references, not evidence of a successful save.
+  // A settled run is read from its file once and then held whole, so every
+  // caller (a resume, a delete, retention) sees the same working object until
+  // the next save makes it light again. Concurrent first reads share one read.
+  const pendingReads = new Map();
+  const get = async (id) => {
+    await load();
+    const run = runs.get(id) ?? null;
+    if (!run || !lightRuns.has(run)) return run;
+    let reading = pendingReads.get(id);
+    if (!reading) {
+      reading = writeChain.then(() => readRun(id)).then((full) => {
+        // Published only over the light form it was read for; a save or a
+        // removal meanwhile wins.
+        if (full && runs.get(id) === run) runs.set(id, full);
+        return runs.get(id) === full ? full : runs.get(id) ?? null;
+      }).finally(() => pendingReads.delete(id));
+      pendingReads.set(id, reading);
+    }
+    const resolved = await reading;
+    return resolved && lightRuns.has(resolved) ? readRun(id) : resolved;
+  };
+
+  /** Every run; a settled one in its light form, which carries what a summary shows. */
   const list = async () => {
     await load();
     return [...runs.values()].sort((left, right) => left.createdAt - right.createdAt);

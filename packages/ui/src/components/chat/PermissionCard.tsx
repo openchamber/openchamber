@@ -3,7 +3,7 @@ import { cn, formatPathForDisplay } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useRoutingStore } from '@/stores/useRoutingStore';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
@@ -149,7 +149,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
           {}
           {bashCommand && (
             <div>
-              <WorkerHighlightedCode
+              <HighlightedCode
                 language="bash"
                 code={bashCommand}
                 style={PERMISSION_BASH_CUSTOM_STYLE}
@@ -227,7 +227,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.headers')}</div>
               <ScrollableOverlay outerClassName="max-h-24" className="p-0">
-                <WorkerHighlightedCode
+                <HighlightedCode
                   language="json"
                   code={JSON.stringify(headers, null, 2)}
                   style={PERMISSION_JSON_CUSTOM_STYLE}
@@ -240,7 +240,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.body')}</div>
               <ScrollableOverlay outerClassName="max-h-32" className="p-0">
-                <WorkerHighlightedCode
+                <HighlightedCode
                   language={typeof body === 'object' ? 'json' : 'text'}
                   code={typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body)}
                   style={PERMISSION_JSON_CUSTOM_STYLE}

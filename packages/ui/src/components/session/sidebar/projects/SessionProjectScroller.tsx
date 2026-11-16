@@ -729,6 +729,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       <ScrollableOverlay
         // Sticky zone headers replace the top shadow.
         ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={40}
+        // The colour the sticky zone headers paint, so the end fade is a band.
+        scrollShadowSurface={view.mobileVariant ? 'var(--background)' : 'var(--sidebar)'}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
         <SessionFolderOwnersProvider ownerKeys={folderDropOwnerKeys}>

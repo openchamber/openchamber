@@ -137,6 +137,15 @@ describe('an extension usage provider', () => {
     expect(empty.calls[0].request.input).toEqual({ credentials: {} });
   });
 
+  it('preserves absent models, an empty model map, and null usage', async () => {
+    for (const usage of [{ windows: {} }, { windows: {}, models: {} }, null]) {
+      const h = harness({ answer: usageAnswer({ usage }) });
+      const result = await h.provider.fetchQuota();
+      expect(result.usage).toEqual(usage);
+      if (usage && !Object.hasOwn(usage, 'models')) expect(result.usage).not.toHaveProperty('models');
+    }
+  });
+
   it('hands over only what the catalog lists now, when a re-approval narrowed the list before the adapter was replaced', async () => {
     const h = harness();
     h.state.catalog = quotaGuest({ quota: { providers: ['teapot'] } });

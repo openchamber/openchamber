@@ -101,8 +101,8 @@ const reopenLastActiveSession = (): ReopenedSession | null => {
  * chat falls back to the draft unless the user has opened something else
  * since. A session that moved directories is reselected in its new one.
  */
-const confirmReopenedSession = async (reopened: ReopenedSession): Promise<LastSessionRestoreResult> => {
-    const snapshot = await loadSessionList(false);
+const confirmReopenedSession = async (reopened: ReopenedSession, refresh: boolean): Promise<LastSessionRestoreResult> => {
+    const snapshot = await loadSessionList(refresh);
     if (getRuntimeKey() !== reopened.runtimeKey) return 'none';
     if (!snapshot || !isSessionListAuthoritative()) return 'failed';
 
@@ -128,9 +128,9 @@ const confirmReopenedSession = async (reopened: ReopenedSession): Promise<LastSe
 };
 
 /**
- * Launch restore for the web and desktop shell. Call it before the chat's
- * first passive effects, which open the automatic draft when nothing is
- * selected. With `selectNow` it selects the last session at once when its
+ * Launch restore. The web and desktop shell call it before the chat's first
+ * passive effects, which open the automatic draft when nothing is selected;
+ * the mobile shell calls it once its instance connects. With `selectNow` it selects the last session at once when its
  * directory is known; otherwise, or without a directory, it waits for the
  * session list as `restoreLastActiveSession` does. Returns the confirmation
  * attempt; `failed` means the session list could not be read yet, and the
@@ -139,9 +139,11 @@ const confirmReopenedSession = async (reopened: ReopenedSession): Promise<LastSe
 export const beginLastSessionRestore = (options: {
     /** False when a route already names a session to open. */
     readonly selectNow: boolean;
+    /** Read the session list fresh rather than accept one already loaded (mobile reconnects). */
+    readonly refresh: boolean;
 }): (() => Promise<LastSessionRestoreResult>) => {
     const reopened = options.selectNow ? reopenLastActiveSession() : null;
     return reopened
-        ? () => confirmReopenedSession(reopened)
-        : () => restoreLastActiveSession({ refresh: false });
+        ? () => confirmReopenedSession(reopened, options.refresh)
+        : () => restoreLastActiveSession({ refresh: options.refresh });
 };

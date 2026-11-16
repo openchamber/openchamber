@@ -261,9 +261,19 @@ const buildSshArgs = (parsed, preDestinationArgs = [], remoteCommand = null) => 
 
 const askpassScriptContent = () => `#!/bin/bash
 PROMPT="$1"
+PROMPT_LOWER="$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]')"
+
+# A one-time code prompt may say "password" too ("One-time password:"), and
+# the stored SSH password never answers it.
+is_one_time_prompt() {
+  case "$PROMPT_LOWER" in
+    *one-time*|*"one time"*|otp*|*" otp"*|*"(otp"*) return 0 ;;
+  esac
+  return 1
+}
 
 if [[ -n "$OPENCHAMBER_SSH_ASKPASS_VALUE" ]]; then
-  if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
+  if [[ "$PROMPT_LOWER" == *"passphrase"* ]] || { [[ "$PROMPT_LOWER" == *"password"* ]] && ! is_one_time_prompt; }; then
     printf '%s\\n' "$OPENCHAMBER_SSH_ASKPASS_VALUE"
     exit 0
   fi
@@ -296,6 +306,44 @@ on run argv
   end try
 end run
 APPLESCRIPT
+  exit $?
+fi
+
+# DISPLAY=1 is the placeholder older OpenSSH needs to call askpass at all. It
+# names no X server, so a dialog program must not see it: on Wayland an X11
+# toolkit would try to open it and fail instead of using the real session.
+if [[ "$DISPLAY" == "1" ]]; then
+  unset DISPLAY
+fi
+
+has_graphical_session() {
+  [[ -n "$WAYLAND_DISPLAY" || -n "$DISPLAY" ]]
+}
+
+# OpenSSH looks a bare SSH_ASKPASS name up on PATH, so this does too.
+USER_ASKPASS=""
+if [[ -n "$OPENCHAMBER_SSH_ASKPASS_FALLBACK" ]]; then
+  USER_ASKPASS="$(type -P -- "$OPENCHAMBER_SSH_ASKPASS_FALLBACK" 2>/dev/null)"
+fi
+if [[ -n "$USER_ASKPASS" ]]; then
+  exec "$USER_ASKPASS" "$PROMPT"
+fi
+
+if has_graphical_session && command -v zenity >/dev/null 2>&1; then
+  if [[ "$HIDDEN_INPUT" == "true" ]]; then
+    zenity --entry --title="OpenChamber SSH" --text="$PROMPT" --hide-text
+  else
+    zenity --entry --title="OpenChamber SSH" --text="$PROMPT" --entry-text="$DEFAULT_ANSWER"
+  fi
+  exit $?
+fi
+
+if has_graphical_session && command -v kdialog >/dev/null 2>&1; then
+  if [[ "$HIDDEN_INPUT" == "true" ]]; then
+    kdialog --title "OpenChamber SSH" --password "$PROMPT"
+  else
+    kdialog --title "OpenChamber SSH" --inputbox "$PROMPT" "$DEFAULT_ANSWER"
+  fi
   exit $?
 fi
 
@@ -440,13 +488,17 @@ export class ElectronSshManager {
   authEnvironment(parsed) {
     const auth = this.sshAuth.get(parsed);
     if (!auth) return process.env;
-    return {
+    const userAskpass = (process.env.SSH_ASKPASS || '').trim();
+    const env = {
       ...process.env,
       SSH_ASKPASS_REQUIRE: 'force',
       SSH_ASKPASS: auth.askpassPath,
-      DISPLAY: '1',
+      DISPLAY: process.env.DISPLAY || '1',
       ...(auth.sshPassword ? { OPENCHAMBER_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
     };
+    // The askpass helper hands prompts it cannot show itself to the user's own program.
+    if (userAskpass && userAskpass !== auth.askpassPath) env.OPENCHAMBER_SSH_ASKPASS_FALLBACK = userAskpass;
+    return env;
   }
 
   independentConnectionArgs() {

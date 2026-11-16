@@ -14,6 +14,7 @@ const TAB_LABEL_KEYS = {
   files: 'mobile.menu.files',
   terminal: 'mobile.menu.terminal',
   notes: 'contextRail.surface.notes',
+  preview: 'contextPanel.mode.browser',
 } satisfies Record<BuiltInMobileWorkspaceTab, I18nKey>;
 
 /**

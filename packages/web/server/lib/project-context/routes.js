@@ -18,6 +18,8 @@ import express from 'express';
 import { z } from 'zod';
 
 const parseJsonBody = express.json({ limit: '1mb' });
+/** A `notesTodosStore` token a context read returned: the store, then its switch count. */
+const NOTES_TODOS_STORE_TOKEN = /^(local|repository):/;
 const todoTextInput = z.string();
 // null clears the plan's session link.
 const sessionIdInput = z.string().nullable();
@@ -72,9 +74,12 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     if (!hasValidTodosShape(body.todos)) {
       return res.status(400).json({ error: 'todos must be an array of todo items' });
     }
+    if (body.store !== undefined && !NOTES_TODOS_STORE_TOKEN.test(body.store)) {
+      return res.status(400).json({ error: 'store must be the notesTodosStore token of a read' });
+    }
 
     try {
-      return res.json(await projectContextRuntime.saveTodos(req.params.projectId, body.todos));
+      return res.json(await projectContextRuntime.saveTodos(req.params.projectId, body.todos, { store: body.store }));
     } catch (error) {
       return respondWithError(res, error, 'Failed to save project todos');
     }

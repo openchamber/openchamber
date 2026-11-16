@@ -29,28 +29,36 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
       return;
     }
 
-    let screenshotAttached = false;
+    // The screenshot joins the composer's files under the annotation's name
+    // for it: the annotation's row shows it, and it goes and leaves with the
+    // annotation, never as a chip in the prompt.
+    let screenshot: string | undefined;
     if (result.screenshot) {
       try {
-        screenshotAttached = await addAttachedFile(result.screenshot, attachments);
+        await addAttachedFile(result.screenshot, attachments, ([landed]) => { screenshot = landed?.filename; });
       } catch {
-        screenshotAttached = false;
+        screenshot = undefined;
       }
     }
+    const screenshotAttached = screenshot !== undefined;
 
     // The overlay is gone by now, so a refusal would lose the comment and marks.
+    // The comment is the draft's own text, as for every other comment, so the
+    // composer shows and edits it apart from the prompt; the model reads it
+    // after the prompt.
     addInlineCommentDraft(target, {
       source: 'preview-annotation',
       fileLabel: result.payload.pageUrl || result.payload.pageTitle || 'browser',
       startLine: 1,
       endLine: 1,
       code: formatBrowserAnnotationPrompt({
-        payload: result.payload,
+        payload: { ...result.payload, comment: '' },
         screenshotAttached,
         intro: intro ?? t('contextPanel.browser.annotate.intro'),
       }),
       language: 'markdown',
-      text: '',
+      text: result.payload.comment.trim(),
+      screenshot,
     }, { written: true });
 
     toast.success(t('contextPanel.browser.annotate.attached'));

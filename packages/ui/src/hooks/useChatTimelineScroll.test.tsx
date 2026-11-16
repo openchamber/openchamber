@@ -348,6 +348,27 @@ test('leaves a reader with auto-follow off where they are when a page waits for 
     }
 });
 
+test('a question card named by its dock line comes into view with auto-follow off, past a card above it', async () => {
+    useUIStore.getState().setStreamingAutoFollowEnabled(false);
+    try {
+        await render('visible'); await frame();
+        node.scrollTop = 300;
+        // Two waiting blocks at the end; the dock's line names the lower one.
+        const { targets } = waitingPage(1100);
+        const named = document.createElement('div');
+        named.dataset.waitingPage = 'form-2';
+        node.append(named);
+        Object.defineProperty(named, 'getBoundingClientRect', { value: () => ({ top: 1500 - node.scrollTop, bottom: 1700 - node.scrollTop }) });
+        act(() => revealWaitingPage('session', 'form-2'));
+        await frame();
+        // Whole, ending at the viewport's bottom (1700 - 500); the block above would aim at 1088.
+        expect(targets).toEqual([1200]);
+        expect(isWaitingPageRevealPending('session')).toBe(false);
+    } finally {
+        useUIStore.getState().setStreamingAutoFollowEnabled(true);
+    }
+});
+
 test('leaves a reader who scrolled up away from a page waiting for an answer', async () => {
     await render('visible'); await frame();
     node.scrollTop = 300;

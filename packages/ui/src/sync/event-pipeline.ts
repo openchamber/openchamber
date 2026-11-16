@@ -43,6 +43,7 @@ const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
+const WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK = 3
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
 // Retry pacing. Visible+online tabs probe quickly so the user sees connection
 // recovery in under a second of real outage; hidden/offline tabs back off
@@ -67,7 +68,11 @@ export type EventPipelineInput = {
   sdk: OpenCodeClient
   routeDirectory?: (directory: string, payload: SyncEvent) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
-  onReconnect?: (details: { replayReset: boolean }) => void
+  /**
+   * `replayed`: the server found the cursor of the previous connection and
+   * sends every event after it, so the stream has no gap.
+   */
+  onReconnect?: (details: { replayReset: boolean; replayed: boolean }) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
   /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
@@ -109,6 +114,8 @@ export type EventPipeline = {
 const wsFrameSchema = z.object({
   type: z.enum(["ready", "event", "error", "backpressure"]),
   replayReset: z.boolean().optional(),
+  replayed: z.boolean().optional(),
+  cursor: z.string().optional(),
   payload: z.unknown().optional(),
   eventId: z.string().optional(),
   directory: z.string().optional(),
@@ -527,6 +534,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   let disconnected = false
   let lastEventId: string | undefined
   let wsFallbackUntil = 0
+  let wsEverReady = false
+  let wsOpenFailuresSinceReady = 0
 
   const directories = new Map<string, DirectoryQueue>()
 
@@ -703,7 +712,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect?.(reason)
   }
 
-  const markConnected = (replayReset = false) => {
+  const markConnected = (replayReset = false, replayed = false) => {
     disconnected = false
     consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
@@ -711,7 +720,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // to be flipped positively; without this the send button throws
     // "Connection lost" until something else (HTTP health check) happens
     // to race a setState({isConnected: true}) through.
-    onReconnect?.({ replayReset })
+    onReconnect?.({ replayReset, replayed })
   }
 
   const enqueueEvent = (directory: string, event: SyncEvent) => {
@@ -834,6 +843,20 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     }
   }
 
+  /**
+   * Whether a WebSocket attempt that failed before `ready` moves the stream to
+   * SSE. A route that already carried the stream has no proxy refusing
+   * WebSockets: the network or the server is away. Retrying it keeps the
+   * replay cursor, which the SSE stream lacks, so SSE waits for failures that
+   * outlast an outage.
+   */
+  const wsOpenFailureFallsBack = (): boolean => {
+    if (!wsEverReady) return true
+    if (isOffline()) return false
+    wsOpenFailuresSinceReady += 1
+    return wsOpenFailuresSinceReady >= WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK
+  }
+
   const runWsAttempt = async (signal: AbortSignal) => {
     // A WebSocket upgrade can't carry an Authorization header, so it
     // authenticates purely via the oc_url_token query param. The sync token
@@ -847,7 +870,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       await refreshRuntimeUrlAuthToken()
     } catch (error) {
       const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
-      if (transport === "auto") {
+      if (transport === "auto" && wsOpenFailureFallsBack()) {
         wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
         ;(wrapped as Error & { code?: string }).code = "WS_FALLBACK"
       }
@@ -862,11 +885,15 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let opened = false
       let readyAt = 0
       const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
+      let openFailureFallsBack: boolean | undefined
       const setFallbackCode = (error: Error, force = false) => {
-        if ((force || !opened) && transport === "auto") {
-          wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
-          ;(error as Error & { code?: string }).code = "WS_FALLBACK"
+        if ((!force && opened) || transport !== "auto") return
+        if (!force) {
+          openFailureFallsBack ??= wsOpenFailureFallsBack()
+          if (!openFailureFallsBack) return
         }
+        wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+        ;(error as Error & { code?: string }).code = "WS_FALLBACK"
       }
 
       let readyTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
@@ -943,14 +970,20 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           // The retained suffix no longer covers our cursor. The normal
           // reconnect callback repairs authoritative state; retire that cursor.
           if (frame.replayReset === true) lastEventId = undefined
+          // No replay follows this frame, so the stream continues from the
+          // server's cursor: the next reconnect can resume even when no event
+          // arrives before it.
+          if (frame.replayed !== true && frame.cursor) lastEventId = frame.cursor
           opened = true
+          wsEverReady = true
+          wsOpenFailuresSinceReady = 0
           readyAt = Date.now()
           if (readyTimer) {
             clearTimeout(readyTimer)
             readyTimer = undefined
           }
           streamErrorLogged = false
-          markConnected(frame.replayReset === true)
+          markConnected(frame.replayReset === true, frame.replayed === true)
           return
         }
 

@@ -316,6 +316,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: false }))
+      .toEqual({ wideChatLayoutEnabled: false, chatWidth: 'default' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true, chatWidth: 'wider' }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'wider' });
+    expect(parseSettingsDocument({ chatWidth: 'wide' })).toEqual({});
+  });
+
   test('applies only the fields a snapshot carries and leaves the rest alone', () => {
     useUIStore.getState().setTerminalShell('fish');
     useUIStore.getState().setShowReasoningTraces(true);

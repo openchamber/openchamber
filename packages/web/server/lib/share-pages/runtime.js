@@ -231,7 +231,7 @@ export const createSharePagesRuntime = ({
 
   // Every card route goes through here: while sharing is unavailable, or the
   // group lives on a relay the policy no longer allows, the card has nothing
-  // to show or do (decision 0005).
+  // to show or do.
   const findGroup = async (sessionId, callId) => {
     if (!isString(sessionId) || !isString(callId) || !sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
@@ -351,7 +351,7 @@ export const createSharePagesRuntime = ({
     }
     const title = (isString(input.title) && input.title.trim()) || group.title;
     if (firstDocument) group.documentSource = readDocumentSource(input.source);
-    // The source lets a recipient's own agent read the page (decision 0013); the relay's viewer ignores it.
+    // The source lets a recipient's own agent read the page; the relay's viewer ignores it.
     const document = group.documentSource ? { v: 1, title, html, source: group.documentSource } : { v: 1, title, html };
     if (Buffer.byteLength(JSON.stringify(document)) + SEAL_OVERHEAD_BYTES > MAX_SEALED_BYTES) {
       throw new OpenChamberControlError('The page is larger than the 32 MB a shared page can be', 413);

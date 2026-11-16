@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -551,6 +552,10 @@ export const settingsDict = {
   'settings.projects.shared.actions.hide': '나에게 숨기기',
   'settings.projects.shared.replaceMode': '내 설정 명령만 사용하고 저장소의 명령은 건너뛰기',
   'settings.projects.shared.toast.shareFailed': '저장소 설정을 업데이트하지 못했습니다',
+  'settings.projects.notesTodos.title': '메모와 Todo',
+  'settings.projects.notesTodos.inRepository': '메모와 Todo를 저장소에 보관',
+  'settings.projects.notesTodos.inRepositoryDescription': '이 기기는 .openchamber/notes-todos.json에서 읽고 저장하므로 Git으로 동기화할 수 있습니다. 켜면 메모와 Todo가 파일로 옮겨지고, 끄면 파일의 항목이 이 기기로 다시 복사됩니다.',
+  'settings.projects.notesTodos.toast.saveFailed': '메모와 Todo의 저장 위치를 변경하지 못했습니다',
   'settings.projects.actions.state.loading': '로딩 중...',
   'settings.projects.actions.state.noDesktopSshForwards': '활성화된 로컬 SSH 포워딩이 없습니다.',
   'settings.projects.actions.field.selectIconAria': '아이콘 선택',
@@ -1226,6 +1231,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyTool': '에이전트 알림 도구',
   'settings.openchamber.tools.field.agentNotifyToolAria': '에이전트 알림 도구',
   "settings.openchamber.tools.field.agentNotifyToolSummary": "작업이 끝나거나 막히면 에이전트가 알려 줍니다.",
+  'settings.openchamber.tools.field.agentTerminalTool': '터미널 패널',
+  'settings.openchamber.tools.field.agentTerminalToolSummary': '에이전트가 이 폴더의 터미널을 나열하고 출력된 내용을 읽을 수 있습니다. 터미널에는 입력된 모든 내용이 비밀 정보까지 남으므로 켤 때까지 꺼져 있습니다.',
   'settings.openchamber.tools.field.agentKnowledgeTool': "프로젝트 지식 도구",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "프로젝트 지식 도구",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "에이전트가 프로젝트의 메모, 할 일, 계획을 읽고 업데이트합니다.",
@@ -2401,6 +2408,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '터미널 보기에서 Esc, Ctrl, 화살표를 표시합니다',
   'settings.openchamber.visual.field.terminalCloseOnExit': '셸이 종료되면 탭 닫기',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '터미널과 프로젝트 작업에 적용됩니다. 끄면 개발 서버가 멈춘 뒤의 로그처럼 탭에 출력이 남습니다.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '프로젝트 작업이 시작되면 터미널 열기',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '끄면 사이드 패널을 전환하지 않고 작업이 실행됩니다. 출력은 터미널의 작업 탭에 남습니다.',
   'settings.openchamber.visual.field.fileEditorKeymap': '파일 편집기 키맵',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '기본값',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',
@@ -2459,8 +2468,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.fileTreeSide': '파일 트리 위치',
   'settings.openchamber.visual.option.fileTreeSide.left': '왼쪽',
   'settings.openchamber.visual.option.fileTreeSide.right': '오른쪽',
-  'settings.openchamber.visual.field.wideChatLayoutAria': '넓은 채팅 레이아웃',
-  'settings.openchamber.visual.field.wideChatLayout': '넓은 채팅 레이아웃',
+  'settings.openchamber.visual.field.chatWidth': '채팅 너비',
+  'settings.openchamber.visual.field.chatWidthInfo': '기본과 넓게는 메시지를 가운데 열에 표시합니다. 전체는 메시지가 채팅 전체를 쓰고, 입력란은 넓게와 같은 너비를 유지합니다.',
+  'settings.openchamber.visual.option.chatWidth.default.label': '기본',
+  'settings.openchamber.visual.option.chatWidth.wider.label': '넓게',
+  'settings.openchamber.visual.option.chatWidth.full.label': '전체',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '인라인 어시스턴트 작업',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '인라인 어시스턴트 작업',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '같은 응답에서 이후 도구 호출 앞에 나타나는 어시스턴트 텍스트 블록에 답변 복사, 이미지로 저장, 소리 내어 읽기 작업을 표시합니다.',
@@ -2733,6 +2745,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...settingsLayoutI18n.ko,
+  ...mobileAppSettingsI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.agents.page.field.steps': '최대 단계 수',
   'settings.agents.page.field.stepsTooltip': '에이전트가 한 턴에서 수행할 수 있는 도구 단계 수입니다.',

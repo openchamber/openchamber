@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useDeferredGlobalUpdates, withDeferredGlobalUpdate } from '@/sync/session-event-router';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { buildMultiRunIndex, readMultiRunIdentity, type MultiRunIndex, type MultiRunSummary } from './runs';
@@ -22,13 +23,20 @@ const resolveLegacyScope = (session: Session): string | null => normalizePath(
  */
 export function useMultiRunSessions(): MultiRunSessions {
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  // A lane running in a folder no store holds gets its spend from here while
+  // its turn runs; the global list takes it at the turn's end.
+  const deferredUpdates = useDeferredGlobalUpdates();
   const liveSessions = useAllLiveSessions();
   return React.useMemo(() => {
     const sessionById = new Map<string, Session>();
     for (const session of activeSessions) sessionById.set(session.id, session);
+    for (const [sessionId, update] of deferredUpdates) {
+      const session = sessionById.get(sessionId);
+      if (session) sessionById.set(sessionId, withDeferredGlobalUpdate(session, update));
+    }
     for (const session of liveSessions) sessionById.set(session.id, session);
     return { index: buildMultiRunIndex(sessionById.values(), resolveLegacyScope), sessionById };
-  }, [activeSessions, liveSessions]);
+  }, [activeSessions, deferredUpdates, liveSessions]);
 }
 
 const isActiveRoot = (session: Session): boolean => !session.time?.archived && !session.parentID;

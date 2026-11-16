@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { ReferenceBrowserList, ReferenceBrowserSearch, ReferenceBrowserTabs } from './ReferenceBrowser';
+import { usePreviewReturnScroll } from './usePreviewReturnScroll';
 import { IDLE_PULL_STATUS, useReferenceBrowser } from './useReferenceBrowser';
 import { ReferencePreview, type ReferencePreviewPurpose } from './ReferencePreview';
 import {
@@ -79,6 +80,10 @@ function ReferencePickerSurface({
 
     const browser = useReferenceBrowser({ source, directory, isMobile, initialGitHubKind, retainedItems: checked });
     const { highlightedItem, previewItem, previewKey, descriptor } = browser;
+    // The phone's list and preview share the sheet's scroller: the list's offset
+    // is kept while an item takes its place, and every preview starts at its top.
+    const inPreview = isMobile && Boolean(browser.mobilePreviewKey && previewItem);
+    const contentRef = usePreviewReturnScroll(inPreview ? browser.mobilePreviewKey : null);
 
     const toggleChecked = React.useCallback((item: ReferencePickerItem) => {
         const key = referencePickerItemKey(item);
@@ -215,13 +220,13 @@ function ReferencePickerSurface({
     );
 
     if (isMobile) {
-        const inPreview = Boolean(browser.mobilePreviewKey && previewItem);
         return (
             <MobileOverlayPanel
                 open
                 title={title}
                 onClose={() => onOpenChange(false)}
                 contentMaxHeightClassName="max-h-[calc(100dvh-12rem)]"
+                contentRef={contentRef}
                 renderHeader={(closeButton) => (
                     <div className="flex flex-col gap-2 border-b border-edge-muted px-3 py-2">
                         <div className="flex items-center justify-between gap-2">

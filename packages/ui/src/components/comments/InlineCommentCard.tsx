@@ -43,7 +43,7 @@ export function InlineCommentCard({
   return (
     <div
       className={cn(
-        'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] shadow-none',
+        'w-full max-w-[min(100%,calc(var(--oc-editor-width,var(--oc-context-panel-width,100vw))-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] font-sans shadow-none',
         className
       )}
       style={{
@@ -92,6 +92,13 @@ export function InlineCommentCard({
           <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
         </Tooltip>
       </div>
+
+      {draft.changedCode !== undefined ? (
+        <div className="flex items-center gap-1.5 px-3 pt-1 text-xs text-[var(--status-warning)]">
+          <Icon name="error-warning" className="size-3.5 shrink-0" />
+          <span className="min-w-0">{t('inlineComment.card.codeChanged')}</span>
+        </div>
+      ) : null}
 
       <div className="px-3 pb-2 pt-1">
         <Collapsible open={isOpen || !isLongContent} onOpenChange={setIsOpen}>

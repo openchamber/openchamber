@@ -162,7 +162,8 @@ export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws an HTML p
   + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
   + " A choice that sets the direction of the work goes through ui with awaitAnswer (see UI blocks);"
-  + " a choice between visual designs, through an html page with awaitAnswer.";
+  + " a choice between visual designs, through an html page with awaitAnswer."
+  + " When the rest of the task does not wait on the choice, send answerLater instead of awaitAnswer and keep working: the answer arrives later as a message.";
 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows

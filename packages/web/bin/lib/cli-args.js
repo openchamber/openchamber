@@ -65,7 +65,7 @@ const TUNNEL = ['tunnel'];
 const LOGS = ['logs'];
 const COMMAND_OWNED_FLAGS = new Map([
   ['daily', SCHEDULE], ['weekly', SCHEDULE], ['once', SCHEDULE], ['time', SCHEDULE], ['cron', SCHEDULE],
-  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE],
+  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE], ['target-session', SCHEDULE],
   ['role', SESSION], ['last', SESSION], ['last-assistant', SESSION], ['wait', SESSION], ['timeout', SESSION],
   ['with-status', SESSION], ['worktree', SESSION], ['branch', SESSION], ['start-ref', SESSION], ['base', SESSION],
   ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
@@ -78,6 +78,13 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['show-secrets', TUNNEL], ['dry-run', TUNNEL], ['force', TUNNEL],
   ['lines', LOGS], ['no-follow', LOGS],
 ]);
+
+// Value flags `schedule update` sends as changes, with the option each one sets.
+const SCHEDULE_UPDATE_VALUE_FLAGS = [
+  ['name', 'name'], ['prompt', 'prompt'], ['model', 'model'], ['agent', 'agent'], ['variant', 'variant'],
+  ['daily', 'daily'], ['weekly', 'weekly'], ['once', 'once'], ['time', 'time'], ['cron', 'cron'],
+  ['timezone', 'timezone'], ['goal-token-budget', 'goalTokenBudget'],
+];
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
@@ -123,6 +130,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     apiOnly: false,
     project: undefined,
     task: undefined,
+    targetSession: undefined,
     session: undefined,
     message: undefined,
     prompt: undefined,
@@ -301,6 +309,20 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.task = typeof value === 'string' ? value : options.task;
+        break;
+      }
+      case 'target-session': {
+        // An empty `--target-session=` (an empty shell variable) must not take the next word as the target.
+        const { value, nextIndex } = inlineValue === '' ? { value: undefined, nextIndex: i } : consumeValue(i, inlineValue);
+        i = nextIndex;
+        // Dropping a missing value would quietly make a task that opens new sessions.
+        // Reported like an unknown flag, so it fails before any request and as JSON under --json.
+        const targetSession = value?.trim();
+        if (!targetSession) {
+          removedFlagErrors.push('Missing value for --target-session.');
+          break;
+        }
+        options.targetSession = targetSession;
         break;
       }
       case 'session': {
@@ -587,6 +609,17 @@ function parseArgs(argv = process.argv.slice(2)) {
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
   const controlAction = command === 'control' ? (positional[1] || 'help') : null;
+
+  // Other schedule actions would ignore the target and run in the task's stored session.
+  if (seenLongFlags.includes('target-session') && scheduleAction && !['create', 'update'].includes(scheduleAction)) {
+    removedFlagErrors.push(`Unknown option for schedule ${scheduleAction}: --target-session (used by: schedule create, schedule update)`);
+  }
+  // On update a dropped value leaves the old setting while the server still answers updated: true.
+  if (scheduleAction === 'update') {
+    for (const [flag, key] of SCHEDULE_UPDATE_VALUE_FLAGS) {
+      if (seenLongFlags.includes(flag) && options[key] === undefined) removedFlagErrors.push(`Missing value for --${flag}.`);
+    }
+  }
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';

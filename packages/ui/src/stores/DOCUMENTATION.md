@@ -70,18 +70,34 @@ request for that key. Their older responses cannot restore a pre-change list or
 stamp a fresh TTL over the replacement request. A runtime switch clears the
 directory maps and rejects loads captured from the previous runtime.
 
+### Why command refreshes retire an in-flight read
+
+A cold OpenCode location can answer with no commands before announcing its
+completed catalog. Command events refresh the ambient project and every named
+location, so an open draft's list updates even when it belongs to a worktree.
+A command invalidation marks that directory's pending read
+obsolete; it publishes nothing and all its callers await one replacement read.
+Joining the old read would keep the empty list even after `command.updated`.
+Empty answers remain visible but receive no freshness TTL, so reopening the
+menu can recover immediately if the event was missed. Nonempty lists retain
+their TTL, and no timer polls for commands.
+
 A same-runtime load retired by a catalog change waits for the replacement list before it returns. A create or delete waiting for that read therefore keeps its successful result; the retired response itself publishes nothing. A runtime switch still returns failure instead of joining work for another runtime.
+
+### Why a configuration reload reads only the active directory
+
+A manual configuration reload used to refresh every saved project's provider and agent catalog. On OpenCode 2 each directory-scoped read boots that location's service graph and MCP fleet, so a reload with a dozen projects turned one restart into a dozen startups; the active directory's model, provider, agent and session requests sat behind them and returned 503/499 (#6815). The reload now reads only the directory the user works in. Every directory is still taken out of the 30-second freshness window and every read started before the reload is retired, so the other projects re-read when the user next activates them. Their loaded snapshots stay in place, so a background project never shows an empty picker while it waits. The Settings page open during the reload re-reads its own project through `catalogReloadRevision`, which covers the one other directory the user is looking at without booting the rest.
 
 ### Why catalog bursts share resource refreshes
 
 A config save announces several catalog kinds. `refreshStoresForCatalogKinds`
-unions their tasks before invalidation, so config plus agent refreshes each
-agent directory once, and config plus provider plus model refreshes providers
+unions their tasks before invalidation, so config plus agent or command refreshes each
+corresponding directory once, and config plus provider plus model refreshes providers
 once. Concurrent batches count invalidation revisions per resource, scoped to
 the SDK instance and the directory owners. A revision received during a request
 earns one trailing read; all invalidations during that read coalesce again.
 Callers wait for the latest revision's read. Entries leave the map when settled;
-a later edit still refreshes. Agents retain the ambient project and event
+a later edit still refreshes. Agents and commands retain the ambient project and event
 locations without reading unrelated directories. Separate refreshes per kind
 were rejected because their invalidations retired each other's fresh reads.
 
@@ -217,7 +233,10 @@ minute, refetched only while the control that asks is open; a config change
 or malformed fetch keeps the previous answer: an unreachable server is not
 evidence that the model went away. Callers with a graceful fallback (a note kept
 verbatim, a reply spoken in full) do not consult it; they silence the 404 on
-`requestSmallModel` instead.
+`requestSmallModel` instead. A folder-trust refusal (403
+`opencode_trust_required`) on `requestSmallModel` shows the server's
+instructions for the folder, never the model-settings advice: the model is fine,
+the folder is paused.
 
 ### UI state stores
 
@@ -279,7 +298,7 @@ Examples:
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
 
-These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. Context surfaces open in zones around the chat (`lib/surfaces/DOCUMENTATION.md`, Zones): `contextSurfaceZones` is the per-device placement, and each `contextPanelByDirectory` entry keeps the right zone in its top-level `isOpen`/`expanded`/`activeTabId` and the left and bottom zones in `zones`. Store version 24 added them; older state loads with everything on the right. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. A browser tab opened by an agent (`openAgentBrowserTab`) is created in the calling session's directory and persists that session as `ownerSessionId`; tabs the user opens, and tabs saved before owners existed, have none. Agent browser actions use it to keep sessions out of each other's tabs (`packages/web/server/lib/browser-control/DOCUMENTATION.md`). Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. A waiting tab retries after a pause that grows from 0.5 s to 4 s within its 40 s wait. While it is out of sight (another tab in front, the panel closed, another project on screen, the window hidden) it holds the retry and retries when shown again; a tab the agent opened or has acted on keeps retrying out of sight. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
+These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. Context surfaces open in zones around the chat (`lib/surfaces/DOCUMENTATION.md`, Zones): `contextSurfaceZones` is the per-device placement, and each `contextPanelByDirectory` entry keeps the right zone in its top-level `isOpen`/`expanded`/`activeTabId` and the left and bottom zones in `zones`. Store version 24 added them; older state loads with everything on the right. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. A browser tab opened by an agent (`openAgentBrowserTab`) is created in the calling session's directory and persists that session as `ownerSessionId`; tabs the user opens, and tabs saved before owners existed, have none. Agent browser actions use it to keep sessions out of each other's tabs (`packages/web/server/lib/browser-control/DOCUMENTATION.md`). Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. A waiting tab retries after a pause that grows from 0.5 s to 4 s within its 40 s wait. The wait has no limit while a project action that opened a page at the same origin is still running (`isProjectActionRunningAtOrigin`: a terminal tab with that `previewUrl` whose action is not stopping or exited), since its server may take any time to come up; once the action stops, quick retries go on for 3 s, for a start script that exits with its servers left running, and then the failure shows. Names under `localhost` (`myapp.localhost`, where a local proxy serves a project) wait the same way, though they stay out of `isLoopbackUrl`, which also decides what goes through the dev tunnel. While it is out of sight (another tab in front, the panel closed, another project on screen, the window hidden) it holds the retry and retries when shown again; a tab the agent opened or has acted on keeps retrying out of sight. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
 
 Context-panel session chats render in this app as a chat column pinned to
 their session (`ChatView` `pinnedSession`, see the sync documentation's
@@ -444,12 +463,10 @@ runtime switch resets the store. VS Code keeps it empty: it has no OpenChamber
 server and no panel.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
-The VS Code foreground delivery gate holds an idle parent while a live busy or
-retry descendant runs, following up to 8 parent links through the cached sync
-session index. It rechecks on status and session-topology changes. Activity
-comes from the queue directory's live status map; unrelated active trees and
-background shells do not hold delivery. This is a queue-specific exception to
-the own-session send status described in `../sync/DOCUMENTATION.md`.
+The VS Code foreground delivery gate uses the session's own status from the
+queue directory's live status map, like a direct send: a parent idle while its
+background subagents or commands run gets the next queued message, as on the
+server (`packages/web/server/lib/message-queue/DOCUMENTATION.md`).
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.
 Scheduled queue items also retain their `scheduledTask` provenance. An inherited

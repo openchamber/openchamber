@@ -36,10 +36,11 @@ test('a saved annotation callback captures both current destinations and keeps t
   useInputStore.setState({
     composerAddress: fork,
     attachedFiles: [], attachmentDraftKey: null, attachmentDrafts: new Map(),
-    addAttachedFile: async (file, target) => {
+    addAttachedFile: async (file, target, onAttached) => {
       expect(target).toEqual(parent.attachments);
       await screenshotReady;
       useInputStore.getState().addRestoredAttachment({ url: 'data:image/png;base64,AA==', mimeType: file.type, filename: file.name }, target);
+      onAttached?.(useInputStore.getState().getAttachedFiles(target).slice(-1));
       return true;
     },
   });
@@ -63,6 +64,7 @@ test('a saved annotation callback captures both current destinations and keeps t
     await act(async () => { await pending; });
     const drafts = useInlineCommentDraftStore.getState();
     expect(drafts.getDrafts({ directory, sessionKey: 'ses_parent' })[0]?.code).toContain('Screenshot: attached');
+    expect(drafts.getDrafts({ directory, sessionKey: 'ses_parent' })[0]?.screenshot).toBe('annotation.png');
     expect(drafts.getDrafts({ directory, sessionKey: 'ses_fork' })).toEqual([]);
     expect(useInputStore.getState().getAttachedFiles(parent.attachments)).toHaveLength(1);
     expect(useInputStore.getState().getAttachedFiles(fork.attachments)).toEqual([]);
@@ -106,7 +108,10 @@ test('an annotation keeps its comment when the shared session limit is full', as
       });
     });
     const drafts = useInlineCommentDraftStore.getState();
-    expect(drafts.getDrafts({ directory, sessionKey: 'ses_new' })[0]?.code).toContain('Comment: Change this');
+    // The comment is the draft's own text; the prompt for the model leaves it out.
+    const [saved] = drafts.getDrafts({ directory, sessionKey: 'ses_new' });
+    expect(saved?.text).toBe('Change this');
+    expect(saved?.code).not.toContain('Comment:');
     expect(drafts.getDrafts({ directory, sessionKey: 'ses_0' })).toHaveLength(1);
   } finally {
     await act(async () => root.unmount());

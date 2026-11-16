@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseMetadata } from '@/lib/metadataParse';
 import type { Metadata, Session } from '@/lib/opencode/model';
 
 /**
@@ -22,14 +23,14 @@ export type SessionWork = z.infer<typeof workSchema>;
 const namespaceSchema = z.object({ openchamber: z.object({ work: workSchema }) });
 
 export function getSessionWork(session: Session | null | undefined): SessionWork | null {
-  return namespaceSchema.safeParse(session?.metadata).data?.openchamber.work ?? null;
+  return parseMetadata(namespaceSchema, session?.metadata).data?.openchamber.work ?? null;
 }
 
 const inWorkSchema = z.object({ openchamber: z.object({ work: z.object({ state: z.literal('open') }) }) });
 
 /** Membership in the sidebar's "In work" block. */
 export function isSessionInWork(session: Session | null | undefined): boolean {
-  return inWorkSchema.safeParse(session?.metadata).success;
+  return parseMetadata(inWorkSchema, session?.metadata).success;
 }
 
 /**
@@ -50,7 +51,7 @@ const reviewOfferSchema = z.object({ openchamber: z.object({ reviewOffer: z.obje
  * freshness rule, and a current done hint takes the slot instead.
  */
 export function isReviewSuggested(session: Session | null | undefined): boolean {
-  const offeredAt = reviewOfferSchema.safeParse(session?.metadata).data?.openchamber.reviewOffer.at;
+  const offeredAt = parseMetadata(reviewOfferSchema, session?.metadata).data?.openchamber.reviewOffer.at;
   return isHintCurrent(session, offeredAt) && !isDoneSuggested(session);
 }
 

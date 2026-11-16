@@ -115,7 +115,10 @@ export const MobileSwipeActionsRow: React.FC<{
       data-active-session={dataActiveSession || undefined}
       // Rounded as the desktop's rows are: the list is inset from the screen's
       // edges, and the selection and a swipe's actions keep the row's shape.
-      className="relative overflow-hidden rounded-lg"
+      // `oc-row-clip` and not `overflow-hidden`: on a phone that class becomes
+      // `overflow-y: auto` (see styles/mobile.css), so the row turned into a
+      // scroller of its own and swallowed a drag that started on it.
+      className="relative oc-row-clip rounded-lg"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

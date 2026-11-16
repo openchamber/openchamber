@@ -4,6 +4,7 @@ import { getSettingsSurface } from '@/lib/settings/surface';
 import { getRuntimeKey, isTransientRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import type { SettingsSurface } from '@/lib/settings/registry';
 import {
+  clampSessionBatchSize,
   DEFAULT_SIDEBAR_SECTIONS,
   hiddenSidebarSectionsSchema,
   sidebarPinListsSchema,
@@ -48,6 +49,14 @@ type SessionDisplayStore = {
   /** A work in the Pinned block also stays in its project or folder, and in In work; on by default. */
   keepPinnedInPlace: boolean;
   setKeepPinnedInPlace: (keep: boolean) => void;
+  /**
+   * How many works a project, a worktree, Pinned or one of the user's sections
+   * shows before Show more, and how many each Show more adds. Null until the
+   * user sets it: a project then shows 7 (20 in single-project mode, 10 in
+   * VS Code).
+   */
+  sessionBatchSize: number | null;
+  setSessionBatchSize: (size: number) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -182,6 +191,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setKeepWorkInPlace: (keep) => set({ keepWorkInPlace: keep }),
       keepPinnedInPlace: true,
       setKeepPinnedInPlace: (keep) => set({ keepPinnedInPlace: keep }),
+      sessionBatchSize: null,
+      setSessionBatchSize: (size) => set({ sessionBatchSize: clampSessionBatchSize(size) }),
       showChatsSection: true,
       showWorkSection: true,
       // On for new installs: pinned work gets its own block on top. Stored

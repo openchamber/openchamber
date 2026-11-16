@@ -199,6 +199,9 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
       ci: capabilities.ci,
       comments: capabilities.comments,
+      // Declared, not inherited from `comments`: an extension that only posts
+      // must not gain the edit and delete routes.
+      commentEdit: capabilities.commentEdit === true,
       reviews: capabilities.reviews,
       state: capabilities.state,
       labels: capabilities.labels,
@@ -269,6 +272,13 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
+        issueEdit: presentation.features.issueEdit === true,
+        changeRequestEdit: presentation.features.changeRequestEdit === true,
+        // The box is a plain search: the standard routes pass it as text only.
+        advancedSearch: false,
+        // The same switch as the capability: it gates the edit and delete routes,
+        // so publishing it from anywhere else would offer a write that 501s.
+        commentEdit: capabilities.commentEdit === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

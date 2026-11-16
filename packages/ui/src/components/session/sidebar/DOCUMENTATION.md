@@ -300,8 +300,8 @@ no Shift.
   always shown, since there is no hover to reveal it: in the slot of a
   one-line row, over the second line's first icon of a two-line row, in a
   thumb-sized target. The live state sits on the right before the time on
-  every row, and the marks before it come in the desktop's order (the goal,
-  the PR, the requests waiting on the user, the pin, the done hint). No row
+  every row, and the marks before it come in the desktop's order (the done
+  hint, the goal, the PR, the requests waiting on the user, the pin). No row
   shows a date, as on the
   desktop: the list is ordered by recency; a turn's duration shows while it
   runs and until it is read.
@@ -651,7 +651,7 @@ the same Mark all as read.
 - Chats rows are one line with the tree's slot (`'tree-chat'`). Chats open
   with a reveal of 3 and 7 more per Show more; pinned chats are always shown
   and never spend that limit. Pinned sessions under a project do spend its
-  limit, so a project or worktree list never opens with more than 7.
+  limit, so a project or worktree list never opens with more than its batch.
   Collapsing a zone header resets its Show more state.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
@@ -897,8 +897,9 @@ chevron, while its saved collapse stays and its delete dialog counts the members
 - A detailed zone row has two lines of fixed height (20px and 16px). An empty
   second line is omitted; a project icon, branch, goal, linked reference,
   waiting request or expansion chevron keeps it visible, and an extension's
-  mark never does. The first holds the title and the action indicator, pin, done hint,
-  status icon and time; hover actions cover that cluster. The second opens
+  mark never does. The first holds the title and the done hint, action indicator, pin,
+  status icon and time; hover actions cover that cluster. The done hint comes and
+  goes, so it opens the cluster: the marks that stay keep their place at the row's end. The second opens
   with the project's icon (and its name, with several projects) and holds the
   branch (or the space's name) and the state cluster: goal glyph, PR (or the zombie warning), extension marks,
   permission/question badges. It shows no provider logo: the model's provider says nothing about
@@ -1197,6 +1198,7 @@ rest it is as quiet as the button was.
 - Hide speculative work when the sidebar/chat surface is hidden: message prefetch, Git/PR enrichment and subscriptions, search listeners, sticky-header observation, and archived-folder derivation stop. Paused work keeps its last result (branches, repository status) instead of clearing it, so reopening neither re-reads every project's Git status nor redraws the list without it. Once shown, the session row tree stays mounted while the desktop sidebar is closed: rebuilding and re-measuring it was the bulk of the reopen frame (`SessionProjectCollection`). The closed sidebar skips its rendering (`content-visibility: hidden` after the close animation, `inert`), so row-owned status, permission and unseen subscriptions still re-render rows on events but cause no style or layout work. The outer sidebar remains mounted, preserving UI state and authoritative directory refresh for an immediate reopen; deferred derived work reruns from current state when visibility returns.
 - A mouse resting within 18 px of the window's start edge below the titlebar while the desktop sidebar is closed shows it over the chat (`useSidebarPeek` in `components/layout`). The edge is measured from document pointer moves; no element sits there, so nothing under it loses clicks. The column stays at zero width, so the chat does not move; the same mounted tree slides out with its rendering resumed and `inert` lifted, and counts as visible for the work above. It slides back once the pointer has been away for 300 ms, on a click outside it, or on Escape. A menu or dialog opened from it (anything with a popup role portalled outside `#root`) or an inline rename holding focus keeps it out until done.
 - Change-request enrichment uses worktree topology only to discover at most 50 unique demanded directories in stable project order. Repository binding selects the primary provider, instance, account, revision, and primary remote; connected accounts outside that binding add no requests, and missing or `needs-attention` bindings create no provider request. The discovery effect keys its restart on the candidate set rather than on row order (`sourceControlDiscoverySignature`): ordinary session activity reorders rows constantly, and a reorder re-reads no binding and spawns no Git process for one (#6084).
+- Over the relay the discovery reads its bindings together, eight at a time inside one background slot (`readWithConcurrency`). Every request there rides one tunnel, so the background gate has no connection pool to protect, and two reads at a time left twenty worktrees waiting seconds of round trips for their branch markers. Direct connections keep one gated read per directory.
 - Binding discovery shares the [repository binding owner](../../../lib/source-control/DOCUMENTATION.md) with editors and pickers. Mounted directory subscriptions refresh affected status demand after binding mutations; the existing status timer does not poll repository bindings. Auth-entry changes update only directories using that entry and do not release or reload bindings.
 - Linked change requests and issues take one path whatever their provider. `getLinkedSidebarChanges` and `getLinkedSidebarIssues` (`lib/linkedIssues.ts`) read each link's address through `useRepositoryUrlMatcher()` into a `RepositoryThreadRef`; rows, worktree headers and the list's followed items (`repositoryRefs` in `list/SessionProjectCollection.tsx`) turn it into a tracked item with `repositoryThread(kind, ref)` and read one `repositoryStates` array (`buildSessionIssueItems`). A change whose state has not arrived is listed uncoloured by its provider's reference (`#12`, `!12`), as is any change no provider reads. The row's reference and status wording come from the provider's descriptor (`formatChangeRequestReference`, `getPrStatusLabel(summary, term, t)`); no surface here names a provider. Tracker items (`source: 'tracker'`, a Linear issue) are followed as `workItem(provider, identifier)` and read through `useTrackedWorkItemStates`: the tracker's own state name, in the issue colour of its category (`getTrackerItemStateLook`), with the tracker's mark from `lib/trackers/presentation.ts`.
 - A worktree's PR badge reads the read contexts the sidebar registered for its directory. When the shown directories change (a sibling worktree deleted or created, a branch renamed), a directory still shown keeps its registration until the fresh read replaces it; only directories that left the shown set, or were registered under another runtime, are released (`list/registeredContextDirectories.ts`), and unmount releases all. Releasing every directory on each change blanked every other badge and branch tint until the binding reads came back (issue 5160).
@@ -1254,7 +1256,7 @@ rest it is as quiet as the button was.
   state (running kind, unread, the move/rename spinner) sits on the right
   before the time. With the state in the slot a running worktree read as a
   chat, its branch mark gone (maintainer, 2026-10-26). Session rows use the
-  one-line form of `SessionTimelineRowBody`: pin, done hint, the live state
+  one-line form of `SessionTimelineRowBody`: done hint, pin, the live state
   and, while a turn runs or until it is read, the turn's duration on the
   right. No row shows a date:
   every list is ordered by recency and the whole-row tooltip has the time.
@@ -1386,10 +1388,16 @@ rest it is as quiet as the button was.
   collapsed folder headers. It includes descendant activity without mounting
   those sessions; a subtask is never unread on its own. Expanded and archived
   folders do not derive hidden activity.
-- Single-project flat mode reveals 20 root sessions initially and 20 per Show
-  more; Show less resets to 20. Chats keeps its reveal of 3. Elsewhere a
-  Tree worktree group reveals 7 sessions, 7 more per Show more, and 10 in
-  VS Code. Show more and Show less share one row under the list, in the
+- One number sets the reveal of projects, worktrees, Pinned and the user's
+  sections: they show that many works, that many more per Show more, and
+  Show less folds back to it (`sessionBatchSize`, the profile setting
+  `sidebarSessionBatchSize`, 3 to 50, set in the sections manager; the phone
+  has no control and follows it). Unset, a project shows 7, 10 in VS Code,
+  and VS Code's single-project flat mode 20. A run or a worktree spends one
+  slot. Chats keeps its reveal of 3, and In work and the list by time list
+  everything: In work is what is being worked on now, and the list by time is
+  the whole sidebar (maintainer, 2026-11-14). A search shows every match in
+  a zone. Show more and Show less share one row under the list, in the
   micro size so it reads as a control rather than a row: Show more while
   something is hidden, Show less once more than the first batch shows
   (maintainer, 2026-10-27). Reveal
@@ -1411,7 +1419,7 @@ rest it is as quiet as the button was.
 - Cleanup after a PR merge is opt-in (`mergedWorktreeCleanupEnabled`, Settings → Sessions → Finished worktrees, beside archiving on Done, off by default; maintainer decision 2026-10-02). `hooks/useMergedWorktreeCleanup.ts` reads the bound branch PR status (`getFreshestBranchStatusForDirectory`) for each discovered linked worktree and, while the setting is on, has the server follow the open PR of every such worktree, collapsed projects included, so a merge is seen without its row on screen; finding a branch's first PR stays with the rows on screen, and `lib/worktrees/mergedWorktreeCleanup.ts` decides: wait while the host reports a session there running or cannot be asked, a background command runs there, the open session is there, or the worktree is the directory on screen (`lib/worktrees/worktreeUse.ts`, shared with Overview and Works); otherwise archive the worktree with its sessions. An archive keeps uncommitted work and commits outside the merged PR, so the earlier rule (remove only a checkout with nothing to lose, keep the rest) is gone with the checks it needed. A worktree and PR pair that was archived or restored is done with (remembered in local storage). A failed archive is retried after 1, 5 and 15 minutes, then hourly, with a toast only for the first failure; the retry state lives for the app run, so a reload tries again at once. A worktree being archived or removed right now is skipped, so Done and a pass never archive it twice; a worktree the user restored from the archive is marked handled for its PR on the next pass (`takeRestoredWorktree`), since restoring a merged worktree is taking it back. It runs on desktop and web only; VS Code has no worktrees and a phone would race the desktop it drives.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event re-lists the worktrees of the session's project, or of every project when the session's directory is not a project root or a known worktree, so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch.
-- `useProjectRepoStatus` reads Git status once per project path while the sidebar is visible. A change to the project list that adds no path (collapse, rename, color, last opened) reads nothing; an added project reads only its own status; a failed read is retried on the next list change. New paths are first read together through `GitAPI.prefetchProjectStatuses`, one batched request that warms the status cache, so the per-project reads after it are cache hits; VS Code has no batched read and reads one by one. Hiding the sidebar or switching runtime starts over.
+- `useProjectRepoStatus` reads Git status once per project path while the sidebar is visible. A change to the project list that adds no path (collapse, rename, color, last opened) reads nothing; an added project reads only its own status; a failed read is retried on the next list change. New paths are prefetched through `GitAPI.prefetchProjectStatuses` while the store joins each directory's own promise. The HTTP adapter streams each completed directory into its cache and store without waiting for the batch; VS Code keeps its native bridge reads. Hiding the sidebar preserves its known paths; showing it re-ensures them, and switching runtime starts over.
 - Structural updates rebuild grouped nodes only for projects whose local sessions, worktrees, repository state, branch, or worktree-ordering ranks changed; unchanged project sections preserve references so memoized group/session descendants skip the update wave. The grouping builder therefore keeps its identity across inputs the section cache compares per project: it reads git branches and lifecycle ranks at call time, and keeps the session ownership map while every session's scope directory is unchanged (the ownership index itself is rebuilt on any session-list change). Without a search query every group shares one empty search-data map, so a rebuilt section does not invalidate the others' group headers.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.

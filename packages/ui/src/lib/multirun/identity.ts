@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseMetadata } from '@/lib/metadataParse';
 import type { JsonValue, Metadata, Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { parseMultiRunSessionTitle } from './title';
@@ -43,13 +44,13 @@ export const multiRunGroupKey = (group: MultiRunMembership['group'], groupSlug: 
   group.kind === 'id' ? JSON.stringify(['id', group.id]) : JSON.stringify(['legacy', group.scope, groupSlug]);
 
 export function getMultiRunMembership(session: Session): MultiRunMembership | null {
-  const envelope = membershipEnvelopeSchema.safeParse(session.metadata?.openchamber);
+  const envelope = parseMetadata(membershipEnvelopeSchema, session.metadata?.openchamber);
   return envelope.success && envelope.data.multirun.sessionID === session.id ? envelope.data.multirun : null;
 }
 
 /** A present marker is authoritative, even if pending, invalid, or inherited by a fork. */
 export function getMultiRunIdentity(session: Session, legacyDirectory = session.directory): MultiRunIdentity | null {
-  const parsedOpenchamber = openchamberSchema.safeParse(session.metadata?.openchamber);
+  const parsedOpenchamber = parseMetadata(openchamberSchema, session.metadata?.openchamber);
   const openchamber = parsedOpenchamber.success ? parsedOpenchamber.data : null;
   if (openchamber && Object.hasOwn(openchamber, 'multirun')) {
     const membership = getMultiRunMembership(session);

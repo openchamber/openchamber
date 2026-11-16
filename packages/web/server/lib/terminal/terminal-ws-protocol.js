@@ -1,5 +1,10 @@
+import { gzipSync } from 'node:zlib';
+
 export const TERMINAL_WS_PATH = '/api/terminal/ws';
 export const TERMINAL_WS_CONTROL_TAG_JSON = 0x01;
+// The JSON of a control frame, gzipped. Sent only for a snapshot whose attach asked for it.
+export const TERMINAL_WS_CONTROL_TAG_GZIP_JSON = 0x02;
+const TERMINAL_WS_GZIP_MIN_BYTES = 4 * 1024;
 export const TERMINAL_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
 
 export const parseRequestPathname = (requestUrl) => {
@@ -57,8 +62,11 @@ export const readTerminalWsControlFrame = (rawData) => {
   }
 };
 
-export const createTerminalWsControlFrame = (payload) => {
+export const createTerminalWsControlFrame = (payload, { gzip = false } = {}) => {
   const jsonBytes = Buffer.from(JSON.stringify(payload), 'utf8');
+  if (gzip && jsonBytes.length >= TERMINAL_WS_GZIP_MIN_BYTES) {
+    return Buffer.concat([Buffer.from([TERMINAL_WS_CONTROL_TAG_GZIP_JSON]), gzipSync(jsonBytes)]);
+  }
   return Buffer.concat([Buffer.from([TERMINAL_WS_CONTROL_TAG_JSON]), jsonBytes]);
 };
 

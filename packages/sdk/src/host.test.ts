@@ -1187,3 +1187,154 @@ describe('connectHost resolve and badge', () => {
     host.dispose();
   });
 });
+
+describe('openMicrophone', () => {
+  type FakeProcessor = { onaudioprocess: ((event: { outputBuffer: { getChannelData: () => Float32Array } }) => void) | null; connected: boolean };
+  const installAudio = () => {
+    const made: { processor: FakeProcessor; stopped: () => boolean; closed: () => boolean }[] = [];
+    class FakeAudioContext {
+      sampleRate = 48_000;
+      state = 'running';
+      private closedFlag = false;
+      private trackStopped = false;
+      constructor() {
+        const processor: FakeProcessor = { onaudioprocess: null, connected: false };
+        made.push({ processor, stopped: () => this.trackStopped, closed: () => this.closedFlag });
+        this.processor = processor;
+      }
+      processor: FakeProcessor;
+      createScriptProcessor() {
+        const processor = this.processor;
+        return Object.assign(processor, { connect: () => { processor.connected = true; }, disconnect: () => { processor.connected = false; } });
+      }
+      createMediaStreamDestination() {
+        return { stream: { getTracks: () => [{ stop: () => { this.trackStopped = true; } }] } };
+      }
+      resume() { return Promise.resolve(); }
+      close() { this.closedFlag = true; return Promise.resolve(); }
+    }
+    const previous = globalThis.AudioContext;
+    Object.defineProperty(globalThis, 'AudioContext', { value: FakeAudioContext, configurable: true, writable: true });
+    return { made, restore: () => Object.defineProperty(globalThis, 'AudioContext', { value: previous, configurable: true, writable: true }) };
+  };
+
+  const microphoneReady = { ...ready, payload: { ...ready.payload, features: { microphone: true } } };
+  const connect = () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    guest.dispatch(new MessageEvent('message', { data: microphoneReady }));
+    const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION } as const;
+    const deliver = (data: HostMessage) => guest.dispatch(new MessageEvent('message', { data }));
+    const answer = (id: string, outcome: { ok: true } | { ok: false; error: string; code: 'DENIED' }) => deliver(
+      outcome.ok ? { ...envelope, type: 'result', id, ok: true, payload: { opened: true } } : { ...envelope, type: 'result', id, ...outcome },
+    );
+    const pushAudio = (samples: Float32Array<ArrayBuffer>) => deliver({ ...envelope, type: 'microphone-audio', payload: { samples } });
+    const pushEnded = () => deliver({ ...envelope, type: 'microphone-ended', payload: { reason: 'revoked' } });
+    return { parent, guest, host, answer, pushAudio, pushEnded };
+  };
+  const lastOpen = (posted: GuestMessage[]) => {
+    const open = posted.filter((message) => message.type === 'microphone-open').at(-1);
+    if (!open) throw new Error('No microphone-open was posted.');
+    return open;
+  };
+  const closes = (posted: GuestMessage[]) => posted.filter((message) => message.type === 'microphone-close').length;
+
+  test('is UNSUPPORTED on a host without the feature, before asking anything', async () => {
+    const audio = installAudio();
+    try {
+      const frame = createFrame();
+      const host = connectHost({ target: frame, acceptSource: () => true });
+      frame.dispatch(new MessageEvent('message', { data: ready }));
+      await expect(host.openMicrophone()).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+      expect(frame.posted.some((message) => message.type === 'microphone-open')).toBe(false);
+      expect(audio.made).toHaveLength(0);
+      host.dispose();
+    } finally {
+      audio.restore();
+    }
+  });
+
+  test('asks at the frame rate, plays host audio into the stream, and closes on both sides', async () => {
+    const audio = installAudio();
+    try {
+      const { parent, host, answer, pushAudio } = connect();
+      const opening = host.openMicrophone();
+      const request = lastOpen(parent.posted);
+      expect(request).toMatchObject({ payload: { sampleRate: 48_000 } });
+      answer(request.id, { ok: true });
+      const microphone = await opening;
+      await expect(host.openMicrophone()).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+
+      pushAudio(new Float32Array([0.5, -0.5]));
+      const out = new Float32Array(3);
+      audio.made[0].processor.onaudioprocess?.({ outputBuffer: { getChannelData: () => out } });
+      expect([...out]).toEqual([0.5, -0.5, 0]);
+
+      microphone.close();
+      microphone.close();
+      expect(closes(parent.posted)).toBe(1);
+      expect(audio.made[0].stopped()).toBe(true);
+      expect(audio.made[0].closed()).toBe(true);
+      host.dispose();
+    } finally {
+      audio.restore();
+    }
+  });
+
+  test('a refusal rejects with its code, releases the frame audio, and tells the host to let go', async () => {
+    const audio = installAudio();
+    try {
+      const { parent, host, answer } = connect();
+      const opening = host.openMicrophone();
+      answer(lastOpen(parent.posted).id, { ok: false, error: 'Microphone access was refused.', code: 'DENIED' });
+      await expect(opening).rejects.toMatchObject({ code: 'DENIED' });
+      expect(audio.made[0].stopped()).toBe(true);
+      expect(closes(parent.posted)).toBe(1);
+      // Nothing stays open, so the user can try again.
+      const again = host.openMicrophone();
+      answer(lastOpen(parent.posted).id, { ok: true });
+      await expect(again).resolves.toBeDefined();
+      host.dispose();
+    } finally {
+      audio.restore();
+    }
+  });
+
+  test('the host ending the capture reaches onEnded and ends the stream', async () => {
+    const audio = installAudio();
+    try {
+      const { parent, host, answer, pushEnded } = connect();
+      const opening = host.openMicrophone();
+      answer(lastOpen(parent.posted).id, { ok: true });
+      const microphone = await opening;
+      const reasons: string[] = [];
+      microphone.onEnded((reason) => reasons.push(reason));
+      pushEnded();
+      expect(reasons).toEqual(['revoked']);
+      expect(audio.made[0].stopped()).toBe(true);
+      // Closing after the host ended it sends nothing more.
+      microphone.close();
+      expect(closes(parent.posted)).toBe(0);
+      host.dispose();
+    } finally {
+      audio.restore();
+    }
+  });
+
+  test('dispose releases an open microphone on the host', async () => {
+    const audio = installAudio();
+    try {
+      const { parent, host, answer } = connect();
+      const opening = host.openMicrophone();
+      answer(lastOpen(parent.posted).id, { ok: true });
+      await opening;
+      host.dispose();
+      expect(closes(parent.posted)).toBe(1);
+      expect(audio.made[0].stopped()).toBe(true);
+    } finally {
+      audio.restore();
+    }
+  });
+});

@@ -10,8 +10,8 @@ import { cn } from '@/lib/utils';
 /**
  * What a session row or aggregate is showing: its own turn running
  * (busy/retry), a pause kept open by a workflow run, a background subagent, a
- * background command or image, an agent waiting on its pull request or on an
- * extension, or a finished turn the user has not seen.
+ * background command or image, an agent waiting on its pull request, a timer
+ * or an extension, or a finished turn the user has not seen.
  */
 type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait' | 'unread';
 

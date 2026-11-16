@@ -1,4 +1,5 @@
 import { toServerFileUrl } from '@/components/chat/composer/attachments/filePaths';
+import { attachmentBasename, withMissingCitations } from '@/lib/attachmentIdentity';
 import { createChatDraftIdentity, getChatDraftIdentityKey, workDraftComposerKey } from '@/lib/chatDraftPersistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { hasUnsyncedSessionDraft, readSessionDraftAttachment, type SessionDraft } from '@/stores/useSessionDraftsStore';
@@ -34,7 +35,10 @@ export async function openSessionDraft(draft: SessionDraft): Promise<boolean> {
       : []
   ));
   // The composer applies it once it shows this draft, over what it kept of it.
-  useInputStore.setState({ pendingComposerRestore: { target, text: draft.text, files: pathFiles } });
+  // The text names every attachment: a send includes only the files its text
+  // cites, and the files stored on the server arrive after the text is shown.
+  const text = withMissingCitations(draft.text, draft.attachments.map((attachment) => ({ filename: attachmentBasename(attachment.filename) })));
+  useInputStore.setState({ pendingComposerRestore: { target, text, files: pathFiles } });
 
   const stored = draft.attachments.filter((attachment) => attachment.kind === 'data');
   if (stored.length === 0) return true;

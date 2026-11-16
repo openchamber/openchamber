@@ -238,6 +238,12 @@ export interface SourceControlAuthAccount {
   user: SourceControlUser;
   scope?: string;
   current: boolean;
+  /**
+   * Whether a binding may pick this account now. Stored accounts are always
+   * usable; a gh login only while its host's switch is on. Absent from older
+   * servers and other providers, where `current` still decides a CLI login.
+   */
+  usable?: boolean;
   source: 'oauth' | 'pat' | 'cli';
   status: 'valid' | 'invalid';
 }
@@ -341,6 +347,10 @@ export interface IssueComment extends SourceControlIdentity {
   author?: SourceControlUser | null;
   createdAt?: string;
   updatedAt?: string;
+  /** Whether this account may replace this comment; absent when the host does not say. */
+  canUpdate?: boolean;
+  /** Whether this account may remove this comment; absent when the host does not say. */
+  canDelete?: boolean;
   /** The thread the comment is in, when read for the preview's timeline (GitLab merge requests). */
   thread?: CommentThreadRef;
 }
@@ -742,6 +752,18 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
   body?: string;
 }
 
+/** An issue's title and body, replaced together; an empty body clears it. */
+export interface UpdateIssueInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
+/** A discussion's title and body, replaced together; an empty body clears it. */
+export interface UpdateDiscussionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
   /** GitHub only: remove from the queue or disable auto-merge. */
@@ -755,6 +777,17 @@ export type DraftChangeRequestInput = SourceControlMutationContext<SourceControl
 /** A comment on a change request, or on an issue (the target names its number). */
 export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   body: string;
+}
+
+/** Replace a conversation comment's text (an issue's, a change request's or a discussion's). */
+export interface CommentUpdateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+  body: string;
+}
+
+/** Remove a conversation comment. */
+export interface CommentDeleteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
 }
 
 /** A reply in a change request's review thread; `threadId` is the host's id for it. */

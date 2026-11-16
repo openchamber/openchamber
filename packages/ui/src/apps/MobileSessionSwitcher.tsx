@@ -10,7 +10,8 @@ import { useSwitcherItems } from '@/components/session/sidebar/shell/useSwitcher
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessionsWhenShown, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS } from '@/hooks/useGlobalSessionsPolling';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
@@ -136,9 +137,10 @@ export const MobileSessionSwitcher: React.FC<{
 
   React.useEffect(() => {
     if (open) {
-      // Fresh authoritative snapshot on open — updated stamps re-sort recents
+      // The newest sessions are read on open: updated stamps re-sort recents
       // (see raiseSessionOrderingBaselines) while the cached list shows first.
-      void refreshGlobalSessions();
+      // The complete snapshot is read only once it is ten minutes old.
+      void refreshGlobalSessionsWhenShown(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS);
       setShouldRender(true);
       setIsExiting(false);
       return;

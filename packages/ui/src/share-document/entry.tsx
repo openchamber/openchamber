@@ -27,7 +27,7 @@ function installStyles(expectAnswer: boolean) {
   const generator = new CSSVariableGenerator();
   const style = document.createElement('style');
   style.textContent = `${appCss}\n:root{\n${generator.generate(lightTheme)}\n}\n@media (prefers-color-scheme: dark){:root{\n${generator.generate(darkTheme)}\n}}\n`
-    + 'html,body{height:auto;min-height:100%;overflow:auto;background:var(--background);color:var(--foreground)}'
+    + 'html,body{height:auto;min-height:100%;background:var(--background);color:var(--foreground)}html{overflow:auto}body{overflow:visible}'
     + `#${SHARE_PAGE_ROOT_ID}{box-sizing:border-box;max-width:${expectAnswer ? '48rem' : '64rem'};margin:0 auto;padding:24px 16px 40px}`;
   document.head.appendChild(style);
 }

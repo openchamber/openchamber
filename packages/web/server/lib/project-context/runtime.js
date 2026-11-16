@@ -30,6 +30,10 @@ const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 const PROJECT_PLAN_BODY_MAX_LENGTH = 200_000;
 const PROJECT_TODO_MAX_ITEMS = 500;
 const PROJECT_PLAN_MAX_ITEMS = 500;
+/** Where a context's notes and todos came from: `context.json` or the repository file. */
+const NOTES_TODOS_STORE_LOCAL = 'local';
+const NOTES_TODOS_STORE_REPOSITORY = 'repository';
+const MALFORMED_NOTES_TODOS_FILE = 'MALFORMED_NOTES_TODOS_FILE';
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 const PLAN_FILE_PATTERN = /^[a-zA-Z0-9._-]+\.md$/;
@@ -335,12 +339,15 @@ const assertTodoGraph = (previous, next) => {
 };
 
 export const createProjectContextRuntime = (deps) => {
-  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, onChanged } = deps;
+  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, resolveNotesTodosFile, onChanged } = deps;
   // The team's shared plans folder for a project (absolute path) or null; the
   // project config runtime owns that answer (`plansDir` in the shared file).
   const sharedPlansDirFor = typeof resolveSharedPlansDir === 'function'
     ? resolveSharedPlansDir
     : async () => null;
+  // The repository file holding notes and todos (absolute path) or null when
+  // they stay in `context.json`; the project config runtime owns that answer.
+  const resolveNotesTodosFileFor = resolveNotesTodosFile ?? (async () => null);
 
   const planSummaries = createPlanSummaryCache({ fsPromises, parseTitle: (raw) => parsePlanMarkdown(raw).title });
 
@@ -351,6 +358,15 @@ export const createProjectContextRuntime = (deps) => {
       : `plan_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
   const writeLocks = new Map();
+  // The notes and todos file each locked write resolved once, so a read and
+  // the write after it use the same store while the option changes under them.
+  const lockedNotesTodosFiles = new Map();
+  // Successful store switches per project, so a list read before two switches
+  // (local, repository, local again) still differs from the current selection.
+  // The run prefix keeps a count from an earlier server run from matching.
+  const notesTodosSwitches = new Map();
+  const runPrefix = Math.random().toString(36).slice(2, 10);
+  const notesTodosStoreToken = (projectId, store) => `${store}:${runPrefix}.${notesTodosSwitches.get(sanitizeProjectId(projectId)) ?? 0}`;
 
   const sanitizeProjectId = (projectId) => {
     const value = asNonEmptyString(projectId);
@@ -410,8 +426,10 @@ export const createProjectContextRuntime = (deps) => {
 
     await previous;
     try {
+      lockedNotesTodosFiles.set(key, await resolveNotesTodosFileFor(key));
       return await mutate();
     } finally {
+      lockedNotesTodosFiles.delete(key);
       release();
       if (writeLocks.get(key) === chained) {
         writeLocks.delete(key);
@@ -502,8 +520,29 @@ export const createProjectContextRuntime = (deps) => {
     return migrated;
   };
 
+  const notesTodosFileFor = async (projectId) => {
+    const key = sanitizeProjectId(projectId);
+    return lockedNotesTodosFiles.has(key) ? lockedNotesTodosFiles.get(key) : resolveNotesTodosFileFor(key);
+  };
+
   /**
-   * Read the stored context.
+   * Notes and todos from the repository file. A missing file or key is an
+   * empty list; unparsable content (a Git conflict, a bad hand edit) or a
+   * `notes` / `todos` that is not a list fails the read, so no write can
+   * replace it.
+   */
+  const readNotesTodosFile = async (filePath, now) => {
+    const stored = await readJson(filePath);
+    if (stored.missing) return { notes: [], todos: [] };
+    const isList = (value) => value === undefined || Array.isArray(value);
+    if (!stored.value || !isList(stored.value.notes) || !isList(stored.value.todos)) {
+      throw Object.assign(new Error(`Notes and todos file ${filePath} is malformed`), { code: MALFORMED_NOTES_TODOS_FILE });
+    }
+    return { notes: sanitizeNotes(stored.value.notes, now), todos: sanitizeTodos(stored.value.todos, now) };
+  };
+
+  /**
+   * Read `context.json`.
    *
    * Distinguishes the three states the caller must not conflate: a missing
    * file is authoritative empty, malformed JSON is a failure, and an I/O
@@ -516,7 +555,7 @@ export const createProjectContextRuntime = (deps) => {
    * of identical content, so concurrent migrations converge instead of
    * interleaving.
    */
-  const readStoredContext = async (projectId) => {
+  const readLocalContext = async (projectId) => {
     const now = Date.now();
     const stored = await readJson(contextPathFor(projectId));
 
@@ -544,6 +583,24 @@ export const createProjectContextRuntime = (deps) => {
       todos: sanitizeTodos(stored.value.todos, now),
       plans: sanitizePlanLinks(stored.value.plans, now),
       planSessions: sanitizePlanSessions(stored.value.planSessions),
+    };
+  };
+
+  /**
+   * The stored context. With the repository option on, notes and todos come
+   * from the repository file and everything else from `context.json`.
+   * `notesTodosStore` is an opaque token for the store the notes and todos
+   * came from (`local` or `repository`, then the switch count); every
+   * successful switch changes it.
+   */
+  const readStoredContext = async (projectId) => {
+    const local = await readLocalContext(projectId);
+    const notesTodosFile = await notesTodosFileFor(projectId);
+    if (!notesTodosFile) return { ...local, notesTodosStore: notesTodosStoreToken(projectId, NOTES_TODOS_STORE_LOCAL) };
+    return {
+      ...local,
+      ...(await readNotesTodosFile(notesTodosFile, Date.now())),
+      notesTodosStore: notesTodosStoreToken(projectId, NOTES_TODOS_STORE_REPOSITORY),
     };
   };
 
@@ -638,14 +695,38 @@ export const createProjectContextRuntime = (deps) => {
   /** The folder a manifest plan's file lives in; null for a moved plan when the project lost its shared folder. */
   const folderOfLink = async (projectId, link) => (link.shared ? sharedPlansDirFor(projectId) : plansDirFor(projectId));
 
+  /**
+   * With the repository option on, notes and todos go to the repository
+   * file and plans to `context.json`, each written only when its part
+   * changed: a note or todo write commits to one file, a plan edit leaves Git
+   * clean, and `context.json` keeps its own notes and todos byte for byte.
+   * A write that still changes both (a `shared:` plan that is unshared or
+   * deleted while entries link to it) commits `context.json` first.
+   */
   const writeContext = async (projectId, context) => {
-    await writeJsonAtomic(contextPathFor(projectId), {
+    const local = {
       version: PROJECT_CONTEXT_VERSION,
       notes: context.notes,
       todos: context.todos,
       plans: context.plans,
       planSessions: context.planSessions ?? {},
-    });
+    };
+    const notesTodosFile = await notesTodosFileFor(projectId);
+    if (!notesTodosFile) {
+      await writeJsonAtomic(contextPathFor(projectId), local);
+      onChanged?.(sanitizeProjectId(projectId));
+      return;
+    }
+    const now = Date.now();
+    const kept = (await readJson(contextPathFor(projectId))).value ?? {};
+    const keptPlans = { plans: sanitizePlanLinks(kept.plans, now), planSessions: sanitizePlanSessions(kept.planSessions) };
+    if (JSON.stringify(keptPlans) !== JSON.stringify({ plans: local.plans, planSessions: local.planSessions })) {
+      await writeJsonAtomic(contextPathFor(projectId), { ...local, notes: kept.notes ?? [], todos: kept.todos ?? [] });
+    }
+    const next = { notes: context.notes, todos: context.todos };
+    if (JSON.stringify(await readNotesTodosFile(notesTodosFile, now)) !== JSON.stringify(next)) {
+      await writeJsonAtomic(notesTodosFile, { version: 1, ...next });
+    }
     onChanged?.(sanitizeProjectId(projectId));
   };
 
@@ -680,8 +761,12 @@ export const createProjectContextRuntime = (deps) => {
    * Replaces the whole list. A listed todo that already exists keeps the plan
    * link and dependencies its entry omits, so a client that does not know
    * these fields cannot erase them.
+   *
+   * `store` is the `notesTodosStore` token the client read the list with. A
+   * list read before any switch of the repository option since is refused (409) instead of replacing the
+   * newly selected store with the other one's entries.
    */
-  const saveTodos = async (projectId, todos) => {
+  const saveTodos = async (projectId, todos, { store } = {}) => {
     const entries = Array.isArray(todos) ? todos : [];
     for (const entry of entries) {
       planIdPatch(entry?.planId);
@@ -690,6 +775,9 @@ export const createProjectContextRuntime = (deps) => {
     return withWriteLock(projectId, async () => {
       const now = Date.now();
       const current = await readStoredContext(projectId);
+      if (store !== undefined && store !== current.notesTodosStore) {
+        throw mutationError('Notes and todos moved to another store; reload the list', 409);
+      }
       const stored = new Map(current.todos.map((todo) => [todo.id, todo]));
       const merged = entries.map((entry) => {
         const existing = isObjectRecord(entry) && stored.get(asNonEmptyString(entry.id));
@@ -1113,8 +1201,15 @@ export const createProjectContextRuntime = (deps) => {
       if (!link) {
         return { deleted: false, context: await readContext(projectId) };
       }
+      const unlinked = withPlanUnlinked(current, id);
+      // With notes and todos in the repository, the unlink is its own write
+      // and lands first: a failure after it still lists the plan, so deleting
+      // again finishes the job.
+      if (unlinked !== current && await notesTodosFileFor(projectId)) {
+        await writeContext(projectId, unlinked);
+      }
       const next = {
-        ...withPlanUnlinked(current, id),
+        ...unlinked,
         plans: current.plans.filter((entry) => entry.id !== id),
         planSessions: withoutKey(current.planSessions, id),
       };
@@ -1258,8 +1353,84 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
+  /**
+   * `into` followed by the entries of `from` whose ids it does not hold yet.
+   * An id both hold takes `from`'s version: `from` is the store the user has
+   * been editing, and `into` holds at most an older copy left by an earlier
+   * switch or a failed one.
+   */
+  const mergeById = (into, from) => {
+    const fromById = new Map(from.map((entry) => [entry.id, entry]));
+    const ids = new Set(into.map((entry) => entry.id));
+    return [...into.map((entry) => fromById.get(entry.id) ?? entry), ...from.filter((entry) => !ids.has(entry.id))];
+  };
+
+  /**
+   * Switch the store of a project's notes and todos, so the selected one
+   * never comes up without the entries the user had. Turning the repository
+   * option on moves this machine's entries into the repository file, after
+   * the ones already there; turning it off copies the file's entries into
+   * `context.json` and leaves the file, which Git shares, as it is. An entry
+   * the target already holds (same id) is not added twice but replaced by the
+   * version moved in, so a repeated or retried switch converges and keeps the
+   * edits made since the last one.
+   *
+   * `file` is the repository file, `commit` persists the option. Order on:
+   * repository file, option, then `context.json` is emptied; off: `context.json`,
+   * then the option. A failure before the option leaves it as it was and a
+   * retry finishes the move; a failure after it is announced.
+   */
+  const switchNotesTodosStorage = async (projectId, { enabled, file, commit }) => withWriteLock(projectId, async () => {
+    const key = sanitizeProjectId(projectId);
+    if (enabled && !file) throw new Error('project checkout not found');
+    if (Boolean(lockedNotesTodosFiles.get(key)) === enabled) {
+      await commit();
+      return;
+    }
+    const now = Date.now();
+    const local = await readLocalContext(projectId);
+    const empty = { notes: [], todos: [] };
+    // Turning the option off is the way out of a conflicted file: it copies
+    // nothing from it then, and the file stays for the user to repair.
+    const repository = !file ? empty : await readNotesTodosFile(file, now).catch((error) => {
+      if (!enabled && error?.code === MALFORMED_NOTES_TODOS_FILE) return empty;
+      throw error;
+    });
+    const [from, into] = enabled ? [local, repository] : [repository, local];
+    const merged = { notes: mergeById(into.notes, from.notes), todos: mergeById(into.todos, from.todos) };
+    if (merged.notes.length > PROJECT_NOTE_MAX_ITEMS || merged.todos.length > PROJECT_TODO_MAX_ITEMS) {
+      throw mutationError(`Together they exceed ${PROJECT_NOTE_MAX_ITEMS} notes or ${PROJECT_TODO_MAX_ITEMS} todos`, 400);
+    }
+    const writeLocal = (entries) => writeJsonAtomic(contextPathFor(projectId), {
+      version: PROJECT_CONTEXT_VERSION,
+      ...entries,
+      plans: local.plans,
+      planSessions: local.planSessions ?? {},
+    });
+    const commitSwitch = async () => {
+      await commit();
+      notesTodosSwitches.set(key, (notesTodosSwitches.get(key) ?? 0) + 1);
+    };
+    if (!enabled) {
+      await writeLocal(merged);
+      await commitSwitch();
+      onChanged?.(key);
+      return;
+    }
+    if (JSON.stringify(repository) !== JSON.stringify(merged)) {
+      await writeJsonAtomic(file, { version: 1, ...merged });
+    }
+    await commitSwitch();
+    try {
+      if (local.notes.length > 0 || local.todos.length > 0) await writeLocal({ notes: [], todos: [] });
+    } finally {
+      onChanged?.(key);
+    }
+  });
+
   return {
     readContext,
+    switchNotesTodosStorage,
     setPlanSession,
     saveTodos,
     createTodo,

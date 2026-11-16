@@ -57,7 +57,7 @@ export function SharedPageCard({ part, page, plainPage }: {
   const state = useSharePageGroup(part.sessionID, part.callID, available);
   const group = state.group;
 
-  // Enterprise mode without an allowed relay (decision 0005): no links, PINs
+  // Enterprise mode without an allowed relay: no links, PINs
   // or preview, only the page the agent drew and why it went nowhere.
   if (state.turnedOff) {
     return (

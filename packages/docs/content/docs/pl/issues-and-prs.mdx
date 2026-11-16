@@ -23,12 +23,14 @@ Wszystko mieści się w jednym wierszu paska narzędzi. Po lewej jest wybór pro
 
 W **Linear** wybór projektu zamienia się w wybór zespołu: wybierz **All teams** albo jeden zespół. Jeśli masz połączoną więcej niż jedną przestrzeń roboczą Linear, przełączasz ją w tym samym menu. Jak połączyć Linear, opisują [Integracje](/pl/integrations/).
 
-Wyszukiwanie przyjmuje tytuł, numer albo wklejony link. Menu filtrów zostaje otwarte, gdy wybierasz, więc możesz łączyć filtry.
+Wyszukiwanie przyjmuje tytuł, numer albo wklejony link. Menu filtrów zostaje otwarte, gdy wybierasz, więc możesz łączyć filtry. Na GitHubie pole przyjmuje też własne kwalifikatory (`is:closed`, `label:bug`, `author:@me`), które mają pierwszeństwo przed menu.
 
 Dla GitHub, GitLab, Gitea, Forgejo i Gerrit:
 
 - Status: **Open**, **Closed**, **All**, a dla pull requestów także **Merged**
 - Osoby: **Anyone**, **Assigned to me**, **Created by me**, a dla pull requestów także **Review requested**
+
+Menu **Filter** pokazuje też etykiety repozytorium, z wyszukiwaniem i polem wyboru przy każdej etykiecie; każde zaznaczenie od razu zawęża listę. Filtr jest pamiętany dla każdego repozytorium i karty.
 
 Dla Linear:
 
@@ -42,6 +44,8 @@ Podgląd pokazuje opis, etykiety i komentarze. W issue z Linear kliknij znacznik
 
 Wiersz **Labels** ma przycisk z ołówkiem, który otwiera listę etykiet repozytorium z wyszukiwaniem. Zaznacz je albo odznacz. Zmiana zapisuje się, gdy zamkniesz listę, więc kilka kliknięć liczy się jako jedna zmiana. Otwarty pull request (na GitLabie merge request) ma też wiersz **Reviewers**, który działa tak samo, z osobami, które mogą robić review w repozytorium. Na GitHubie autor pull requesta nie jest proponowany. Issues z Linear nie mają żadnego z tych wierszy.
 
+Ołówek obok tytułu edytuje tytuł i opis razem. <kbd>⌘</kbd>+<kbd>Enter</kbd> zapisuje (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> w Windows i Linuksie), <kbd>Esc</kbd> anuluje, a podgląd pokazuje potem to, co zapisał hosting. Element otwarty z linku nie ma ołówka, podobnie hosting, który nie umie zmieniać tekstu.
+
 ## Skomentuj i zrób review
 
 Pod aktywnością issue albo pull requesta jest pole komentarza. **Comment** publikuje twój tekst na hoście repozytorium, tak samo jak <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> w Windows i Linuksie). Tekst zostaje w polu, dopóki nie zostanie opublikowany, więc przy nieudanej próbie nic nie przepada. Przejście do innego elementu czyści pole. Issues z Linear nie mają tego pola.
@@ -49,6 +53,8 @@ Pod aktywnością issue albo pull requesta jest pole komentarza. **Comment** pub
 Otwarty pull request (na GitLabie merge request) ma też **Approve** i **Request changes**, a tekst z pola idzie razem z review. **Request changes** wymaga tekstu, który mówi, co zmienić. Review dotyczy commitów pokazanych w podglądzie. Jeśli ktoś od tego czasu zrobił push, review zostaje odrzucone, a podgląd się odświeża, żebyś mógł spojrzeć jeszcze raz. Na GitLabie **Request changes** działa, gdy jesteś reviewerem merge requesta, a tekst review jest publikowany jako osobny komentarz. Jeśli nie uda się tylko ten komentarz, review i tak się liczy, a twój tekst zostaje w polu.
 
 Zmiana w Gerrit ma wiersz dla każdej etykiety projektu, takiej jak Code-Review i Verified, z ocenami, które wolno ci wystawić; wybierz je i kliknij **Zagłosuj**. Twój tekst idzie razem z głosami jako wiadomość. Głosy trafiają na najnowszy zestaw poprawek, więc nie są oferowane, gdy czytasz wcześniejszy.
+
+Komentarz, który napisałeś, ma menu obok przycisku wysyłania: **Edit** przepisuje go na miejscu, a **Delete** usuwa po pytaniu. Odpowiedź edytuje się i usuwa tak samo. Obie akcje działają na hostingu, więc komentarz zmienia się dla wszystkich.
 
 ## Zacznij pracę
 

@@ -41,6 +41,7 @@ import {
   type Vcs,
 } from "./model"
 import { formatModelSelection, parseModelSelection } from "../modelIdentifier"
+import { workflowAgentParentId } from "../sessionWorkflowMetadata"
 
 /** One item of an assistant message's ordered content. */
 export type AssistantContentItem = SessionMessageAssistant["content"][number]
@@ -50,10 +51,14 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
+export const sessionParentID = (record: { parentID?: string; metadata?: Session["metadata"] }): string | undefined => (
+  record.parentID ?? workflowAgentParentId(record.metadata)
+)
+
 export function projectSession(info: SessionInfo): Session {
   return compact({
     id: info.id,
-    parentID: info.parentID,
+    parentID: sessionParentID(info),
     projectID: info.projectID,
     directory: info.location.directory,
     subpath: info.subpath,
@@ -292,6 +297,7 @@ export function projectInboxMessage(
         sessionID: owner.sessionID,
         role: "user",
         time: { created: owner.created },
+        skills: projectUserSkills(item.payload),
         metadata: item.payload.metadata,
       }),
       parts: projectUserParts(item.payload, owner),
@@ -313,6 +319,12 @@ export function projectInboxMessage(
     }
   }
   return null
+}
+
+/** Id and name of each attached skill; the skill text stays on the server. */
+function projectUserSkills(payload: SessionInboxUserPayload): UserMessage["skills"] {
+  if (!payload.skills?.length) return undefined
+  return payload.skills.map((skill) => ({ id: skill.id, name: skill.name }))
 }
 
 /**
@@ -373,7 +385,7 @@ export function projectMessage(info: SessionMessageInfo, sessionID: string): Pro
   const metadata = info.metadata
   switch (info.type) {
     case "user": {
-      const message: UserMessage = compact({ id: info.id, sessionID, role: "user", time: { ...info.time }, metadata })
+      const message: UserMessage = compact({ id: info.id, sessionID, role: "user", time: { ...info.time }, skills: projectUserSkills(info), metadata })
       return {
         message,
         parts: projectUserParts(info, { sessionID, messageID: info.id, created: info.time.created }),

@@ -42,6 +42,7 @@ const cleanReasoningText = (text: string): string => {
 };
 
 const SUMMARY_MAX_CHARS = 80;
+const SUMMARY_SOURCE_CHARS = 4000;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
 
@@ -52,6 +53,8 @@ const stripMarkdown = (text: string): string =>
         .replace(/<!--\s*-->/g, '')
         // Fenced code blocks → keep inner text on one line
         .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
+        // A fence the excerpt cut before its closing marker
+        .replace(/```[\w]*\n?/g, '')
         // Inline code
         .replace(/`([^`]+)`/g, '$1')
         // Bold + italic (*** / __)
@@ -73,11 +76,16 @@ const getReasoningSummary = (text: string): string => {
         return '';
     }
 
+    // The header shows the opening words, so only the start of the text is
+    // read: the strip patterns rescan from every unclosed `[`, `_` or `*`, and
+    // a long trace full of them took hundreds of milliseconds.
+    const cutShort = text.length > SUMMARY_SOURCE_CHARS;
+    const source = cutShort ? text.slice(0, SUMMARY_SOURCE_CHARS) : text;
     // Strip markdown, then collapse all whitespace runs into single spaces.
-    const flat = stripMarkdown(text).replace(/\s+/g, ' ').trim();
+    const flat = stripMarkdown(source).replace(/\s+/g, ' ').trim();
 
     if (flat.length <= SUMMARY_MAX_CHARS) {
-        return flat;
+        return cutShort && flat ? `${flat}…` : flat;
     }
 
     // Cut at a word boundary before the limit, then append ellipsis.
@@ -225,7 +233,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return () => observer.disconnect();
     }, [isStreaming, shouldRenderExpandedContent]);
 
-    const summary = React.useMemo(() => getReasoningSummary(text), [text]);
+    // The header shows no summary while the part streams.
+    const summary = React.useMemo(() => (isStreaming ? '' : getReasoningSummary(text)), [isStreaming, text]);
     const toggleAriaLabel = isExpanded
         ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
         : presentation?.expandLabel ?? t('chat.reasoningTrace.expandAria');

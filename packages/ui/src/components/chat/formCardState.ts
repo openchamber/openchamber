@@ -128,6 +128,23 @@ export function fieldAnswer(field: AnswerableField, values: FormValues): FormVal
     }
 }
 
+/** `values` with every external link acknowledged, for a surface that shows them all at once. */
+export const acknowledgeLinks = (fields: readonly FormField[], values: FormValues) => {
+    const next = { ...values };
+    for (const field of fields) {
+        if (!isAnswerableField(field)) next[field.key] = { ...valueOf(values, field.key), acknowledged: true };
+    }
+    return next;
+};
+
+/** Whether a question has an answer, optional or not; a link step counts once acknowledged. */
+export const isFieldAnswered = (field: FormField, values: FormValues): boolean => {
+    if (!isAnswerableField(field)) return valueOf(values, field.key).acknowledged;
+    const answer = fieldAnswer(field, values);
+    if (answer === undefined) return false;
+    return !(Array.isArray(answer) && answer.length === 0);
+};
+
 /** What the form resolves to right now: the fields the user sees and the reply they add up to. */
 export type FormEvaluation = {
     /** Fields shown to the user, in declaration order. */

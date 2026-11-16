@@ -11,6 +11,7 @@ The managed Chats root (`~/.config/openchamber/chats`) is also one context owner
 |---|---|---|
 | `<projectsDir>/<projectId>.json` | `packages/web/server/lib/projects` (`project-setup.js` for the client-owned keys behind `/api/projects/:projectId/config`; `project-config.js` for `version` / `scheduledTasks`), one write lock for both | worktree setup, draft starters, project actions, scheduled tasks |
 | `<projectsDir>/<projectId>/context.json` | **this module, exclusively** | notes, todos, plan manifest |
+| `<repo>/.openchamber/notes-todos.json` | this module, while the personal `notesTodosInRepository` option is on (see *Notes and todos in the repository*) | notes and todos |
 | `<projectsDir>/<projectId>/plans/*.md` | **this module, exclusively** | plan bodies |
 | `<projectsDir>/<projectId>/memory.json` | `packages/web/server/lib/agent-memory` | what the agent chose to remember about the project |
 | `<repo>/<plansDir>/*.md` | this module (read, edit, delete, move) when the team config names a `plansDir`; the folder is the team's, any tool may write there | shared plan bodies |
@@ -71,6 +72,72 @@ denormalized into the manifest so listing plans costs one read rather than one
 read per plan; `readPlan` returns the title parsed from the file, which wins if
 the two ever disagree.
 
+## Notes and todos in the repository
+
+The personal project option `notesTodosInRepository`
+(`packages/web/server/lib/projects`, `resolveNotesTodosFile`) moves notes and
+todos to `<repo>/.openchamber/notes-todos.json` (`{ version: 1, notes, todos }`,
+the same entry shapes) so Git carries them between machines. Plans, plan
+sessions and the legacy migration stay in `context.json`.
+
+- **Switching moves the entries.** While the option is on, notes and todos
+  are read from and written to the repository file only. Turning it on moves
+  this machine's entries from `context.json` into the file, after the entries
+  already there; turning it off copies the file's entries into `context.json`
+  and leaves the file, which Git shares, as it is. An entry the target already
+  holds (same id) is not added twice: the version moved in replaces it, since
+  the target holds at most an older copy from an earlier or failed switch. So
+  a retried or repeated switch converges and keeps the edits made since. `switchNotesTodosStorage` does this under the project's write
+  lock and commits the option itself (`projects/project-config.js` hands it
+  the write): on, the repository file is written first, then the option, then
+  `context.json` loses its notes and todos; off, `context.json` first, then
+  the option. A failure before the option is written leaves it as it was and
+  a retry finishes the move. Turning on over a conflicted file fails; turning
+  off copies nothing from one, so it stays the way out.
+- **A whole list names its store.** Every context read carries
+  `notesTodosStore`, an opaque token (`local` or `repository`, then the
+  switch count of this server run), and a whole-list todo write
+  (`PUT …/todos`: reorder, Clear completed) sends it back. A list read before
+  any switch since, including two that land on the same store again, is
+  refused with `409`, so one store's list never replaces the
+  other's; the panel then reloads. Single-entry writes address entries by id,
+  which the move keeps.
+- **One store per write.** Each locked write resolves the option once and
+  reads and writes that store, so a switch during a write cannot copy local
+  entries into the repository file.
+- **Each file is written only when its part changed.** A note or todo write
+  commits to the repository file alone, and a plan-only change leaves it
+  alone, so Git shows no change and a missing file is not created.
+- **Deleting a linked personal plan takes two commits.** The repository file
+  drops the links first (announced), then `context.json` drops the plan, then
+  the markdown goes. A failure at either step still lists the plan, so
+  deleting again completes it. A `shared:` plan that is unshared or deleted
+  while entries link to it still changes both files in one request,
+  `context.json` first; a failure between them leaves stale links.
+- **Unreadable is a failure.** A conflicted or hand-broken file, or one whose
+  `notes` or `todos` is not a list, fails every read and write of the
+  project's context (`500`), so nothing is written over it; a missing file or
+  key is empty.
+
+Changing the option announces `openchamber:project-context-changed`, so open
+panels read the selected store.
+
+### Why a personal option and not a team setting
+
+Each machine opts in by itself: a teammate who pulls the file keeps their own
+notes until they turn the option on, and nothing the repository brings in can
+change where this machine saves. Plan ids in the file keep their meaning; a
+link to a personal plan that only exists on another machine stays unresolved,
+as any stored link to a vanished plan does.
+
+### Why switching moves the entries
+
+A switch that only picked a store showed an empty list on the side just
+turned on, and the user's notes looked lost. Turning the option on is the
+user saying these entries belong in the repository, so they move there.
+Turning it off copies rather than moves, because the file is shared through
+Git and removing entries from it would delete them for the team.
+
 ## Plan progress
 
 A plan's progress is its `## Steps` checklist: the knowledge tool tells agents
@@ -121,8 +188,9 @@ Every todo write validates the full candidate list under the project lock:
   removes are dropped; a stored reference to a todo that vanished outside the
   API stays.
 
-Deleting a plan unlinks its notes and todos in the same write, and its todos
-lose their dependencies, which could only name todos of that plan. When
+Deleting a plan unlinks its notes and todos in the same write (two writes for a
+personal plan while notes and todos live in the repository, see above), and its
+todos lose their dependencies, which could only name todos of that plan. When
 `unsharePlan` gives a `shared:` plan a manifest id, linked notes and todos
 move to that id in the same write as its session entry. Refused writes change
 no file and announce nothing.
@@ -196,8 +264,8 @@ Clients re-read authoritative context for the visible owner. This is a commit no
 
 ## Invariants
 
-- **Missing is not malformed.** A missing `context.json` is authoritative empty
-  data. Unparseable JSON is a failure that propagates as `500`, so the client
+- **Missing is not malformed.** A missing `context.json` (or repository notes
+  file) is authoritative empty data. Unparseable JSON is a failure that propagates as `500`, so the client
   preserves what it already has instead of rendering an empty panel over intact
   data on disk.
 - **Writes are serialized per project** through an in-process lock, and land via
@@ -275,5 +343,5 @@ migration picks it up from the merged destination afterwards.
 
 ## Tests
 
-- `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle.
+- `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle, repository notes and todos.
 - `routes.test.js` — status-code mapping, payload validation, failure surfacing.

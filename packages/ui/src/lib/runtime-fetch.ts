@@ -55,8 +55,14 @@ export const addRuntimeProxyHeaders = (url: string, headers: Headers): Headers =
 
 const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   if (!query) return;
-  const entries = query instanceof URLSearchParams ? Array.from(query.entries()) : Object.entries(query);
-  for (const [key, value] of entries) {
+  // A URLSearchParams may name one key more than once on purpose (`label`,
+  // `directory`); `set` would keep only its last value, which is a different
+  // request. A plain object has one value per key, so it still overrides.
+  if (query instanceof URLSearchParams) {
+    for (const [key, value] of query) url.searchParams.append(key, value);
+    return;
+  }
+  for (const [key, value] of Object.entries(query)) {
     if (value === null || value === undefined) continue;
     url.searchParams.set(key, String(value));
   }
@@ -323,6 +329,14 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean, header
   return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
 };
 
+type RuntimeRequestObserver = (request: { method: string; url: string; status: number | null; durationMs: number }) => void;
+let runtimeRequestObserver: RuntimeRequestObserver | null = null;
+
+/** Diagnostics only: reports each runtime request with the time until its response headers. */
+export const setRuntimeRequestObserver = (observer: RuntimeRequestObserver | null): void => {
+  runtimeRequestObserver = observer;
+};
+
 export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, directory, ...ownInit } = init;
   // Before either transport: the relay and the network see the same headers.
@@ -371,10 +385,19 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
   // Session-expiry classification rides on responses that already flow
   // through here; only the status is read, never the body.
   const rawFetch = doFetch;
-  doFetch = () => rawFetch().then((response) => {
-    observeRuntimeAuthResponse(url, response.status);
-    return response;
-  });
+  const observer = runtimeRequestObserver;
+  doFetch = async () => {
+    const startedAt = observer ? performance.now() : 0;
+    try {
+      const response = await rawFetch();
+      observeRuntimeAuthResponse(url, response.status);
+      observer?.({ method, url, status: response.status, durationMs: performance.now() - startedAt });
+      return response;
+    } catch (error) {
+      observer?.({ method, url, status: null, durationMs: performance.now() - startedAt });
+      throw error;
+    }
+  };
 
   // A Request always carries a (possibly default) signal; treat any Request, or
   // an explicit init.signal, as "has signal" and skip coalescing for safety.

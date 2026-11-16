@@ -238,7 +238,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     let channel = null;
     let batchNegotiated = false;
     // Serialize async message handling so encrypted frame order (and the
-    // strictly-increasing decrypt counter) is preserved.
+    // consecutive decrypt counter) is preserved.
     let processing = Promise.resolve();
     // Serialize encrypt+send so the per-direction IV counter reaches the wire in
     // encryption order. One encrypt() == one WS message == one counter tick,

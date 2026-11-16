@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { contentFingerprint, estimateTokenRunsBytes, HighlightResultCache, utf16Bytes } from './highlightResultCache';
+import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 
 describe('HighlightResultCache', () => {
   test('returns cached values for identical keys and refreshes LRU order', () => {
@@ -39,13 +39,5 @@ describe('HighlightResultCache', () => {
       seen.set(fingerprint, source);
     }
     expect(seen.size).toBe(20_000);
-  });
-
-  test('estimateTokenRunsBytes avoids JSON and stays positive', () => {
-    const lines: Array<Array<[number, string, number]>> = [
-      [[3, '#fff', 0], [1, '', 1]],
-      [[8, 'var(--md-syntax-keyword)', 0]],
-    ];
-    expect(estimateTokenRunsBytes(lines)).toBeGreaterThan(0);
   });
 });

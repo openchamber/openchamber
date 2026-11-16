@@ -65,6 +65,13 @@ const threadIdOf = (value) => {
   return value;
 };
 
+// A GitLab note id; the request path keeps it on the target issue or merge request.
+const noteIdOf = (value) => {
+  const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
+  if (!/^[1-9]\d{0,19}$/.test(id)) throw invalidMutationContext('commentId is invalid');
+  return id;
+};
+
 /**
  * Each mutation route's persisted kind, input normalization (with the fields
  * its digest covers), provider call and restart reconciliation. Kind names and
@@ -244,6 +251,83 @@ function mutationTable(descriptor) {
         return {};
       },
       reconcile: unknownOutcome,
+    },
+    '/issues/update': {
+      kind: 'issue-update',
+      normalize: (input, context) => {
+        const title = requestText(input.title);
+        if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
+        const normalized = { title };
+        if (isString(input.body)) normalized.body = input.body;
+        normalized.digest = { title, body: normalized.body ?? null };
+        return normalized;
+      },
+      perform: (service, normalized, resolved) => service.updateIssue({
+        title: normalized.title,
+        body: normalized.body,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized),
+    },
+    '/pr/comment/update': {
+      kind: 'change-request-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateChangeRequestComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/pr/comment/delete': {
+      kind: 'change-request-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteChangeRequestComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'delete', normalized),
+    },
+    '/issues/comment/update': {
+      kind: 'issue-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateIssueComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/issues/comment/delete': {
+      kind: 'issue-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteIssueComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'delete', normalized),
     },
     '/pr/review': {
       kind: 'change-request-review',
@@ -560,6 +644,7 @@ export function createProvider({
       client: createClient({ origin: session.instance, token, tokenType }),
       download: createDownloader({ origin: session.instance, token, tokenType }),
       canonicalReads,
+      providerUserId: session.providerUserId,
     };
     if (resolveProjects) resourceOptions.resolveProjects = resolveProjects;
     const service = createResourceService(resourceOptions);
@@ -731,15 +816,15 @@ export function createProvider({
     resources: Object.freeze({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session)
         .changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listChangeRequests(directory, { page, query, state, people, remote }),
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, {
           includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, labels, remote }),
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),

@@ -262,7 +262,7 @@ export function createWorktreeBootstrapStore({
         await fsImpl.lstat(directory);
         return false;
       } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+        if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error;
       }
     }
     // Another reader may already have pruned the same missing checkout.

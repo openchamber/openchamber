@@ -24,9 +24,11 @@ import {
   requireProviderArray,
 } from './mappers.js';
 import {
+  buildReferenceSearchQuery,
   fetchDiscussionDetail,
   fetchPullStack,
   fetchReferenceDetail,
+  labelSearchQualifiers,
   mapReferencesAcross,
   readPullStatusRefs,
   readReferencePeople,
@@ -54,6 +56,9 @@ import { fetchReviewState } from './review-draft.js';
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const GITHUB_COM = 'github.com';
+// The board's own pull-list filters; anything else reads as the default view.
+const PULL_LIST_STATES = new Set(['open', 'closed', 'merged', 'all']);
+const PULL_LIST_PEOPLE = new Set(['any', 'assigned', 'created', 'reviewRequested']);
 // GitHub answers the same 403 for a non-collaborator on every status read.
 // Remembering that refusal per host/account/repository keeps the log quiet and
 // saves a round trip per poll (#5954).
@@ -387,16 +392,22 @@ export function createGitHubResources({
       }
     },
 
-    listChangeRequests: async ({ session, directory, page, query, remote }) => {
+    listChangeRequests: async ({ session, directory, page, query, labels, state, people, remote }) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const { repo, repos } = await resolveRepoNetwork(octokit, directory, remote);
       const projectOf = (repoRef) => mapProject(repoRef, identity);
       const toChangeRequest = (pr, repoRef) => mapChangeRequest(requireGitHubPullRequest(pr, 'GitHub returned an invalid pull request'), projectOf(repoRef), identity);
       const isPrimary = (repoRef) => repoRef.owner === repo.owner && repoRef.repo === repo.repo;
+      const ofState = PULL_LIST_STATES.has(state) ? state : 'open';
+      const ofPeople = PULL_LIST_PEOPLE.has(people) ? people : 'any';
 
-      if (query) {
-        const q = `${repos.map((entry) => `repo:${entry.owner}/${entry.repo}`).join(' ')} ${query} type:pr state:open`;
+      // The REST list answers a plain state filter (open, closed, all) per
+      // repo. Only what REST cannot express — labels, people, text and
+      // `merged` — goes through search, whose index lags behind a write made
+      // here and whose quota is 30 reads a minute.
+      if (ofState === 'merged' || ofPeople !== 'any' || query || labels?.length > 0) {
+        const q = buildReferenceSearchQuery({ repos, kind: 'pull', state: ofState, people: ofPeople, text: query ?? '', labels });
         const search = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 50, page });
         const data = search?.data;
         if (!isPlainObject(data) || !Number.isSafeInteger(data.total_count) || data.total_count < 0) {
@@ -434,7 +445,7 @@ export function createGitHubResources({
 
       const results = await Promise.all(repos.map(async (repoRef) => {
         try {
-          const list = await octokit.rest.pulls.list({ owner: repoRef.owner, repo: repoRef.repo, state: 'open', per_page: 50, page });
+          const list = await octokit.rest.pulls.list({ owner: repoRef.owner, repo: repoRef.repo, state: ofState, per_page: 50, page });
           const link = isProviderString(list?.headers?.link) ? list.headers.link : '';
           const prs = requireProviderArray(list?.data, 'GitHub returned an invalid pull request list');
           return { items: prs.map((pr) => toChangeRequest(pr, repoRef)), hasMore: /rel="next"/.test(link) };
@@ -531,14 +542,15 @@ export function createGitHubResources({
       return result;
     },
 
-    listIssues: async ({ session, directory, page, query, remote }) => {
+    listIssues: async ({ session, directory, page, query, labels, remote }) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
       const { repos } = await resolveRepoNetwork(octokit, directory, remote, { requirePrimary: false });
       const toIssue = (issue, repoRef) => mapIssue(requireGitHubIssue(issue, 'GitHub returned an invalid issue'), mapProject(repoRef, identity), identity);
 
       if (query) {
-        const q = `${repos.map((entry) => `repo:${entry.owner}/${entry.repo}`).join(' ')} ${query} type:issue state:open`;
+        const q = [...repos.map((entry) => `repo:${entry.owner}/${entry.repo}`), query, 'type:issue state:open',
+          ...labelSearchQualifiers(labels, query)].join(' ');
         const search = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 50, page });
         const data = search?.data;
         if (!isPlainObject(data) || !Number.isSafeInteger(data.total_count) || data.total_count < 0) {
@@ -569,9 +581,11 @@ export function createGitHubResources({
         return result;
       }
 
+      // A REST list narrows by every label with one comma-joined parameter.
+      const labelParam = labels?.length > 0 ? { labels: labels.join(',') } : {};
       const results = await Promise.all(repos.map(async (repoRef) => {
         try {
-          const list = await octokit.rest.issues.listForRepo({ owner: repoRef.owner, repo: repoRef.repo, state: 'open', per_page: 50, page });
+          const list = await octokit.rest.issues.listForRepo({ owner: repoRef.owner, repo: repoRef.repo, state: 'open', per_page: 50, page, ...labelParam });
           const link = isProviderString(list?.headers?.link) ? list.headers.link : '';
           const issues = requireProviderArray(list?.data, 'GitHub returned an invalid issue list')
             .filter((item) => !item?.pull_request)
@@ -696,7 +710,7 @@ export function createGitHubResources({
      * pasted link or number names, across the repository network. A `linked`
      * read answers the one item its link names, wherever the repository is.
      */
-    references: ({ session, context, directory, remote, kind, state, people, query, cursor }) => pickerRead(async () => {
+    references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const { rateLimit } = await load();
       const { repo } = await resolveRepo(directory, remote);
@@ -723,6 +737,7 @@ export function createGitHubResources({
         kind,
         state: readReferenceState(state),
         people: readReferencePeople(people),
+        labels,
         text: query ?? '',
         cursor: cursor || null,
       });
@@ -795,6 +810,7 @@ export function createGitHubResources({
           kind: input.kind,
           state: input.state ?? 'open',
           people: input.people ?? 'any',
+          labels: input.labels ?? [],
           text: input.query?.trim() ?? '',
           cursor: input.cursor || null,
           onGroupError: async (group, error) => {

@@ -22,7 +22,7 @@ Bez dostawcy siatka bezpieczeństwa i Auto są ukryte, a sesje w toku nie dostaj
 
 ## Konfiguracja
 
-Jev jest wyłączony, dopóki go nie włączysz: nic z Twoich rozmów nie trafia do dostawcy klasyfikacji, dopóki go nie wybierzesz. Otwórz **Ustawienia → Dostawcy → Dostawcy klasyfikacji** i wybierz, dokąd trafiają zapytania do Jev. Oprócz **Wyłączone** jest sześć możliwości.
+Jev jest wyłączony, dopóki go nie włączysz: nic z Twoich rozmów nie trafia do dostawcy klasyfikacji, dopóki go nie wybierzesz. Otwórz **Ustawienia → Dostawcy → Dostawcy klasyfikacji** i wybierz, dokąd trafiają zapytania do Jev. Oprócz **Wyłączone** jest siedem możliwości.
 
 ### Promocja OpenCode Zen
 
@@ -52,6 +52,17 @@ Korzysta z klucza API AI Gateway zapisanego w OpenCode, a opłaty idą z Twojego
 
 1. Otwórz **Ustawienia → Dostawcy** i dodaj klucz API do dostawcy **Vercel AI Gateway**.
 2. Wróć do **Dostawcy klasyfikacji** i wybierz **Klucz Vercel AI Gateway**.
+
+### Google Gemini
+
+Korzysta z Gemini Decision 1, własnego modelu decyzyjnego Google, przez Decisions API Google, a opłaty idą z Twojego konta Google. OpenChamber zadaje mu te same pytania co Jev. W darmowym planie Google może używać tego, co otrzymuje, do ulepszania swoich produktów ([warunki Gemini API](https://ai.google.dev/gemini-api/terms#data-use-unpaid)).
+
+1. Zdobądź klucz API w [Google AI Studio](https://aistudio.google.com/apikey).
+2. Wklej go w pole **Klucz API Gemini** i kliknij **Zapisz**.
+
+Zapisany klucz od razu zostaje wybrany. Leży na serwerze OpenChamber w osobnym pliku i nigdy nie trafia do przeglądarki.
+
+Jeśli dostawca **Google** w OpenCode ma już klucz API, możesz pominąć pole i wybrać **Google Gemini**. Klucz w `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` lub `GEMINI_API_KEY` też działa. Klucz zapisany w OpenChamber wygrywa z oboma. Trzymaj klucz w OpenChamber, jeśli chcesz używać Gemini tylko do decyzji: klucz u dostawcy Google w OpenCode otwiera tam też wszystkie modele czatu Gemini, a klucza API Gemini nie da się ograniczyć do jednego modelu.
 
 ### Klucz API TypeSafe
 
@@ -90,7 +101,7 @@ Gdy dostawca zacznie działać, karta w **Ustawienia → Dostawcy** pokaże **Go
 
 ## Kiedy Twój wybór przestaje działać
 
-Jeśli z wybranego dostawcy nie da się skorzystać (promocja się skończyła, klucz usunięto), OpenChamber przechodzi na pierwszy działający z Twoich własnych kluczy: klucz TypeSafe, potem Twój własny endpoint, potem OpenRouter, potem Vercel AI Gateway, potem klucz Zen. Nigdy nie przechodzi na promocję, a **Wyłączone** pozostaje wyłączone. Strona pokazuje, którego używa w tej chwili.
+Jeśli z wybranego dostawcy nie da się skorzystać (promocja się skończyła, klucz usunięto), OpenChamber przechodzi na pierwszy działający z Twoich własnych kluczy: klucz TypeSafe, potem Twój własny endpoint, potem OpenRouter, potem Vercel AI Gateway, potem klucz Zen. Nigdy nie przechodzi na promocję ani na Google Gemini, a **Wyłączone** pozostaje wyłączone. Strona pokazuje, którego używa w tej chwili.
 
 Jeśli Jev odpowiada wolno albo zawodzi przy pojedynczym zapytaniu, nic się nie psuje. Każda funkcja ma na ten wypadek bezpieczną odpowiedź:
 
@@ -101,9 +112,9 @@ Jeśli Jev odpowiada wolno albo zawodzi przy pojedynczym zapytaniu, nic się nie
 
 ## Co widzi Jev
 
-Jev dostaje krótkie fragmenty Twojej rozmowy: Twoją ostatnią wiadomość i, jako kontekst, do trzech poprzednich tur, przyciętych do kilkuset pierwszych znaków. Dla siatki bezpieczeństwa dostaje też sprawdzane działanie w takiej postaci, w jakiej opisuje je OpenCode: polecenie, które agent chce uruchomić, albo plik i zmianę przy edycji. Nigdy nie dostaje całych plików ani obrazów.
+Jev dostaje Twoją ostatnią wiadomość i, jako kontekst, fragmenty niedawnej rozmowy: do trzech poprzednich tur, każdą przyciętą do kilkuset znaków, a na koniec tury początek i koniec odpowiedzi agenta. Dla siatki bezpieczeństwa dostaje też działanie, na które agent prosi o zgodę, w takiej postaci, w jakiej opisuje je OpenCode: polecenie, które agent chce uruchomić, albo plik i zmianę przy edycji. Gdy agent tworzy plik, ta zmiana to cały plik, także obraz zapisany jako tekst, np. SVG. Gdy Jev sprawdza cel, dostaje cel i ostatnią odpowiedź agenta, do 10 000 znaków.
 
-Zapytania idą z serwera OpenChamber prosto do OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe albo Twojego własnego endpointu, zależnie od Twojego wyboru.
+Zapytania idą z serwera OpenChamber prosto do OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe albo Twojego własnego endpointu, zależnie od Twojego wyboru.
 
 ## Gdzie to działa
 
