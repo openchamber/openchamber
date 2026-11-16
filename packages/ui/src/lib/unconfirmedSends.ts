@@ -25,6 +25,9 @@ const recordSchema = z.object({
   sessionId: z.string().nullable(),
   messageId: z.string().nullable(),
   left: z.boolean(),
+  chatDirectory: z.string().nullable().default(null),
+  textReturned: z.boolean().default(false),
+  orphanSeen: z.boolean().default(false),
 });
 
 export type UnconfirmedSend = z.infer<typeof recordSchema>;
@@ -40,6 +43,8 @@ export type UnconfirmedSendServer = {
   ready: () => Promise<void>;
   sessionDirectory: (sessionId: string) => Promise<string | null>;
   hasMessage: (sessionId: string, messageId: string, directory: string) => Promise<boolean>;
+  hasSessionsIn: (directory: string) => Promise<boolean>;
+  deleteChatDirectory: (directory: string) => Promise<void>;
 };
 
 const webLocks = (): LockManager | null => globalThis.navigator?.locks ?? null;
@@ -108,29 +113,40 @@ export const trackUnconfirmedSend = (input: {
     sessionId: isNewSessionDraftIdentity(input.identity) ? null : input.identity.sessionId,
     messageId: null,
     left: false,
+    chatDirectory: null,
+    textReturned: false,
+    orphanSeen: false,
   };
   storage.setItem(keyOf(id), JSON.stringify(record));
   return {
     progress: {
-      sessionMinted: (sessionId: string) => updateRecord(id, (current) => ({ ...current, sessionId })),
+      sessionMinted: (sessionId: string, chatDirectory: string | null) => updateRecord(id, (current) => ({ ...current, sessionId, chatDirectory })),
       messageMinted: (messageId: string) => updateRecord(id, (current) => ({ ...current, messageId })),
       requestLeaving: () => updateRecord(id, (current) => ({ ...current, left: true })),
     },
-    settle: () => removeAfterRestoredDraft(id),
+    settle: () => {
+      const current = readRecord(keyOf(id));
+      if (!current?.chatDirectory || current.left) return removeAfterRestoredDraft(id);
+      flushDeferredStorage();
+      storage.setItem(keyOf(id), JSON.stringify({ ...current, textReturned: true }));
+    },
   };
 };
 
-type Outcome = { kind: 'restore'; target: ChatDraftIdentity } | { kind: 'drop' } | { kind: 'unknown' };
+type Outcome = { kind: 'restore'; target: ChatDraftIdentity; orphanChatDirectory?: string } | { kind: 'drop'; orphanChatDirectory?: string } | { kind: 'unknown' };
 
 const needsServer = (record: UnconfirmedSend) => record.left || (record.sessionId !== null && isNewSessionDraftIdentity(record.identity));
 
 const decide = async (record: UnconfirmedSend, server: UnconfirmedSendServer): Promise<Outcome> => {
   let target: ChatDraftIdentity = record.identity;
+  let orphanChatDirectory: string | undefined;
   if (record.sessionId && isNewSessionDraftIdentity(record.identity)) {
     const directory = await server.sessionDirectory(record.sessionId);
     if (directory) target = createChatDraftIdentity(record.identity.runtimeKey, directory, record.sessionId) ?? target;
+    else orphanChatDirectory = record.chatDirectory ?? undefined;
   }
-  if (!record.left) return { kind: 'restore', target };
+  if (record.textReturned) return { kind: 'drop', orphanChatDirectory };
+  if (orphanChatDirectory || !record.left) return { kind: 'restore', target, orphanChatDirectory };
   if (!record.sessionId || !record.messageId) return { kind: 'drop' };
   return await server.hasMessage(record.sessionId, record.messageId, target.directory)
     ? { kind: 'drop' }
@@ -154,6 +170,22 @@ const restoreRecord = (record: UnconfirmedSend, target: ChatDraftIdentity, compo
   composer.restore(shownTarget, record.text, new Set(record.confirmedMentions));
 };
 
+const keepForFolderCleanup = (record: UnconfirmedSend): void => {
+  flushDeferredStorage();
+  storage.setItem(keyOf(record.id), JSON.stringify({ ...record, pageId, textReturned: true, orphanSeen: true }));
+};
+
+const removeOrphanChatDirectory = async (directory: string, server: UnconfirmedSendServer): Promise<'settled' | 'unknown'> => {
+  try {
+    if (await server.hasSessionsIn(directory)) return 'settled';
+    if (!server.isCurrent()) return 'unknown';
+    await server.deleteChatDirectory(directory);
+    return 'settled';
+  } catch {
+    return 'unknown';
+  }
+};
+
 const recover = async (runtimeKey: string, composer: UnconfirmedSendComposer, server: UnconfirmedSendServer): Promise<void> => {
   const live = await livePages();
   const interrupted = readRecords().filter((record) => (
@@ -174,7 +206,9 @@ const recover = async (runtimeKey: string, composer: UnconfirmedSendComposer, se
     if (!server.isCurrent()) return;
     if (outcome.kind === 'unknown') continue;
     if (outcome.kind === 'restore') restoreRecord(record, outcome.target, composer);
-    removeAfterRestoredDraft(record.id);
+    if (!outcome.orphanChatDirectory) removeAfterRestoredDraft(record.id);
+    else if (!record.orphanSeen) keepForFolderCleanup(record);
+    else if (await removeOrphanChatDirectory(outcome.orphanChatDirectory, server) === 'settled') removeAfterRestoredDraft(record.id);
   }
 };
 

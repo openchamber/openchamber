@@ -28,6 +28,9 @@ const record = (runtimeKey: string, change: Partial<UnconfirmedSend> = {}): Unco
     sessionId: 'ses_existing',
     messageId: null,
     left: false,
+    chatDirectory: null,
+    textReturned: false,
+    orphanSeen: false,
     ...change,
   };
 };
@@ -38,8 +41,9 @@ const store = (...records: UnconfirmedSend[]) => {
 };
 const stored = (): UnconfirmedSend[] => keys().map((key) => JSON.parse(storage.getItem(key) ?? 'null'));
 
-const fakeServer = (state: { sessions?: Record<string, string>; messages?: string[]; failing?: boolean; current?: () => boolean } = {}) => {
+const fakeServer = (state: { sessions?: Record<string, string>; messages?: string[]; failing?: boolean; current?: () => boolean; usedDirectories?: string[]; usageUnknown?: boolean } = {}) => {
   const calls: string[] = [];
+  const deleted: string[] = [];
   const server: UnconfirmedSendServer = {
     isCurrent: state.current ?? (() => true),
     ready: async () => { calls.push('ready'); },
@@ -53,8 +57,13 @@ const fakeServer = (state: { sessions?: Record<string, string>; messages?: strin
       if (state.failing) throw new Error('offline');
       return state.messages?.includes(messageId) ?? false;
     },
+    hasSessionsIn: async (directory) => {
+      if (state.usageUnknown) throw new Error('offline');
+      return state.usedDirectories?.includes(directory) ?? false;
+    },
+    deleteChatDirectory: async (directory) => { deleted.push(directory); },
   };
-  return { server, calls };
+  return { server, calls, deleted };
 };
 
 const recoverInto = async (runtimeKey: string, server: UnconfirmedSendServer, shown: ChatDraftIdentity | null = null) => {
@@ -193,5 +202,149 @@ describe('unconfirmedSends', () => {
     const target = { runtimeKey: 'r', directory: '/repo', sessionId: 'draft:old' };
     expect(draftRestoreTarget(target, { runtimeKey: 'r', directory: '/other', sessionId: 'draft:new' })).toEqual({ ...target, sessionId: null });
     expect(draftRestoreTarget({ ...target, sessionId: 'ses_1' }, null)).toEqual({ ...target, sessionId: 'ses_1' });
+  });
+  describe('the chat folder a first send left behind', () => {
+    const chatDraft = (runtime: string) => ({ runtimeKey: runtime, directory: '__chat__', sessionId: null });
+    const folder = '/chats/2026-11-16/session-a';
+    const orphan = (runtime: string) => record(runtime, { identity: chatDraft(runtime), sessionId: 'ses_minted', chatDirectory: folder });
+    const nextStart = async (server: UnconfirmedSendServer) => {
+      const runtime = nextRuntime();
+      for (const entry of stored()) store({ ...entry, pageId: 'dead-page', identity: { ...entry.identity, runtimeKey: runtime } });
+      return recoverInto(runtime, server);
+    };
+
+    test('is removed on the start after the one that found its session missing', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      const { server, deleted } = fakeServer();
+
+      expect((await recoverInto(runtime, server)).map((entry) => entry.target)).toEqual([chatDraft(runtime)]);
+      expect(deleted).toEqual([]);
+      expect(stored()).toMatchObject([{ textReturned: true, orphanSeen: true }]);
+
+      expect([...await nextStart(server)]).toEqual([]);
+      expect(deleted).toEqual([folder]);
+      expect(stored()).toEqual([]);
+    });
+
+    test('belongs to the page that found it, so another client starting meanwhile leaves it', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      await recoverInto(runtime, fakeServer().server);
+      const [marked] = stored();
+      expect(marked?.pageId).not.toBe('dead-page');
+      const other = nextRuntime();
+      store({ ...marked!, identity: { ...marked!.identity, runtimeKey: other } });
+      const { server, deleted } = fakeServer();
+
+      expect([...await recoverInto(other, server)]).toEqual([]);
+      expect(deleted).toEqual([]);
+    });
+
+    test('stays when its session was created after the first look', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      await recoverInto(runtime, fakeServer().server);
+      const { server, deleted } = fakeServer({ sessions: { ses_minted: folder } });
+
+      expect([...await nextStart(server)]).toEqual([]);
+      expect(deleted).toEqual([]);
+      expect(stored()).toEqual([]);
+    });
+
+    test('stays when the session was created', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      const { server, deleted } = fakeServer({ sessions: { ses_minted: folder } });
+
+      await recoverInto(runtime, server);
+      await nextStart(server);
+      expect(deleted).toEqual([]);
+    });
+
+    test('stays when another client has a session in it', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      const { server, deleted } = fakeServer({ usedDirectories: [folder] });
+
+      await recoverInto(runtime, server);
+      await nextStart(server);
+      expect(deleted).toEqual([]);
+      expect(stored()).toEqual([]);
+    });
+
+    test('stays, and is tried again, when the sessions it may hold cannot be read', async () => {
+      const runtime = nextRuntime();
+      store(orphan(runtime));
+      const { server, deleted } = fakeServer({ usageUnknown: true });
+
+      expect((await recoverInto(runtime, server)).map((entry) => entry.text)).toEqual(['the prompt']);
+      expect([...await nextStart(server)]).toEqual([]);
+      expect(deleted).toEqual([]);
+      expect(stored()).toMatchObject([{ orphanSeen: true }]);
+    });
+
+    test('stays while the page that is sending it is alive', async () => {
+      const runtime = nextRuntime();
+      const own = trackUnconfirmedSend({ identity: chatDraft(runtime), text: 'sending now', confirmedMentions: [], attachmentNames: [] });
+      own.progress.sessionMinted('ses_minted', folder);
+      const { server, deleted } = fakeServer();
+
+      expect([...await recoverInto(runtime, server)]).toEqual([]);
+      expect(deleted).toEqual([]);
+      own.settle();
+    });
+
+    test('stays after a runtime switch', async () => {
+      const runtime = nextRuntime();
+      store({ ...orphan(runtime), orphanSeen: true, textReturned: true });
+      const { server, deleted } = fakeServer({ current: () => false });
+
+      await recoverInto(runtime, server);
+      expect(deleted).toEqual([]);
+      expect(stored()).toHaveLength(1);
+    });
+
+    test('a send that failed live before its session existed keeps only the folder to remove', async () => {
+      const runtime = nextRuntime();
+      const own = trackUnconfirmedSend({ identity: chatDraft(runtime), text: 'failed live', confirmedMentions: [], attachmentNames: [] });
+      own.progress.sessionMinted('ses_minted', folder);
+      own.settle();
+      const kept = stored();
+      expect(kept).toMatchObject([{ textReturned: true, chatDirectory: folder }]);
+      store({ ...kept[0]!, pageId: 'dead-page' });
+      const { server, deleted } = fakeServer();
+
+      expect([...await recoverInto(runtime, server)]).toEqual([]);
+      expect([...await nextStart(server)]).toEqual([]);
+      expect(deleted).toEqual([folder]);
+      expect(stored()).toEqual([]);
+    });
+
+    test('a send whose request left settles without a trace', () => {
+      const own = trackUnconfirmedSend({ identity: chatDraft(nextRuntime()), text: 'sent', confirmedMentions: [], attachmentNames: [] });
+      own.progress.sessionMinted('ses_minted', folder);
+      own.progress.requestLeaving();
+      own.settle();
+      expect(stored()).toEqual([]);
+    });
+
+    test('a failed send whose session turned out to exist keeps its folder', async () => {
+      const runtime = nextRuntime();
+      store({ ...orphan(runtime), textReturned: true });
+      const { server, deleted } = fakeServer({ sessions: { ses_minted: folder } });
+
+      expect([...await recoverInto(runtime, server)]).toEqual([]);
+      expect(deleted).toEqual([]);
+      expect(stored()).toEqual([]);
+    });
+
+    test('a record written before the folder was tracked still comes back', async () => {
+      const runtime = nextRuntime();
+      const { chatDirectory: _omitted, textReturned: _alsoOmitted, orphanSeen: _neither, ...older } = record(runtime);
+      storage.setItem(`${UNCONFIRMED_SEND_KEY_PREFIX}older`, JSON.stringify(older));
+
+      expect((await recoverInto(runtime, fakeServer().server)).map((entry) => entry.text)).toEqual(['the prompt']);
+    });
   });
 });

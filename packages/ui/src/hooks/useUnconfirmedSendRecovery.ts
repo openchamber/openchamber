@@ -1,11 +1,13 @@
 import * as React from 'react';
 
+import { deleteChatDirectory } from '@/lib/chatDirectories';
 import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { holdPageLock, recoverUnconfirmedSends, type UnconfirmedSendServer } from '@/lib/unconfirmedSends';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
-import { waitForConnectionOrThrow } from '@/sync/session-actions';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { isChatDirectoryStillReferenced, waitForConnectionOrThrow } from '@/sync/session-actions';
 
 type Restore = (target: ChatDraftIdentity, text: string, confirmedMentions: Set<string>) => void;
 
@@ -29,6 +31,12 @@ const serverOfThisRuntime = (): UnconfirmedSendServer => ({
         opencodeClient.getSessionMessage(sessionId, messageId, directory).then(() => true),
         false,
     ),
+    hasSessionsIn: async (directory) => {
+        const sessions = useGlobalSessionsStore.getState();
+        if (!sessions.hasLoaded) await sessions.loadSessions();
+        return isChatDirectoryStillReferenced(directory, new Set());
+    },
+    deleteChatDirectory,
 });
 
 export function useUnconfirmedSendRecovery(
