@@ -1,17 +1,3 @@
-/**
- * Project context storage: notes, todos, and plan files.
- *
- * The server is the sole writer of `<projectsDir>/<projectId>/context.json`.
- * The sibling `<projectsDir>/<projectId>.json` stays client-owned (worktree
- * setup, draft starters, project actions) and server-owned only for
- * `version`/`scheduledTasks`; keeping the two apart is what removes the
- * cross-process read-modify-write race that a shared file would create.
- *
- * Plan bodies live as markdown at `<projectsDir>/<projectId>/plans/<file>.md`
- * and are referenced by base name only, so moving the project storage
- * directory never invalidates a reference.
- */
-
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { createPlanSummaryCache } from './plan-progress.js';
@@ -30,7 +16,6 @@ const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 const PROJECT_PLAN_BODY_MAX_LENGTH = 200_000;
 const PROJECT_TODO_MAX_ITEMS = 500;
 const PROJECT_PLAN_MAX_ITEMS = 500;
-/** Where a context's notes and todos came from: `context.json` or the repository file. */
 const NOTES_TODOS_STORE_LOCAL = 'local';
 const NOTES_TODOS_STORE_REPOSITORY = 'repository';
 const MALFORMED_NOTES_TODOS_FILE = 'MALFORMED_NOTES_TODOS_FILE';
@@ -53,13 +38,6 @@ const sanitizeNoteOrigin = (value) => {
   return messageId ? { sessionId, messageId } : { sessionId };
 };
 
-/**
- * Notes are a list of entries.
- *
- * Version 1 stored a single string. It is converted here rather than in a
- * separate migration pass so that any read — including one that races another
- * writer — sees the same shape.
- */
 const sanitizeNotes = (value, now) => {
   if (typeof value === 'string') {
     const body = clampLength(value, PROJECT_NOTE_BODY_MAX_LENGTH).trim();
@@ -173,7 +151,6 @@ const sanitizePlanLinks = (value, now) => {
     const id = asNonEmptyString(entry.id);
     const file = asNonEmptyString(entry.file);
     if (!id || !file || !PLAN_FILE_PATTERN.test(file)) continue;
-    // A personal file and a shared file may carry the same name: they live in different folders.
     const shared = entry.shared === true;
     const fileKey = `${shared ? 'shared' : 'personal'}/${file}`;
     if (seenIds.has(id) || seenFiles.has(fileKey)) continue;
@@ -185,20 +162,12 @@ const sanitizePlanLinks = (value, now) => {
       title: sanitizePlanTitle(entry.title) || 'Plan',
       createdAt: Number.isFinite(entry.createdAt) && entry.createdAt >= 0 ? entry.createdAt : now,
       pinned: entry.pinned === true,
-      // The user's own plan that was moved into the team's folder: it keeps
-      // its id (session attachments still point at it) and this flag says
-      // which folder holds the file.
       shared,
     });
   }
   return result.sort((a, b) => b.createdAt - a.createdAt);
 };
 
-/**
- * The session a plan was last sent to with Implement or Improve, keyed by plan
- * id. A map beside the manifest rather than a field on the link, because a
- * plan that only lives in the team's folder has no link to carry it.
- */
 const sanitizePlanSessions = (value) => {
   if (!isObjectRecord(value)) return {};
   const result = {};
@@ -226,7 +195,6 @@ const SHARED_PLAN_ID_PREFIX = 'shared:';
 
 const mutationError = (message, status) => Object.assign(new Error(message), { status });
 
-/** A listed plan with its checklist counts, when it has a checklist. */
 const withProgress = (plan, progress) => (progress ? { ...plan, progress } : plan);
 
 const withoutKey = (record, key) => {
@@ -251,14 +219,12 @@ const todoText = (value) => {
   return text;
 };
 
-/** A requested plan link: a plan id sets it, null clears it, undefined leaves it alone. */
 const planIdPatch = (value) => {
   const planId = planIdInput.safeParse(value);
   if (!planId.success) throw mutationError('planId must be a non-empty string or null', 400);
   return planId.data;
 };
 
-/** Requested dependencies: an array replaces them ([] clears), undefined leaves them alone. */
 const dependsOnPatch = (value) => {
   const dependsOn = dependsOnInput.safeParse(value);
   if (!dependsOn.success) throw mutationError('dependsOn must be an array of todo ids', 400);
@@ -272,12 +238,6 @@ const withLinks = (record, { planId, dependsOn }) => {
   return next;
 };
 
-/**
- * Drops the todos a write removes from the dependencies of the todos it keeps.
- * Deleting a todo, alone or with Clear completed, never waits on the todos
- * that depend on it, and a dependency removed this way no longer holds its
- * todo back.
- */
 const withoutRemovedDependencies = (previous, next) => {
   const kept = new Set(next.map((todo) => todo.id));
   const removed = new Set(previous.map((todo) => todo.id).filter((id) => !kept.has(id)));
@@ -287,10 +247,6 @@ const withoutRemovedDependencies = (previous, next) => {
     : todo));
 };
 
-/**
- * Leaves no note or todo linked to a plan that is being deleted. A todo loses
- * its dependencies too: they could only name todos of that plan.
- */
 const withPlanUnlinked = (context, planId) => {
   const linked = (entry) => entry.planId === planId;
   if (![...context.notes, ...context.todos].some(linked)) return context;
@@ -301,12 +257,6 @@ const withPlanUnlinked = (context, planId) => {
   };
 };
 
-/**
- * Refuses a todo list that holds a new dependency on a missing todo, a
- * dependency across plans or outside any plan, or a cycle. A dependency
- * already stored on a todo that is gone stays while its todo keeps its plan:
- * only new references must exist.
- */
 const assertTodoGraph = (previous, next) => {
   const nextById = new Map(next.map((todo) => [todo.id, todo]));
   const previousById = new Map(previous.map((todo) => [todo.id, todo]));
@@ -318,7 +268,6 @@ const assertTodoGraph = (previous, next) => {
       if (!dependency && !before?.dependsOn?.includes(dependencyId)) {
         throw mutationError(`Dependency ${dependencyId} not found`, 400);
       }
-      // A stored edge to a vanished todo stays only while its todo keeps its plan.
       const dependencyPlanId = dependency ? dependency.planId : before.planId;
       if (!todo.planId || dependencyPlanId !== todo.planId) {
         throw mutationError('A dependency must link two todos of the same plan', 400);
@@ -340,13 +289,9 @@ const assertTodoGraph = (previous, next) => {
 
 export const createProjectContextRuntime = (deps) => {
   const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, resolveNotesTodosFile, onChanged } = deps;
-  // The team's shared plans folder for a project (absolute path) or null; the
-  // project config runtime owns that answer (`plansDir` in the shared file).
   const sharedPlansDirFor = typeof resolveSharedPlansDir === 'function'
     ? resolveSharedPlansDir
     : async () => null;
-  // The repository file holding notes and todos (absolute path) or null when
-  // they stay in `context.json`; the project config runtime owns that answer.
   const resolveNotesTodosFileFor = resolveNotesTodosFile ?? (async () => null);
 
   const planSummaries = createPlanSummaryCache({ fsPromises, parseTitle: (raw) => parsePlanMarkdown(raw).title });
@@ -358,12 +303,7 @@ export const createProjectContextRuntime = (deps) => {
       : `plan_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
   const writeLocks = new Map();
-  // The notes and todos file each locked write resolved once, so a read and
-  // the write after it use the same store while the option changes under them.
   const lockedNotesTodosFiles = new Map();
-  // Successful store switches per project, so a list read before two switches
-  // (local, repository, local again) still differs from the current selection.
-  // The run prefix keeps a count from an earlier server run from matching.
   const notesTodosSwitches = new Map();
   const runPrefix = Math.random().toString(36).slice(2, 10);
   const notesTodosStoreToken = (projectId, store) => `${store}:${runPrefix}.${notesTodosSwitches.get(sanitizeProjectId(projectId)) ?? 0}`;
@@ -379,9 +319,6 @@ export const createProjectContextRuntime = (deps) => {
     return value;
   };
 
-  // The folder and the client-owned config file share one bounded stem
-  // (`projectConfigFileStemOf`): an id too long for a file name would
-  // otherwise fail every read with ENAMETOOLONG instead of reading as empty.
   const storageStemFor = (projectId) => projectConfigFileStemOf(sanitizeProjectId(projectId));
   const storageDirFor = (projectId) => path.join(projectsDirPath, storageStemFor(projectId));
   const contextPathFor = (projectId) => path.join(storageDirFor(projectId), 'context.json');
@@ -437,20 +374,6 @@ export const createProjectContextRuntime = (deps) => {
     }
   };
 
-  /**
-   * One-time migration of `projectNotes` / `projectTodos` / `projectPlanFiles`
-   * out of the client-owned `<projectId>.json`.
-   *
-   * Plan links carried absolute paths; those are converted to base names. A
-   * referenced file that is not already inside the plans directory is moved
-   * there so a stale absolute path from an earlier project id is recovered
-   * rather than dropped. A link whose file cannot be located at all is kept
-   * out of the result — the markdown is gone, so the link is dead either way.
-   *
-   * The legacy keys are removed only after `context.json` is durably written.
-   * A failure at any point leaves the legacy keys in place, so the migration
-   * simply runs again on the next read.
-   */
   const migrateFromLegacyConfig = async (projectId, now) => {
     const legacyPath = legacyConfigPathFor(projectId);
     const legacy = await readJson(legacyPath);
@@ -483,7 +406,6 @@ export const createProjectContextRuntime = (deps) => {
         raw = await fsPromises.readFile(targetPath, 'utf8');
       } catch (error) {
         if (!error || error.code !== 'ENOENT') throw error;
-        // Not in the plans directory yet — recover it from the recorded path.
         try {
           raw = await fsPromises.readFile(absolutePath, 'utf8');
         } catch (recoverError) {
@@ -525,12 +447,6 @@ export const createProjectContextRuntime = (deps) => {
     return lockedNotesTodosFiles.has(key) ? lockedNotesTodosFiles.get(key) : resolveNotesTodosFileFor(key);
   };
 
-  /**
-   * Notes and todos from the repository file. A missing file or key is an
-   * empty list; unparsable content (a Git conflict, a bad hand edit) or a
-   * `notes` / `todos` that is not a list fails the read, so no write can
-   * replace it.
-   */
   const readNotesTodosFile = async (filePath, now) => {
     const stored = await readJson(filePath);
     if (stored.missing) return { notes: [], todos: [] };
@@ -541,20 +457,6 @@ export const createProjectContextRuntime = (deps) => {
     return { notes: sanitizeNotes(stored.value.notes, now), todos: sanitizeTodos(stored.value.todos, now) };
   };
 
-  /**
-   * Read `context.json`.
-   *
-   * Distinguishes the three states the caller must not conflate: a missing
-   * file is authoritative empty, malformed JSON is a failure, and an I/O
-   * error propagates. Never returns an empty context to paper over a read
-   * that did not succeed.
-   *
-   * Deliberately does NOT take the write lock: every mutator calls this while
-   * already holding it, so locking here would deadlock. The legacy migration
-   * it can trigger is safe unlocked — both of its writes are atomic renames
-   * of identical content, so concurrent migrations converge instead of
-   * interleaving.
-   */
   const readLocalContext = async (projectId) => {
     const now = Date.now();
     const stored = await readJson(contextPathFor(projectId));
@@ -586,13 +488,6 @@ export const createProjectContextRuntime = (deps) => {
     };
   };
 
-  /**
-   * The stored context. With the repository option on, notes and todos come
-   * from the repository file and everything else from `context.json`.
-   * `notesTodosStore` is an opaque token for the store the notes and todos
-   * came from (`local` or `repository`, then the switch count); every
-   * successful switch changes it.
-   */
   const readStoredContext = async (projectId) => {
     const local = await readLocalContext(projectId);
     const notesTodosFile = await notesTodosFileFor(projectId);
@@ -604,18 +499,12 @@ export const createProjectContextRuntime = (deps) => {
     };
   };
 
-  /** The file name behind a shared plan id, or null when the id is not one. */
   const sharedPlanFileOf = (planId) => {
     if (typeof planId !== 'string' || !planId.startsWith(SHARED_PLAN_ID_PREFIX)) return null;
     const file = planId.slice(SHARED_PLAN_ID_PREFIX.length);
     return PLAN_FILE_PATTERN.test(file) ? file : null;
   };
 
-  /**
-   * Plans in the team's shared folder: every `.md` file there, newest first,
-   * addressed by `shared:<file>`. Plans written by other tools have no
-   * manifest entry, so the title comes from the file each time.
-   */
   const listSharedPlans = async (projectId, claimedFiles = new Set()) => {
     const dir = await sharedPlansDirFor(projectId);
     if (!dir) return { dir: null, plans: [] };
@@ -629,10 +518,8 @@ export const createProjectContextRuntime = (deps) => {
     const plans = [];
     for (const entry of entries) {
       if (!entry.isFile() || !PLAN_FILE_PATTERN.test(entry.name)) continue;
-      // Listed under its own id by the manifest entry that moved it there.
       if (claimedFiles.has(entry.name)) continue;
       const summary = await planSummaries.summaryOf(path.join(dir, entry.name));
-      // Removed between the directory read and this one.
       if (!summary) continue;
       plans.push(withProgress({
         id: `${SHARED_PLAN_ID_PREFIX}${entry.name}`,
@@ -647,11 +534,6 @@ export const createProjectContextRuntime = (deps) => {
     return { dir, plans };
   };
 
-  /**
-   * Progress of one of the user's own plans. The list must not fail because
-   * one plan file could not be read, so an unreadable file shows no progress,
-   * the same as a plan without a checklist.
-   */
   const progressOfLink = async (projectId, link, sharedDir) => {
     const folder = link.shared ? sharedDir : plansDirFor(projectId);
     if (!folder) return null;
@@ -662,17 +544,11 @@ export const createProjectContextRuntime = (deps) => {
     }
   };
 
-  /**
-   * What clients see: the stored context plus the team's shared plans, each
-   * marked with its source, its checklist progress and the session it was
-   * last sent to.
-   */
   const readContext = async (projectId) => {
     const { planSessions, ...stored } = await readStoredContext(projectId);
     const claimed = new Set(stored.plans.filter((plan) => plan.shared).map((plan) => plan.file));
     const shared = await listSharedPlans(projectId, claimed);
     const own = await Promise.all(stored.plans
-      // A moved plan is only reachable while the project still has a shared folder.
       .filter((plan) => !plan.shared || shared.dir)
       .map(async ({ shared: isShared, ...plan }) => {
         const progress = await progressOfLink(projectId, { ...plan, shared: isShared }, shared.dir);
@@ -686,23 +562,13 @@ export const createProjectContextRuntime = (deps) => {
     };
   };
 
-  /** One plan as clients see it, read back from the committed context. */
   const publicPlanOf = async (projectId, planId) => {
     const context = await readContext(projectId);
     return { plan: context.plans.find((entry) => entry.id === planId) ?? null, context };
   };
 
-  /** The folder a manifest plan's file lives in; null for a moved plan when the project lost its shared folder. */
   const folderOfLink = async (projectId, link) => (link.shared ? sharedPlansDirFor(projectId) : plansDirFor(projectId));
 
-  /**
-   * With the repository option on, notes and todos go to the repository
-   * file and plans to `context.json`, each written only when its part
-   * changed: a note or todo write commits to one file, a plan edit leaves Git
-   * clean, and `context.json` keeps its own notes and todos byte for byte.
-   * A write that still changes both (a `shared:` plan that is unshared or
-   * deleted while entries link to it) commits `context.json` first.
-   */
   const writeContext = async (projectId, context) => {
     const local = {
       version: PROJECT_CONTEXT_VERSION,
@@ -730,7 +596,6 @@ export const createProjectContextRuntime = (deps) => {
     onChanged?.(sanitizeProjectId(projectId));
   };
 
-  /** Whether a plan id names a manifest entry or a file in the team's folder. */
   const planExists = async (projectId, current, planId) => {
     const sharedFile = sharedPlanFileOf(planId);
     if (!sharedFile) return current.plans.some((entry) => entry.id === planId);
@@ -738,10 +603,6 @@ export const createProjectContextRuntime = (deps) => {
     return dir ? fsPromises.access(path.join(dir, sharedFile)).then(() => true, () => false) : false;
   };
 
-  /**
-   * Refuses a record whose plan link is new and names no plan. A link that is
-   * already stored stays when its shared file disappears outside the API.
-   */
   const assertNewPlanLinksExist = async (projectId, current, previous, next) => {
     const previousById = new Map(previous.map((entry) => [entry.id, entry]));
     const checked = new Set();
@@ -757,15 +618,6 @@ export const createProjectContextRuntime = (deps) => {
     await assertNewPlanLinksExist(projectId, current, current.todos, todos);
   };
 
-  /**
-   * Replaces the whole list. A listed todo that already exists keeps the plan
-   * link and dependencies its entry omits, so a client that does not know
-   * these fields cannot erase them.
-   *
-   * `store` is the `notesTodosStore` token the client read the list with. A
-   * list read before any switch of the repository option since is refused (409) instead of replacing the
-   * newly selected store with the other one's entries.
-   */
   const saveTodos = async (projectId, todos, { store } = {}) => {
     const entries = Array.isArray(todos) ? todos : [];
     for (const entry of entries) {
@@ -795,12 +647,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Adds one todo, an open one ahead of the completed ones and a done one at
-   * the end; answers with it and the committed context. The panel names the id it already shows, so a check
-   * made before this answer arrives addresses the same todo; a taken or
-   * missing id gets a fresh one.
-   */
   const createTodo = async (projectId, value) => {
     const text = todoText(value?.text);
     const requestedId = asNonEmptyString(value?.id);
@@ -866,14 +712,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Notes are addressed individually.
-   *
-   * Splitting them from todos is what lets the panel stop writing both fields
-   * on every keystroke-driven save: a todo toggle can no longer clobber notes
-   * the user is still typing, and an agent-authored note can no longer lose a
-   * concurrent todo change.
-   */
   const createNote = async (projectId, value) => {
     const body = clampLength(typeof value?.body === 'string' ? value.body : '', PROJECT_NOTE_BODY_MAX_LENGTH).trim();
     if (!body) {
@@ -905,10 +743,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Patch one note. Omitted fields are left alone, so pinning a note cannot
-   * roll back an edit that landed between the two requests.
-   */
   const updateNote = async (projectId, noteId, patch, options = {}) => {
     const id = asNonEmptyString(noteId);
     if (!id) {
@@ -1010,18 +844,6 @@ export const createProjectContextRuntime = (deps) => {
     return { id: link.id, file: link.file, path: planPath, createdAt: link.createdAt, title: parsed.title, body: parsed.body, raw, source: link.shared ? 'shared' : 'personal' };
   };
 
-  /**
-   * Overwrite a plan's markdown in place.
-   *
-   * Takes the whole raw document, because the editor surface owns the file
-   * verbatim — round-tripping through title + body would rewrite the heading
-   * and silently reformat what the user typed. The manifest title is
-   * re-derived from the saved content so the list never drifts from the file.
-   *
-   * The file name is deliberately not regenerated on a title change: it is the
-   * stable identity behind the link, and renaming it would strand the markdown
-   * if the manifest write failed afterwards.
-   */
   const updatePlan = async (projectId, planId, value, options = {}) => {
     const id = asNonEmptyString(planId);
     if (!id) {
@@ -1044,7 +866,6 @@ export const createProjectContextRuntime = (deps) => {
 
     const sharedFile = sharedPlanFileOf(id);
     if (sharedFile) {
-      // A shared plan is the file itself: written verbatim, no manifest.
       return withWriteLock(projectId, async () => {
         const dir = await sharedPlansDirFor(projectId);
         if (!dir) return null;
@@ -1075,9 +896,6 @@ export const createProjectContextRuntime = (deps) => {
       const folder = await folderOfLink(projectId, link);
       if (!folder) return null;
       const filePath = path.join(folder, link.file);
-      // Refuse to recreate a file that was deleted underneath us: the link is
-      // already dead, and writing here would resurrect it with editor content
-      // the user believed was discarded.
       try {
         await fsPromises.access(filePath);
       } catch (error) {
@@ -1102,14 +920,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Create a plan from title + body.
-   *
-   * The markdown file is written before the manifest entry. A failure after
-   * the file write leaves an unreferenced markdown file rather than a
-   * manifest entry pointing at nothing — the orphan is inert, a dangling
-   * entry would surface as a broken row in the UI.
-   */
   const createPlan = async (projectId, value) => {
     const title = sanitizePlanTitle(value?.title) || 'Plan';
     const body = clampLength(typeof value?.body === 'string' ? value.body : '', PROJECT_PLAN_BODY_MAX_LENGTH);
@@ -1141,14 +951,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Delete a plan.
-   *
-   * The manifest entry is removed first so a failed file unlink cannot leave
-   * the UI showing a plan that no longer opens. The leftover markdown is
-   * unreferenced and harmless.
-   */
-  /** Pin state is patched on its own so it cannot roll back a concurrent edit. */
   const setPlanPinned = async (projectId, planId, pinned) => {
     const id = asNonEmptyString(planId);
     if (!id) {
@@ -1202,9 +1004,6 @@ export const createProjectContextRuntime = (deps) => {
         return { deleted: false, context: await readContext(projectId) };
       }
       const unlinked = withPlanUnlinked(current, id);
-      // With notes and todos in the repository, the unlink is its own write
-      // and lands first: a failure after it still lists the plan, so deleting
-      // again finishes the job.
       if (unlinked !== current && await notesTodosFileFor(projectId)) {
         await writeContext(projectId, unlinked);
       }
@@ -1220,7 +1019,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /** A free file name in `dir`, keeping the wanted base name unless it is taken. */
   const freeFileNameIn = async (dir, wanted, taken = new Set()) => {
     const base = wanted.replace(/\.md$/, '');
     let file = wanted;
@@ -1242,15 +1040,6 @@ export const createProjectContextRuntime = (deps) => {
     }
   };
 
-  /**
-   * Move one of the user's plans into the team's shared folder. The plan
-   * keeps its id: the manifest entry stays and gets the `shared` flag, so a
-   * session that attached the plan still finds it. The markdown moves first,
-   * then the manifest is written; a failure in between leaves the file in the
-   * shared folder (listed there as `shared:<file>`) and a dead personal entry
-   * that `readPlan` reports as gone. Needs a shared plans folder; refused
-   * (validation error) when the project has none.
-   */
   const sharePlan = async (projectId, planId) => {
     const id = asNonEmptyString(planId);
     if (!id) throw new Error('planId is required');
@@ -1273,11 +1062,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Move a shared plan back into the user's own plans; the reverse of
-   * `sharePlan`. A plan the user moved keeps its id; a plan that only ever
-   * lived in the team's folder (`shared:<file>`) gets a manifest entry now.
-   */
   const unsharePlan = async (projectId, planId) => {
     const id = asNonEmptyString(planId);
     if (!id) throw new Error('planId is required');
@@ -1308,8 +1092,6 @@ export const createProjectContextRuntime = (deps) => {
       const plans = ownLink
         ? current.plans.map((entry) => (entry.id === id ? link : entry))
         : [link, ...current.plans];
-      // A plan that only lived in the team's folder gets a new id here; the
-      // session it was sent to and the notes and todos linked to it follow it.
       const planSessions = !ownLink && current.planSessions[id]
         ? { ...withoutKey(current.planSessions, id), [link.id]: current.planSessions[id] }
         : current.planSessions;
@@ -1327,11 +1109,6 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * Record the session a plan was just sent to, so its card can lead there.
-   * One session per plan: sending it again replaces the previous one, and an
-   * explicit null `sessionId` clears it.
-   */
   const setPlanSession = async (projectId, planId, value) => {
     const id = asNonEmptyString(planId);
     if (!id) throw new Error('planId is required');
@@ -1353,33 +1130,12 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
-  /**
-   * `into` followed by the entries of `from` whose ids it does not hold yet.
-   * An id both hold takes `from`'s version: `from` is the store the user has
-   * been editing, and `into` holds at most an older copy left by an earlier
-   * switch or a failed one.
-   */
   const mergeById = (into, from) => {
     const fromById = new Map(from.map((entry) => [entry.id, entry]));
     const ids = new Set(into.map((entry) => entry.id));
     return [...into.map((entry) => fromById.get(entry.id) ?? entry), ...from.filter((entry) => !ids.has(entry.id))];
   };
 
-  /**
-   * Switch the store of a project's notes and todos, so the selected one
-   * never comes up without the entries the user had. Turning the repository
-   * option on moves this machine's entries into the repository file, after
-   * the ones already there; turning it off copies the file's entries into
-   * `context.json` and leaves the file, which Git shares, as it is. An entry
-   * the target already holds (same id) is not added twice but replaced by the
-   * version moved in, so a repeated or retried switch converges and keeps the
-   * edits made since the last one.
-   *
-   * `file` is the repository file, `commit` persists the option. Order on:
-   * repository file, option, then `context.json` is emptied; off: `context.json`,
-   * then the option. A failure before the option leaves it as it was and a
-   * retry finishes the move; a failure after it is announced.
-   */
   const switchNotesTodosStorage = async (projectId, { enabled, file, commit }) => withWriteLock(projectId, async () => {
     const key = sanitizeProjectId(projectId);
     if (enabled && !file) throw new Error('project checkout not found');
@@ -1390,8 +1146,6 @@ export const createProjectContextRuntime = (deps) => {
     const now = Date.now();
     const local = await readLocalContext(projectId);
     const empty = { notes: [], todos: [] };
-    // Turning the option off is the way out of a conflicted file: it copies
-    // nothing from it then, and the file stays for the user to repair.
     const repository = !file ? empty : await readNotesTodosFile(file, now).catch((error) => {
       if (!enabled && error?.code === MALFORMED_NOTES_TODOS_FILE) return empty;
       throw error;

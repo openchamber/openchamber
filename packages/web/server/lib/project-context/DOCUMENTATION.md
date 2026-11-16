@@ -264,6 +264,24 @@ Clients re-read authoritative context for the visible owner. This is a commit no
 
 ## Invariants
 
+- **Plan file identity includes its folder.** Personal and shared plans may
+  have the same base name because their files live in separate directories.
+- **Store tokens include a server-run prefix.** A token from an earlier run
+  cannot match the current store merely because its switch count is the same.
+- **The summary cache leaves read failures to its caller.** A missing file
+  clears its cached summary and returns no summary; other errors propagate so
+  callers retain control of whether the plan list fails.
+- **Sharing moves the markdown before updating the manifest.** If the manifest
+  write fails, the file remains visible as `shared:<file>` and the personal
+  entry reads as gone.
+- **Moved plans require a resolved shared folder.** When the project loses that
+  folder, those manifest entries are omitted from the list and their files
+  cannot be addressed through the personal plans directory.
+- **Plan pin writes patch only pin state.** A pin change cannot roll back a
+  concurrent edit to the plan.
+- **Todo creation accepts the panel's displayed id.** A check sent before the
+  creation response arrives addresses the same todo; a missing or taken id
+  receives a fresh one.
 - **Missing is not malformed.** A missing `context.json` (or repository notes
   file) is authoritative empty data. Unparseable JSON is a failure that propagates as `500`, so the client
   preserves what it already has instead of rendering an empty panel over intact
@@ -281,7 +299,8 @@ Clients re-read authoritative context for the visible owner. This is a commit no
   the file verbatim; reassembling it from parsed parts would rewrite the
   heading and reformat what the user typed. The manifest title is re-derived
   from the saved content, and the file name never changes with the title — it
-  is the stable identity behind the link.
+  is the stable identity behind the link. Renaming it before the manifest write
+  succeeds could strand the markdown if that write fails.
 - **Plan update refuses to recreate a deleted file.** If the markdown vanished
   underneath an open editor the link is already dead; writing would resurrect
   content the user believes was discarded, so it returns `404` instead.
