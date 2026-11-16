@@ -2,7 +2,6 @@ import type { Metadata, Part } from '@/lib/opencode/model';
 import { changeRequestCheckSource, changeRequestCommentSource, readContextPart, type ContextPartPayload } from './contextParts';
 import { extractTerminalContexts } from './terminalContext';
 
-/** Preserve both the source and the reply when a model context needs a limit. */
 export function excerptMarkdown(text: string, limit: number): string {
   if (text.length <= limit) return text;
   const marker = '\n\n[Content omitted]\n\n';
@@ -59,11 +58,6 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
   }
 }
 
-/**
- * The model-facing text of a message's own parts. Attached context is no
- * longer a part — it arrives as its own synthetic message — so render it with
- * `formatContextMessage`.
- */
 export function formatMessageText(
   parts: readonly Part[],
   options: { user?: boolean; fieldLimit?: number } = {},
@@ -89,7 +83,6 @@ export function formatMessageText(
   return blocks.map((block) => block.trim()).filter(Boolean).join('\n\n');
 }
 
-/** One attached context item (a synthetic message) as model-facing Markdown. */
 export function formatContextMessage(
   message: { text: string; metadata?: Metadata },
   fieldLimit?: number,

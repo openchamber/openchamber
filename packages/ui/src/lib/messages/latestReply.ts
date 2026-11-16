@@ -7,7 +7,6 @@ export interface LatestReply {
     text: string;
 }
 
-/** One entry of the session history the search reads, newest last. */
 export interface LatestReplyRecord {
     info: Message;
     parts: Part[];
@@ -23,11 +22,6 @@ const completedReplyText = (record: LatestReplyRecord): string | null => {
     return text || null;
 };
 
-/**
- * The last answer of the latest prompt: the newest completed assistant
- * message that finished with `stop` and has text to read. Steps that ended in
- * tool calls, aborted turns, and messages still streaming are left out.
- */
 export const findLatestCompletedReply = (messages: readonly LatestReplyRecord[]): LatestReply | null => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const record = messages[index];
@@ -41,7 +35,6 @@ export const findLatestCompletedReply = (messages: readonly LatestReplyRecord[])
     return null;
 };
 
-/** Finished answers across all turns, for the auto-read history baseline. */
 export const findCompletedReplyIds = (messages: readonly LatestReplyRecord[]): string[] => {
     const ids: string[] = [];
     for (const record of messages) {

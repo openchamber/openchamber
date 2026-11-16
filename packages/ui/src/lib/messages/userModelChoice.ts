@@ -8,13 +8,6 @@ export type UserModelChoice = {
   variant?: string
 }
 
-/**
- * The agent/model a turn actually ran on.
- *
- * OpenCode v2 user messages carry no model: the server records the choice on
- * the assistant reply, so the reply is the authority for what the composer
- * should show.
- */
 export const extractAssistantModelChoice = (message: Message): UserModelChoice | null => {
   if (message.role !== 'assistant') {
     return null
@@ -28,12 +21,6 @@ export const extractAssistantModelChoice = (message: Message): UserModelChoice |
   }
 }
 
-/**
- * Find the latest turn's model/agent choice.
- *
- * Messages whose parts have not been loaded yet are skipped so an incomplete
- * snapshot cannot be treated as authoritative.
- */
 export const findLatestUserModelChoice = (
   messages: readonly Message[],
   getParts: (messageId: string) => Part[] | undefined,
@@ -55,11 +42,6 @@ export const findLatestUserModelChoice = (
   return null
 }
 
-/**
- * The selection OpenCode 2 keeps on the session record itself (`model` with
- * its variant). The record's agent is followed separately, so the choice
- * carries none.
- */
 export const extractSessionRecordModelChoice = (session: Session | undefined): UserModelChoice | null => {
   const model = session?.model
   if (!session || !model?.providerID || !model.id) return null
@@ -72,7 +54,6 @@ export const extractSessionRecordModelChoice = (session: Session | undefined): U
   }
 }
 
-/** Field equality, so a re-derived choice keeps its previous reference. */
 export const areModelChoicesEqual = (left: UserModelChoice | null, right: UserModelChoice | null): boolean => {
   if (left === right) return true
   if (!left || !right) return false
@@ -83,12 +64,6 @@ export const areModelChoicesEqual = (left: UserModelChoice | null, right: UserMo
     && left.variant === right.variant
 }
 
-/**
- * When the user has a manual session model override, historical user-message
- * metadata must not overwrite it. After a real send the selection store is
- * updated to match the message, so a conflict means the picker was changed
- * after the last prompt — keep the override.
- */
 export const shouldPreserveManualModelOverride = ({
   selectionSource,
   savedSessionModel,
