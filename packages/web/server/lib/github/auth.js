@@ -13,11 +13,6 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
 
 const STORAGE_DIR = OPENCHAMBER_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'github-auth.json');
-// GitHub Enterprise instances keep their own credentials in the server token
-// store GitLab uses, one entry per host; this file stays github.com's own. The
-// github.com instance (device flow and accounts) keeps living here. The path is
-// resolved at call time (not module load) so the caller's OPENCHAMBER_DATA_DIR
-// at that moment wins even when the module was imported earlier in the process.
 const sourceControlAuthStoreFilePath = () => path.join(
   process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -25,11 +20,6 @@ const sourceControlAuthStoreFilePath = () => path.join(
   'source-control-auth.json',
 );
 const SETTINGS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
-// Version 3 holds one entry per instance. Version 2 was a flat github.com-only
-// list. github.com's device-flow accounts stay in this file; a GitHub
-// Enterprise host's personal access tokens live in the shared
-// `source-control-auth.json` next to GitLab's (`createSourceControlAuthStore`),
-// and the host-scoped accessors below route non-github.com hosts there.
 const AUTH_VERSION = 3;
 
 const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
@@ -56,8 +46,6 @@ export function githubCliAccountId(userId) {
   return `github.com#cli:${userId}`;
 }
 
-// A host key is always a normalized hostname; an omitted/empty host is
-// github.com, the only instance the device flow can serve.
 const normalizeInstance = (host) => {
   const value = String(host ?? '').trim().toLowerCase();
   return value ? value : 'github.com';
@@ -65,9 +53,6 @@ const normalizeInstance = (host) => {
 const providerUserIdFor = (host, userId) => `${normalizeInstance(host)}#${userId}`;
 const newCredentialId = () => `occred:v1:github:${randomUUID()}:r1`;
 const emptyState = () => ({ version: AUTH_VERSION, instances: {} });
-// `cliLogin` is the gh login the instance uses as its current account while its
-// gh switch is on: null means gh's own active login, which is what earlier
-// releases always used.
 const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, cliLogin: null });
 
 function parseUser(value) {
@@ -133,9 +118,6 @@ function parseVersionThree(value) {
   return state;
 }
 
-// Version 2 was the flat github.com-only shape `{ version: 2, activeCredentialId,
-// credentials }`. It migrates into the github.com instance so existing files
-// keep their credentials with the same ids and secrets.
 function parseVersionTwo(value) {
   const { version: _version, ...flatValue } = value;
   const flat = parseInstance({ ...flatValue, cliDisabled: false, cliActive: false });
@@ -216,9 +198,6 @@ const serializeCredential = (credential) => {
   return stored;
 };
 
-// Earlier releases read only the flat version 2 shape, so a file that holds
-// nothing beyond github.com accounts is written that way; version 3 appears
-// once another host, or a gh switch the flat shape cannot hold, is stored.
 const fitsVersionTwo = (state) => Object.keys(state.instances).every((host) => host === 'github.com')
   && !state.instances['github.com']?.cliDisabled && !state.instances['github.com']?.cliActive
   && !state.instances['github.com']?.cliLogin;
@@ -255,9 +234,6 @@ function serializeState(state) {
       cliDisabled: instance.cliDisabled,
       cliActive: instance.cliActive,
     };
-    // Written only while a login is pinned: an older release's strict parser
-    // rejects keys it does not know, so a file a switch with no pinned login
-    // touched stays readable by it, the way source-control-auth.json does.
     if (instance.cliLogin) instances[host].cliLogin = instance.cliLogin;
   }
   return { version: AUTH_VERSION, instances };
@@ -281,7 +257,7 @@ function publicCredential(credential, instance) {
   };
 }
 
-/** @public Exposed to integration tests that dynamically import the auth module. */
+/** @public */
 export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 } = {}) {
   if (!validText(filePath)) throw new TypeError('GitHub auth file path is required');
   let transactions = Promise.resolve();
@@ -352,9 +328,6 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       return credential?.status === 'valid' ? credential : null;
     }),
     listAccountsForHost: (host) => read((state) => instanceOf(state, host).credentials.map((credential) => publicCredential(credential, instanceOf(state, host)))),
-    // Credential ids are unique across instances (server-assigned), so an opaque
-    // credential id alone identifies its own instance. The returned record earns
-    // a `host` so callers know which API root the token belongs to.
     readAccountAnyInstance: (credentialId, revision) => read((state) => {
       for (const [host, instance] of Object.entries(state.instances)) {
         const credential = readAccountIn(instance, credentialId, revision);
@@ -439,8 +412,6 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       const hostKey = normalizeInstance(host);
       const instance = instanceOf(state, hostKey);
       const nextActive = Boolean(active) && !instance.cliDisabled;
-      // No login argument keeps the account the instance already had; null pins
-      // gh's own active login, which is what earlier releases always used.
       const requested = validText(login) ? login : null;
       const nextLogin = !nextActive ? null : login === undefined ? (instance.cliLogin ?? null) : requested;
       const changed = instance.cliActive !== nextActive || (instance.cliLogin ?? null) !== nextLogin;
@@ -453,7 +424,6 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
 
   return Object.freeze({
     ...hostMethods,
-    // github.com shorthands kept for the account layer: a hostless call means github.com.
     listAccounts: () => hostMethods.listAccountsForHost('github.com'),
     setAccount: (args) => hostMethods.setAccountForHost('github.com', args),
     markInvalid: (credentialId, reason) => hostMethods.markInvalidForHost('github.com', credentialId, reason),
@@ -461,15 +431,6 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
 }
 
 const authStore = createGitHubAuthStore({ filePath: STORAGE_FILE });
-// The server token store GitLab uses, read and written from here for GitHub
-// Enterprise hosts: one entry per host, holding that host's personal access
-// tokens and its gh CLI switch. Its file lock and this file's are the same
-// `source-control-auth.json.lock`, so the desktop app and a web server share it
-// the way GitLab's accounts do. A fresh store per call, so the shared token
-// store's path — and therefore the OPENCHAMBER_DATA_DIR in effect at that
-// moment — is the one that wins, even when this module was imported earlier in
-// the same process; the github.com file and lock above keep module-load
-// behavior exactly.
 const instanceAuthStore = () => createSourceControlAuthStore({ filePath: sourceControlAuthStoreFilePath() });
 
 function readSettingsFile() {
@@ -495,9 +456,6 @@ const getActiveForHost = async (host) => {
   if (!instance.activeAccountId) return null;
   return instanceAuthStore().github.readAccount(host, instance.activeAccountId);
 };
-// The active credential of one instance (github.com from github-auth.json, a
-// named enterprise host from the shared server token store); caller-scoped per
-// host, so github.com's OAuth token is never a candidate for another host.
 export const getGitHubAuthForHost = (host) => (normalizeInstance(host) === 'github.com'
   ? authStore.getActiveForHost(host)
   : getActiveForHost(host));
@@ -509,10 +467,6 @@ export const getGitHubAuthAccountsForHost = async (host) => (normalizeInstance(h
   ? authStore.listAccountsForHost(host)
   : githubInstanceAccounts(host));
 export const getGitHubAuthByAccountId = async (credentialId, revision) => {
-  // Credential ids are server-assigned and opaque; github.com's live in
-  // `github-auth.json`, a named enterprise host's in the shared token store.
-  // Read the shared store first (the per-host path the GHE branch writes), then
-  // the github.com file, so a per-instance PAT never falls through.
   const instanceCredential = await instanceAuthStore().github.readAccountAnyInstance(credentialId, revision);
   if (instanceCredential) return instanceCredential;
   return authStore.readAccountAnyInstance(credentialId, revision);
@@ -521,7 +475,6 @@ export const getGitHubAuthByAccountId = async (credentialId, revision) => {
 export async function setGitHubAuth({ accessToken, scope, tokenType, user, accountId, source = 'oauth' }) {
   if (accountId !== undefined) throw new Error('GitHub credential IDs are server assigned');
   const credential = await authStore.setAccount({ accessToken, scope, tokenType, user, source });
-  // A newly connected account becomes current, so the gh CLI stops being it.
   if (readSettingsFile().ghCliActive) setGhCliActive(false);
   return credential;
 }
@@ -530,8 +483,6 @@ export async function setGitHubAuthForHost(host, { accessToken, scope, tokenType
   const credential = normalizeInstance(host) === 'github.com'
     ? await authStore.setAccountForHost(host, { accessToken, scope, tokenType, user, source })
     : await instanceAuthStore().github.setAccount(host, { accessToken, scope, tokenType, user, source });
-  // The gh CLI for that instance stops being active: a stored credential is the
-  // preference until the instance's gh login is explicitly active again.
   if (normalizeInstance(host) === 'github.com' && readSettingsFile().ghCliActive) setGhCliActive(false);
   return credential;
 }
@@ -590,21 +541,12 @@ function isGhCliActive() {
 export function setGhCliActive(active, login) {
   const settings = readSettingsFile();
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
-  // The gh login this instance's switch is on for. No login argument keeps the
-  // one already pinned, exactly like the enterprise store; null pins gh's own
-  // active login, which is what earlier releases always used.
   const requested = isString(login) && login.trim() ? login.trim() : null;
   const existing = isString(settings.ghCliLogin) && settings.ghCliLogin.trim() ? settings.ghCliLogin.trim() : null;
   settings.ghCliLogin = !settings.ghCliActive ? null : login === undefined ? existing : requested;
   writeSettingsFile(settings);
 }
 
-// The gh CLI switch is per instance: github.com keeps its Settings switch; an
-// enterprise host's gh login is used only after the user activated that instance.
-// The per-instance switch lives in the shared server token store like GitLab's;
-// github.com's lives in settings.json. The global `ghCliDisabled` is github.com's
-// own switch only — it never kills another host's gh login, so turning one
-// instance off cannot take the others with it.
 export const isGhCliDisabledForHost = async (host) => {
   if (normalizeInstance(host) === 'github.com') return isGhCliDisabled();
   return (await instanceAuthStore().github.readInstance(host)).cliDisabled;
@@ -623,7 +565,6 @@ export const setGhCliActiveForHost = (host, active, login) => (normalizeInstance
   ? setGhCliActive(active, login)
   : instanceAuthStore().github.setCliActive(host, active, login));
 
-/** The gh login an instance's switch is on for, or null for gh's own active login. */
 export const getGhCliLoginForHost = async (host) => {
   if (normalizeInstance(host) === 'github.com') {
     const settings = readSettingsFile();

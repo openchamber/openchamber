@@ -40,32 +40,15 @@ import {
 } from './reference-search.js';
 import { fetchReviewState } from './review-draft.js';
 
-/**
- * GitHub's bound reads behind the shared route shell: change request status,
- * lists, context, issues, the repository's upstream, branches, labels and
- * reviewer candidates, the reference picker, and the change-request head and
- * source behind worktrees. Every read takes the shell's input (`session`,
- * `directory`, the trusted primary `remote`, the validated `context`) and
- * answers neutral DTOs (`mappers.js`).
- *
- * `accountOf(session)` is the session's Octokit and stored user; the remaining
- * dependencies are GitHub's own libraries, loaded lazily (`load`), and the
- * repository lookups tests replace.
- */
 
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const GITHUB_COM = 'github.com';
-// The board's own pull-list filters; anything else reads as the default view.
 const PULL_LIST_STATES = new Set(['open', 'closed', 'merged', 'all']);
 const PULL_LIST_PEOPLE = new Set(['any', 'assigned', 'created', 'reviewRequested']);
-// GitHub answers the same 403 for a non-collaborator on every status read.
-// Remembering that refusal per host/account/repository keeps the log quiet and
-// saves a round trip per poll (#5954).
 const CAN_MERGE_REFUSAL_TTL_MS = 5 * 60_000;
 const CAN_MERGE_REFUSAL_MAX_ENTRIES = 1000;
 
-/** An error the shell answers with exactly this status and body. */
 export const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
 const sourceControlError = (message, code, status) => Object.assign(new Error(message), { code, status });
@@ -77,19 +60,11 @@ const rateLimited = () => Object.assign(new Error('GitHub rate limited'), { stat
 const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
   && left.repo.toLowerCase() === right.repo.toLowerCase();
 
-/** GitHub's own words for a refusal, without the documentation URL Octokit appends to the error message. */
 export const gitHubRefusalMessage = (error) => {
   const message = error?.response?.data?.message;
   return isProviderString(message) && message.trim() ? message : error?.message;
 };
 
-/**
- * A short-lived cache of pull request contexts: the checks view, the comments
- * view and the send-to-chat actions ask for the same context within seconds.
- * A detail-inclusive answer serves a detail-free request. A mutation drops
- * its target's entries, and a read that started before such an invalidation
- * does not store what it read.
- */
 function createContextCache() {
   const entries = new Map();
   let epoch = 0;
@@ -107,7 +82,6 @@ function createContextCache() {
       entries.set(key, { data, includeCheckDetails, fetchedAt: data.fetchedAt, scope });
       if (entries.size > PR_CONTEXT_CACHE_MAX_ENTRIES) entries.delete(entries.keys().next().value);
     },
-    /** Every entry whose scope matches all given fields, in any directory. */
     invalidate: (scope) => {
       epoch += 1;
       for (const [key, entry] of entries) {
@@ -127,22 +101,11 @@ export function createGitHubResources({
   invalidateAccount,
 }) {
   const contextCache = createContextCache();
-  // The login a merge-permission check resolves is memoized per host and
-  // credential: an enterprise host's login must never be satisfied from (or
-  // replayed onto) the github.com account's memo, and a changed credential
-  // resolves its own login.
   const authLoginByCredential = new Map();
-  // Refusals live with the runtime's other read memos: one server process
-  // shares its own map, never another instance's.
   const canMergeRefusals = new Map();
 
   const identityOf = (session) => ({ provider: 'github', instance: session.instance });
 
-  /**
-   * The repository a read names, inside the primary remote's fork network,
-   * or null for one outside it. Without a selector, the primary repository.
-   * A `linked` read names its repository wherever it is.
-   */
   const resolveRepoForRequest = async (octokit, directory, requestedRepo, remoteName, { linked = false } = {}) => {
     const { repo } = await resolveRepo(directory, remoteName);
     if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
@@ -155,10 +118,6 @@ export function createGitHubResources({
       : null;
   };
 
-  /**
-   * The primary repository and its network, the primary alone when GitHub
-   * reports none. `requirePrimary` also checks the network's origin is it.
-   */
   const resolveRepoNetwork = async (octokit, directory, remoteName, { requirePrimary = true } = {}) => {
     const { repo } = await resolveRepo(directory, remoteName);
     if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
@@ -169,10 +128,6 @@ export function createGitHubResources({
     return { repo, repos: network ?? [{ ...repo, source: 'origin' }] };
   };
 
-  // A worktree checked out from a contributor's fork PR deliberately has no
-  // upstream, so the branch alone looks like it came from the primary remote.
-  // Its provenance names the fork remote the branch really came from. Without
-  // provenance (or when it cannot be read) status resolves as for any branch.
   const readContributorSourceRemote = async (directory, branch) => {
     if (!(readContributorProvenance instanceof Function)) return null;
     try {
@@ -184,7 +139,6 @@ export function createGitHubResources({
     }
   };
 
-  /** Checks of a head commit: check runs (Actions), else classic statuses; null when neither answers. */
   const readChecks = async (octokit, repo, sha, { runs: keepRuns = false } = {}) => {
     const { checks: { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } } = await load();
     let summary = null;
@@ -207,7 +161,6 @@ export function createGitHubResources({
     return { summary, checkRuns: keepRuns && summary && checkRuns.length > 0 ? checkRuns : [] };
   };
 
-  /** Workflow jobs and failure annotations behind the check runs, for the checks view. */
   const readCheckDetails = async (octokit, repo, checkRuns) => {
     const jobsByRun = new Map();
     const annotationsByRun = new Map();
@@ -255,7 +208,6 @@ export function createGitHubResources({
     };
   };
 
-  /** Whether the session's user may merge in `repo`; best effort, false when unknown. */
   const readCanMerge = async (octokit, session, user, repo, host) => {
     try {
       const loginHost = String(host ?? '').trim().toLowerCase() || GITHUB_COM;
@@ -275,11 +227,6 @@ export function createGitHubResources({
         username = await loginPromise;
       }
       if (!username) return false;
-      // A refusal is stable for a host, account and repository: remember it
-      // for a while so the status route stops asking GitHub and the log stops
-      // filling up (#5954). Only a 403 is remembered, and not every 403: a
-      // rate limit surfaces as a 403 too and lifts within minutes, so it asks
-      // again on the next poll like any other transient failure.
       const refusalKey = JSON.stringify([loginHost, session.accountId, session.credentialRevision, repo.owner, repo.repo]);
       const refusedUntil = canMergeRefusals.get(refusalKey);
       if (refusedUntil !== undefined && Date.now() < refusedUntil) return false;
@@ -307,10 +254,6 @@ export function createGitHubResources({
     }
   };
 
-  /**
-   * A rate limit, primary or secondary, as the transient failure the shell
-   * answers from its last-known status; a refusal with GitHub's own message.
-   */
   const statusFailure = async (error, host) => {
     const { rateLimit } = await load();
     if (rateLimit.noteIfGitHubRateLimit(error, host)) return rateLimited();
@@ -320,18 +263,12 @@ export function createGitHubResources({
     return error;
   };
 
-  /**
-   * A reference picker read: a refused token writes the account off and
-   * answers `connected: false`; a rate limit answers 503.
-   */
   const pickerRead = async (operation) => {
     try {
       return await operation();
     } catch (error) {
       if (error?.sourceControlResponse || error?.sourceControlAccountUnavailable) throw error;
       if ((error?.status ?? error?.response?.status) === 401) {
-        // The bound account's refusal is the shell's to answer: it writes the
-        // account off. A host's current credential refused answers `connected: false`.
         if (error?.sourceControlIdentity?.accountId) throw error;
         return { connected: false };
       }
@@ -347,15 +284,12 @@ export function createGitHubResources({
   const emptyContext = (identity) => ({ identity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [] });
 
   return Object.freeze({
-    /** Cached contexts drop with their mutation's target, whichever directory read them. */
     invalidateContexts: (scope) => contextCache.invalidate(scope),
 
     changeRequestStatus: async ({ session, directory, branch, remote, force = false }) => {
       const { octokit, user } = accountOf(session);
       const identity = identityOf(session);
       const { rateLimit } = await load();
-      // The host this request works on, so the gate short-circuits only that
-      // host: an enterprise instance's cooldown must not pause github.com.
       const { repo: hostRepo } = await resolveRepo(directory, remote).catch(() => ({ repo: null }));
       const host = hostRepo?.host ?? session.instance;
       if (rateLimit.isGitHubRateLimited(host)) throw rateLimited();
@@ -375,8 +309,6 @@ export function createGitHubResources({
         const full = await octokit.rest.pulls.get({ owner: resolved.repo.owner, repo: resolved.repo.repo, pull_number: resolved.pr.number });
         if (!full?.data) return found;
         const changeRequest = mapChangeRequest(full.data, project, identity);
-        // A closed or merged PR is the branch's history: its checks are not
-        // actionable and it cannot be merged, so neither costs a call.
         if (changeRequest.state !== 'open') return { ...found, changeRequest };
         const { summary } = changeRequest.headSha ? await readChecks(octokit, resolved.repo, changeRequest.headSha) : { summary: null };
         return {
@@ -386,7 +318,6 @@ export function createGitHubResources({
           canMerge: await readCanMerge(octokit, session, user, resolved.repo, hostRepo?.host),
         };
       } catch (error) {
-        // A repository GitHub does not show this account is no change request, quietly.
         if ((error?.status ?? error?.response?.status) === 404) return noProject;
         throw await statusFailure(error, host);
       }
@@ -402,10 +333,6 @@ export function createGitHubResources({
       const ofState = PULL_LIST_STATES.has(state) ? state : 'open';
       const ofPeople = PULL_LIST_PEOPLE.has(people) ? people : 'any';
 
-      // The REST list answers a plain state filter (open, closed, all) per
-      // repo. Only what REST cannot express — labels, people, text and
-      // `merged` — goes through search, whose index lags behind a write made
-      // here and whose quota is 30 reads a minute.
       if (ofState === 'merged' || ofPeople !== 'any' || query || labels?.length > 0) {
         const q = buildReferenceSearchQuery({ repos, kind: 'pull', state: ofState, people: ofPeople, text: query ?? '', labels });
         const search = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 50, page });
@@ -531,9 +458,6 @@ export function createGitHubResources({
         ci,
       };
       if (diff) result.diff = diff;
-      // A layer of a stack names its layers, so an agent given the PR knows
-      // what sits below and above it. GitHub marks a stacked PR's own
-      // resource; only then is the stack read, and a failed read leaves it out.
       if (isPlainObject(prData.stack)) {
         const stack = await fetchPullStack({ octokit, owner: repo.owner, repo: repo.repo, number }).catch(() => undefined);
         if (stack !== undefined) result.stack = stack;
@@ -581,7 +505,6 @@ export function createGitHubResources({
         return result;
       }
 
-      // A REST list narrows by every label with one comma-joined parameter.
       const labelParam = labels?.length > 0 ? { labels: labels.join(',') } : {};
       const results = await Promise.all(repos.map(async (repoRef) => {
         try {
@@ -604,7 +527,6 @@ export function createGitHubResources({
       return result;
     },
 
-    /** The issue, null for a selector outside the bound network; a pull request number is refused. */
     getIssue: async ({ session, context, directory, number, project, remote }) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
@@ -635,7 +557,6 @@ export function createGitHubResources({
       const defaultBranch = isProviderString(metadata?.data?.default_branch) ? metadata.data.default_branch.trim() : '';
       if (!defaultBranch) throw new Error('GitHub returned invalid repository metadata');
       const ref = await octokit.rest.git.getRef({ owner: upstream.owner, repo: upstream.repo, ref: `heads/${defaultBranch}` });
-      // Which configured remote points at the upstream, if any.
       let remoteName = null;
       try {
         const { git } = await load();
@@ -678,9 +599,6 @@ export function createGitHubResources({
       return branches;
     },
 
-    // The repository's labels and the people who can be asked to review in
-    // it, for the board's pickers: one page of 100, from a repository in the
-    // bound project's network.
     listLabels: async ({ session, directory, project, remote }) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
@@ -705,16 +623,10 @@ export function createGitHubResources({
       });
     },
 
-    /**
-     * One page of issues or PRs for the reference picker, or the item a
-     * pasted link or number names, across the repository network. A `linked`
-     * read answers the one item its link names, wherever the repository is.
-     */
     references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const { rateLimit } = await load();
       const { repo } = await resolveRepo(directory, remote);
-      // The gate short-circuits only this host.
       if (rateLimit.isGitHubRateLimited(repo?.host)) throw responseError(503, { error: 'GitHub rate limited' });
       if (!repo) return { connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 };
       if (context?.linked) {
@@ -744,12 +656,6 @@ export function createGitHubResources({
       return { connected: true, repo, ...page };
     }),
 
-    /**
-     * The picker's search across several folders. Every folder's context is
-     * validated (`validateReadContext`) and read with its own account; one
-     * search per account, so repositories read with different accounts
-     * never share a query.
-     */
     referencesAcross: async ({ body, validateReadContext, resolveSession }) => {
       const { rateLimit, summaries } = await load();
       const input = readReferencesAcrossRequest(body);
@@ -767,7 +673,6 @@ export function createGitHubResources({
           }
           return 'disconnected';
         }
-        // The folder's account is gone or unreadable: only its folders go.
         if (error?.sourceControlAccountUnavailable) return 'disconnected';
         if (error?.code?.startsWith('SOURCE_CONTROL_BINDING_') || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
           || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT' || error?.code === 'INVALID_SOURCE_CONTROL_BINDING') {
@@ -830,12 +735,6 @@ export function createGitHubResources({
       }
     },
 
-    /**
-     * Comments of one issue or PR the picker previews, and a PR's size,
-     * review decision and reviewers; with `kind: 'discussion'`, a
-     * discussion's comment threads. A named enterprise `host` reads with that
-     * host's Octokit; its repository must still be in the bound network.
-     */
     referenceDetail: ({ session, context, directory, remote, project, number, host, kind }) => pickerRead(async () => {
       const { octokit: github, rateLimit } = await load();
       const requestedHost = String(host ?? '').trim().toLowerCase();
@@ -860,7 +759,6 @@ export function createGitHubResources({
       return { connected: true, detail: await read({ octokit, owner: repo.owner, repo: repo.repo, number }) };
     }),
 
-    /** The viewer's review draft and the open threads of one PR, read with the bound account. */
     reviewState: ({ session, directory, remote, project, number }) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
@@ -868,13 +766,6 @@ export function createGitHubResources({
       return fetchReviewState({ octokit, owner: repo.owner, repo: repo.repo, number });
     }),
 
-    /**
-     * What colours the PRs a picker page shows, from the sidebar's summaries.
-     * Refs group by host (missing means github.com), each on its own Octokit;
-     * an untrusted, cooling or failed enterprise host drops only its refs.
-     * Every PR on the checkout's own host must be in the bound network, unless
-     * a link named it (`linked`).
-     */
     referenceStatuses: ({ context, directory, remote, pulls }) => pickerRead(async () => {
       const { octokit: github, rateLimit, summaries: summaryReads } = await load();
       const refs = readPullStatusRefs(pulls);
@@ -908,15 +799,12 @@ export function createGitHubResources({
             });
           }
         } catch (error) {
-          // github.com's group fails the read as it always has (a 401 answers
-          // `connected: false`); a failed enterprise host drops only its refs.
           if (refHost === GITHUB_COM) throw error;
         }
       }
       return { connected: true, statuses };
     }),
 
-    /** A pull request's head on the context's primary remote, by number, for a worktree made from it. */
     readChangeRequestHead: async ({ session, directory, remote, number }) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, null, remote);

@@ -1,11 +1,5 @@
 import { z } from 'zod';
 
-/**
- * A pull request's review as the diff draws it: the viewer's pending review
- * and the published threads with where each sits. GitHub keeps the pending
- * review, so one started on another device, on github.com or by an agent
- * through `gh` reads the same as one started here.
- */
 
 const THREAD_PAGE = 100;
 const THREAD_PAGE_LIMIT = 10;
@@ -117,10 +111,6 @@ const toThread = (thread) => {
   };
 };
 
-/**
- * The side lives on the thread, the pending text on the review, so a draft
- * comment takes its side from the thread that holds it.
- */
 const toDraft = (pending, sides) => (pending ? {
   id: pending.id,
   body: pending.body,
@@ -135,7 +125,6 @@ const toDraft = (pending, sides) => (pending ? {
   })),
 } : null);
 
-/** The review state of one pull request; a thread GitHub calls outdated has no line left here and stays on the board. */
 export async function fetchReviewState({ octokit, owner, repo, number }) {
   const threads = [];
   let first = null;
@@ -166,7 +155,6 @@ export async function fetchReviewState({ octokit, owner, repo, number }) {
   };
 }
 
-/** The viewer's pending review and the commit it was started on, null without one. GitHub keeps one per person per pull request. */
 export async function readPendingReview({ octokit, owner, repo, number }) {
   const data = await octokit.graphql(PENDING_REVIEW_QUERY, { owner, repo, number });
   const reviews = data?.repository?.pullRequest?.reviews?.nodes;
