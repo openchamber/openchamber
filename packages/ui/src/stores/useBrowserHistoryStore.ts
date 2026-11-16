@@ -10,13 +10,6 @@ import {
 } from '@/lib/browser/history';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-/**
- * Addresses visited in the browser panel, kept per project.
- *
- * Scoped by runtime as well as directory: the same path on a remote instance is
- * a different machine with different servers on it, and offering one's
- * addresses while connected to the other would be a suggestion that cannot work.
- */
 const MAX_PROJECTS = 20;
 
 type BrowserHistoryState = {
@@ -31,7 +24,6 @@ const projectKey = (directory: string): string => {
   return normalized ? JSON.stringify([getRuntimeKey(), normalized]) : '';
 };
 
-/** Keeps the projects visited most recently; the rest are not worth carrying. */
 const evictOldestProjects = (
   byProject: Record<string, BrowserHistoryEntry[]>,
 ): Record<string, BrowserHistoryEntry[]> => {
@@ -91,7 +83,6 @@ export const useBrowserHistoryStore = create<BrowserHistoryState>()(
   ),
 );
 
-/** Reads one project's history. Returns a stable empty list when there is none. */
 const EMPTY: readonly BrowserHistoryEntry[] = [];
 
 export const selectBrowserHistory = (directory: string) => (

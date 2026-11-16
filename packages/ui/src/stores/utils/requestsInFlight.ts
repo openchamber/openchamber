@@ -1,14 +1,3 @@
-// Tracks every fetch() request as "in flight" from call to promise settle,
-// samples two series once per second, and keeps a 5-minute rolling window for
-// plotting:
-//   1. in-flight request count
-//   2. percentile distribution of currently in-flight request ages: p50, p90,
-//      p99, max (ms since each unsettled fetch started; 0 when nothing is in
-//      flight)
-// Mirrors the streamDebug.ts pattern: collection is gated behind an
-// enable/disable toggle (driven by the debug panel), state lives on `window`
-// to survive HMR, and the UI polls a serializable snapshot instead of
-// subscribing to a store (this is high-frequency debug data, see stores docs).
 
 const STORAGE_KEY = 'openchamber_requests_in_flight';
 const SAMPLE_INTERVAL_MS = 1000;
@@ -117,8 +106,6 @@ const recordSettle = (id: number): void => {
     state.inFlightStarts.delete(id);
 };
 
-// Sorted ages (ms) of every currently in-flight request. Empty when nothing
-// is in flight. Used both for live snapshot reporting and per-second sampling.
 const currentAges = (state: RequestsInFlightState): number[] => {
     if (state.inFlightStarts.size === 0) return [];
     const now = Date.now();
@@ -130,7 +117,6 @@ const currentAges = (state: RequestsInFlightState): number[] => {
     return ages;
 };
 
-// Linear-interpolation percentile of a pre-sorted array.
 const percentile = (sorted: number[], p: number): number => {
     const n = sorted.length;
     if (n === 0) return 0;
@@ -214,8 +200,6 @@ export const setRequestsInFlightTrackingEnabled = (enabled: boolean): void => {
 
     try {
         if (enabled) {
-            // Idempotent: tear down any prior tracking first so a repeated
-            // enable can never wrap window.fetch twice (which would double-count).
             stopSampling();
             uninstallFetchTracker();
             window.localStorage.setItem(STORAGE_KEY, '1');

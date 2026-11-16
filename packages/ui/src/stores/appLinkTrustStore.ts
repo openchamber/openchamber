@@ -6,7 +6,6 @@ import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
 export const MAX_TRUSTED_SCHEMES = 64;
 
 interface AppLinkTrustState {
-  /** Application deep-link schemes (obsidian, vscode, ...) the user chose to always allow. */
   trustedSchemes: string[];
   trustScheme: (scheme: string) => void;
   removeTrustedScheme: (scheme: string) => void;
@@ -15,11 +14,6 @@ interface AppLinkTrustState {
 
 const normalizeScheme = (scheme: string): string => scheme.trim().toLowerCase();
 
-/**
- * Per-device trust for application deep links rendered in chat. Security
- * decisions do not roam, so this persists locally through the shared safe
- * storage rather than server-synced settings.
- */
 export const useAppLinkTrustStore = create<AppLinkTrustState>()(
   persist(
     (set, get) => ({

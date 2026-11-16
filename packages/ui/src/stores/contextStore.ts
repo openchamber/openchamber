@@ -24,9 +24,6 @@ interface ContextState {
 
     sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>;
 
-    // sessionId → agentName → "providerId/modelId" → variant, where `null` is
-    // an explicit "Default" (send no effort) and a missing entry means the
-    // inherited default applies.
     sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string | null>>>;
  
     currentAgentContext: Map<string, string>;
@@ -103,8 +100,6 @@ export const useContextStore = create<ContextStore>()(
                         const newSelections = new Map(state.sessionAgentSelections);
                         newSelections.set(sessionId, agentName);
 
-                        // Keep a "current" agent context for components that only know sessionId.
-                        // This is also used by external-session inference logic.
                         const nextAgentContext = new Map(state.currentAgentContext);
                         nextAgentContext.set(sessionId, agentName);
 
@@ -382,7 +377,6 @@ export const useContextStore = create<ContextStore>()(
                         return override;
                     }
 
-                    // Fallback: global (applies to all sessions)
                     if (sessionId !== GLOBAL_EDIT_MODE_SESSION_ID) {
                         const globalMap = get().sessionAgentEditModes.get(GLOBAL_EDIT_MODE_SESSION_ID);
                         const globalOverride = globalMap?.get(agentName);

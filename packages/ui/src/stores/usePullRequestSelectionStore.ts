@@ -8,20 +8,12 @@ interface PullRequestSelection {
 
 interface PullRequestSelectionState {
   selections: Map<string, PullRequestSelection>;
-  /** A pull request another surface asked Changes to show, per directory. */
   diffRequests: Map<string, PullRequestSource>;
-  /**
-   * The repository the phone's Changes shows, per folder that is not one
-   * itself, in place of the Git selection: the one a requested PR belongs to,
-   * until the next request for that folder or a repository picked there.
-   */
   changesRepositories: Map<string, string>;
   select: (key: string, source: PullRequestSource) => void;
   acceptHandoff: (key: string, source: PullRequestSource) => void;
-  /** Each call is a new request, so asking for the same PR again shows it again. */
   requestDiff: (directory: string, source: PullRequestSource, repository?: string | null) => void;
   clearChangesRepository: (directory: string) => void;
-  /** Drops `source` once Changes has taken it, so it never comes back on another branch. */
   settleDiffRequest: (directory: string, source: PullRequestSource) => void;
 }
 
@@ -36,13 +28,11 @@ const remember = (state: PullRequestSelectionState, key: string, selection: Pull
   return { selections };
 };
 
-// Keys are runtime/directory/branch tuples supplied by usePullRequestComparison.
 export const usePullRequestSelectionStore = create<PullRequestSelectionState>((set) => ({
   selections: new Map(),
   diffRequests: new Map(),
   changesRepositories: new Map(),
   select: (key, source) => set((state) => remember(state, key, { source, handoff: state.selections.get(key)?.handoff ?? null })),
-  // A retained request is consumed once even if the walkthrough tab remounts.
   acceptHandoff: (key, source) => set((state) => state.selections.get(key)?.handoff === source
     ? state : remember(state, key, { source, handoff: source })),
   requestDiff: (directory, source, repository = null) => set((state) => {

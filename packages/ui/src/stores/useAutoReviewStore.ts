@@ -5,11 +5,6 @@ import { runtimeFetch, type RuntimeFetchOptions } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 
-/**
- * Auto-review runs belong to the OpenChamber server (`packages/web/server/lib/auto-review`),
- * which drives the loop whether or not any UI is open. This store is their projection for the
- * active runtime. VS Code has no server of its own, so auto-review does not exist there.
- */
 export const isAutoReviewAvailable = (): boolean => !isVSCodeRuntime();
 
 const runSchema = z.object({
@@ -23,7 +18,6 @@ const runSchema = z.object({
   startedAt: z.number(),
   updatedAt: z.number(),
   error: z.string().optional(),
-  // A disputed run: both positions, as the reviewer summed them up.
   dispute: z.string().optional(),
 });
 
@@ -40,14 +34,12 @@ export const autoReviewUpdatedEventSchema = z.object({
     originalSessionID: z.string().min(1),
     directory: z.string().min(1),
     run: runSchema.nullable(),
-    // Marks a change the host forwarded from that space's own server.
     spaceId: z.string().optional(),
   }),
 });
 
 export type AutoReviewUpdatedEvent = z.infer<typeof autoReviewUpdatedEventSchema>;
 
-/** The prompts the server sends, rendered from the magic prompts with their placeholders kept. */
 type AutoReviewStartInput = {
   originalSessionID: string;
   reviewSessionID: string;
@@ -61,18 +53,8 @@ type AutoReviewStartInput = {
   };
 };
 
-/**
- * The server that owns a session's run: the one inside a space for a directory of that space,
- * the host's ('') for any other. Each numbers its own revisions.
- */
 const ownerOf = (directory: string | null | undefined): string => (directory ? spaceIdOfDirectory(directory) : null) ?? '';
 
-/**
- * A run is keyed by its owner and session. A space answers for itself and is
- * not trusted: whatever it names, its runs land under its own owner, and a
- * chat reads under the owner of its own directory, so a space cannot put a
- * run on a host chat.
- */
 const runKey = (owner: string, sessionID: string): string => `${owner}\n${sessionID}`;
 
 const requestJson = async <T,>(schema: z.ZodType<T>, path: string, init?: RuntimeFetchOptions): Promise<T> => {
@@ -88,20 +70,15 @@ const requestJson = async <T,>(schema: z.ZodType<T>, path: string, init?: Runtim
 
 const runPath = (originalSessionID: string) => `/api/auto-review/runs/${encodeURIComponent(originalSessionID)}`;
 
-/** Revision last applied per run key, and per owner for its last full snapshot. */
 const appliedRevisions = new Map<string, number>();
 const snapshotRevisions = new Map<string, number>();
 
 interface AutoReviewState {
-  /** Runs of the active runtime by owner and reviewed session (`runKey`). */
   runs: Record<string, AutoReviewRun>;
-  /** The host's runs; each space's are read with `refreshSpace`. */
   hydrate: () => Promise<void>;
   refreshSpace: (spaceId: string) => Promise<void>;
-  /** One run's authoritative state from its owner, the host ('') or a space. */
   applyUpdate: (update: AutoReviewUpdatedEvent['properties'], expectedRuntimeKey: string) => void;
   startRun: (input: AutoReviewStartInput) => Promise<void>;
-  /** Stops a running review or dismisses a finished one. */
   removeRun: (originalSessionID: string, directory: string) => Promise<void>;
   resetForRuntimeSwitch: () => void;
 }
@@ -122,7 +99,6 @@ export const useAutoReviewStore = create<AutoReviewState>()((set, get) => {
     });
   };
 
-  /** A full snapshot of one owner replaces that owner's runs, except changes newer than it. */
   const applySnapshot = (owner: string, snapshot: z.infer<typeof snapshotSchema>, runtimeKey: string) => {
     if (runtimeKey !== getRuntimeKey()) return;
     if ((snapshotRevisions.get(owner) ?? -1) > snapshot.revision) return;
@@ -159,7 +135,6 @@ export const useAutoReviewStore = create<AutoReviewState>()((set, get) => {
     hydrate: () => readOwner(''),
 
     refreshSpace: async (spaceId) => {
-      // A stopped or unreachable space keeps what was last known of its runs.
       await readOwner(spaceId).catch(() => undefined);
     },
 
@@ -196,7 +171,6 @@ export const useAutoReviewStore = create<AutoReviewState>()((set, get) => {
         applyRun(owner, result.revision, originalSessionID, directory, result.run);
       } catch (error) {
         if (runtimeKey !== getRuntimeKey()) return;
-        // The server still has it: show it again and let its state decide.
         if (previous) set((state) => ({ runs: { ...state.runs, [key]: previous } }));
         await readOwner(owner).catch(() => undefined);
         throw error;
@@ -211,18 +185,15 @@ export const useAutoReviewStore = create<AutoReviewState>()((set, get) => {
   };
 });
 
-/** The run of a chat, read under the owner of the chat's own directory. */
 export const selectAutoReviewRun = (sessionID: string | null | undefined, directory: string | null | undefined) => (
   (state: AutoReviewState): AutoReviewRun | null => (sessionID ? state.runs[runKey(ownerOf(directory), sessionID)] ?? null : null)
 );
 
-/** A running review holds the session: follow-ups wait in its queue. */
 export const selectAutoReviewRunning = (sessionID: string | null | undefined, directory: string | null | undefined) => {
   const selectRun = selectAutoReviewRun(sessionID, directory);
   return (state: AutoReviewState): boolean => selectRun(state)?.status === 'running';
 };
 
-/** `openchamber:auto-review.updated` broadcast → projection. */
 export const applyAutoReviewUpdatedEvent = (event: AutoReviewUpdatedEvent, expectedRuntimeKey: string): void => {
   if (!isAutoReviewAvailable()) return;
   useAutoReviewStore.getState().applyUpdate(event.properties, expectedRuntimeKey);
