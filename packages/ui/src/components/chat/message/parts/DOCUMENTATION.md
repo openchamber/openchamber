@@ -6,7 +6,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## High-level flow
 
-- Message parts are rendered from `MessageBody.tsx`.
+- Message parts are rendered from `MessageBody.tsx`, which composes `body/` (`useAssistantRenderedParts.tsx` draws the assistant rows).
 - There are two tool rendering paths:
   - **Static tools** -> `StaticToolRow` in `ProgressiveGroup.tsx`
   - **Expandable tools** -> `ToolPart.tsx`
