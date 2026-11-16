@@ -74,6 +74,26 @@ const isKnownActiveSessionDirectory = (
   return knownDirectories.has(directory) || (!isVSCode && [...knownDirectories].some((root) => directory.startsWith(root.endsWith('/') ? root : `${root}/`)));
 };
 
+const keepKnownSessionsWithDescendants = (
+  sessions: readonly Session[],
+  isKnown: (session: Session) => boolean,
+  anchors: readonly Session[],
+): Session[] => {
+  const sessionById = new Map([...anchors, ...sessions].map((session) => [session.id, session]));
+  const nestingParentOf = nestingParentResolver(sessionById);
+  const kept = new Map<string, boolean>(anchors.map((anchor) => [anchor.id, true]));
+  const keeps = (session: Session): boolean => {
+    const cached = kept.get(session.id);
+    if (cached !== undefined) return cached;
+    kept.set(session.id, false);
+    const parent = isKnown(session) ? null : sessionById.get(nestingParentOf(session) ?? '');
+    const result = parent === null || Boolean(parent && keeps(parent));
+    kept.set(session.id, result);
+    return result;
+  };
+  return sessions.filter(keeps);
+};
+
 // Global sessions provide complete sidebar coverage; initialized directory
 // stores only fill gaps until the global cache catches up.
 export const projectSidebarActiveSessions = ({
@@ -91,8 +111,12 @@ export const projectSidebarActiveSessions = ({
     sessions.push(session);
   }
 
-  return partitionSidebarSessions(sessions, isVSCode).projectSessions
-    .filter((session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode));
+  const partition = partitionSidebarSessions(sessions, isVSCode);
+  return keepKnownSessionsWithDescendants(
+    partition.projectSessions,
+    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode),
+    partition.chatSessions,
+  );
 };
 
 export const projectSidebarCollection = (args: ProjectSidebarActiveSessionsArgs): Session[] => {
@@ -178,8 +202,11 @@ const buildSidebarSessionStructure = ({
   const visibleSessions = mergeSidebarSessionSources(indexedGlobalSessions, liveSessions);
   const partition = partitionSidebarSessions(visibleSessions, isVSCode);
   const knownDirectoryKeys = new Set([...knownDirectories].map((directory) => isVSCode ? directory.toLowerCase() : directory));
-  const projectSessions = partition.projectSessions
-    .filter((session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode));
+  const projectSessions = keepKnownSessionsWithDescendants(
+    partition.projectSessions,
+    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode),
+    partition.chatSessions,
+  );
   const sessions = [...projectSessions, ...partition.chatSessions];
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   return {

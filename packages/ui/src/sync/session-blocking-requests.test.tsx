@@ -167,6 +167,23 @@ describe('useSessionBlockingRequests', () => {
     }
   })
 
+  test('shows a permission the host seed found waiting in a directory this client never opened', async () => {
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+          sessions: {},
+          pending: { child: { permissions: [{ id: 'seeded-permission', sessionID: 'child', action: 'bash', resources: ['*'] }], forms: [], pages: [] } },
+          serverTime: 0,
+        }), () => CHILD_DIR) })
+        expect(stores!.child.getState().permission.child).toBeUndefined()
+        expect(rendered).toEqual({ hasPermission: true, hasForm: false })
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
+  })
+
   test('a store whose bootstrap completed outranks a form the index still holds', async () => {
     resetGlobalBlockingRequests()
     try {

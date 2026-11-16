@@ -1,5 +1,9 @@
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { useSession } from '@/sync/sync-context';
 import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { resolveChatPromptReadOnly } from '../chatPromptReadOnly';
@@ -26,10 +30,14 @@ export const useColumnPromptReadOnly = ({
         ensureSpaceArchives();
     }, []);
     const spaceArchive = useSpaceArchiveOf(currentSessionId ? effectiveSessionDirectory : null);
+    const projects = useProjectsStore((state) => state.projects);
+    const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
+    const ownDirectory = currentSession ? resolveGlobalSessionDirectory(currentSession) : null;
     const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(
         currentSession,
         allowPromptingSubagentSessions,
         readOnly,
+        !ownDirectory || isSessionDirectoryAdmitted(ownDirectory, projects, worktrees),
     );
     const messageSelectionActive = useMessageSelecting(currentSessionId);
     useEndMessageSelectionOnLeave(currentSessionId);

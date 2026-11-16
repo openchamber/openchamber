@@ -11,6 +11,19 @@ the panel a press opens the card under the row instead of the chat, and the
 row shows the current tool call, which the section leaves out.
 Workflow agents stay in the Workflows panel.
 
+The children come from the live directory stores plus the global session
+list. A session an agent started with `ownWork` often lives in another folder
+(a worktree) that has no live store until the user opens it, and it gets its
+agent and model by events after `session.created`; the list record carries
+both, so such a child shows at once with its model
+(`useSessionsWithListedChildren`, which the parent's cost rollup reads too,
+so the rows and the total add up). It takes them from the store's child index
+(`structure.activeChildrenByParentId`), never by scanning the list: the store
+calls `set` on every streamed step of any session (`noteDeferredSessionUpdate`),
+and every subscriber's selector runs each time. Its permission and question state comes
+from the cross-folder request index as well, and opening it gives the chat
+tab the child's own folder.
+
 ## Invariants
 
 - The surface is `has-content`: its rail icon shows while a Subagents tab is

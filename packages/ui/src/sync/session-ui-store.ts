@@ -53,7 +53,7 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
-import { admitSession, isSessionAdmitted } from "./session-admission"
+import { admitSession, isSessionAdmitted, withAdmittedLineage } from "./session-admission"
 import { isSessionDirectoryAdmitted } from "./session-admission-rule"
 import {
   getSyncSessions,
@@ -1518,9 +1518,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const navigationRevision = ++admissionNavigationRevision
     if (id) {
       const record = useGlobalSessionsStore.getState().entityById.get(id)
-      const directory = (record ? resolveGlobalSessionDirectory(record) : null)
+      const directory = withAdmittedLineage(id, (record ? resolveGlobalSessionDirectory(record) : null)
         ?? resolveSessionDirectory(id, (sid) => get().worktreeMetadata.get(sid))
-        ?? normalizePath(directoryHint)
+        ?? normalizePath(directoryHint))
       if (!directory || !isSessionAdmitted(directory)) {
         const runtimeKey = getRuntimeKey()
         const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
