@@ -1,15 +1,9 @@
-/**
- * How a linked issue, change request or tracker item draws as a chip in text:
- * its number and title, with its kind's mark. Shared by the composer and sent
- * messages, so a pasted link reads the same before and after Enter.
- */
 
 import type { IconName } from '@/components/icon/icons';
 import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 
-/** What a chip needs of an item: a composer reference, or the context payload a sent message carries. */
 type ReferenceLinkChipSource =
     | { kind: 'tracker-item'; provider: string; identifier: string; title: string }
     | { kind: 'change-request' | 'repository-issue' | 'repository-discussion'; provider?: string; number: number; title: string }
@@ -18,7 +12,6 @@ type ReferenceLinkChipSource =
 export type ReferenceLinkChip = { label: string; title: string; icon: IconName };
 
 const CHIP_TITLE_LENGTH = 48;
-// An item written before providers other than GitHub existed names none: it is GitHub's.
 const LEGACY_PROVIDER = 'github';
 
 export const referenceLinkChip = (
