@@ -67,6 +67,22 @@ var createMutations = ({
       return login;
     });
   };
+  const listReviewerCandidates = async (call, input) => {
+    const selector = objectOf(input, "project");
+    const owner = text(selector, "owner");
+    const name = text(selector, "name") || text(selector, "repo");
+    if (!owner || !name)
+      throw new CallError("project is required", 400);
+    const kind = text(input, "role") === "assignee" ? "assignees" : "collaborators";
+    const users = await readUsers(call, `${repoPath({ owner, name })}/${kind}`);
+    const byId = new Map(users.map((user) => [String(user.id), user]));
+    return [...byId.values()].map((user) => {
+      const candidate = { id: String(user.id), login: user.login };
+      if (user.avatar_url)
+        candidate.avatarUrl = user.avatar_url;
+      return candidate;
+    });
+  };
   const perform = async (call, input) => {
     const kind = text(input, "kind");
     const normalized = objectOf(input, "input");
@@ -214,7 +230,7 @@ var createMutations = ({
         return { state: "outcome-unknown" };
     }
   };
-  return { perform, reconcile };
+  return { perform, reconcile, listReviewerCandidates };
 };
 export {
   createMutations

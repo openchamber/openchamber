@@ -525,9 +525,9 @@ const handlers = {
     return data.map((branch) => branch.name);
   },
 
-  // Off in the manifest's capabilities, so OpenChamber never routes them here.
+  // Off in the manifest's capabilities, so OpenChamber never routes it here.
   listLabels: unsupported,
-  listReviewerCandidates: unsupported,
+  listReviewerCandidates: (call, input) => reviewerCandidates(call, input),
 
   /** The pull request's changes as one unified diff, for the comparison view and walkthroughs. */
   readChangeRequestPatch: async (call, input) => {
@@ -724,7 +724,7 @@ const resolveTarget = async (call: Call, input: Input): Promise<SourceControlJso
 const mutationsPath = `./mutations${'.js'}`;
 const { createMutations }: { createMutations: (deps: MutationDeps) => Mutations } = await import(mutationsPath);
 
-const { perform, reconcile } = createMutations({
+const { perform, reconcile, listReviewerCandidates: reviewerCandidates } = createMutations({
   api, CallError, repoPath, seg, text, integer, objectOf, readPull, branchRepoId, scanSize: SCAN_SIZE, fileScanPages: FILE_SCAN_PAGES,
 });
 

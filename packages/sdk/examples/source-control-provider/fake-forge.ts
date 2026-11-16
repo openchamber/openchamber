@@ -206,7 +206,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       return { status: 200, body: page([...branches].map(([name, sha]) => ({ name, commit: { id: sha } })), url, response) };
     }
     if (method === 'GET' && (collection === 'collaborators' || collection === 'assignees') && rest.length === 1) {
-      return { status: 200, body: page([user, octo], url, response) };
+      return { status: 200, body: page(collection === 'collaborators' ? [user, octo] : [user], url, response) };
     }
     if (collection === 'pulls') {
       if (method === 'GET' && rest.length === 1) {

@@ -432,8 +432,8 @@ const sourceControlSchema = z.object({
     features: z.object({
       authorCanReview: z.boolean().default(false),
       issueCloseReason: z.boolean().default(false),
-      issueEdit: z.boolean().optional(),
-      changeRequestEdit: z.boolean().optional(),
+      issueEdit: z.boolean().optional(), changeRequestEdit: z.boolean().optional(),
+      baseChange: z.boolean().default(false).catch(false), updateBranch: z.boolean().default(false).catch(false),
       submitRequirements: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {

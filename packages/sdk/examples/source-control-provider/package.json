@@ -58,7 +58,8 @@
           },
           "changeRequestPatch": true,
           "liveSummaries": true,
-          "commentEdit": true
+          "commentEdit": true,
+          "reviewers": true
         },
         "token": {
           "header": "authorization",
@@ -100,7 +101,9 @@
           },
           "features": {
             "issueEdit": true,
-            "changeRequestEdit": true
+            "changeRequestEdit": true,
+            "baseChange": true,
+            "updateBranch": true
           },
           "changeRequestTemplates": [
             ".gitea/pull_request_template.md",

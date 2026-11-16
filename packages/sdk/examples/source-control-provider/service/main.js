@@ -709,7 +709,7 @@ var handlers = {
     return data.map((branch) => branch.name);
   },
   listLabels: unsupported,
-  listReviewerCandidates: unsupported,
+  listReviewerCandidates: (call, input) => reviewerCandidates(call, input),
   readChangeRequestPatch: async (call, input) => {
     const project = await changeRequestRepo(call, input);
     const number = integer(input, "number");
@@ -880,7 +880,7 @@ var resolveTarget = async (call, input) => {
 };
 var mutationsPath = `./mutations${".js"}`;
 var { createMutations } = await import(mutationsPath);
-var { perform, reconcile } = createMutations({
+var { perform, reconcile, listReviewerCandidates: reviewerCandidates } = createMutations({
   api,
   CallError,
   repoPath,

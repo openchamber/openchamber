@@ -159,6 +159,16 @@ describe('source-control provider example', () => {
     expect(await call('listLabels', { ...read(), project: { owner: 'mona', name: 'teapot' } })).toMatchObject({ ok: false, error: { status: 501 } });
   });
 
+  test('reviewer candidates read collaborators or assignees by role', async () => {
+    const project = { owner: 'mona', name: 'teapot' };
+    expect(await data('listReviewerCandidates', { ...read(), project, role: 'reviewer' }))
+      .toEqual([{ id: '7', login: 'mona' }, { id: '8', login: 'octo' }]);
+    expect(await data('listReviewerCandidates', { ...read(), project, role: 'assignee' }))
+      .toEqual([{ id: '7', login: 'mona' }]);
+    expect(await data('listReviewerCandidates', { ...read(), project }))
+      .toEqual([{ id: '7', login: 'mona' }, { id: '8', login: 'octo' }]);
+  });
+
   test('a pull request\'s diff, split per file in its context, and both sides of a changed file', async () => {
     const patch = await data('readChangeRequestPatch', { ...read(), number: 2 });
     expect(field(patch, 'meta')).toEqual({ owner: 'mona', repo: 'teapot', number: 2 });

@@ -1,4 +1,5 @@
 import type {
+  SourceControlJson,
   SourceControlJsonObject,
   SourceControlMutationResult,
   SourceControlOutboundMethod,
@@ -26,6 +27,7 @@ export type MutationDeps = {
 };
 
 type Resolved = { providerTarget: ProviderTarget; target: Input };
+type ReviewerCandidate = { id: string; login: string; avatarUrl?: string };
 
 export const createMutations = ({
   api, CallError, repoPath, seg, text, integer, objectOf, readPull, branchRepoId, scanSize, fileScanPages,
@@ -91,6 +93,21 @@ export const createMutations = ({
       const login = byId.get(entry) ?? (/^\d+$/.test(entry) ? null : entry);
       if (!login) throw new CallError(`User ${entry} cannot be assigned in this repository`, 422);
       return login;
+    });
+  };
+
+  const listReviewerCandidates = async (call: Call, input: Input): Promise<SourceControlJson> => {
+    const selector = objectOf(input, 'project');
+    const owner = text(selector, 'owner');
+    const name = text(selector, 'name') || text(selector, 'repo');
+    if (!owner || !name) throw new CallError('project is required', 400);
+    const kind = text(input, 'role') === 'assignee' ? 'assignees' : 'collaborators';
+    const users = await readUsers(call, `${repoPath({ owner, name })}/${kind}`);
+    const byId = new Map(users.map((user): [string, GiteaUser] => [String(user.id), user]));
+    return [...byId.values()].map((user) => {
+      const candidate: ReviewerCandidate = { id: String(user.id), login: user.login };
+      if (user.avatar_url) candidate.avatarUrl = user.avatar_url;
+      return candidate;
     });
   };
 
@@ -245,7 +262,7 @@ export const createMutations = ({
     }
   };
 
-  return { perform, reconcile };
+  return { perform, reconcile, listReviewerCandidates };
 };
 
 export type Mutations = ReturnType<typeof createMutations>;
