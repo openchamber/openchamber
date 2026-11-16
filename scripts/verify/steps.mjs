@@ -3,6 +3,7 @@ import { dirname, join } from "node:path"
 
 import { wait } from "../perf/cdp.mjs"
 import { DEEP_QUERY } from "./browser.mjs"
+import { PROFILE_KEYS } from "./stand.mjs"
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const READY_TIMEOUT_MS = 120_000
@@ -151,6 +152,17 @@ const ACTIONS = {
     } while (Date.now() < deadline)
     fail(problem)
   },
+  async settings(step, ctx) {
+    const values = step.values ?? {}
+    const unknown = Object.keys(values).filter((key) => !PROFILE_KEYS.includes(key))
+    if (unknown.length) fail(`settings ${unknown.join(", ")} are not profile settings, so the reset could not undo them`)
+    const response = await fetch(`${ctx.stand.apiUrl}/api/config/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(values),
+    })
+    if (!response.ok) fail(`saving settings answered ${response.status}`)
+  },
   async "server.stop"(step, ctx) {
     await ctx.stand.stopApi()
   },
@@ -174,9 +186,12 @@ const ACTIONS = {
   async click(step, ctx) {
     const point = await ctx.page.click(resolveTarget(step, ctx), timeoutOf(step), ["right", "long"].includes(step.button) ? step.button : "left")
     if (!point) fail(`nothing to click: ${describe(step)} is not visible`)
+    if (!point.hits) fail(`nothing to click: ${describe(step)} stays covered by another element`)
   },
   async hover(step, ctx) {
-    if (!await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step))) fail(`nothing to hover: ${describe(step)} is not visible`)
+    const point = await ctx.page.hover(resolveTarget(step, ctx), timeoutOf(step))
+    if (!point) fail(`nothing to hover: ${describe(step)} is not visible`)
+    if (!point.hits) fail(`nothing to hover: ${describe(step)} stays covered by another element`)
   },
   async drag(step, ctx) {
     if (!step.to?.on) fail("a drag needs \"to\" with its own \"on\"")
@@ -254,14 +269,19 @@ const ACTIONS = {
       await ctx.page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(step.set)})`)
       return
     }
+    // `{var}` placeholders name remembered values, as in `url`.
+    const expected = {
+      equals: step.equals === undefined ? undefined : fill(step.equals, step, ctx.vars),
+      contains: step.contains === undefined ? undefined : fill(step.contains, step, ctx.vars),
+    }
     const deadline = Date.now() + timeoutOf(step)
     let actual = ""
     do {
       actual = await ctx.page.evaluate("navigator.clipboard.readText().catch((error) => 'clipboard error: ' + error.message)")
-      if (!expectText(actual, step, "the clipboard")) return
+      if (!expectText(actual, expected, "the clipboard")) return
       await wait(150)
     } while (Date.now() < deadline)
-    fail(expectText(actual, step, "the clipboard"))
+    fail(expectText(actual, expected, "the clipboard"))
   },
   async screenshot(step, ctx) {
     await ctx.page.screenshot(join(ctx.dir, `${String(++ctx.shots).padStart(2, "0")}-${step.name}.png`))

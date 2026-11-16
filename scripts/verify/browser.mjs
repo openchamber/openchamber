@@ -160,9 +160,11 @@ export class Page {
     await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra })
   }
 
+  // A point another element still covers when the wait ends comes back
+  // unused: pressing there would act on whatever lies on top.
   async hover(target, timeoutMs) {
     const point = await this.point(target, timeoutMs)
-    if (!point) return null
+    if (!point?.hits) return point
     await this.mouse("mouseMoved", point)
     return point
   }
@@ -183,11 +185,11 @@ export class Page {
   async click(target, timeoutMs, button = "left") {
     if (this.phone || button === "long") {
       const point = await this.point(target, timeoutMs)
-      if (point) await this.touch(point, button === "long" ? 800 : 40)
+      if (point?.hits) await this.touch(point, button === "long" ? 800 : 40)
       return point
     }
     const point = await this.hover(target, timeoutMs)
-    if (!point) return null
+    if (!point?.hits) return point
     await this.mouse("mousePressed", point, { button, buttons: button === "right" ? 2 : 1, clickCount: 1 })
     await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount: 1 })
     return point

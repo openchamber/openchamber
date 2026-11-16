@@ -41,6 +41,23 @@
             {"do": "click", "on": "chat.toolRow", "text": "+3"},
             {"do": "gone", "on": "chat.toolDiffLine", "text": "isAbortError"}
           ]
+        },
+        {
+          "id": "answer-divider",
+          "kind": "path",
+          "title": "A line separates the agent's steps from its final answer, and a turn without steps has none",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat answer divider"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "see", "on": "chat.answerDivider", "count": 1},
+            {"do": "session.create", "as": "t", "title": "Chat no divider"},
+            {"do": "session.send", "session": "t", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "t"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "see", "on": "chat.answerDivider", "count": 0, "timeout": 1}
+          ]
         }
       ]
     },
@@ -248,6 +265,272 @@
             {"do": "gone", "on": "chat.answer", "text": "split the file into 5 MB parts"},
             {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"},
             {"do": "editor", "contains": "Attachments over 10 MB time out"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "name": "Actions under a prompt",
+      "what": "Under a prompt, on hover: the time it was sent, Copy, and a menu with Save as snippet, Select messages, Pin into context and Fork from here.",
+      "reach": "Hover a prompt in the transcript; the ... opens the menu.",
+      "proof": "Copy puts the prompt on the clipboard; each menu item opens its dialog, bar or session, and Pin turns into Unpin.",
+      "scenarios": [
+        {
+          "id": "copy",
+          "kind": "path",
+          "title": "Hovering a prompt shows its time, and Copy puts the prompt on the clipboard",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat prompt copy"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "see", "on": "chat.promptTime"},
+            {"do": "click", "on": "chat.promptCopy"},
+            {"do": "clipboard", "equals": "Bump TypeScript to 5.7 and fix whatever breaks."}
+          ]
+        },
+        {
+          "id": "fork",
+          "kind": "path",
+          "title": "Fork from here on a prompt opens a fork with the prompt back in the composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat prompt fork"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "click", "on": "chat.promptMore"},
+            {"do": "click", "on": "menu.item", "text": "Fork from here"},
+            {"do": "see", "on": "sidebar.anyActiveRow", "text": "Chat prompt fork (fork #1)"},
+            {"do": "editor", "equals": "Bump TypeScript to 5.7 and fix whatever breaks."}
+          ]
+        },
+        {
+          "id": "pin",
+          "kind": "path",
+          "title": "Pin into context on a prompt turns into Unpin",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat prompt pin"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "click", "on": "chat.promptMore"},
+            {"do": "click", "on": "menu.item", "text": "Pin into context"},
+            {"do": "gone", "on": "menu.item"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "click", "on": "chat.promptMore"},
+            {"do": "see", "on": "menu.item", "text": "Unpin from context"}
+          ]
+        },
+        {
+          "id": "snippet",
+          "kind": "path",
+          "title": "Save as snippet opens the snippet dialog named after the prompt",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat prompt snippet"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "click", "on": "chat.promptMore"},
+            {"do": "click", "on": "menu.item", "text": "Save as snippet"},
+            {"do": "see", "on": "dialog.field", "value": "bump-typescript-to"}
+          ]
+        },
+        {
+          "id": "select",
+          "kind": "path",
+          "title": "Select messages on a prompt opens the selection bar",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat prompt select"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Bump TypeScript"},
+            {"do": "click", "on": "chat.promptMore"},
+            {"do": "click", "on": "menu.item", "text": "Select messages"},
+            {"do": "see", "on": "chat.selectionBar"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "long-prompt",
+      "name": "A long prompt",
+      "what": "A long prompt shows its first lines with Show more; Show more opens it whole, Show less folds it again.",
+      "reach": "Send a prompt of sixty lines and open the session; once it is open, scroll down to the link under it.",
+      "proof": "The answer under the prompt is on screen while the prompt is folded, is pushed off it once the prompt opens, and is back after Show less.",
+      "scenarios": [
+        {
+          "id": "expand",
+          "kind": "path",
+          "title": "Show more opens a long prompt and Show less folds it",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat long prompt"},
+            {"do": "session.send", "session": "s", "prompt": "Long prompt line 1\nLong prompt line 2\nLong prompt line 3\nLong prompt line 4\nLong prompt line 5\nLong prompt line 6\nLong prompt line 7\nLong prompt line 8\nLong prompt line 9\nLong prompt line 10\nLong prompt line 11\nLong prompt line 12\nLong prompt line 13\nLong prompt line 14\nLong prompt line 15\nLong prompt line 16\nLong prompt line 17\nLong prompt line 18\nLong prompt line 19\nLong prompt line 20\nLong prompt line 21\nLong prompt line 22\nLong prompt line 23\nLong prompt line 24\nLong prompt line 25\nLong prompt line 26\nLong prompt line 27\nLong prompt line 28\nLong prompt line 29\nLong prompt line 30\nLong prompt line 31\nLong prompt line 32\nLong prompt line 33\nLong prompt line 34\nLong prompt line 35\nLong prompt line 36\nLong prompt line 37\nLong prompt line 38\nLong prompt line 39\nLong prompt line 40\nLong prompt line 41\nLong prompt line 42\nLong prompt line 43\nLong prompt line 44\nLong prompt line 45\nLong prompt line 46\nLong prompt line 47\nLong prompt line 48\nLong prompt line 49\nLong prompt line 50\nLong prompt line 51\nLong prompt line 52\nLong prompt line 53\nLong prompt line 54\nLong prompt line 55\nLong prompt line 56\nLong prompt line 57\nLong prompt line 58\nLong prompt line 59\nLong prompt line 60\nBump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up", "inView": true},
+            {"do": "click", "on": "chat.promptToggle", "text": "Show more"},
+            {"do": "see", "on": "chat.promptToggle", "text": "Show less"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up", "inView": true, "count": 0},
+            {"do": "wheel", "on": "chat.scroller", "dy": 800, "times": 4},
+            {"do": "click", "on": "chat.promptToggle", "text": "Show less"},
+            {"do": "see", "on": "chat.promptToggle", "text": "Show more"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up", "inView": true}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "name": "The turn footer",
+      "what": "Under a turn's final answer: the model and agent that answered, the time it took, and actions on hover: copy, continue from this answer, pin, and a menu with Copy link, Save as image, Select messages, Save as plan.",
+      "reach": "Open a session with a finished turn, hover the answer.",
+      "proof": "The footer names the model and agent; each action does what it says: a fork, a dialog, a draft, a toast, a pressed pin.",
+      "scenarios": [
+        {
+          "id": "facts",
+          "kind": "path",
+          "title": "The footer names the model and the agent",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer facts"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.footer", "text": "Fixture stream, seeding speed"},
+            {"do": "see", "on": "chat.footer", "text": "build"}
+          ]
+        },
+        {
+          "id": "fork",
+          "kind": "path",
+          "title": "Fork from here under an answer opens a fork that keeps the answer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer fork"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerBranch"},
+            {"do": "click", "on": "menu.item", "text": "Fork from here"},
+            {"do": "see", "on": "sidebar.anyActiveRow", "text": "Chat footer fork (fork #1)"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"}
+          ]
+        },
+        {
+          "id": "new-session",
+          "kind": "path",
+          "title": "Start new session from this answer opens its dialog",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer new session"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerBranch"},
+            {"do": "click", "on": "menu.item", "text": "Start new session from this answer"},
+            {"do": "see", "on": "dialog.button", "text": "Run as goal"},
+            {"do": "see", "on": "dialog.button", "text": "Send", "exact": true}
+          ]
+        },
+        {
+          "id": "multi-run",
+          "kind": "path",
+          "title": "Start new multi-run from this answer opens a draft for several models",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer multi-run"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerBranch"},
+            {"do": "click", "on": "menu.item", "text": "Start new multi-run from this answer"},
+            {"do": "see", "on": "composer.multiRun"},
+            {"do": "editor", "contains": "Bumped. Two errors came up"},
+            {"do": "gone", "on": "chat.answer", "text": "Bumped. Two errors came up"}
+          ]
+        },
+        {
+          "id": "ask-models",
+          "kind": "path",
+          "title": "Ask other models opens its dialog",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer ask models"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerBranch"},
+            {"do": "click", "on": "menu.item", "text": "Ask other models"},
+            {"do": "see", "on": "dialog", "text": "Each model gets the same first prompt"}
+          ]
+        },
+        {
+          "id": "pin",
+          "kind": "path",
+          "title": "The footer pin keeps the answer in context and shows pressed",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer pin"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerPin", "pressed": "false"},
+            {"do": "see", "on": "chat.footerPin", "pressed": "true"}
+          ]
+        },
+        {
+          "id": "copy-link",
+          "kind": "path",
+          "title": "Copy link puts a link to this answer of this session on the clipboard",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer copy link"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "remember", "on": "chat.message", "text": "Bumped. Two errors came up", "attr": "data-message-id", "as": "m"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Copy link"},
+            {"do": "see", "on": "toast", "text": "Link copied"},
+            {"do": "clipboard", "contains": "session={s}&message={m}"}
+          ]
+        },
+        {
+          "id": "image",
+          "kind": "path",
+          "title": "Save as image saves the answer as a picture",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer image"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Save as image"},
+            {"do": "see", "on": "toast", "text": "Image saved"}
+          ]
+        },
+        {
+          "id": "select",
+          "kind": "path",
+          "title": "Select messages under an answer opens the selection bar",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer select"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Select messages"},
+            {"do": "see", "on": "chat.selectionBar"}
+          ]
+        },
+        {
+          "id": "plan",
+          "kind": "path",
+          "title": "Save as plan opens the plan dialog with a title from the answer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat footer plan"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.footerMore"},
+            {"do": "click", "on": "menu.item", "text": "Save as plan"},
+            {"do": "see", "on": "dialog.field", "value": "Bumped."},
+            {"do": "see", "on": "dialog.button", "text": "Save", "exact": true}
           ]
         }
       ]
@@ -808,10 +1091,10 @@
     },
     {
       "id": "changed-files",
-      "name": "Changed files under a turn",
-      "what": "With changed files on, the latest turn lists the files it changed under its answer.",
-      "reach": "Settings > Chat > changed files, then open a session where the agent edited a file.",
-      "proof": "No file pill before the setting; a pill for src/api/retry.ts after it.",
+      "name": "Files a turn changed",
+      "what": "With Show changed files on, the turn footer lists the files the turn changed; a file opens its diff, and past four files a +N chip shows the rest.",
+      "reach": "Settings > Chat > Show changed files, then a turn that edits files.",
+      "proof": "No file pill before the setting and a pill for src/api/retry.ts after it; the pill opens Changes on that file's diff; +1 shows the fifth file and Show fewer hides it again.",
       "scenarios": [
         {
           "id": "pills",
@@ -831,6 +1114,149 @@
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
             {"do": "see", "on": "chat.changedFile", "path": "src/api/retry.ts"}
+          ]
+        },
+        {
+          "id": "open",
+          "kind": "path",
+          "title": "A changed file under the answer opens its diff",
+          "steps": [
+            {"do": "settings", "values": {"showTurnChangedFiles": true}},
+            {"do": "session.create", "as": "s", "title": "Chat changed files"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.changedFile", "path": "src/api/retry.ts"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "see", "on": "diff.added", "text": "isAbortError"}
+          ]
+        },
+        {
+          "id": "more",
+          "kind": "path",
+          "title": "Past four changed files, +N shows the rest and hides them again",
+          "steps": [
+            {"do": "settings", "values": {"showTurnChangedFiles": true}},
+            {"do": "session.create", "as": "s", "title": "Chat changed files more"},
+            {"do": "session.send", "session": "s", "prompt": "Add a locale file for each language we ship."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.changedFile", "path": "src/locales/de.json"},
+            {"do": "see", "on": "chat.changedFile", "path": "src/locales/ja.json", "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.changedFilesToggle", "expanded": "false", "text": "+1"},
+            {"do": "see", "on": "chat.changedFile", "path": "src/locales/ja.json"},
+            {"do": "click", "on": "chat.changedFilesToggle", "expanded": "true"},
+            {"do": "gone", "on": "chat.changedFile", "path": "src/locales/ja.json"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "failure",
+      "name": "A failed turn",
+      "what": "When the model cannot be reached, the turn shows the provider's error where the answer would be.",
+      "reach": "Send a prompt to a provider that is down.",
+      "proof": "The error text shows in the transcript under the prompt.",
+      "scenarios": [
+        {
+          "id": "provider-down",
+          "kind": "break",
+          "title": "A provider that refuses connections shows its error in the turn",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat failed turn"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "This one fails", "model": "offline/no-answer", "wait": false},
+            {"do": "see", "on": "chat.userBubble", "text": "This one fails"},
+            {"do": "see", "on": "chat.error", "text": "ECONNREFUSED"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "selection",
+      "name": "Selecting text in an answer",
+      "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes.",
+      "reach": "Drag across an answer's text.",
+      "proof": "The menu shows over the selection.",
+      "scenarios": [
+        {
+          "id": "menu",
+          "kind": "path",
+          "title": "Dragging across an answer opens the selection menu",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat selection"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "drag", "on": "chat.paragraph", "text": "тепер зупиняється", "to": {"on": "chat.listItem", "text": "без змін"}},
+            {"do": "see", "on": "chat.selectionMenu", "text": "Add to notes"},
+            {"do": "see", "on": "chat.selectionMenu", "text": "Comment"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reasoning",
+      "name": "The agent's thinking",
+      "what": "With Show reasoning traces on, each step's thinking shows before its text: as a folded Thinking block, or as plain text with collapsible thinking blocks off. With it off, no thinking shows.",
+      "reach": "Settings, Chat: Show reasoning traces and Collapsible thinking blocks. A turn whose model thinks before its steps.",
+      "proof": "Two Thinking blocks with the reasoning's first words; none after the setting goes off; the reasoning as text when blocks do not collapse.",
+      "scenarios": [
+        {
+          "id": "blocks",
+          "kind": "path",
+          "title": "Thinking shows as folded blocks with reasoning traces on and disappears with them off",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "session.create", "as": "s", "title": "Chat reasoning"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "text": "Сигнал треба прокинути в sleep"},
+            {"do": "see", "on": "chat.reasoning", "count": 2},
+            {"do": "settings", "values": {"showReasoningTraces": false}},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 1},
+            {"do": "see", "on": "chat.message", "text": "Сигнал треба прокинути в sleep", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "inline",
+          "kind": "path",
+          "title": "With collapsible thinking blocks off, thinking shows as plain text",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true, "collapsibleThinkingBlocks": false}},
+            {"do": "session.create", "as": "s", "title": "Chat reasoning inline"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "see", "on": "chat.message", "text": "Сигнал треба прокинути в sleep"},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "step-actions",
+      "name": "Actions under every reply",
+      "what": "With message actions on every reply, each text the agent wrote between its steps gets its own row: copy link and copy.",
+      "reach": "Settings, Chat: show actions under every assistant reply. A turn with several steps.",
+      "proof": "Copy under the first step's text puts that text, and only it, on the clipboard.",
+      "scenarios": [
+        {
+          "id": "copy",
+          "kind": "path",
+          "title": "Copy under a step's text copies that text",
+          "steps": [
+            {"do": "settings", "values": {"showSplitAssistantMessageActions": true}},
+            {"do": "session.create", "as": "s", "title": "Chat step actions"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "hover", "on": "chat.message", "text": "Перечитаю хелпер"},
+            {"do": "click", "on": "chat.stepCopy", "index": 0},
+            {"do": "clipboard", "equals": "Перечитаю хелпер і гляну, хто його викликає, перш ніж правити."}
           ]
         }
       ]

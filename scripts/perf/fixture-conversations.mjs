@@ -502,6 +502,7 @@ const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
  * which the verify stand asks permission for, so the subagent's read-only
  * session asks for a permission.
  * `QUESTION_PROMPT` asks the user a question and answers after it.
+ * `verify_locales` changes more files than the turn footer shows as chips.
  */
 export const SUBAGENT_PROMPT = "Hand the parser review to a subagent."
 export const SUBAGENT_PERMISSION_PROMPT = "Hand the secret notes to a subagent."
@@ -517,7 +518,18 @@ const subagentTurn = (id, prompt, task, model) => ({
   answer: "The subagent is on it.\n",
 })
 
+const LOCALES = ["de", "fr", "pl", "uk", "ja"]
+
 const VERIFY_TURNS = [
+{
+  id: "verify_locales",
+  prompt: "Add a locale file for each language we ship.",
+  steps: [{
+    text: "Writing one file per locale:",
+    calls: LOCALES.map((locale) => ({ name: "write", arguments: { path: `src/locales/${locale}.json`, content: `${JSON.stringify({ locale, inbox: "Inbox" }, null, 2)}\n` } })),
+  }],
+  answer: `Added ${LOCALES.length} locale files under \`src/locales\`, each with the inbox title.\n`,
+},
   subagentTurn("verify_subagent", SUBAGENT_PROMPT, "Review the parser", "perf/think-30s"),
   subagentTurn("verify_subagent_permission", SUBAGENT_PERMISSION_PROMPT, SECRET_NOTES_PROMPT, "perf/stream-20000cps"),
 {
