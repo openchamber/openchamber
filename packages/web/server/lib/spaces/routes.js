@@ -46,6 +46,8 @@ const STATUS_BY_CODE = new Map([
   ['network_is_open', 409],
   ['too_many_domains', 409],
   ['secret_source_missing', 409],
+  ['stored_key_missing', 409],
+  ['host_catalog_unreadable', 502],
   ['login_not_found', 409],
   ['login_not_supported', 409],
   ['login_expired', 409],
@@ -344,6 +346,10 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
   // The providers the user defined on the host for a project, for the grant dialogs; never a key.
   app.get(`${SPACES_ROUTE}/custom-providers`, withJourney(async (journey, req, res) => {
     res.json(await journey.readHostCustomProviders(directoryQuerySchema.safeParse(req.query?.directory).data ?? null));
+  }));
+
+  app.get(`${SPACES_ROUTE}/catalog-providers`, withJourney(async (journey, req, res) => {
+    res.json(await journey.readHostCatalogProviders(directoryQuerySchema.safeParse(req.query?.directory).data ?? null));
   }));
 
   // A grant for a running space; the key in the body goes to the gatekeeper and nowhere else.

@@ -101,6 +101,7 @@ const grantSchema = z.discriminatedUnion('kind', [
     source: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('typed') }),
       z.object({ kind: z.literal('env'), name: z.string() }),
+      z.object({ kind: z.literal('stored'), integration: z.string() }),
     ]),
     url: z.string(),
   }),
@@ -233,7 +234,7 @@ export type CreateSpaceRequest = {
 };
 
 export type GrantRequest =
-  | { kind: 'model'; provider: string; upstream: string; secret: { kind: 'typed'; value: string } | { kind: 'env'; name: string } }
+  | { kind: 'model'; provider: string; upstream?: string; secret: { kind: 'typed'; value: string } | { kind: 'env'; name: string } | { kind: 'stored' } }
   | { kind: 'login'; provider: string }
   | { kind: 'custom'; provider: string }
   | { kind: 'domain'; upstream: string };
@@ -265,6 +266,15 @@ const customProviderSchema = z.object({
 });
 
 export type SpaceCustomProvider = z.infer<typeof customProviderSchema>;
+
+const catalogProviderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  supported: z.boolean(),
+  storedKey: z.boolean(),
+});
+
+export type SpaceCatalogProvider = z.infer<typeof catalogProviderSchema>;
 
 const errorBodySchema = z.object({ code: z.string(), message: z.string(), details: failureDetailsSchema.nullable().optional().catch(null) });
 
@@ -369,6 +379,9 @@ export const readSpaceHostLogins = async (signal?: AbortSignal): Promise<SpaceHo
 /** The providers of the user's own a space of this project can be given, read from the host's configuration; a host that cannot be asked throws. */
 export const readSpaceCustomProviders = async (projectDirectory: string, signal?: AbortSignal): Promise<SpaceCustomProvider[]> =>
   (await request(`${SPACES_ROUTE}/custom-providers?directory=${encodeURIComponent(projectDirectory)}`, z.object({ providers: z.array(customProviderSchema) }), { signal })).providers;
+
+export const readSpaceCatalogProviders = async (projectDirectory: string, signal?: AbortSignal): Promise<SpaceCatalogProvider[]> =>
+  (await request(`${SPACES_ROUTE}/catalog-providers?directory=${encodeURIComponent(projectDirectory)}`, z.object({ providers: z.array(catalogProviderSchema) }), { signal })).providers;
 
 export const grantSpaceAccess = async (spaceId: string, body: GrantRequest): Promise<SpaceGrant> =>
   (await request(`${SPACES_ROUTE}/${spaceId}/grants`, z.object({ grant: grantSchema }), { method: 'POST', body: JSON.stringify(body) })).grant;

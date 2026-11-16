@@ -36,6 +36,7 @@ import { useI18n } from '@/lib/i18n';
 import { getGitStatus } from '@/lib/gitApi';
 import { draftSpaceTarget, isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useComposerFollowsSpace } from '@/lib/spaces/useComposerFollowsSpace';
 import { spacesOfProject, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -332,6 +333,7 @@ export function useDraftTarget(enabled: boolean) {
             ?? selectedDraftProjectPath,
         [draftSpaceDirectory, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
     );
+    useComposerFollowsSpace(enabled && isSpaceDirectory(selectedDraftDirectory) ? selectedDraftDirectory : null);
 
     // The draft's own pending flags clear once the directory exists, which is
     // before setup commands and the initial git reset finish; the bootstrap
@@ -346,6 +348,7 @@ export function useDraftTarget(enabled: boolean) {
             !enabled
             || !selectedDraftDirectory
             || selectedDraftProject?.kind === 'chat'
+            || isSpaceDirectory(selectedDraftDirectory)
             || newSessionDraft?.pendingWorktreeRequestId
             || newSessionDraft?.bootstrapPendingDirectory
             || selectedDraftDirectoryBootstrapPending

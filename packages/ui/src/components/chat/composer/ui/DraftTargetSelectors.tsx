@@ -523,15 +523,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             onQuick={() => { setOpenPicker(null); void createWorktreeDraft(); }}
                             onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
                         />
-                        <SelectSeparator />
-                        <SelectGroup>
+                        {worktreeBranchOptions.length > 0 ? <SelectSeparator /> : null}
+                        {worktreeBranchOptions.length > 0 ? <SelectGroup>
                             <SelectLabel>{t('chat.chatInput.worktrees')}</SelectLabel>
                             {worktreeBranchOptions.map((option) => (
                                 <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
                                     {option.pending ? '⏳ ' : ''}{option.label}
                                 </SelectItem>
                             ))}
-                        </SelectGroup>
+                        </SelectGroup> : null}
                         {selectedDirectory && !selectedBranchIsKnown ? (
                             <SelectItem value={selectedDirectory} className="max-w-[24rem] truncate">
                                 {selectedBranchLabel}
@@ -552,16 +552,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             </SelectGroup>
                         ) : null}
                         {onCreateSpace ? (
-                            <div className="px-2 py-1.5">
-                                <button
-                                    type="button"
-                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                    onPointerDown={(e) => { e.stopPropagation(); }}
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
-                                >
-                                    {t('spaces.picker.new')}
-                                </button>
-                            </div>
+                            <button
+                                type="button"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                onPointerDown={(e) => { e.stopPropagation(); }}
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                            >
+                                <Icon name="add" className="size-4 shrink-0 text-muted-foreground" />
+                                {t('spaces.picker.new')}
+                            </button>
                         ) : null}
                     </SelectContent>
                 </Select>
@@ -781,7 +780,7 @@ export function MobileDraftTargetSheets(
                                     {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label])
                                         .map((option) => renderRow(option.value, option.label, undefined, 'instance'))}
                                     {onCreateSpace ? (
-                                        <MobileSheetRow
+                                        <MobileSheetRow icon="add"
                                             onClick={() => {
                                                 onOpenPickerChange(null);
                                                 onCreateSpace();

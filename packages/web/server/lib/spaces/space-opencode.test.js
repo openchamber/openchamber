@@ -27,6 +27,28 @@ describe('the provider configuration inside a space', () => {
     expect(JSON.stringify(buildProviderConfig(GRANTS))).not.toContain('api.anthropic.com');
   });
 
+  it('sends a catalog provider and every model with an address of its own through the window, under the same path', () => {
+    const grant = { kind: 'model', id: 'opencode-go', provider: 'opencode-go', upstream: 'https://opencode.ai/inference/go/', header: 'authorization', source: { kind: 'stored', integration: 'opencode' } };
+    const catalog = new Map([['opencode-go', { baseURL: 'https://opencode.ai/inference/go/openai/v1', models: [
+      { id: 'deepseek-v4.1-flash', baseURL: 'https://opencode.ai/inference/go/openai/v1' },
+      { id: 'minimax-m3', baseURL: 'https://opencode.ai/inference/go/anthropic/v1' },
+    ] }]]);
+    expect(buildProviderConfig([grant], new Map(), catalog)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      provider: {},
+      providers: {
+        'opencode-go': {
+          settings: { apiKey: WINDOW_PLACEHOLDER_KEY, baseURL: 'http://gatekeeper:8080/model/opencode-go/openai/v1' },
+          models: {
+            'deepseek-v4.1-flash': { settings: { baseURL: 'http://gatekeeper:8080/model/opencode-go/openai/v1' } },
+            'minimax-m3': { settings: { baseURL: 'http://gatekeeper:8080/model/opencode-go/anthropic/v1' } },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(buildProviderConfig([grant], new Map(), catalog))).not.toContain('opencode.ai/inference');
+  });
+
   it('writes the whole file over exec, as JSON on stdin, through a temporary name, beside the project and not in the home directory', async () => {
     const calls = [];
     const opencode = createSpaceOpenCode({ exec: async (spaceId, argv, options) => { calls.push({ spaceId, argv, options }); return { code: 0, stdout: '', stderr: '' }; } });

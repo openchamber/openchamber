@@ -29,7 +29,7 @@ import { runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
 import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelKeySource } from './ModelKeySource';
-import { isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type HostLoginOffer, type KeySourceChoice, type SpaceModelProviderOption } from './spaceModelKeys';
+import { defaultKeySource, isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type HostLoginOffer, type KeySourceChoice, type SpaceModelProviderOption } from './spaceModelKeys';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { useOpenSpaceDomain, useSpaceJournal } from './spaceNetwork';
 
@@ -83,24 +83,20 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
   const loginName = offer?.name ?? hostLogin?.name ?? provider.name;
   const [open, setOpen] = React.useState(initiallyOpen);
   // The source the row starts from: the grant's own, and for a space without one the host's login
-  // when there is one to offer, since it asks the user for nothing. A provider without a key has
-  // only the login.
-  const defaultSource = (): KeySourceChoice['source'] => {
-    if (grant?.kind === 'model') return grant.source.kind;
-    return offer || !provider.key ? 'login' : 'env';
-  };
+  // when there is one to offer, then the key saved in Settings, since neither asks the user for
+  // anything. A provider without a key has only the login.
+  const fallbackSource = defaultKeySource(provider, offer);
   const [choice, setChoice] = React.useState<KeySourceChoice>(() => ({
-    source: defaultSource(),
+    source: grant?.kind === 'model' ? grant.source.kind : fallbackSource,
     envName: grant?.kind === 'model' && grant.source.kind === 'env' ? grant.source.name : provider.key?.envName ?? '',
     value: '',
   }));
-  // Until the user picks a source, the row follows the host's logins as they arrive.
+  // Until the user picks a source, the row follows the host's logins and saved keys as they arrive.
   const touched = React.useRef(false);
-  const offered = offer !== null;
   React.useEffect(() => {
     if (touched.current || !provider.key) return;
-    setChoice((current) => ({ ...current, source: offered ? (grant?.kind === 'model' ? grant.source.kind : 'login') : current.source === 'login' ? 'env' : current.source }));
-  }, [grant, offered, provider.key]);
+    setChoice((current) => ({ ...current, source: grant?.kind === 'model' ? grant.source.kind : fallbackSource }));
+  }, [fallbackSource, grant, provider.key]);
   const [giving, setGiving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -129,6 +125,7 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
       if (grant?.kind === 'login') return <span className="text-muted-foreground">{t('spaces.access.model.grantedLogin', { name: loginName })}</span>;
       if (grant?.kind === 'custom') return <span className="text-muted-foreground">{t(provider.custom?.hasKey ? 'spaces.access.model.grantedCustom' : 'spaces.access.model.granted')}</span>;
       if (grant?.kind === 'model' && grant.source.kind === 'env') return <span className="text-muted-foreground">{t('spaces.access.model.grantedFromEnv', { name: grant.source.name })}</span>;
+      if (grant?.kind === 'model' && grant.source.kind === 'stored') return <span className="text-muted-foreground">{t('spaces.access.model.grantedStored')}</span>;
       return <span className="text-muted-foreground">{t('spaces.access.model.granted')}</span>;
     }
     if (access === 'needs_again') {
@@ -242,7 +239,9 @@ const BlockedSection: React.FC<{ entry: SpaceEntry; journal: ReturnType<typeof u
             return (
               <li key={`${attempt.reason}:${attempt.host}:${attempt.port}`} className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div className="font-mono typography-meta text-foreground break-all">{attempt.reason === 'port' ? `${attempt.host}:${attempt.port}` : attempt.host}</div>
+                  {attempt.host === ''
+                    ? <div className="typography-meta text-foreground">{t('spaces.access.blocked.unreadableHost')}</div>
+                    : <div className="font-mono typography-meta text-foreground break-all">{attempt.reason === 'port' ? `${attempt.host}:${attempt.port}` : attempt.host}</div>}
                   <div className="typography-micro text-muted-foreground">
                     {t(REASON_TEXT[attempt.reason], { port: attempt.port })}
                     {' · '}

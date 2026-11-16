@@ -13,12 +13,14 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { getProviderAuth, getStoredLogin, renewStoredLogin } from '../opencode/auth.js';
+import { readOpenCodeCatalog } from '../small-model/client.js';
 import { createCodeIn } from './code-in.js';
 import { createCodeOut } from './code-out.js';
 import { createSpaceDispatcher } from './dispatcher.js';
 import { SpaceError } from './errors.js';
 import { createGatekeeperChannel } from './gatekeeper-channel.js';
 import { createHostGit } from './host-git.js';
+import { createHostCatalog } from './host-catalog.js';
 import { createHostProviders } from './host-providers.js';
 import { createSpaceJourney } from './journey.js';
 import { KEEP_INTERVAL_MS, createLoginExchange, createLoginKeeper } from './login-keeper.js';
@@ -37,6 +39,8 @@ import { createPlaceRegistry } from './places/registry.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
 import { createRegistryToolsSource, readHostToolVersions } from './tools.js';
+
+const storedApiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
 
 const OWNER_FILE = path.join('spaces', 'owner');
 
@@ -134,7 +138,8 @@ export function readOrCreateOwner(dataDir) {
  * the issuer gives for its refresh token; the tests give a login of their own, and `loginWindowOf`
  * lets the live test point that grant's upstream at its stand-in. `hostProviders` reads the
  * providers the user defined in the host's OpenCode configuration, `host-providers.js` over the
- * host's configuration and OpenCode's stored keys unless a test gives its own. `userAgent` names
+ * host's configuration and OpenCode's stored keys unless a test gives its own. `readHostCatalog(directory)`
+ * answers the host OpenCode's `{ providers, models }` for `host-catalog.js`. `userAgent` names
  * this OpenChamber to the issuer.
  */
 export function createSpacesHost({
@@ -154,6 +159,7 @@ export function createSpacesHost({
   renewHostLogin = renewStoredLogin,
   loginWindowOf = undefined,
   hostProviders = null,
+  readHostCatalog = readOpenCodeCatalog,
   userAgent = 'OpenChamber',
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
@@ -341,6 +347,7 @@ export function createSpacesHost({
     loginWindowOf,
     // A custom provider's key is OpenCode's stored one, else the variable its entry names, read now and kept nowhere.
     hostProviders: hostProviders ?? createHostProviders({ readStoredKey: async (providerId) => (await getProviderAuth(providerId))?.key ?? null, hostEnvironment }),
+    hostCatalog: createHostCatalog({ readCatalog: readHostCatalog, readStoredKey: async (integration) => storedApiKeySchema.safeParse(await getProviderAuth(integration)).data?.key ?? null }),
     readIdleStop,
     saveIdleStop,
     readPermissionDefault,

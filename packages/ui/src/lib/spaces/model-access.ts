@@ -1,9 +1,9 @@
-// The model providers a space can be given a key for, and what the create dialog needs to know
-// about each: the API the gatekeeper's window forwards to, and the environment variable a key is
-// usually kept in on the host. The list is the server's (`provider_not_supported` refuses any
-// other, see "Grants" in `packages/web/server/lib/spaces/DOCUMENTATION.md`); OpenCode 2's catalog
-// carries neither the API address nor the variable name, so both are the defaults of each
-// provider's own SDK, which is what OpenCode inside talks to through the window.
+// The model providers the server knows by name, and what the dialogs need to know about each: the
+// API the gatekeeper's window forwards to, and the environment variable a key is usually kept in
+// on the host, both the defaults of each provider's own SDK, which OpenCode inside talks to
+// through the window. Every other provider of the host's catalog is given by key too, its address
+// read by the host from the catalog; see "Grants" in
+// `packages/web/server/lib/spaces/DOCUMENTATION.md`.
 
 type SpaceModelProvider = {
   id: string;

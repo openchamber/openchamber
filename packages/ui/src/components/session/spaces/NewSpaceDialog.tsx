@@ -25,7 +25,7 @@ import { getGitStatus } from '@/lib/gitApi';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { SPACE_LOGIN_ONLY_PROVIDERS, SPACE_MODEL_PROVIDERS } from '@/lib/spaces/model-access';
+import { SPACE_LOGIN_ONLY_PROVIDERS } from '@/lib/spaces/model-access';
 import { opencodeClient } from '@/lib/opencode/client';
 import { registryDomainsOf } from '@/lib/spaces/registry-domains';
 import { isDomainName } from '@/lib/spaces/space-access';
@@ -38,7 +38,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { DockerSetupNotice } from './DockerSetupNotice';
 import { ModelKeySource } from './ModelKeySource';
-import { isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
+import { defaultKeySource, isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
 
 // The places, each checked by the host as the list came: none at all is a failure of its own.
 type PlacesState = { kind: 'checking' } | { kind: 'ready'; places: SpacePlace[] } | { kind: 'failed'; failure: SpaceFailure };
@@ -111,7 +111,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   const hostLogins = useSpaceHostLogins(open);
   // A login-only provider has a row only while the host has a login the space can be given.
   const loginOnly = SPACE_LOGIN_ONLY_PROVIDERS.filter((id) => usableHostLoginOf(hostLogins.logins, id) !== null);
-  const providers = useSpaceModelProviders(undefined, loginOnly, open ? project.path : null);
+  const providers = useSpaceModelProviders(open ? project.path : null, loginOnly);
 
   React.useEffect(() => {
     if (!open) return;
@@ -124,22 +124,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     setDomainInput('');
     setDomainError(false);
     setSubmitError(null);
-    setAccess(Object.fromEntries([
-      ...SPACE_MODEL_PROVIDERS.map((provider): [string, AccessChoice] => [provider.id, {
-        selected: provider.id === useConfigStore.getState().currentProviderId,
-        source: 'env',
-        sourceChosen: false,
-        envName: provider.envName,
-        value: '',
-      }]),
-      ...SPACE_LOGIN_ONLY_PROVIDERS.map((id): [string, AccessChoice] => [id, {
-        selected: id === useConfigStore.getState().currentProviderId,
-        source: 'login',
-        sourceChosen: false,
-        envName: '',
-        value: '',
-      }]),
-    ]));
+    setAccess({});
   }, [open]);
 
   // The registries the project installs from, as the allowlist's first domains: its setup commands
@@ -157,25 +142,28 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     return () => { current = false; };
   }, [open, project.path]);
 
-  // A provider of the user's own arrives from the host after the dialog opened: its row starts
-  // unticked, or ticked when the composer's model is its own.
-  React.useEffect(() => {
-    setAccess((current) => {
-      const missing = providers.filter((provider) => provider.custom && !current[provider.id]);
-      if (missing.length === 0) return current;
-      const currentProviderId = useConfigStore.getState().currentProviderId;
-      return { ...current, ...Object.fromEntries(missing.map((provider): [string, AccessChoice] => [provider.id, { selected: provider.id === currentProviderId && provider.custom?.blocked === null, source: 'env', sourceChosen: true, envName: '', value: '' }])) };
-    });
-  }, [providers]);
-
+  // The providers arrive from the host after the dialog opened: ticked when the composer's model is
+  // its own, and following the host's login and saved key until the user picks a source.
   const logins = hostLogins.logins;
   React.useEffect(() => {
-    setAccess((current) => Object.fromEntries(Object.entries(current).map(([providerId, choice]) => {
-      if (choice.sourceChosen || SPACE_LOGIN_ONLY_PROVIDERS.includes(providerId)) return [providerId, choice];
-      const offered = usableHostLoginOf(logins, providerId) !== null;
-      return [providerId, { ...choice, source: offered ? 'login' : choice.source === 'login' ? 'env' : choice.source }];
-    })));
-  }, [logins]);
+    const currentProviderId = useConfigStore.getState().currentProviderId;
+    setAccess((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const provider of providers) {
+        const existing = current[provider.id];
+        const source = provider.custom ? 'env' : defaultKeySource(provider, usableHostLoginOf(logins, provider.id));
+        if (!existing) {
+          next[provider.id] = { selected: provider.id === currentProviderId && !provider.custom?.blocked, source, sourceChosen: Boolean(provider.custom), envName: provider.key?.envName ?? '', value: '' };
+          changed = true;
+        } else if (!existing.sourceChosen && existing.source !== source) {
+          next[provider.id] = { ...existing, source };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [logins, providers]);
 
   const changedFiles = changes.kind === 'ready' ? changes.files : [];
   const hasChanges = changedFiles.length > 0;
@@ -319,7 +307,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
           onSelect={() => setStart('uncommitted')}
           disabled={changes.kind !== 'ready'}
           label={t('spaces.create.start.uncommitted')}
-          description={changes.kind === 'unknown' ? t('spaces.create.start.changesUnknown') : hasChanges ? filesText : undefined}
+          description={changes.kind === 'loading' ? t('spaces.create.start.changesChecking') : changes.kind === 'unknown' ? t('spaces.create.start.changesUnknown') : hasChanges ? filesText : undefined}
         />
       </SettingsRadioGroup>
       {hasChanges && effectiveStart === 'uncommitted' ? (

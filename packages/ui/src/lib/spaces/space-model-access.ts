@@ -87,12 +87,13 @@ export const spaceModelRefusal = (target: SpaceTarget, providerId: string): Spac
   if (!space) return null;
   const { spaceId, directory } = space;
   if (providerId === OPENCODE_PROVIDER_ID) return { spaceId, providerId, reason: 'opencode' };
-  const { journey, customProviders } = useSpacesStore.getState();
+  const { journey, customProviders, catalogProviders } = useSpacesStore.getState();
   const entry = journey?.get(spaceId);
-  // A provider of the user's own is grantable when the host lists it for the space's project;
-  // a project not read yet refuses nothing, as the rule above says.
-  const custom = entry?.projectDirectory ? customProviders.get(entry.projectDirectory)?.some((provider) => provider.id === providerId) === true : false;
-  if (!custom && !isSpaceGrantableProvider(providerId)) return null;
+  // A provider of the user's own or of the host's catalog is grantable when the host lists it for
+  // the space's project; a project not read yet refuses nothing, as the rule above says.
+  const listed = (providers: readonly { id: string; supported: boolean }[] | undefined) => providers?.some((provider) => provider.id === providerId && provider.supported) === true;
+  const grantable = entry?.projectDirectory ? listed(customProviders.get(entry.projectDirectory)) || listed(catalogProviders.get(entry.projectDirectory)) : false;
+  if (!grantable && !isSpaceGrantableProvider(providerId)) return null;
   // The host gives the creation's access before it says "ready", so a running space is judged by the list.
   if (entry?.state === 'running') return refusalFromList(entry, providerId);
   const chosen = chosenByDirectory.get(directory);
@@ -119,4 +120,14 @@ export const composerModelForSpaceAccess = (providers: readonly string[]): { pro
     if (visible) return { providerId, modelId: visible.modelID };
   }
   return null;
+};
+
+export const composerModelForSpace = (directory: string): { providerId: string; modelId: string } | null => {
+  const spaceId = spaceIdOfDirectory(directory);
+  const entry = spaceId ? useSpacesStore.getState().journey?.get(spaceId) : undefined;
+  if (!entry || entry.state !== 'running') return null;
+  const { currentProviderId } = useConfigStore.getState();
+  if (!spaceModelRefusal({ requestId: null, directory }, currentProviderId)) return null;
+  const held = entry.grants.flatMap((grant) => ((grant.kind === 'model' || grant.kind === 'login' || grant.kind === 'custom') && !entry.needsAccess.includes(grant.id) ? [grant.provider] : []));
+  return composerModelForSpaceAccess(held);
 };

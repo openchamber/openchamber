@@ -26,6 +26,7 @@ import { spaceAccessNoticeOf } from '@/lib/spaces/space-access';
 import { runSpaceAction, spaceConditionOf, type SpaceCondition } from '@/lib/spaces/space-repair';
 import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
 import { spaceFailureText } from './spaceFailureText';
 
@@ -121,11 +122,14 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
     return [{ tone: 'error', text: t(FAILED_TEXT[condition.action], { reason: spaceFailureText(t, condition.failure) }), action: repair(condition.action) }];
   }
   // The machine is off or out of reach: nothing to do here but wait, or, once the machine left
-  // Settings, delete the space, which forgets its record and nothing else.
+  // Settings, delete the space; on this computer Docker is started again from Settings.
   if (condition?.kind === 'unreachable') {
+    if (!condition.gone && condition.machine === null) {
+      return [{ tone: 'warning', text: t('spaces.group.state.dockerNotRunning'), action: { label: t('spaces.group.state.openDockerSettings'), run: () => useUIStore.getState().openSettingsAt('isolated-spaces') } }];
+    }
     const text = condition.gone
       ? t('spaces.group.state.machineRemoved')
-      : condition.machine === null ? t('spaces.group.state.unreachable') : t('spaces.group.state.unreachableMachine', { machine: condition.machine });
+      : t('spaces.group.state.unreachableMachine', { machine: condition.machine ?? '' });
     return [{ tone: 'warning', text, action: condition.gone ? repair('remove') : undefined }];
   }
   if (condition) {
@@ -178,7 +182,7 @@ const useSpaceStatusLines = (spaceId: string): StatusLine[] => {
 
 const LineIcon: React.FC<{ tone: StatusTone; className: string }> = ({ tone, className }) => {
   if (tone === 'busy') return <Spinner className={className} />;
-  const name = tone === 'error' ? 'error-warning' : tone === 'stopped' ? 'stop' : 'alert';
+  const name = tone === 'error' ? 'error-warning' : tone === 'stopped' ? 'stop' : tone === 'note' ? 'information' : 'alert';
   return <Icon name={name} className={className} />;
 };
 
