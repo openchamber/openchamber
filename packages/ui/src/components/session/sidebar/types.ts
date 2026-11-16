@@ -21,16 +21,9 @@ export type SessionGroup = {
   isMain: boolean;
   isArchivedBucket?: boolean;
   worktree: WorktreeMetadata | null;
-  /** The isolated space this group shows, with the state of its last answer. */
   space?: SpaceMark;
   directory: string | null;
   folderScopeKey?: string | null;
-  /**
-   * Flat display groups merge sessions from the project root and every
-   * worktree; their folders come from all of these scopes. When present, the
-   * group section gathers folders across every listed scope (in order)
-   * instead of reading the single folderScopeKey.
-   */
   folderScopes?: SessionGroupFolderScope[];
   draftTarget?: 'chat' | 'project';
   emptyMessage?: string;

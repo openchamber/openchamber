@@ -22,7 +22,6 @@ type SessionRowTooltipBodyProps = {
   recap: string | null;
 };
 
-/** What the whole-row tooltip says: the title and time, project, branch, PR links, marks and the last recap. */
 export function SessionRowTooltipBody({
   sessionTitle,
   updatedLabel,
@@ -58,8 +57,6 @@ export function SessionRowTooltipBody({
         </div>
       ) : null}
       {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
-      {/* Every mark, not only those past the two drawn: on a one-line
-          row the hover actions cover the cluster. */}
       {guestMarks.length > 0 ? <GuestRowMarkLines marks={guestMarks} /> : null}
       {recap ? (
         <p className="min-w-0 line-clamp-4 text-muted-foreground">{recap}</p>

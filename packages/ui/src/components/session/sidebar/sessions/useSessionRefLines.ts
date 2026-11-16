@@ -16,15 +16,8 @@ import type { SidebarRefLink } from './SidebarRefLinks';
 const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
 const EMPTY_LINKED_SIDEBAR_CHANGES: readonly LinkedSidebarChange[] = [];
 
-/** One PR or issue a session row lists in its badge and tooltips. */
 export type SessionRefLine = SidebarRefLink;
 
-/**
- * The work linked to a session, as its row shows it: the branch's PR and the
- * change requests linked to the session with their live state, or else its
- * linked issues; the one that needs attention first leads. Shared by the
- * desktop's session rows and the phone's. VS Code reads only the branch.
- */
 export function useSessionRefLines(session: Session, worktree: WorktreeMetadata | null | undefined, isVSCode: boolean) {
   const { t } = useI18n();
   const prLookup = React.useMemo(
@@ -33,9 +26,6 @@ export function useSessionRefLines(session: Session, worktree: WorktreeMetadata 
   );
   const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(prLookup?.directory ?? null, prLookup?.branch ?? null);
   const urlMatcher = useRepositoryUrlMatcher();
-  // Every change linked to the session: change requests on a source-control
-  // provider carry live state once it arrives; the rest show by identifier,
-  // uncoloured.
   const linkedChanges = React.useMemo(
     () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session, urlMatcher)),
     [isVSCode, session, urlMatcher],
@@ -45,8 +35,6 @@ export function useSessionRefLines(session: Session, worktree: WorktreeMetadata 
     [linkedChanges],
   );
   const repositoryChangeVisuals = useTrackedPullVisualSummaries(repositoryChangeLinks);
-  // The branch's PR and the change requests linked to the session; the row
-  // leads with the one that needs attention first.
   const prSummaries = React.useMemo(
     () => combineSessionPrSummaries(
       branchPrSummary,
@@ -59,10 +47,7 @@ export function useSessionRefLines(session: Session, worktree: WorktreeMetadata 
     [linkedChanges, prSummaries],
   );
   const uncolouredChanges = React.useMemo(() => linkedChanges.filter((change) => !change.repository), [linkedChanges]);
-  // The branch icon speaks for the branch, not for PRs linked from elsewhere.
   const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
-  // Linked issues show only while the session has no PR: once a PR exists it
-  // is the thing to follow, and it usually closes the issue anyway.
   const linkedIssues = React.useMemo(
     () => (isVSCode ? EMPTY_LINKED_SIDEBAR_ISSUES : getLinkedSidebarIssues(session, urlMatcher)),
     [isVSCode, session, urlMatcher],
@@ -77,7 +62,6 @@ export function useSessionRefLines(session: Session, worktree: WorktreeMetadata 
     [linkedIssues],
   );
   const linkedWorkItemStates = useTrackedWorkItemStates(linkedWorkItems);
-  // What the row's badge and tooltips list: its PRs, or else its issues.
   const refLines = React.useMemo((): SessionRefLine[] => {
     if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || uncolouredChanges.length > 0) {
       const summaryLines = prSummaries.map((summary): SessionRefLine => {

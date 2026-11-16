@@ -31,7 +31,6 @@ type SessionRowRenameProps = {
   inputRef: React.RefObject<HTMLInputElement | null>;
 };
 
-/** A row in rename mode: the title becomes the input and the rest of the row stays where it was. */
 export function SessionRowRename({
   sessionRowKey,
   depth,
@@ -58,8 +57,6 @@ export function SessionRowRename({
     <form
       ref={formRef}
       data-session-rename-form={sessionRowKey}
-      // Exactly one text line tall: the input and its two icon buttons must
-      // not make the row taller than the title they replace.
       className="flex h-[1lh] w-full items-center gap-2 typography-ui-label"
       onSubmit={(event) => {
         event.preventDefault();
@@ -95,11 +92,8 @@ export function SessionRowRename({
     </form>
   );
   if (isTwoLineRow) {
-    // Renaming keeps the whole card in place: the title line becomes the
-    // input, project and branch stay where they were, the slot stays empty.
     return (
       <div
-        // The virtual list's 1px margins apply to the row box, rename included.
         data-session-row-box=""
         style={{ paddingInlineStart: sessionDetailedRowPaddingLeft(depth) }}
         className={cn(
@@ -143,8 +137,6 @@ export function SessionRowRename({
     <div
           data-session-row-box=""
       style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
-      // my-0.5 matches the normal row box so entering rename mode does not
-      // shift the row vertically; the empty slot keeps the title in place.
       className="group relative my-0.5 flex items-center gap-1.5 rounded-md py-[5px] pe-2.5"
     >
       <span aria-hidden className="h-3.5 w-3.5 flex-shrink-0" />

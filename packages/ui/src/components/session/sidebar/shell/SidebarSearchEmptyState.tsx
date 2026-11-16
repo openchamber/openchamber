@@ -1,7 +1,6 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 
-/** Nothing matched: the search already covered active and archived sessions. */
 export function SidebarSearchEmptyState(): React.ReactNode {
   const { t } = useI18n();
   return (

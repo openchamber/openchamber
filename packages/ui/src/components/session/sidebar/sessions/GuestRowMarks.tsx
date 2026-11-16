@@ -7,7 +7,6 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { RowMarkTooltip } from './RowMarkTooltip';
 
-// Written out in full: the stylesheet is built from the class names it finds in the source.
 const MARK_TONE_CLASS = {
   neutral: 'text-muted-foreground',
   info: 'text-status-info',
@@ -16,24 +15,15 @@ const MARK_TONE_CLASS = {
   error: 'text-status-error',
 } satisfies Record<GuestTone, string>;
 
-/** An extension's mark as a bare icon in its tone; a name the sprite lacks draws the fallback glyph. */
 export const GuestRowMarkIcon: React.FC<{ mark: RowGuestMark; className?: string }> = ({ mark, className }) => (
   <Icon name={resolveGuestIconName(mark.icon)} className={cn('h-3 w-3 flex-shrink-0', MARK_TONE_CLASS[mark.tone], className)} />
 );
 
 type Props = {
-  /** Every mark of the row, in order; the first `ROW_GUEST_MARKS_SHOWN` are drawn. */
   marks: readonly RowGuestMark[];
-  /** Opens what the mark opens: the extension's panel, or the mark's link when it has no panel. */
   onOpen: (mark: RowGuestMark) => void;
 };
 
-/**
- * The marks extensions put on a sidebar row (`contributes.marks`): an icon
- * each, named in a tooltip above it by the extension and the mark's text. A
- * mark with something to open is a button that keeps the press off the row,
- * as the row's PR badge does; one with nothing to open is an image.
- */
 export const GuestRowMarks: React.FC<Props> = ({ marks, onOpen }) => {
   const { t } = useI18n();
   return <>
@@ -75,7 +65,6 @@ export const GuestRowMarks: React.FC<Props> = ({ marks, onOpen }) => {
   </>;
 };
 
-/** The row's marks as lines of its whole-row tooltip: icon, extension name and text, never a link. */
 export const GuestRowMarkLines: React.FC<{ marks: readonly RowGuestMark[] }> = ({ marks }) => {
   const { t } = useI18n();
   return <>

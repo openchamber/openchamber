@@ -17,8 +17,6 @@ type QuickSessionActionProps = {
   onDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
-// Extracted so only this small button re-renders when Shift is pressed/released,
-// instead of every mounted session row.
 export const QuickSessionAction = React.memo(function QuickSessionAction({
   shortcut,
   archiveLabel,

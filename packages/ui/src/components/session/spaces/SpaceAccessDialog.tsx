@@ -1,16 +1,3 @@
-/**
- * The grant dialog of an isolated space (journey step 4): model keys per provider,
- * the domains the space may reach, and the attempts its gatekeeper refused, each opened from here.
- * Every grant goes through the host at once; nothing is saved at the end. A grant cannot be taken
- * back (decision 4), so opened domains show without a remove button.
- *
- * The journal lives in the gatekeeper's memory only: it holds nothing from before the last start,
- * and the dialog says so, so that an empty list never reads as "the agent tried nothing" when the
- * record is simply gone. It is read when the dialog opens and on "Refresh", never polled.
- *
- * Mounted once by the main layout, opened from the space's group and the session header; never in
- * VS Code (decision 16).
- */
 
 import React from 'react';
 
@@ -44,7 +31,6 @@ const REASON_TEXT = {
   other: 'spaces.access.reason.other',
 } satisfies Record<BlockReason, I18nKey>;
 
-/** A time of the journal in the user's language: the hour when it is today, the date as well when it is not. */
 const formatJournalTime = (value: string): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -66,9 +52,7 @@ type ModelRowProps = {
   entry: SpaceEntry;
   provider: SpaceModelProviderOption;
   initiallyOpen: boolean;
-  /** The host's browser logins, by provider, or null while unread or when the host could not be asked. */
   logins: ReadonlyMap<string, HostLoginOffer> | null;
-  /** Reads the host's logins again, after the host refused a login grant. */
   refreshLogins: () => void;
 };
 
@@ -76,22 +60,16 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
   const { t } = useI18n();
   const access = providerAccessOf(entry, provider.id);
   const grant = providerGrantOf(entry.grants, provider.id);
-  // The login the row can offer: one the host can say now. What the host has for the provider,
-  // whatever its state, says why a login grant needs the user again.
   const offer = usableHostLoginOf(logins, provider.id);
   const hostLogin = logins?.get(provider.id) ?? null;
   const loginName = offer?.name ?? hostLogin?.name ?? provider.name;
   const [open, setOpen] = React.useState(initiallyOpen);
-  // The source the row starts from: the grant's own, and for a space without one the host's login
-  // when there is one to offer, then the key saved in Settings, since neither asks the user for
-  // anything. A provider without a key has only the login.
   const fallbackSource = defaultKeySource(provider, offer);
   const [choice, setChoice] = React.useState<KeySourceChoice>(() => ({
     source: grant?.kind === 'model' ? grant.source.kind : fallbackSource,
     envName: grant?.kind === 'model' && grant.source.kind === 'env' ? grant.source.name : provider.key?.envName ?? '',
     value: '',
   }));
-  // Until the user picks a source, the row follows the host's logins and saved keys as they arrive.
   const touched = React.useRef(false);
   React.useEffect(() => {
     if (touched.current || !provider.key) return;
@@ -112,7 +90,6 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
     } catch (failure) {
       if (!(failure instanceof Error)) throw failure;
       const refusal = failureOfError(failure);
-      // The host refused its own login: what it has for the provider may have changed, so the row reads it again.
       if (refusal.code.startsWith('login_')) refreshLogins();
       setError(spaceFailureText(t, refusal, { name: loginName }));
     } finally {
@@ -130,8 +107,6 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
     }
     if (access === 'needs_again') {
       if (grant?.kind !== 'login') return <span className="text-status-warning">{t('spaces.access.model.needsAgain')}</span>;
-      // Why the host cannot say its login: it has run out and could not be renewed, the user signed
-      // out, or it can be said again now; unread logins say the last, the one the user can act on here.
       if (hostLogin?.state === 'expired') return <span className="text-status-warning">{t('spaces.access.model.loginExpired', { name: loginName })}</span>;
       if (logins !== null && hostLogin === null) return <span className="text-status-warning">{t('spaces.access.model.loginSignedOut', { name: loginName })}</span>;
       return <span className="text-status-warning">{t('spaces.access.model.loginNeedsAgain', { name: loginName })}</span>;
@@ -268,7 +243,6 @@ const BlockedSection: React.FC<{ entry: SpaceEntry; journal: ReturnType<typeof u
   );
 };
 
-/** A stopped space can be given nothing; it can be started from here, as from its group. */
 const StoppedNotice: React.FC<{ spaceId: string }> = ({ spaceId }) => {
   const { t } = useI18n();
   const action = useSpacesStore((state) => state.actions.get(spaceId));
@@ -294,8 +268,6 @@ const StoppedNotice: React.FC<{ spaceId: string }> = ({ spaceId }) => {
 const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | null }> = ({ entry, focusProviderId }) => {
   const { t } = useI18n();
   const hostLogins = useSpaceHostLogins(true);
-  // A login-only provider has a row while the host has a login for it, in any state, or the space
-  // holds its grant: the row is where "sign in again" is said.
   const loginOnly = SPACE_LOGIN_ONLY_PROVIDERS.filter((id) => hostLogins.logins?.has(id) || entry.grants.some((grant) => grant.kind === 'login' && grant.provider === id));
   const providers = useSpaceModelProviders(entry.projectDirectory, loginOnly);
   const running = entry.state === 'running';
@@ -341,7 +313,6 @@ export const SpaceAccessDialog: React.FC = () => {
   const open = target !== null;
   const [readError, setReadError] = React.useState<string | null>(null);
 
-  // A space the list has not answered for yet, in a window that has not read it: read it now.
   const missing = target !== null && entry === undefined;
   React.useEffect(() => {
     if (!missing) return;
@@ -354,8 +325,6 @@ export const SpaceAccessDialog: React.FC = () => {
   }, [missing, t, target?.spaceId]);
 
   const title = entry ? t('spaces.access.title', { name: entry.name }) : t('spaces.group.access.give');
-  // Keyed by the space and the provider asked for, so opening it again for a missing key opens
-  // that provider's row, and another space starts from nothing typed.
   const body = !target ? null : entry
     ? <SpaceAccessBody key={`${target.spaceId}:${target.providerId ?? ''}`} entry={entry} focusProviderId={target.providerId} />
     : <p className={readError ? 'typography-meta text-status-error' : 'typography-meta text-muted-foreground'}>{readError ?? t('spaces.access.loading')}</p>;

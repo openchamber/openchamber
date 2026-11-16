@@ -7,7 +7,6 @@ import { openCodeProjectCandidates, type OpenCodeProject } from './openCodeProje
 
 const NONE: OpenCodeProject[] = [];
 
-/** Read only while enabled, so startup and a closed dialog touch nothing. */
 export function useOpenCodeProjects(enabled: boolean, runtimeKey: string): OpenCodeProject[] {
   const [loaded, setLoaded] = React.useState<{ runtimeKey: string; projects: OpenCodeProject[] } | null>(null);
   const hasServerSnapshot = useProjectsStore((state) => state.hasServerSnapshot);
@@ -21,14 +20,10 @@ export function useOpenCodeProjects(enabled: boolean, runtimeKey: string): OpenC
       if (cancelled) return;
       const configured = new Set(useProjectsStore.getState().projects.flatMap((project) => normalizePath(project.path) ?? []));
       const candidates = openCodeProjectCandidates(projects, configured);
-      // The client batches these filesystem probes. They do not start OpenCode
-      // locations, and an unavailable or unknown folder is never offered.
       const available = await Promise.all(candidates.map(async (candidate) =>
         await opencodeClient.getDirectoryAvailability(candidate.path) === 'available' ? candidate : null));
       if (!cancelled) setLoaded({ runtimeKey, projects: available.filter((candidate) => candidate !== null) });
     };
-    // The list is an extra way in: without it the dialog simply does not offer
-    // it, and the next opening reads again.
     void load().catch(() => {});
     return () => {
       cancelled = true;

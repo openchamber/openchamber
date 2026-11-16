@@ -17,19 +17,12 @@ type SessionFolderDropTarget = {
   ownerKey: string;
 };
 
-/**
- * The folder owners that have a folder a session can be dropped into. A row
- * whose owner has none does not drag at all: a drag with nowhere to land only
- * swallowed the click that started it. Without a provider every row drags.
- */
 const SessionFolderOwnersContext = React.createContext<ReadonlySet<string> | null>(null);
 
 export const SessionFolderOwnersProvider: React.FC<{
   ownerKeys: readonly string[];
   children: React.ReactNode;
 }> = ({ ownerKeys, children }) => {
-  // Keyed by content: the row model is rebuilt often, and a new set each time
-  // would re-render every draggable row.
   const ownersKey = [...new Set(ownerKeys)].sort().join('\n');
   const owners = React.useMemo(() => new Set(ownersKey ? ownersKey.split('\n') : []), [ownersKey]);
   return <SessionFolderOwnersContext.Provider value={owners}>{children}</SessionFolderOwnersContext.Provider>;
@@ -91,7 +84,6 @@ export const DroppableFolderWrapper: React.FC<{
     disabled: disabled || isArchivedFolderScope(scopeKey),
     data: { type: 'folder', folderId, scopeKey, ownerKey },
   });
-  // A session of another owner cannot land here, so the folder does not offer to take it.
   return <>{children(setNodeRef, isOver && active?.data.current?.ownerKey === ownerKey)}</>;
 };
 
@@ -150,7 +142,6 @@ export const SessionFolderDndScope: React.FC<{
       onDragEnd={handleDragEnd}
     >
       {children}
-      {/* Dropped, the row is where it lands at once: no flight back. */}
       <DragOverlay dropAnimation={null}>
         {dragSource && hasFolders ? <RowDragPreview copy={dragSource} /> : null}
       </DragOverlay>

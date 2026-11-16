@@ -18,6 +18,8 @@ show the entry, and neither does the folder choice of Move session.
   while there is something to offer. An empty or failed read hides it; the next
   opening reads again.
 - Runtime changes reject late results.
+- Availability probes use the client's filesystem batch and start no OpenCode
+  locations, so discovering candidates cannot initialize disposable directories.
 
 ## Decisions
 

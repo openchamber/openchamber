@@ -5,19 +5,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 
-/**
- * The panel's search, floating over the top of the list the way the chat's
- * search floats over the conversation. It opens from the search button in the
- * panel header and filters every section at once; the section tabs show where
- * the matches are. Escape or the close button closes it and clears the query.
- */
 export const KnowledgeSearchBar: React.FC<{
   query: string;
   onQueryChange: (query: string) => void;
   placeholder: string;
-  /** No section has a match for a non-empty query. */
   nothingFound: boolean;
-  /** Bumped every time the search is opened: focus and select the query. */
   focusRequest: number;
   onClose: () => void;
 }> = ({ query, onQueryChange, placeholder, nothingFound, focusRequest, onClose }) => {

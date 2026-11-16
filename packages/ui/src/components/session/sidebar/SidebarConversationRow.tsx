@@ -45,7 +45,6 @@ export function SidebarSearchMore({ onLoadMore, mobile = false }: { onLoadMore?:
   return <Button data-sidebar-search-more variant="link" size={mobile ? 'default' : 'xs'} className={mobile ? 'min-h-11' : undefined} onClick={onLoadMore}>{t('search.omni.result.loadMore')}</Button>;
 }
 
-/** The caption over a search's archived matches. */
 export function SidebarSearchArchivedCaption(): React.ReactNode {
   const { t } = useI18n();
   return <div data-sidebar-search-archived className="px-2 py-1 typography-ui-label font-medium text-muted-foreground">{t('search.omni.result.archivedTag')}</div>;
@@ -56,9 +55,6 @@ export function SidebarSearchShowMore({ section, hidden, onShow, mobile = false 
   return <Button data-sidebar-search-show-more={section} variant="link" size={mobile ? 'default' : 'xs'} className={mobile ? 'min-h-11' : undefined} onClick={() => onShow?.(section)}>{t('search.omni.result.showArchived', { count: hidden })}</Button>;
 }
 
-// Where the conversation lives, as the one mark the eye scans down the list:
-// its project's icon, a folder for a directory outside every project, a chat
-// bubble for a chat.
 function ResultLocationMark({ context }: { context: ConversationResultContext }): React.ReactNode {
   const { t } = useI18n();
   if (context.project) return <TimelineProjectIcon project={context.project} label={context.project.label} />;

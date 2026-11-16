@@ -41,8 +41,6 @@ export function SessionActionSpinner({ aiRenaming }: { aiRenaming: boolean }): R
   );
 }
 
-// Jev thinks the work looks finished: a quiet check next to the row until a
-// new turn starts or the user closes it.
 export function DoneHintMark({ className }: { className?: string }): React.ReactNode {
   const { t } = useI18n();
   const doneHintLabel = t('sessions.sidebar.session.work.doneSuggested');
@@ -55,7 +53,6 @@ export function DoneHintMark({ className }: { className?: string }): React.React
   );
 }
 
-/** The marks for a request that waits on the user: a permission, a question, or both. */
 export function PendingRequestBadges({ hasPermission, hasForm }: { hasPermission: boolean; hasForm: boolean }): React.ReactNode {
   const { t } = useI18n();
   const pendingFormLabel = t('sessions.sidebar.session.status.questionPending');

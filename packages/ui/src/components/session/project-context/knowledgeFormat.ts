@@ -1,10 +1,5 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
 
-/**
- * A note has no title field; its first non-empty line is the title, the same
- * way agents and people already write them. Markdown heading and emphasis
- * markers are dropped from the title so `# Release` reads as "Release".
- */
 export const splitNoteTitle = (body: string) => {
   const lines = body.split('\n');
   const titleIndex = lines.findIndex((line) => line.trim().length > 0);
@@ -27,7 +22,6 @@ const isSameDay = (left: Date, right: Date): boolean => (
   && left.getDate() === right.getDate()
 );
 
-/** Time for today's entries, a short date otherwise; the year only when it differs. */
 export const formatKnowledgeDate = (timestamp: number, now: Date = new Date()): string => {
   const date = new Date(timestamp);
   const locale = getCurrentIntlLocale();

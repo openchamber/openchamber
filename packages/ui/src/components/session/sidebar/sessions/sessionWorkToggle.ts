@@ -6,11 +6,6 @@ import { setSessionWorkState } from '@/sync/session-actions';
 import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { normalizePath } from '../utils';
 
-/**
- * Track a work, or finish it: Done closes every session of the work that is
- * in work (`inWork`), and they leave the working set, as Mark done in the
- * composer does.
- */
 export const toggleSessionWork = async (
   sessionId: string,
   directory: string | null,

@@ -8,11 +8,6 @@ type SessionRowChevronProps = {
   onToggle: () => void;
 };
 
-// Grouped rows are file tree rows: one indent per level, then a slot left
-// of the title. The slot says what a row is (a worktree's branch, a run's
-// mark, a session's chevron when it has subsessions) and never its state:
-// the live state sits on the right before the time on every row, so a
-// running mark never hides a worktree's branch (maintainer, 2026-10-26).
 export function SessionTreeChevron({ expanded, onToggle }: SessionRowChevronProps): React.ReactNode {
   const { t } = useI18n();
   return (
@@ -42,8 +37,6 @@ export function SessionTreeChevron({ expanded, onToggle }: SessionRowChevronProp
   );
 }
 
-// A two-line row's chevron sits over the second line's first icon, shown
-// while the row is hovered or focused (always on touch layouts).
 export function SessionLeadToggle({ expanded, alwaysShowActions, onToggle }: SessionRowChevronProps & { alwaysShowActions: boolean }): React.ReactNode {
   const { t } = useI18n();
   return (
