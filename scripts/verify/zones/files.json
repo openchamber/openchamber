@@ -1,7 +1,7 @@
 {
   "zone": "files",
   "name": "Files",
-  "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/", "packages/ui/src/components/layout/SidebarFilesTree.tsx"],
+  "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/", "packages/ui/src/components/layout/SidebarFilesTree.tsx", "packages/ui/src/components/layout/sidebarFilesTree/"],
   "features": [
     {
       "id": "tree",

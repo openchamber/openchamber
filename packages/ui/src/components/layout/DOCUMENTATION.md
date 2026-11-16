@@ -61,3 +61,16 @@ new-session draft decline it.
   neighbour, and with nothing to close it closes the window. Web keeps the
   configurable `close_session_tab` shortcut (Alt+W by default), since the
   browser owns Cmd/Ctrl+W.
+
+## SidebarFilesTree modules
+
+`SidebarFilesTree.tsx` only composes; its parts live in `sidebarFilesTree/`:
+`useFileTreeListing` (per-root listing cache, loading, re-listing on file changes),
+`useVirtualFileTree` (rows, virtualizer, list width, reveal of the selected file),
+`useFileTreeToggle` (expand/collapse motion), `useFileTreeDragDrop` (uploads dropped
+in, row moves and their confirmation), `useFileTreeDialogs` (create, rename, delete),
+`useFileTreeOpening` (opening files and find-in-files matches), `useFileNameSearch`,
+`useFileTreeGitMarks`, and the row, search field, toolbar, fallback list, error row,
+drop indicator and dialog components. The tree cache is module-scoped in `treeCache.ts`
+so it survives the sidebar closing and reopening. A folder change remounts the tree
+(the content component is keyed by runtime and directory), so no state is reset on a root change.
