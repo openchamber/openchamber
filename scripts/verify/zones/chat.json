@@ -1,7 +1,14 @@
 {
   "zone": "chat",
   "name": "Chat transcript and messages",
-  "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx"],
+  "sources": [
+    "packages/ui/src/components/chat/ChatContainer.tsx",
+    "packages/ui/src/components/chat/column/",
+    "packages/ui/src/components/chat/MessageList.tsx",
+    "packages/ui/src/components/chat/ChatMessage.tsx",
+    "packages/ui/src/components/chat/message/",
+    "packages/ui/src/components/chat/MarkdownRendererImpl.tsx"
+  ],
   "features": [
     {
       "id": "history",
@@ -15,16 +22,60 @@
           "kind": "path",
           "title": "Tool rows and the answer of an agent turn render",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat agent turn"},
-            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
-            {"do": "see", "on": "chat.tool", "text": "Search Files", "exact": true},
-            {"do": "see", "on": "chat.tool", "text": "Edit File", "count": 2, "exact": true},
-            {"do": "see", "on": "chat.toolRow", "text": "+9"},
-            {"do": "see", "on": "chat.tool", "text": "Shell Command", "exact": true},
-            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
-            {"do": "see", "on": "chat.fileLink", "ref": "src/api/retry.ts"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat agent turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Search Files",
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Edit File",
+              "count": 2,
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.toolRow",
+              "text": "+9"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Shell Command",
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.fileLink",
+              "ref": "src/api/retry.ts"
+            }
           ]
         },
         {
@@ -32,14 +83,44 @@
           "kind": "path",
           "title": "Clicking an Edit File row shows the edit as a diff",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat tool expand"},
-            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
-            {"do": "open", "session": "s"},
-            {"do": "click", "on": "chat.toolRow", "text": "+3"},
-            {"do": "see", "on": "chat.toolDiffLine", "text": "isAbortError"},
-            {"do": "screenshot", "name": "expanded"},
-            {"do": "click", "on": "chat.toolRow", "text": "+3"},
-            {"do": "gone", "on": "chat.toolDiffLine", "text": "isAbortError"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat tool expand"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "chat.toolRow",
+              "text": "+3"
+            },
+            {
+              "do": "see",
+              "on": "chat.toolDiffLine",
+              "text": "isAbortError"
+            },
+            {
+              "do": "screenshot",
+              "name": "expanded"
+            },
+            {
+              "do": "click",
+              "on": "chat.toolRow",
+              "text": "+3"
+            },
+            {
+              "do": "gone",
+              "on": "chat.toolDiffLine",
+              "text": "isAbortError"
+            }
           ]
         }
       ]
@@ -56,15 +137,52 @@
           "kind": "path",
           "title": "Headings, a numbered list, a table and code blocks render",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat markdown"},
-            {"do": "session.send", "session": "s", "prompt": "Explain a call"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.heading", "text": "3. Executing a call in a bytecode virtual machine"},
-            {"do": "see", "on": "chat.table", "text": "Register machine"},
-            {"do": "see", "on": "chat.code", "text": "fn call(&mut self, argc: usize)"},
-            {"do": "see", "on": "chat.code", "text": "function call(vm: Vm, argc: number): void"},
-            {"do": "see", "on": "chat.listItem", "text": "The dispatch loop continues at the callee's entry point."},
-            {"do": "see", "on": "chat.answer", "text": "**", "count": 0, "timeout": 1}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat markdown"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Explain a call"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.heading",
+              "text": "3. Executing a call in a bytecode virtual machine"
+            },
+            {
+              "do": "see",
+              "on": "chat.table",
+              "text": "Register machine"
+            },
+            {
+              "do": "see",
+              "on": "chat.code",
+              "text": "fn call(&mut self, argc: usize)"
+            },
+            {
+              "do": "see",
+              "on": "chat.code",
+              "text": "function call(vm: Vm, argc: number): void"
+            },
+            {
+              "do": "see",
+              "on": "chat.listItem",
+              "text": "The dispatch loop continues at the callee's entry point."
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "**",
+              "count": 0,
+              "timeout": 1
+            }
           ]
         }
       ]
@@ -81,19 +199,72 @@
           "kind": "path",
           "title": "A long streamed reply stops at its start and Scroll to bottom reaches its end",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat stream"},
-            {"do": "open", "session": "s"},
-            {"do": "session.send", "session": "s", "prompt": "Stream something", "model": "perf/stream-300cps", "wait": false},
-            {"do": "see", "on": "chat.userBubble", "text": "Stream something"},
-            {"do": "see", "on": "composer.stop"},
-            {"do": "session.idle", "session": "s", "timeout": 60},
-            {"do": "gone", "on": "composer.stop"},
-            {"do": "see", "on": "chat.heading", "text": "1. Executing a call in a bytecode virtual machine", "inView": true},
-            {"do": "see", "on": "chat.scrollToBottom"},
-            {"do": "see", "on": "chat.message", "text": "Fixture stream", "inView": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.scrollToBottom"},
-            {"do": "see", "on": "chat.message", "text": "Fixture stream", "inView": true},
-            {"do": "gone", "on": "chat.scrollToBottom"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat stream"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Stream something",
+              "model": "perf/stream-300cps",
+              "wait": false
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Stream something"
+            },
+            {
+              "do": "see",
+              "on": "composer.stop"
+            },
+            {
+              "do": "session.idle",
+              "session": "s",
+              "timeout": 60
+            },
+            {
+              "do": "gone",
+              "on": "composer.stop"
+            },
+            {
+              "do": "see",
+              "on": "chat.heading",
+              "text": "1. Executing a call in a bytecode virtual machine",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.scrollToBottom"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture stream",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.scrollToBottom"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture stream",
+              "inView": true
+            },
+            {
+              "do": "gone",
+              "on": "chat.scrollToBottom"
+            }
           ]
         },
         {
@@ -101,16 +272,56 @@
           "kind": "path",
           "title": "The transcript fades above the composer while a followed reply streams, and not once the reader scrolls away",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat live fade"},
-            {"do": "session.send", "session": "s", "prompt": "First turn", "model": "perf/code-20000cps"},
-            {"do": "open", "session": "s"},
-            {"do": "session.send", "session": "s", "prompt": "Stream something", "model": "perf/stream-300cps", "wait": false},
-            {"do": "see", "on": "chat.liveTail"},
-            {"do": "wheel", "on": "chat.scroller", "dy": -400, "times": 2},
-            {"do": "gone", "on": "chat.liveTail", "timeout": 3},
-            {"do": "session.busy", "session": "s"},
-            {"do": "session.idle", "session": "s", "timeout": 60},
-            {"do": "gone", "on": "chat.liveTail"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat live fade"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Stream something",
+              "model": "perf/stream-300cps",
+              "wait": false
+            },
+            {
+              "do": "see",
+              "on": "chat.liveTail"
+            },
+            {
+              "do": "wheel",
+              "on": "chat.scroller",
+              "dy": -400,
+              "times": 2
+            },
+            {
+              "do": "gone",
+              "on": "chat.liveTail",
+              "timeout": 3
+            },
+            {
+              "do": "session.busy",
+              "session": "s"
+            },
+            {
+              "do": "session.idle",
+              "session": "s",
+              "timeout": 60
+            },
+            {
+              "do": "gone",
+              "on": "chat.liveTail"
+            }
           ]
         }
       ]
@@ -127,18 +338,69 @@
           "kind": "path",
           "title": "A long session opens at its end and Scroll to bottom returns there",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat scroll"},
-            {"do": "session.send", "session": "s", "prompt": "First turn"},
-            {"do": "session.send", "session": "s", "prompt": "Second turn"},
-            {"do": "session.send", "session": "s", "prompt": "Third turn", "model": "perf/code-20000cps"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
-            {"do": "wheel", "on": "chat.scroller", "dy": -1500, "times": 4},
-            {"do": "see", "on": "chat.scrollToBottom"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.scrollToBottom"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
-            {"do": "gone", "on": "chat.scrollToBottom"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat scroll"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "wheel",
+              "on": "chat.scroller",
+              "dy": -1500,
+              "times": 4
+            },
+            {
+              "do": "see",
+              "on": "chat.scrollToBottom"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.scrollToBottom"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "gone",
+              "on": "chat.scrollToBottom"
+            }
           ]
         },
         {
@@ -146,66 +408,310 @@
           "kind": "path",
           "title": "Scrolling to the start of a session longer than its first page loads its first prompt",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat older"},
-            {"do": "session.send", "session": "s", "prompt": "Oldest prompt"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 1: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 2: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 3: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 4: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 5: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 6: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 7: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 8: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 9: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 10: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 11: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 12: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 13: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 14: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 15: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 16: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 17: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 18: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 19: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 20: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 21: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 22: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 23: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 24: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 25: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 26: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 27: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 28: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 29: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 30: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 31: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 32: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 33: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 34: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 35: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 36: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 37: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 38: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 39: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 40: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 41: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 42: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 43: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 44: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 45: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 46: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 47: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 48: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 49: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 50: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 51: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Turn 52: Чому білд у CI падає тільки на Windows?"},
-            {"do": "session.send", "session": "s", "prompt": "Newest prompt"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.message", "text": "Fixture stream", "inView": true},
-            {"do": "see", "on": "chat.userBubble", "text": "Oldest prompt", "count": 0, "timeout": 1},
-            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 15},
-            {"do": "see", "on": "chat.userBubble", "text": "Oldest prompt", "timeout": 30}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat older"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Oldest prompt"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 1: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 2: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 3: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 4: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 5: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 6: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 7: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 8: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 9: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 10: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 11: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 12: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 13: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 14: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 15: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 16: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 17: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 18: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 19: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 20: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 21: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 22: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 23: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 24: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 25: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 26: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 27: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 28: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 29: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 30: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 31: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 32: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 33: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 34: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 35: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 36: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 37: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 38: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 39: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 40: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 41: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 42: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 43: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 44: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 45: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 46: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 47: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 48: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 49: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 50: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 51: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Turn 52: Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Newest prompt"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture stream",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Oldest prompt",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "wheel",
+              "on": "chat.scroller",
+              "dy": -3000,
+              "times": 15
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Oldest prompt",
+              "timeout": 30
+            }
           ]
         }
       ]
@@ -222,14 +728,42 @@
           "kind": "path",
           "title": "Copy puts the answer's text on the clipboard",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat copy"},
-            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "clipboard", "set": "clipboard before the copy"},
-            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "click", "on": "chat.copy"},
-            {"do": "clipboard", "contains": "Bumped. Two errors came up, both from stricter checks"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat copy"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "clipboard",
+              "set": "clipboard before the copy"
+            },
+            {
+              "do": "hover",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "click",
+              "on": "chat.copy"
+            },
+            {
+              "do": "clipboard",
+              "contains": "Bumped. Two errors came up, both from stricter checks"
+            }
           ]
         },
         {
@@ -237,17 +771,58 @@
           "kind": "path",
           "title": "Revert removes the last prompt and its answer and returns the prompt to the composer",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat revert"},
-            {"do": "session.send", "session": "s", "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."},
-            {"do": "session.send", "session": "s", "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.answer", "text": "split the file into 5 MB parts"},
-            {"do": "hover", "on": "chat.userBubble", "text": "Attachments over 10 MB"},
-            {"do": "click", "on": "chat.revert"},
-            {"do": "gone", "on": "chat.userBubble", "text": "Attachments over 10 MB"},
-            {"do": "gone", "on": "chat.answer", "text": "split the file into 5 MB parts"},
-            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"},
-            {"do": "editor", "contains": "Attachments over 10 MB time out"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat revert"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "split the file into 5 MB parts"
+            },
+            {
+              "do": "hover",
+              "on": "chat.userBubble",
+              "text": "Attachments over 10 MB"
+            },
+            {
+              "do": "click",
+              "on": "chat.revert"
+            },
+            {
+              "do": "gone",
+              "on": "chat.userBubble",
+              "text": "Attachments over 10 MB"
+            },
+            {
+              "do": "gone",
+              "on": "chat.answer",
+              "text": "split the file into 5 MB parts"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "The palette shortcut is now registered"
+            },
+            {
+              "do": "editor",
+              "contains": "Attachments over 10 MB time out"
+            }
           ]
         }
       ]
@@ -264,16 +839,62 @@
           "kind": "path",
           "title": "Picking the first prompt in the prompt list scrolls to it",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat prompts"},
-            {"do": "session.send", "session": "s", "prompt": "First turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Second turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Third turn", "model": "perf/code-20000cps"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
-            {"do": "see", "on": "chat.userBubble", "text": "First turn", "inView": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.navigator"},
-            {"do": "click", "on": "chat.navigatorPrompt", "text": "First turn"},
-            {"do": "see", "on": "chat.userBubble", "text": "First turn", "inView": true}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat prompts"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.navigator"
+            },
+            {
+              "do": "click",
+              "on": "chat.navigatorPrompt",
+              "text": "First turn"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            }
           ]
         },
         {
@@ -281,21 +902,87 @@
           "kind": "path",
           "title": "Arrow Up and Down after clicking the transcript step from prompt to prompt",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat prompts"},
-            {"do": "session.send", "session": "s", "prompt": "First turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Second turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Third turn", "model": "perf/code-20000cps"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
-            {"do": "click", "on": "chat.scroller"},
-            {"do": "press", "key": "ArrowUp"},
-            {"do": "see", "on": "chat.userBubble", "text": "Second turn", "inView": true},
-            {"do": "press", "key": "ArrowUp"},
-            {"do": "see", "on": "chat.userBubble", "text": "First turn", "inView": true},
-            {"do": "see", "on": "chat.userBubble", "text": "Second turn", "inView": true, "count": 0},
-            {"do": "press", "key": "ArrowDown"},
-            {"do": "see", "on": "chat.userBubble", "text": "Second turn", "inView": true},
-            {"do": "see", "on": "chat.userBubble", "text": "First turn", "inView": true, "count": 0}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat prompts"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "click",
+              "on": "chat.scroller"
+            },
+            {
+              "do": "press",
+              "key": "ArrowUp"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Second turn",
+              "inView": true
+            },
+            {
+              "do": "press",
+              "key": "ArrowUp"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Second turn",
+              "inView": true,
+              "count": 0
+            },
+            {
+              "do": "press",
+              "key": "ArrowDown"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Second turn",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true,
+              "count": 0
+            }
           ]
         },
         {
@@ -303,17 +990,198 @@
           "kind": "path",
           "title": "A click on the first prompt in the Conversation Timeline scrolls the chat to it",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat prompts"},
-            {"do": "session.send", "session": "s", "prompt": "First turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Second turn", "model": "perf/code-20000cps"},
-            {"do": "session.send", "session": "s", "prompt": "Third turn", "model": "perf/code-20000cps"},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
-            {"do": "press", "key": "k", "mods": ["mod"]},
-            {"do": "press", "key": "t"},
-            {"do": "click", "on": "timeline.entry", "text": "First turn"},
-            {"do": "gone", "on": "dialog"},
-            {"do": "see", "on": "chat.userBubble", "text": "First turn", "inView": true}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat prompts"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "press",
+              "key": "k",
+              "mods": [
+                "mod"
+              ]
+            },
+            {
+              "do": "press",
+              "key": "t"
+            },
+            {
+              "do": "click",
+              "on": "timeline.entry",
+              "text": "First turn"
+            },
+            {
+              "do": "gone",
+              "on": "dialog"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            }
+          ]
+        },
+        {
+          "id": "prompt-navigator",
+          "kind": "path",
+          "title": "Picking the first prompt in the prompt navigator brings it on screen",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat prompt navigator"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.navigator"
+            },
+            {
+              "do": "click",
+              "on": "chat.navigatorPrompt",
+              "text": "First turn"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            }
+          ]
+        },
+        {
+          "id": "timeline-b",
+          "kind": "path",
+          "title": "Clicking the first prompt in the conversation timeline brings it on screen",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat timeline"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "press",
+              "key": "k",
+              "mods": [
+                "mod"
+              ]
+            },
+            {
+              "do": "press",
+              "key": "t"
+            },
+            {
+              "do": "click",
+              "on": "timeline.message",
+              "text": "First turn"
+            },
+            {
+              "do": "gone",
+              "on": "dialog"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            }
           ]
         }
       ]
@@ -330,25 +1198,98 @@
           "kind": "path",
           "title": "Cmd/Ctrl+F finds a word in two messages, Escape closes the bar, a session switch closes it",
           "steps": [
-            {"do": "session.create", "as": "other", "title": "Chat search other"},
-            {"do": "session.send", "session": "other", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "session.create", "as": "s", "title": "Chat search"},
-            {"do": "session.send", "session": "s", "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."},
-            {"do": "session.send", "session": "s", "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"},
-            {"do": "open", "session": "s"},
-            {"do": "click", "on": "chat.answer", "text": "split the file into 5 MB parts"},
-            {"do": "press", "key": "f", "mods": ["mod"]},
-            {"do": "see", "on": "chat.search"},
-            {"do": "type", "text": "palette"},
-            {"do": "see", "on": "chat.searchCount", "text": "2 of 2"},
-            {"do": "press", "key": "Escape"},
-            {"do": "gone", "on": "chat.search"},
-            {"do": "click", "on": "chat.answer", "text": "split the file into 5 MB parts"},
-            {"do": "press", "key": "f", "mods": ["mod"]},
-            {"do": "see", "on": "chat.search"},
-            {"do": "click", "on": "sidebar.row", "session": "other"},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "gone", "on": "chat.search"}
+            {
+              "do": "session.create",
+              "as": "other",
+              "title": "Chat search other"
+            },
+            {
+              "do": "session.send",
+              "session": "other",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat search"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "chat.answer",
+              "text": "split the file into 5 MB parts"
+            },
+            {
+              "do": "press",
+              "key": "f",
+              "mods": [
+                "mod"
+              ]
+            },
+            {
+              "do": "see",
+              "on": "chat.search"
+            },
+            {
+              "do": "type",
+              "text": "palette"
+            },
+            {
+              "do": "see",
+              "on": "chat.searchCount",
+              "text": "2 of 2"
+            },
+            {
+              "do": "press",
+              "key": "Escape"
+            },
+            {
+              "do": "gone",
+              "on": "chat.search"
+            },
+            {
+              "do": "click",
+              "on": "chat.answer",
+              "text": "split the file into 5 MB parts"
+            },
+            {
+              "do": "press",
+              "key": "f",
+              "mods": [
+                "mod"
+              ]
+            },
+            {
+              "do": "see",
+              "on": "chat.search"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "other"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "gone",
+              "on": "chat.search"
+            }
           ]
         }
       ]
@@ -365,17 +1306,63 @@
           "kind": "path",
           "title": "Cmd/Ctrl+Shift+E hides the transcript behind the editor and brings it back",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat expand"},
-            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "press", "key": "e", "mods": ["mod", "shift"]},
-            {"do": "gone", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "see", "on": "composer.centered"},
-            {"do": "see", "on": "composer.editor"},
-            {"do": "press", "key": "e", "mods": ["mod", "shift"]},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "see", "on": "composer.floating"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat expand"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "press",
+              "key": "e",
+              "mods": [
+                "mod",
+                "shift"
+              ]
+            },
+            {
+              "do": "gone",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "see",
+              "on": "composer.centered"
+            },
+            {
+              "do": "see",
+              "on": "composer.editor"
+            },
+            {
+              "do": "press",
+              "key": "e",
+              "mods": [
+                "mod",
+                "shift"
+              ]
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "see",
+              "on": "composer.floating"
+            }
           ]
         }
       ]
@@ -392,15 +1379,45 @@
           "kind": "path",
           "title": "The first prompt of a draft becomes a session with its answer and a floating composer",
           "steps": [
-            {"do": "open"},
-            {"do": "see", "on": "composer.centered"},
-            {"do": "see", "on": "chat.message", "count": 0, "timeout": 1},
-            {"do": "click", "on": "composer.editor"},
-            {"do": "type", "text": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "press", "key": "Enter"},
-            {"do": "see", "on": "chat.userBubble", "text": "Bump TypeScript to 5.7"},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "see", "on": "composer.floating"}
+            {
+              "do": "open"
+            },
+            {
+              "do": "see",
+              "on": "composer.centered"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "composer.editor"
+            },
+            {
+              "do": "type",
+              "text": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "press",
+              "key": "Enter"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Bump TypeScript to 5.7"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "see",
+              "on": "composer.floating"
+            }
           ]
         },
         {
@@ -408,12 +1425,32 @@
           "kind": "path",
           "title": "On the phone a draft shows its heading and starters, and a starter sends its prompt",
           "steps": [
-            {"do": "open", "phone": true},
-            {"do": "see", "on": "draft.heading"},
-            {"do": "click", "on": "draft.starter", "text": "Explore the codebase"},
-            {"do": "gone", "on": "draft.heading"},
-            {"do": "see", "on": "chat.userBubble", "text": "Give me a high-level tour of this codebase."},
-            {"do": "see", "on": "composer.floating"}
+            {
+              "do": "open",
+              "phone": true
+            },
+            {
+              "do": "see",
+              "on": "draft.heading"
+            },
+            {
+              "do": "click",
+              "on": "draft.starter",
+              "text": "Explore the codebase"
+            },
+            {
+              "do": "gone",
+              "on": "draft.heading"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Give me a high-level tour of this codebase."
+            },
+            {
+              "do": "see",
+              "on": "composer.floating"
+            }
           ]
         }
       ]
@@ -430,19 +1467,66 @@
           "kind": "path",
           "title": "A subagent's session opens beside the chat with the read-only banner, and its Stop ends the subagent's turn",
           "steps": [
-            {"do": "session.create", "as": "p", "title": "Chat subagent"},
-            {"do": "session.send", "session": "p", "prompt": "Hand the parser review to a subagent."},
-            {"do": "open", "session": "p"},
-            {"do": "click", "on": "chat.openSubtask"},
-            {"do": "see", "on": "chat.sidePanelChat"},
-            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
-            {"do": "see", "on": "chat.parent", "count": 0, "timeout": 1},
-            {"do": "remember", "on": "chat.sidePanelChat", "attr": "data-chat-session-id", "as": "child"},
-            {"do": "session.busy", "session": "child"},
-            {"do": "click", "on": "chat.readOnlyStop"},
-            {"do": "session.idle", "session": "child"},
-            {"do": "gone", "on": "chat.readOnlyStop"},
-            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."}
+            {
+              "do": "session.create",
+              "as": "p",
+              "title": "Chat subagent"
+            },
+            {
+              "do": "session.send",
+              "session": "p",
+              "prompt": "Hand the parser review to a subagent."
+            },
+            {
+              "do": "open",
+              "session": "p"
+            },
+            {
+              "do": "click",
+              "on": "chat.openSubtask"
+            },
+            {
+              "do": "see",
+              "on": "chat.sidePanelChat"
+            },
+            {
+              "do": "see",
+              "on": "chat.readOnlyBanner",
+              "text": "Subagent sessions cannot be prompted."
+            },
+            {
+              "do": "see",
+              "on": "chat.parent",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "remember",
+              "on": "chat.sidePanelChat",
+              "attr": "data-chat-session-id",
+              "as": "child"
+            },
+            {
+              "do": "session.busy",
+              "session": "child"
+            },
+            {
+              "do": "click",
+              "on": "chat.readOnlyStop"
+            },
+            {
+              "do": "session.idle",
+              "session": "child"
+            },
+            {
+              "do": "gone",
+              "on": "chat.readOnlyStop"
+            },
+            {
+              "do": "see",
+              "on": "chat.readOnlyBanner",
+              "text": "Subagent sessions cannot be prompted."
+            }
           ]
         },
         {
@@ -450,14 +1534,43 @@
           "kind": "path",
           "title": "A permission the subagent asks for is answered in its read-only chat",
           "steps": [
-            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
-            {"do": "session.create", "as": "p", "title": "Chat subagent permission"},
-            {"do": "session.send", "session": "p", "prompt": "Hand the secret notes to a subagent."},
-            {"do": "open", "session": "p"},
-            {"do": "click", "on": "chat.openSubtask"},
-            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
-            {"do": "click", "on": "chat.sidePanelAllowOnce"},
-            {"do": "see", "on": "chat.sidePanelAnswer", "text": "The secret notes hold one line."}
+            {
+              "do": "file.write",
+              "path": "notes.secret",
+              "content": "rotate the staging key on Friday\n"
+            },
+            {
+              "do": "session.create",
+              "as": "p",
+              "title": "Chat subagent permission"
+            },
+            {
+              "do": "session.send",
+              "session": "p",
+              "prompt": "Hand the secret notes to a subagent."
+            },
+            {
+              "do": "open",
+              "session": "p"
+            },
+            {
+              "do": "click",
+              "on": "chat.openSubtask"
+            },
+            {
+              "do": "see",
+              "on": "chat.readOnlyBanner",
+              "text": "Subagent sessions cannot be prompted."
+            },
+            {
+              "do": "click",
+              "on": "chat.sidePanelAllowOnce"
+            },
+            {
+              "do": "see",
+              "on": "chat.sidePanelAnswer",
+              "text": "The secret notes hold one line."
+            }
           ]
         },
         {
@@ -465,16 +1578,54 @@
           "kind": "path",
           "title": "On the phone a subagent's session replaces the chat, and Parent returns to the parent",
           "steps": [
-            {"do": "session.create", "as": "p", "title": "Chat subagent phone"},
-            {"do": "session.send", "session": "p", "prompt": "Hand the parser review to a subagent."},
-            {"do": "open", "session": "p", "phone": true},
-            {"do": "see", "on": "chat.userBubble", "text": "Hand the parser review to a subagent."},
-            {"do": "click", "on": "chat.openSubtask"},
-            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
-            {"do": "click", "on": "chat.parent"},
-            {"do": "see", "on": "chat.userBubble", "text": "Hand the parser review to a subagent."},
-            {"do": "gone", "on": "chat.readOnlyBanner"},
-            {"do": "see", "on": "chat.parent", "count": 0, "timeout": 1}
+            {
+              "do": "session.create",
+              "as": "p",
+              "title": "Chat subagent phone"
+            },
+            {
+              "do": "session.send",
+              "session": "p",
+              "prompt": "Hand the parser review to a subagent."
+            },
+            {
+              "do": "open",
+              "session": "p",
+              "phone": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Hand the parser review to a subagent."
+            },
+            {
+              "do": "click",
+              "on": "chat.openSubtask"
+            },
+            {
+              "do": "see",
+              "on": "chat.readOnlyBanner",
+              "text": "Subagent sessions cannot be prompted."
+            },
+            {
+              "do": "click",
+              "on": "chat.parent"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Hand the parser review to a subagent."
+            },
+            {
+              "do": "gone",
+              "on": "chat.readOnlyBanner"
+            },
+            {
+              "do": "see",
+              "on": "chat.parent",
+              "count": 0,
+              "timeout": 1
+            }
           ]
         }
       ]
@@ -491,23 +1642,89 @@
           "kind": "path",
           "title": "Escape twice in the side panel's composer stops the session shown there and leaves the main one running",
           "steps": [
-            {"do": "session.create", "as": "main", "title": "Chat main column"},
-            {"do": "session.send", "session": "main", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "session.create", "as": "b", "title": "Chat side panel"},
-            {"do": "session.send", "session": "b", "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"},
-            {"do": "open", "session": "main"},
-            {"do": "click", "on": "sidebar.row", "session": "b", "button": "right"},
-            {"do": "click", "on": "menu.item", "text": "Open in Side Panel"},
-            {"do": "see", "on": "chat.sidePanelAnswer", "text": "split the file into 5 MB parts"},
-            {"do": "session.send", "session": "main", "prompt": "Think it over", "model": "perf/think-30s", "wait": false},
-            {"do": "session.send", "session": "b", "prompt": "Think it over", "model": "perf/think-30s", "wait": false},
-            {"do": "session.busy", "session": "main"},
-            {"do": "session.busy", "session": "b"},
-            {"do": "click", "on": "chat.sidePanelEditor"},
-            {"do": "press", "key": "Escape"},
-            {"do": "press", "key": "Escape"},
-            {"do": "session.idle", "session": "b"},
-            {"do": "session.busy", "session": "main", "timeout": 1}
+            {
+              "do": "session.create",
+              "as": "main",
+              "title": "Chat main column"
+            },
+            {
+              "do": "session.send",
+              "session": "main",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "session.create",
+              "as": "b",
+              "title": "Chat side panel"
+            },
+            {
+              "do": "session.send",
+              "session": "b",
+              "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"
+            },
+            {
+              "do": "open",
+              "session": "main"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "b",
+              "button": "right"
+            },
+            {
+              "do": "click",
+              "on": "menu.item",
+              "text": "Open in Side Panel"
+            },
+            {
+              "do": "see",
+              "on": "chat.sidePanelAnswer",
+              "text": "split the file into 5 MB parts"
+            },
+            {
+              "do": "session.send",
+              "session": "main",
+              "prompt": "Think it over",
+              "model": "perf/think-30s",
+              "wait": false
+            },
+            {
+              "do": "session.send",
+              "session": "b",
+              "prompt": "Think it over",
+              "model": "perf/think-30s",
+              "wait": false
+            },
+            {
+              "do": "session.busy",
+              "session": "main"
+            },
+            {
+              "do": "session.busy",
+              "session": "b"
+            },
+            {
+              "do": "click",
+              "on": "chat.sidePanelEditor"
+            },
+            {
+              "do": "press",
+              "key": "Escape"
+            },
+            {
+              "do": "press",
+              "key": "Escape"
+            },
+            {
+              "do": "session.idle",
+              "session": "b"
+            },
+            {
+              "do": "session.busy",
+              "session": "main",
+              "timeout": 1
+            }
           ]
         }
       ]
@@ -524,26 +1741,102 @@
           "kind": "path",
           "title": "With In the chat chosen, the agent's question is a card in the transcript that takes the answer",
           "steps": [
-            {"do": "open"},
-            {"do": "click", "on": "sidebar.settings"},
-            {"do": "click", "on": "settings.search", "timeout": 60},
-            {"do": "type", "text": "questions"},
-            {"do": "click", "on": "settings.searchResult", "text": "Questions"},
-            {"do": "click", "on": "settings.chip", "item": "chat.questions-placement", "text": "In the chat"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.questions-placement", "text": "In the chat"},
-            {"do": "session.create", "as": "s", "title": "Chat question"},
-            {"do": "open", "session": "s"},
-            {"do": "session.send", "session": "s", "prompt": "Ask me which retry policy to use.", "wait": false},
-            {"do": "click", "on": "chat.formOption", "text": "Fixed delay"},
-            {"do": "click", "on": "chat.formSubmit", "exact": true},
-            {"do": "see", "on": "chat.answer", "text": "Going with the policy you picked."},
-            {"do": "open"},
-            {"do": "click", "on": "sidebar.settings"},
-            {"do": "click", "on": "settings.search", "timeout": 60},
-            {"do": "type", "text": "questions"},
-            {"do": "click", "on": "settings.searchResult", "text": "Questions"},
-            {"do": "click", "on": "settings.chip", "item": "chat.questions-placement", "text": "Pop-up"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.questions-placement", "text": "Pop-up"}
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "settings.search",
+              "timeout": 60
+            },
+            {
+              "do": "type",
+              "text": "questions"
+            },
+            {
+              "do": "click",
+              "on": "settings.searchResult",
+              "text": "Questions"
+            },
+            {
+              "do": "click",
+              "on": "settings.chip",
+              "item": "chat.questions-placement",
+              "text": "In the chat"
+            },
+            {
+              "do": "see",
+              "on": "settings.chipOn",
+              "item": "chat.questions-placement",
+              "text": "In the chat"
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat question"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Ask me which retry policy to use.",
+              "wait": false
+            },
+            {
+              "do": "click",
+              "on": "chat.formOption",
+              "text": "Fixed delay"
+            },
+            {
+              "do": "click",
+              "on": "chat.formSubmit",
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Going with the policy you picked."
+            },
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "settings.search",
+              "timeout": 60
+            },
+            {
+              "do": "type",
+              "text": "questions"
+            },
+            {
+              "do": "click",
+              "on": "settings.searchResult",
+              "text": "Questions"
+            },
+            {
+              "do": "click",
+              "on": "settings.chip",
+              "item": "chat.questions-placement",
+              "text": "Pop-up"
+            },
+            {
+              "do": "see",
+              "on": "settings.chipOn",
+              "item": "chat.questions-placement",
+              "text": "Pop-up"
+            }
           ]
         }
       ]
@@ -560,19 +1853,65 @@
           "kind": "break",
           "title": "A session opened while the server is down says it could not be loaded, and loads once the server is back",
           "steps": [
-            {"do": "session.create", "as": "a", "title": "Chat loaded"},
-            {"do": "session.send", "session": "a", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "session.create", "as": "b", "title": "Chat not loaded"},
-            {"do": "session.send", "session": "b", "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"},
-            {"do": "open", "session": "a"},
-            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
-            {"do": "server.stop"},
-            {"do": "click", "on": "sidebar.row", "session": "b"},
-            {"do": "see", "on": "chat.loadError", "timeout": 60},
-            {"do": "see", "on": "chat.loadRetry"},
-            {"do": "server.start"},
-            {"do": "see", "on": "chat.answer", "text": "split the file into 5 MB parts", "timeout": 60},
-            {"do": "gone", "on": "chat.loadError"}
+            {
+              "do": "session.create",
+              "as": "a",
+              "title": "Chat loaded"
+            },
+            {
+              "do": "session.send",
+              "session": "a",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "session.create",
+              "as": "b",
+              "title": "Chat not loaded"
+            },
+            {
+              "do": "session.send",
+              "session": "b",
+              "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"
+            },
+            {
+              "do": "open",
+              "session": "a"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Bumped. Two errors came up"
+            },
+            {
+              "do": "server.stop"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "b"
+            },
+            {
+              "do": "see",
+              "on": "chat.loadError",
+              "timeout": 60
+            },
+            {
+              "do": "see",
+              "on": "chat.loadRetry"
+            },
+            {
+              "do": "server.start"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "split the file into 5 MB parts",
+              "timeout": 60
+            },
+            {
+              "do": "gone",
+              "on": "chat.loadError"
+            }
           ]
         }
       ]
@@ -589,11 +1928,731 @@
           "kind": "path",
           "title": "The Work status card beside a session names its project and branch",
           "steps": [
-            {"do": "session.create", "as": "s", "title": "Chat work status"},
-            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
-            {"do": "open", "session": "s"},
-            {"do": "see", "on": "workStatus", "text": "relay-desk"},
-            {"do": "see", "on": "workStatus", "text": "main"}
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat work status"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "workStatus",
+              "text": "relay-desk"
+            },
+            {
+              "do": "see",
+              "on": "workStatus",
+              "text": "main"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "activity",
+      "name": "Collapsed activity",
+      "what": "In Collapsed activity mode a finished turn hides its steps under an Activity header that opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it.",
+      "reach": "Settings > Chat > Activity: Collapsed, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
+      "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step.",
+      "scenarios": [
+        {
+          "id": "toggle",
+          "kind": "path",
+          "title": "Activity opens and closes a finished turn's tool rows",
+          "steps": [
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Chat",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "settings.chip",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "see",
+              "on": "settings.chipOn",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat activity toggle"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.fold",
+              "text": "Activity"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true,
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.fold",
+              "text": "Activity"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Shell Command",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "chat.fold",
+              "text": "Activity"
+            },
+            {
+              "do": "gone",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true
+            }
+          ]
+        },
+        {
+          "id": "remount",
+          "kind": "path",
+          "title": "An opened Activity is still open after the chat showed four other sessions",
+          "steps": [
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Chat",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "settings.chip",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "see",
+              "on": "settings.chipOn",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat activity remount"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "session.create",
+              "as": "o1",
+              "title": "Chat other 1"
+            },
+            {
+              "do": "session.send",
+              "session": "o1",
+              "prompt": "Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "session.create",
+              "as": "o2",
+              "title": "Chat other 2"
+            },
+            {
+              "do": "session.send",
+              "session": "o2",
+              "prompt": "Чому лічильник непрочитаних лишається, коли розмову вже відкрито?"
+            },
+            {
+              "do": "session.create",
+              "as": "o3",
+              "title": "Chat other 3"
+            },
+            {
+              "do": "session.send",
+              "session": "o3",
+              "prompt": "Як перенести налаштування на нову схему так, щоб старі ключі не загубились?"
+            },
+            {
+              "do": "session.create",
+              "as": "o4",
+              "title": "Chat other 4"
+            },
+            {
+              "do": "session.send",
+              "session": "o4",
+              "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "click",
+              "on": "chat.fold",
+              "text": "Activity"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "o1"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Чому білд у CI падає"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "o2"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Чому лічильник непро"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "o3"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Як перенести налашту"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "o4"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Bump TypeScript to 5"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.foldOpen",
+              "text": "Activity"
+            },
+            {
+              "do": "see",
+              "on": "chat.tool",
+              "text": "Read File",
+              "exact": true
+            }
+          ]
+        },
+        {
+          "id": "search-reveal",
+          "kind": "path",
+          "title": "A search hit in a closed Activity opens it and shows the step",
+          "steps": [
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Chat",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "settings.chip",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "see",
+              "on": "settings.chipOn",
+              "item": "chat.activity-default",
+              "text": "Collapsed"
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat activity search"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Перечитаю хелпер",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "press",
+              "key": "f",
+              "mods": [
+                "mod"
+              ]
+            },
+            {
+              "do": "see",
+              "on": "chat.search"
+            },
+            {
+              "do": "type",
+              "text": "Перечитаю хелпер"
+            },
+            {
+              "do": "see",
+              "on": "chat.foldOpen",
+              "text": "Activity"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Перечитаю хелпер",
+              "inView": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sticky",
+      "name": "Sticky prompt",
+      "what": "With Sticky user header on, a turn's prompt stays at the top while its long answer scrolls under it.",
+      "reach": "Settings > Chat > Sticky user header, then open a session whose answer is taller than the screen.",
+      "proof": "At the end of the answer the prompt is still on screen.",
+      "scenarios": [
+        {
+          "id": "prompt",
+          "kind": "path",
+          "title": "The prompt stays on screen at the end of its long answer",
+          "steps": [
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Chat",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "settings.checkbox",
+              "item": "chat.sticky-user-header"
+            },
+            {
+              "do": "see",
+              "on": "settings.checkboxOn",
+              "item": "chat.sticky-user-header"
+            },
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat sticky prompt"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Long one",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "Long one",
+              "inView": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "return",
+      "name": "Reading position on return",
+      "what": "Coming back to a session shows the place the reader left, not its end.",
+      "reach": "Scroll a long session up to its first prompt, open another session, come back.",
+      "proof": "The first prompt is on screen again and the last answer is not.",
+      "scenarios": [
+        {
+          "id": "session-switch",
+          "kind": "path",
+          "title": "A session scrolled to its first prompt shows it again after a visit to another session",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat reading position"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "First turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Second turn"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Third turn",
+              "model": "perf/code-20000cps"
+            },
+            {
+              "do": "session.create",
+              "as": "o",
+              "title": "Chat other session"
+            },
+            {
+              "do": "session.send",
+              "session": "o",
+              "prompt": "Чому білд у CI падає тільки на Windows?"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true
+            },
+            {
+              "do": "wheel",
+              "on": "chat.scroller",
+              "dy": -1500,
+              "times": 40
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "o"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "path.posix.join"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.row",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "First turn",
+              "inView": true
+            },
+            {
+              "do": "see",
+              "on": "chat.message",
+              "text": "Fixture code",
+              "inView": true,
+              "count": 0,
+              "timeout": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notices",
+      "name": "Rows that are not a turn",
+      "what": "A !command the user runs shows as a Shell Command row with its output; a provider that keeps failing shows its retry error in the transcript.",
+      "reach": "Type ! and a command in the composer and press Enter; send a prompt to a provider that is down.",
+      "proof": "The Shell Command row opens to the command's output; the transcript shows ECONNREFUSED while the session retries.",
+      "scenarios": [
+        {
+          "id": "shell",
+          "kind": "path",
+          "title": "A !command shows as a Shell Command row that opens to its output",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat shell command"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "click",
+              "on": "composer.editor"
+            },
+            {
+              "do": "type",
+              "text": "!"
+            },
+            {
+              "do": "type",
+              "text": "echo verify-$((40+2))"
+            },
+            {
+              "do": "press",
+              "key": "Enter"
+            },
+            {
+              "do": "see",
+              "on": "chat.anyToolRow",
+              "text": "Shell Command"
+            },
+            {
+              "do": "see",
+              "on": "chat.scroller",
+              "text": "verify-42",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "click",
+              "on": "chat.anyToolRow",
+              "text": "Shell Command"
+            },
+            {
+              "do": "see",
+              "on": "chat.scroller",
+              "text": "verify-42"
+            }
+          ]
+        },
+        {
+          "id": "retry",
+          "kind": "break",
+          "title": "A provider that is down shows its retry error in the transcript",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat retry notice"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "This one fails",
+              "model": "offline/no-answer",
+              "wait": false
+            },
+            {
+              "do": "see",
+              "on": "chat.userBubble",
+              "text": "This one fails"
+            },
+            {
+              "do": "see",
+              "on": "chat.error",
+              "text": "ECONNREFUSED"
+            },
+            {
+              "do": "click",
+              "on": "composer.stop"
+            },
+            {
+              "do": "session.idle",
+              "session": "s",
+              "timeout": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "changed-files",
+      "name": "Changed files under a turn",
+      "what": "With changed files on, the latest turn lists the files it changed under its answer.",
+      "reach": "Settings > Chat > changed files, then open a session where the agent edited a file.",
+      "proof": "No file pill before the setting; a pill for src/api/retry.ts after it.",
+      "scenarios": [
+        {
+          "id": "pills",
+          "kind": "path",
+          "title": "Turning changed files on adds the edited file under the answer",
+          "steps": [
+            {
+              "do": "session.create",
+              "as": "s",
+              "title": "Chat changed files"
+            },
+            {
+              "do": "session.send",
+              "session": "s",
+              "prompt": "Так, виправ у retry.ts."
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.changedFile",
+              "path": "src/api/retry.ts",
+              "count": 0,
+              "timeout": 1
+            },
+            {
+              "do": "open"
+            },
+            {
+              "do": "click",
+              "on": "sidebar.settings"
+            },
+            {
+              "do": "click",
+              "on": "dialog.button",
+              "text": "Chat",
+              "exact": true
+            },
+            {
+              "do": "click",
+              "on": "settings.checkbox",
+              "item": "chat.changed-files"
+            },
+            {
+              "do": "see",
+              "on": "settings.checkboxOn",
+              "item": "chat.changed-files"
+            },
+            {
+              "do": "open",
+              "session": "s"
+            },
+            {
+              "do": "see",
+              "on": "chat.answer",
+              "text": "Змінені файли"
+            },
+            {
+              "do": "see",
+              "on": "chat.changedFile",
+              "path": "src/api/retry.ts"
+            }
           ]
         }
       ]

@@ -1,128 +1,531 @@
 {
-  "sidebar.row": {"selector": "[data-session-row=\"{session}\"]", "means": "A session's row in the left sidebar."},
-  "sidebar.activeRow": {"selector": "[data-session-row=\"{session}\"][aria-current=\"page\"]", "means": "The sidebar row of the session the chat shows, highlighted."},
-  "sidebar.rowInScope": {"selector": "[data-session-row=\"{session}\"][data-session-scope=\"{scope}\"]", "means": "A session row under a sidebar section: activity:work is In work."},
-  "sidebar.anyRow": {"selector": "[data-session-row]", "means": "Any session row in the sidebar; pair it with text."},
-  "sidebar.anyActiveRow": {"selector": "[data-session-row][aria-current=\"page\"]", "means": "Whichever sidebar row is highlighted as the open session."},
-  "sidebar.rowArchive": {"selector": "[data-session-row=\"{session}\"] button[aria-label=\"Archive\"]", "means": "The Archive button a row shows on hover."},
-  "sidebar.rowMarkDone": {"selector": "[data-session-row=\"{session}\"] button[aria-label=\"Mark done\"]", "means": "The Mark done check a row shows on hover."},
-  "sidebar.newSession": {"selector": "button[aria-label=\"New session\"]", "means": "The New session button at the top of the sidebar; opens a draft."},
-  "header.actions": {"selector": "button[aria-label=\"Open session actions\"]", "means": "The ... next to the session title above the chat; opens the session menu."},
-  "header.renameInput": {"selector": "[data-session-rename-form] input", "means": "The title field that Rename opens in place of the session title."},
-  "menu.item": {"selector": "[role=\"menu\"] [role=\"menuitem\"]", "means": "An item of the open dropdown or context menu; pair it with text."},
-  "menu.option": {"selector": "[role=\"menu\"] [role=\"menuitemradio\"]", "means": "A pick-one option of the open dropdown, such as Changed or Staged in the change mode menu; pair it with text."},
-  "dialog": {"selector": "[role=\"dialog\"], [role=\"alertdialog\"]", "means": "An open modal dialog."},
-  "dialog.button": {"selector": "[role=\"dialog\"] button, [role=\"alertdialog\"] button", "means": "A button of the open dialog; pair it with text."},
-  "composer.editor": {"selector": "[data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"]", "means": "The composer's text field."},
-  "composer.send": {"selector": "[data-chat-input-footer] button[aria-label=\"Send message\"]", "means": "The round Send button at the end of the composer footer."},
-  "composer.stop": {"selector": "button[aria-label=\"Stop generating\"]", "means": "The Stop button that takes Send's place while the session works."},
-  "composer.model": {"selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]:has(img)", "means": "The model name in the composer footer; opens the model picker."},
-  "composer.popup": {"selector": ".oc-glass-popover", "means": "The autocomplete list over the composer: commands after /, skills after $."},
-  "composer.mentionRow": {"selector": "[data-mention-list] [aria-label=\"{path}\"]", "means": "A file in the @ mention list."},
-  "composer.mentionChip": {"selector": "[data-chat-input=\"true\"] [data-mention-name=\"{path}\"]", "means": "A file chip in the composer after picking it from the @ list."},
-  "composer.projectPicker": {"selector": "button[aria-haspopup=\"dialog\"]", "means": "The project picker above a new session's composer; pair it with its label, Choose project on a new Chat."},
-  "composer.projectOption": {"selector": "[role=\"dialog\"] [cmdk-item]", "means": "A project in the open project picker; pair it with the project's name."},
-  "picker.search": {"selector": "input[role=\"combobox\"][placeholder=\"Search models\"]", "means": "The search field at the top of the model picker."},
-  "picker.option": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"]", "means": "A model in the model picker; pair it with the model's name."},
-  "composer.status": {"selector": "[role=\"status\"][aria-live=\"polite\"]", "means": "The status line above the composer: Retrying in Ns, Warming up."},
-  "chat.message": {"selector": "[data-message-id]", "means": "One message of the transcript, user or assistant."},
-  "chat.userBubble": {"selector": "[data-user-message-bubble]", "means": "A prompt the user sent, as a bubble on the end side."},
-  "chat.answer": {"selector": "[data-message-select-unit^=\"answer:\"]", "means": "The text of an assistant answer."},
-  "chat.tool": {"selector": "[data-message-id] span[title]", "means": "The name of a tool call in its row: Read File, Search Files, Edit File, Shell Command."},
-  "chat.toolRow": {"selector": "[data-message-id] [role=\"button\"][class*=\"group/tool\"]", "means": "A tool call row that expands on click: Edit File, Shell Command."},
-  "chat.toolDiffLine": {"selector": "[data-content] > [data-line-type=\"change-addition\"]", "means": "An added line in an expanded Edit File row."},
-  "chat.fileLink": {"selector": "[data-openchamber-file-link][data-openchamber-file-ref=\"{ref}\"]", "means": "A file path in an answer, rendered as a link."},
-  "chat.copy": {"selector": "[data-message-id]:has([data-message-select-unit^=\"answer:\"]) button[aria-label=\"Copy message text\"]", "means": "The copy button under an assistant answer; it shows when the answer is hovered."},
-  "chat.revert": {"selector": "[data-user-message-actions] button[aria-label=\"Revert to this message\"]", "means": "The revert button under a user prompt; it shows when the prompt is hovered."},
-  "chat.scrollToBottom": {"selector": "button[aria-label=\"Scroll to bottom\"]", "means": "The arrow that appears when the chat is scrolled up."},
-  "chat.scroller": {"selector": "[data-scrollbar=\"chat\"]", "means": "The scrolling area of the transcript."},
-  "chat.navigator": {"selector": "nav[aria-label=\"Prompt navigation\"] button[aria-haspopup=\"listbox\"]", "means": "The ticks at the top start corner of a chat with three prompts or more; a click opens the list of prompts."},
-  "chat.navigatorPrompt": {"selector": "nav[aria-label=\"Prompt navigation\"] [role=\"option\"]", "means": "A prompt in the open prompt list; pair it with the prompt's text."},
-  "chat.search": {"selector": "[role=\"search\"] input[aria-label=\"Search this conversation\"]", "means": "The field of the search bar Cmd/Ctrl+F opens over the chat."},
-  "chat.searchCount": {"selector": "[role=\"search\"] [role=\"status\"]", "means": "The N of M count next to the chat's search field."},
-  "chat.loadOlder": {"selector": "[data-scrollbar=\"chat\"] button", "text": "Load older messages", "means": "The button at the top of a chat whose older history is not loaded yet."},
-  "chat.liveTail": {"selector": "[data-live-tail=\"true\"]", "means": "The chat while it follows a streaming reply: the transcript fades out above the composer."},
-  "chat.parent": {"selector": "button[aria-label=\"Return to parent session\"]", "means": "The Parent button at the top start corner of a subagent's chat."},
-  "chat.readOnlyBanner": {"selector": "[data-composer-slot] [data-composer-transient]", "means": "The banner in the composer's place in a chat that takes no prompts: Subagent sessions cannot be prompted."},
-  "chat.readOnlyStop": {"selector": "[data-composer-slot] [data-composer-transient] button[aria-label=\"Stop generating\"]", "means": "The Stop button on the read-only banner while that session works."},
-  "chat.openSubtask": {"selector": "[data-message-id] button[aria-label^=\"Open \"][aria-label$=\" subtask\"]", "means": "The arrow on a subagent's tool row that opens its session."},
-  "chat.loadError": {"selector": "[data-composer-bound] p", "text": "Session could not be loaded", "means": "The message a chat shows in place of the transcript when its messages failed to load."},
-  "chat.loadRetry": {"selector": "[data-composer-bound] button", "text": "Try again", "means": "The Try again button under a chat's failed load."},
-  "chat.sidePanelChat": {"selector": "[data-chat-column=\"pinned\"]", "means": "A chat open in the context panel beside the main one, such as a subagent's."},
-  "composer.floating": {"selector": "[data-composer-slot=\"floating\"]", "means": "The composer floating over the end of a session's transcript."},
-  "composer.centered": {"selector": "[data-composer-slot=\"flow\"]", "means": "The composer standing in the page instead of over a transcript: a new session's draft or the expanded editor."},
-  "draft.heading": {"selector": ".oc-draft-center h1", "means": "The heading over a new session's draft on the phone: What should we build in <project>?"},
-  "draft.starter": {"selector": "[data-starter-chip] button", "means": "A starter chip under the draft heading; a click sends its prompt."},
-  "timeline.entry": {"selector": "[role=\"dialog\"] [data-timeline-message-id]", "means": "A message in the Conversation Timeline dialog; a click scrolls the chat to it."},
-  "workStatus": {"selector": "aside[aria-label=\"Work status\"]", "means": "The Work status card beside the chat: session, context, project and branch."},
-  "chat.table": {"selector": "[data-markdown-content] table", "means": "A Markdown table in an answer."},
-  "chat.heading": {"selector": "[data-markdown-content] h1, [data-markdown-content] h2", "means": "A Markdown heading in an answer."},
-  "chat.code": {"selector": "[data-markdown-content] pre", "means": "A fenced code block in an answer."},
-  "chat.listItem": {"selector": "[data-markdown-content] li", "means": "A list item in an answer."},
-  "chat.error": {"selector": "[data-message-id]", "means": "A message in the transcript; pair it with the error text a failed turn shows."},
-  "panel": {"selector": "[data-right-slot]", "means": "The context panel on the right of the chat."},
-  "panel.surface": {"selector": "[data-context-surface=\"{surface}\"]", "means": "A context panel button on the right rail: diff is Changes, editor is Files, git is Git."},
-  "panel.surfaceOn": {"selector": "[data-context-surface=\"{surface}\"][aria-pressed=\"true\"]", "means": "A rail button whose surface is open."},
-  "files.row": {"selector": "[data-right-slot] [data-tree-row-path=\"{project}/{path}\"]", "means": "A file or folder row in the Files tree."},
-  "files.modified": {"selector": "[data-right-slot] [data-tree-row-path=\"{project}/{path}\"] [aria-label=\"Modified file\"]", "means": "The M mark of a file with uncommitted changes in the Files tree."},
-  "files.search": {"selector": "[data-right-slot] input[placeholder^=\"Search files\"]", "means": "The search field above the Files tree."},
-  "files.searchResult": {"selector": "[data-right-slot] [data-file-tree-path]", "means": "A file the Files search found."},
-  "files.tab": {"selector": "[data-right-slot] [role=\"tab\"]", "means": "An open file's tab above the editor."},
-  "files.line": {"selector": "[data-right-slot] .cm-content .cm-line", "means": "A line of the open file."},
-  "files.preview": {"selector": "[data-right-slot] [data-markdown-content]", "means": "A Markdown file shown rendered (Preview) in the Files panel."},
-  "diff.mode": {"selector": "button[aria-label=\"Select change mode\"]", "means": "The Changed: N switch at the top of Changes."},
-  "diff.file": {"selector": "[data-diff-virtual-content] [role=\"button\"]", "means": "A changed file's header in Changes; a click expands or collapses it."},
-  "diff.added": {"selector": "[data-content] > [data-line-type=\"change-addition\"]", "means": "An added line in a diff (the code column, not the line numbers)."},
-  "diff.removed": {"selector": "[data-content] > [data-line-type=\"change-deletion\"]", "means": "A removed line in a diff (the code column, not the line numbers)."},
-  "diff.split": {"selector": "pre[data-diff-type=\"split\"]", "means": "A diff shown side by side."},
-  "diff.unified": {"selector": "pre[data-diff-type=\"single\"]", "means": "A diff shown as one column."},
-  "diff.sideBySide": {"selector": "button[aria-label=\"Side-by-side view\"]", "means": "The side-by-side toggle on a file's header."},
-  "diff.line": {"selector": "[data-content] > [data-line]", "means": "Any row of a diff's code column: added, removed or unchanged context; pair it with text."},
-  "diff.selectedLine": {"selector": "[data-content] > [data-line][data-selected-line]", "means": "A diff row painted as selected for a comment."},
-  "diff.lineComment": {"selector": "[data-utility-button]", "means": "The + in the gutter of the diff row under the pointer; opens a comment on that row or on the selected rows."},
-  "diff.commentField": {"selector": "[data-comment-input] textarea", "means": "The text field of the comment opened on diff rows."},
-  "diff.commentSave": {"selector": "[data-comment-input] button[aria-label=\"Attach\"]", "means": "The Attach button that saves the comment being written."},
-  "diff.comment": {"selector": "[data-comment-card]", "means": "A saved comment shown under its rows: header with the range, then the text."},
-  "diff.commentOnLine": {"selector": "[data-annotation-side=\"{side}\"][data-annotation-line=\"{line}\"] [data-comment-card]", "means": "A saved comment anchored under a row: side additions or deletions, line its number on that side (the last row of a range)."},
-  "diff.expandContext": {"selector": "[data-gutter] [data-separator]:not([data-separator-first]) [data-separator-wrapper]", "means": "The separator between two hunks in the line-number gutter; a click shows the unchanged lines it hides."},
-  "diff.hunkStage": {"selector": "button[aria-label=\"Stage hunk {hunk}\"]", "means": "The Stage button over hunk N (1-based) of an unstaged diff; it shows while the pointer is on the hunk."},
-  "diff.hunkDiscard": {"selector": "button[aria-label=\"Discard hunk {hunk}\"]", "means": "The Discard button over hunk N (1-based) of an unstaged diff; it asks to confirm."},
-  "find.input": {"selector": "[data-diff-find-bar] input", "means": "The Find in changes field that Cmd/Ctrl+F opens over Changes."},
-  "find.count": {"selector": "[data-diff-find-bar] [aria-live=\"polite\"]", "means": "The N/M count of matches next to the find field."},
-  "find.next": {"selector": "[data-diff-find-bar] button[aria-label=\"Next match\"]", "means": "The down arrow of the find bar: the next match."},
-  "find.close": {"selector": "[data-diff-find-bar] button[aria-label=\"Close search\"]", "means": "The x that closes the find bar."},
-  "find.mark": {"selector": "mark[data-oc-find-mark]", "means": "A find match painted inside a diff row."},
-  "find.currentRow": {"selector": "[data-content] > [data-line]:has(mark[data-oc-find-current])", "means": "The diff row holding the active find match; pair it with the row's text."},
-  "settings.switch": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"]", "means": "The switch of a Settings row, by its search anchor (sessions.agent-workflow-tool)."},
-  "settings.switchOn": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"true\"]", "means": "That switch turned on."},
-  "settings.switchOff": {"selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"false\"]", "means": "That switch turned off."},
-  "settings.checkbox": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"]", "means": "The checkbox of a Settings row, by its search anchor."},
-  "settings.checkboxOn": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"true\"]", "means": "That checkbox checked."},
-  "settings.checkboxOff": {"selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"false\"]", "means": "That checkbox cleared."},
-  "workflow.card": {"selector": "[data-component=\"workflow-run\"]", "means": "A workflow run's card in the chat; pair it with its state's text (Waiting for you, Running, Stopped, Not run)."},
-  "workflow.button": {"selector": "[data-component=\"workflow-run\"] button", "means": "A button on a workflow run's card; pair it with its text (Run workflow, Don't run, Stop)."},
-  "sidebar.settings": {"selector": "button[aria-label=\"Settings\"]", "means": "The gear at the bottom of the left sidebar that opens Settings."},
-  "sidebar.anyRowInScope": {"selector": "[data-session-row][data-session-scope=\"{scope}\"]", "means": "Any session row under a sidebar section (activity:work is In work); pair it with text."},
-  "sidebar.childCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]", "means": "The count of sessions an agent runs for its own work on its row: how many are running and how many finished."},
-  "sidebar.expandChildren": {"selector": "[data-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]", "means": "The chevron that opens the sessions nested under a row."},
-  "sidebar.anyChildCount": {"selector": "[data-session-row=\"{session}\"] [data-operator-children-running]", "means": "The worker count on an agent's row, whatever it says."},
-  "sidebar.workRow": {"selector": "[role=\"button\"][aria-label^=\"Open {label}\"]", "means": "A worktree's or space's own row in the sidebar, named by its task or branch; the label is the start of that name."},
-  "phone.sessions": {"selector": "button[aria-label=\"Open sessions and projects\"]", "means": "The list button at the top left of the phone layout; opens the drawer with sessions and projects."},
-  "phone.row": {"selector": "[data-mobile-session-row=\"{session}\"]", "means": "A session's row in the phone's session drawer; a long press opens its menu."},
-  "phone.anyRow": {"selector": "[data-mobile-session-row]", "means": "Any session row in the phone's drawer; pair it with text."},
-  "phone.childCount": {"selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]", "means": "The worker count on an agent's row in the phone's drawer."},
-  "phone.anyChildCount": {"selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running]", "means": "The worker count on an agent's phone row, whatever it says."},
-  "phone.expandChildren": {"selector": "[data-mobile-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]", "means": "The chevron that opens the sessions nested under a phone row."},
-  "phone.workRow": {"selector": "button[aria-label^=\"Open {label}\"]", "means": "A worktree's row in the phone's drawer, named by the start of its task or branch; a long press opens its menu."},
-  "operator.doneQuestion": {"selector": "[data-operator-children-done-dialog]", "means": "The question Done asks while sessions an agent runs for its own work still run: stop them or let them finish."},
-  "chat.sidePanelScroller": {"selector": "[data-chat-column=\"pinned\"] [data-scrollbar=\"chat\"]", "means": "The scrolling transcript of the chat in the context panel."},
-  "chat.sidePanelAnswer": {"selector": "[data-chat-column=\"pinned\"] [data-message-select-unit^=\"answer:\"]", "means": "The text of an answer in the chat in the context panel."},
-  "chat.formOption": {"selector": "[data-scrollbar=\"chat\"] button", "means": "An answer of a question the agent asks, shown as a card at the end of the transcript; pair it with its label."},
-  "chat.formSubmit": {"selector": "[data-scrollbar=\"chat\"] button", "text": "Submit", "means": "The Submit button of a question card at the end of the transcript."},
-  "settings.search": {"selector": "input[placeholder=\"Search settings\"]", "means": "The search field at the top of Settings."},
-  "settings.chip": {"selector": "[data-settings-item=\"{item}\"] button[aria-pressed]", "means": "A choice of a Settings row that offers a few, by the row's search anchor; pair it with its label."},
-  "settings.chipOn": {"selector": "[data-settings-item=\"{item}\"] button[aria-pressed=\"true\"]", "means": "The chosen choice of that row; pair it with its label."},
-  "chat.sidePanelAllowOnce": {"selector": "[data-chat-column=\"pinned\"] button", "text": "Allow once", "means": "Allow once on a permission request shown in the chat in the context panel."},
-  "chat.sidePanelEditor": {"selector": "[data-chat-column=\"pinned\"] [data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"]", "means": "The composer's text field of the chat in the context panel."},
-  "settings.searchResult": {"selector": "[role=\"dialog\"] button", "means": "A result of the Settings search in the list on the left; pair it with its title."}
+  "sidebar.row": {
+    "selector": "[data-session-row=\"{session}\"]",
+    "means": "A session's row in the left sidebar."
+  },
+  "sidebar.activeRow": {
+    "selector": "[data-session-row=\"{session}\"][aria-current=\"page\"]",
+    "means": "The sidebar row of the session the chat shows, highlighted."
+  },
+  "sidebar.rowInScope": {
+    "selector": "[data-session-row=\"{session}\"][data-session-scope=\"{scope}\"]",
+    "means": "A session row under a sidebar section: activity:work is In work."
+  },
+  "sidebar.anyRow": {
+    "selector": "[data-session-row]",
+    "means": "Any session row in the sidebar; pair it with text."
+  },
+  "sidebar.anyActiveRow": {
+    "selector": "[data-session-row][aria-current=\"page\"]",
+    "means": "Whichever sidebar row is highlighted as the open session."
+  },
+  "sidebar.rowArchive": {
+    "selector": "[data-session-row=\"{session}\"] button[aria-label=\"Archive\"]",
+    "means": "The Archive button a row shows on hover."
+  },
+  "sidebar.rowMarkDone": {
+    "selector": "[data-session-row=\"{session}\"] button[aria-label=\"Mark done\"]",
+    "means": "The Mark done check a row shows on hover."
+  },
+  "sidebar.newSession": {
+    "selector": "button[aria-label=\"New session\"]",
+    "means": "The New session button at the top of the sidebar; opens a draft."
+  },
+  "header.actions": {
+    "selector": "button[aria-label=\"Open session actions\"]",
+    "means": "The ... next to the session title above the chat; opens the session menu."
+  },
+  "header.renameInput": {
+    "selector": "[data-session-rename-form] input",
+    "means": "The title field that Rename opens in place of the session title."
+  },
+  "menu.item": {
+    "selector": "[role=\"menu\"] [role=\"menuitem\"]",
+    "means": "An item of the open dropdown or context menu; pair it with text."
+  },
+  "menu.option": {
+    "selector": "[role=\"menu\"] [role=\"menuitemradio\"]",
+    "means": "A pick-one option of the open dropdown, such as Changed or Staged in the change mode menu; pair it with text."
+  },
+  "dialog": {
+    "selector": "[role=\"dialog\"], [role=\"alertdialog\"]",
+    "means": "An open modal dialog."
+  },
+  "dialog.button": {
+    "selector": "[role=\"dialog\"] button, [role=\"alertdialog\"] button",
+    "means": "A button of the open dialog; pair it with text."
+  },
+  "composer.editor": {
+    "selector": "[data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"]",
+    "means": "The composer's text field."
+  },
+  "composer.send": {
+    "selector": "[data-chat-input-footer] button[aria-label=\"Send message\"]",
+    "means": "The round Send button at the end of the composer footer."
+  },
+  "composer.stop": {
+    "selector": "button[aria-label=\"Stop generating\"]",
+    "means": "The Stop button that takes Send's place while the session works."
+  },
+  "composer.model": {
+    "selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]:has(img)",
+    "means": "The model name in the composer footer; opens the model picker."
+  },
+  "composer.popup": {
+    "selector": ".oc-glass-popover",
+    "means": "The autocomplete list over the composer: commands after /, skills after $."
+  },
+  "composer.mentionRow": {
+    "selector": "[data-mention-list] [aria-label=\"{path}\"]",
+    "means": "A file in the @ mention list."
+  },
+  "composer.mentionChip": {
+    "selector": "[data-chat-input=\"true\"] [data-mention-name=\"{path}\"]",
+    "means": "A file chip in the composer after picking it from the @ list."
+  },
+  "composer.projectPicker": {
+    "selector": "button[aria-haspopup=\"dialog\"]",
+    "means": "The project picker above a new session's composer; pair it with its label, Choose project on a new Chat."
+  },
+  "composer.projectOption": {
+    "selector": "[role=\"dialog\"] [cmdk-item]",
+    "means": "A project in the open project picker; pair it with the project's name."
+  },
+  "picker.search": {
+    "selector": "input[role=\"combobox\"][placeholder=\"Search models\"]",
+    "means": "The search field at the top of the model picker."
+  },
+  "picker.option": {
+    "selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"]",
+    "means": "A model in the model picker; pair it with the model's name."
+  },
+  "composer.status": {
+    "selector": "[role=\"status\"][aria-live=\"polite\"]",
+    "means": "The status line above the composer: Retrying in Ns, Warming up."
+  },
+  "chat.message": {
+    "selector": "[data-message-id]",
+    "means": "One message of the transcript, user or assistant."
+  },
+  "chat.userBubble": {
+    "selector": "[data-user-message-bubble]",
+    "means": "A prompt the user sent, as a bubble on the end side."
+  },
+  "chat.answer": {
+    "selector": "[data-message-select-unit^=\"answer:\"]",
+    "means": "The text of an assistant answer."
+  },
+  "chat.tool": {
+    "selector": "[data-message-id] span[title]",
+    "means": "The name of a tool call in its row: Read File, Search Files, Edit File, Shell Command."
+  },
+  "chat.toolRow": {
+    "selector": "[data-message-id] [role=\"button\"][class*=\"group/tool\"]",
+    "means": "A tool call row that expands on click: Edit File, Shell Command."
+  },
+  "chat.toolDiffLine": {
+    "selector": "[data-content] > [data-line-type=\"change-addition\"]",
+    "means": "An added line in an expanded Edit File row."
+  },
+  "chat.fileLink": {
+    "selector": "[data-openchamber-file-link][data-openchamber-file-ref=\"{ref}\"]",
+    "means": "A file path in an answer, rendered as a link."
+  },
+  "chat.copy": {
+    "selector": "[data-message-id]:has([data-message-select-unit^=\"answer:\"]) button[aria-label=\"Copy message text\"]",
+    "means": "The copy button under an assistant answer; it shows when the answer is hovered."
+  },
+  "chat.revert": {
+    "selector": "[data-user-message-actions] button[aria-label=\"Revert to this message\"]",
+    "means": "The revert button under a user prompt; it shows when the prompt is hovered."
+  },
+  "chat.scrollToBottom": {
+    "selector": "button[aria-label=\"Scroll to bottom\"]",
+    "means": "The arrow that appears when the chat is scrolled up."
+  },
+  "chat.scroller": {
+    "selector": "[data-scrollbar=\"chat\"]",
+    "means": "The scrolling area of the transcript."
+  },
+  "chat.navigator": {
+    "selector": "nav[aria-label=\"Prompt navigation\"] button[aria-haspopup=\"listbox\"]",
+    "means": "The ticks at the top start corner of a chat with three prompts or more; a click opens the list of prompts."
+  },
+  "chat.navigatorPrompt": {
+    "selector": "nav[aria-label=\"Prompt navigation\"] [role=\"option\"]",
+    "means": "A prompt in the open prompt list; pair it with the prompt's text."
+  },
+  "chat.search": {
+    "selector": "[role=\"search\"] input[aria-label=\"Search this conversation\"]",
+    "means": "The field of the search bar Cmd/Ctrl+F opens over the chat."
+  },
+  "chat.searchCount": {
+    "selector": "[role=\"search\"] [role=\"status\"]",
+    "means": "The N of M count next to the chat's search field."
+  },
+  "chat.loadOlder": {
+    "selector": "[data-scrollbar=\"chat\"] button",
+    "text": "Load older messages",
+    "means": "The button at the top of a chat whose older history is not loaded yet."
+  },
+  "chat.liveTail": {
+    "selector": "[data-live-tail=\"true\"]",
+    "means": "The chat while it follows a streaming reply: the transcript fades out above the composer."
+  },
+  "chat.parent": {
+    "selector": "button[aria-label=\"Return to parent session\"]",
+    "means": "The Parent button at the top start corner of a subagent's chat."
+  },
+  "chat.readOnlyBanner": {
+    "selector": "[data-composer-slot] [data-composer-transient]",
+    "means": "The banner in the composer's place in a chat that takes no prompts: Subagent sessions cannot be prompted."
+  },
+  "chat.readOnlyStop": {
+    "selector": "[data-composer-slot] [data-composer-transient] button[aria-label=\"Stop generating\"]",
+    "means": "The Stop button on the read-only banner while that session works."
+  },
+  "chat.openSubtask": {
+    "selector": "[data-message-id] button[aria-label^=\"Open \"][aria-label$=\" subtask\"]",
+    "means": "The arrow on a subagent's tool row that opens its session."
+  },
+  "chat.loadError": {
+    "selector": "[data-composer-bound] p",
+    "text": "Session could not be loaded",
+    "means": "The message a chat shows in place of the transcript when its messages failed to load."
+  },
+  "chat.loadRetry": {
+    "selector": "[data-composer-bound] button",
+    "text": "Try again",
+    "means": "The Try again button under a chat's failed load."
+  },
+  "chat.sidePanelChat": {
+    "selector": "[data-chat-column=\"pinned\"]",
+    "means": "A chat open in the context panel beside the main one, such as a subagent's."
+  },
+  "composer.floating": {
+    "selector": "[data-composer-slot=\"floating\"]",
+    "means": "The composer floating over the end of a session's transcript."
+  },
+  "composer.centered": {
+    "selector": "[data-composer-slot=\"flow\"]",
+    "means": "The composer standing in the page instead of over a transcript: a new session's draft or the expanded editor."
+  },
+  "draft.heading": {
+    "selector": ".oc-draft-center h1",
+    "means": "The heading over a new session's draft on the phone: What should we build in <project>?"
+  },
+  "draft.starter": {
+    "selector": "[data-starter-chip] button",
+    "means": "A starter chip under the draft heading; a click sends its prompt."
+  },
+  "timeline.entry": {
+    "selector": "[role=\"dialog\"] [data-timeline-message-id]",
+    "means": "A message in the Conversation Timeline dialog; a click scrolls the chat to it."
+  },
+  "workStatus": {
+    "selector": "aside[aria-label=\"Work status\"]",
+    "means": "The Work status card beside the chat: session, context, project and branch."
+  },
+  "chat.table": {
+    "selector": "[data-markdown-content] table",
+    "means": "A Markdown table in an answer."
+  },
+  "chat.heading": {
+    "selector": "[data-markdown-content] h1, [data-markdown-content] h2",
+    "means": "A Markdown heading in an answer."
+  },
+  "chat.code": {
+    "selector": "[data-markdown-content] pre",
+    "means": "A fenced code block in an answer."
+  },
+  "chat.listItem": {
+    "selector": "[data-markdown-content] li",
+    "means": "A list item in an answer."
+  },
+  "chat.error": {
+    "selector": "[data-message-id]",
+    "means": "A message in the transcript; pair it with the error text a failed turn shows."
+  },
+  "panel": {
+    "selector": "[data-right-slot]",
+    "means": "The context panel on the right of the chat."
+  },
+  "panel.surface": {
+    "selector": "[data-context-surface=\"{surface}\"]",
+    "means": "A context panel button on the right rail: diff is Changes, editor is Files, git is Git."
+  },
+  "panel.surfaceOn": {
+    "selector": "[data-context-surface=\"{surface}\"][aria-pressed=\"true\"]",
+    "means": "A rail button whose surface is open."
+  },
+  "files.row": {
+    "selector": "[data-right-slot] [data-tree-row-path=\"{project}/{path}\"]",
+    "means": "A file or folder row in the Files tree."
+  },
+  "files.modified": {
+    "selector": "[data-right-slot] [data-tree-row-path=\"{project}/{path}\"] [aria-label=\"Modified file\"]",
+    "means": "The M mark of a file with uncommitted changes in the Files tree."
+  },
+  "files.search": {
+    "selector": "[data-right-slot] input[placeholder^=\"Search files\"]",
+    "means": "The search field above the Files tree."
+  },
+  "files.searchResult": {
+    "selector": "[data-right-slot] [data-file-tree-path]",
+    "means": "A file the Files search found."
+  },
+  "files.tab": {
+    "selector": "[data-right-slot] [role=\"tab\"]",
+    "means": "An open file's tab above the editor."
+  },
+  "files.line": {
+    "selector": "[data-right-slot] .cm-content .cm-line",
+    "means": "A line of the open file."
+  },
+  "files.preview": {
+    "selector": "[data-right-slot] [data-markdown-content]",
+    "means": "A Markdown file shown rendered (Preview) in the Files panel."
+  },
+  "diff.mode": {
+    "selector": "button[aria-label=\"Select change mode\"]",
+    "means": "The Changed: N switch at the top of Changes."
+  },
+  "diff.file": {
+    "selector": "[data-diff-virtual-content] [role=\"button\"]",
+    "means": "A changed file's header in Changes; a click expands or collapses it."
+  },
+  "diff.added": {
+    "selector": "[data-content] > [data-line-type=\"change-addition\"]",
+    "means": "An added line in a diff (the code column, not the line numbers)."
+  },
+  "diff.removed": {
+    "selector": "[data-content] > [data-line-type=\"change-deletion\"]",
+    "means": "A removed line in a diff (the code column, not the line numbers)."
+  },
+  "diff.split": {
+    "selector": "pre[data-diff-type=\"split\"]",
+    "means": "A diff shown side by side."
+  },
+  "diff.unified": {
+    "selector": "pre[data-diff-type=\"single\"]",
+    "means": "A diff shown as one column."
+  },
+  "diff.sideBySide": {
+    "selector": "button[aria-label=\"Side-by-side view\"]",
+    "means": "The side-by-side toggle on a file's header."
+  },
+  "diff.line": {
+    "selector": "[data-content] > [data-line]",
+    "means": "Any row of a diff's code column: added, removed or unchanged context; pair it with text."
+  },
+  "diff.selectedLine": {
+    "selector": "[data-content] > [data-line][data-selected-line]",
+    "means": "A diff row painted as selected for a comment."
+  },
+  "diff.lineComment": {
+    "selector": "[data-utility-button]",
+    "means": "The + in the gutter of the diff row under the pointer; opens a comment on that row or on the selected rows."
+  },
+  "diff.commentField": {
+    "selector": "[data-comment-input] textarea",
+    "means": "The text field of the comment opened on diff rows."
+  },
+  "diff.commentSave": {
+    "selector": "[data-comment-input] button[aria-label=\"Attach\"]",
+    "means": "The Attach button that saves the comment being written."
+  },
+  "diff.comment": {
+    "selector": "[data-comment-card]",
+    "means": "A saved comment shown under its rows: header with the range, then the text."
+  },
+  "diff.commentOnLine": {
+    "selector": "[data-annotation-side=\"{side}\"][data-annotation-line=\"{line}\"] [data-comment-card]",
+    "means": "A saved comment anchored under a row: side additions or deletions, line its number on that side (the last row of a range)."
+  },
+  "diff.expandContext": {
+    "selector": "[data-gutter] [data-separator]:not([data-separator-first]) [data-separator-wrapper]",
+    "means": "The separator between two hunks in the line-number gutter; a click shows the unchanged lines it hides."
+  },
+  "diff.hunkStage": {
+    "selector": "button[aria-label=\"Stage hunk {hunk}\"]",
+    "means": "The Stage button over hunk N (1-based) of an unstaged diff; it shows while the pointer is on the hunk."
+  },
+  "diff.hunkDiscard": {
+    "selector": "button[aria-label=\"Discard hunk {hunk}\"]",
+    "means": "The Discard button over hunk N (1-based) of an unstaged diff; it asks to confirm."
+  },
+  "find.input": {
+    "selector": "[data-diff-find-bar] input",
+    "means": "The Find in changes field that Cmd/Ctrl+F opens over Changes."
+  },
+  "find.count": {
+    "selector": "[data-diff-find-bar] [aria-live=\"polite\"]",
+    "means": "The N/M count of matches next to the find field."
+  },
+  "find.next": {
+    "selector": "[data-diff-find-bar] button[aria-label=\"Next match\"]",
+    "means": "The down arrow of the find bar: the next match."
+  },
+  "find.close": {
+    "selector": "[data-diff-find-bar] button[aria-label=\"Close search\"]",
+    "means": "The x that closes the find bar."
+  },
+  "find.mark": {
+    "selector": "mark[data-oc-find-mark]",
+    "means": "A find match painted inside a diff row."
+  },
+  "find.currentRow": {
+    "selector": "[data-content] > [data-line]:has(mark[data-oc-find-current])",
+    "means": "The diff row holding the active find match; pair it with the row's text."
+  },
+  "settings.switch": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"switch\"]",
+    "means": "The switch of a Settings row, by its search anchor (sessions.agent-workflow-tool)."
+  },
+  "settings.switchOn": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"true\"]",
+    "means": "That switch turned on."
+  },
+  "settings.switchOff": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"switch\"][aria-checked=\"false\"]",
+    "means": "That switch turned off."
+  },
+  "settings.checkbox": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"]",
+    "means": "The checkbox of a Settings row, by its search anchor."
+  },
+  "settings.checkboxOn": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"true\"]",
+    "means": "That checkbox checked."
+  },
+  "settings.checkboxOff": {
+    "selector": "[data-settings-item=\"{item}\"] [role=\"checkbox\"][aria-checked=\"false\"]",
+    "means": "That checkbox cleared."
+  },
+  "workflow.card": {
+    "selector": "[data-component=\"workflow-run\"]",
+    "means": "A workflow run's card in the chat; pair it with its state's text (Waiting for you, Running, Stopped, Not run)."
+  },
+  "workflow.button": {
+    "selector": "[data-component=\"workflow-run\"] button",
+    "means": "A button on a workflow run's card; pair it with its text (Run workflow, Don't run, Stop)."
+  },
+  "sidebar.settings": {
+    "selector": "button[aria-label=\"Settings\"]",
+    "means": "The gear at the bottom of the left sidebar that opens Settings."
+  },
+  "sidebar.anyRowInScope": {
+    "selector": "[data-session-row][data-session-scope=\"{scope}\"]",
+    "means": "Any session row under a sidebar section (activity:work is In work); pair it with text."
+  },
+  "sidebar.childCount": {
+    "selector": "[data-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]",
+    "means": "The count of sessions an agent runs for its own work on its row: how many are running and how many finished."
+  },
+  "sidebar.expandChildren": {
+    "selector": "[data-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]",
+    "means": "The chevron that opens the sessions nested under a row."
+  },
+  "sidebar.anyChildCount": {
+    "selector": "[data-session-row=\"{session}\"] [data-operator-children-running]",
+    "means": "The worker count on an agent's row, whatever it says."
+  },
+  "sidebar.workRow": {
+    "selector": "[role=\"button\"][aria-label^=\"Open {label}\"]",
+    "means": "A worktree's or space's own row in the sidebar, named by its task or branch; the label is the start of that name."
+  },
+  "phone.sessions": {
+    "selector": "button[aria-label=\"Open sessions and projects\"]",
+    "means": "The list button at the top left of the phone layout; opens the drawer with sessions and projects."
+  },
+  "phone.row": {
+    "selector": "[data-mobile-session-row=\"{session}\"]",
+    "means": "A session's row in the phone's session drawer; a long press opens its menu."
+  },
+  "phone.anyRow": {
+    "selector": "[data-mobile-session-row]",
+    "means": "Any session row in the phone's drawer; pair it with text."
+  },
+  "phone.childCount": {
+    "selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running=\"{running}\"][data-operator-children-finished=\"{finished}\"]",
+    "means": "The worker count on an agent's row in the phone's drawer."
+  },
+  "phone.anyChildCount": {
+    "selector": "[data-mobile-session-row=\"{session}\"] [data-operator-children-running]",
+    "means": "The worker count on an agent's phone row, whatever it says."
+  },
+  "phone.expandChildren": {
+    "selector": "[data-mobile-session-row=\"{session}\"] [aria-label=\"Expand subsessions\"]",
+    "means": "The chevron that opens the sessions nested under a phone row."
+  },
+  "phone.workRow": {
+    "selector": "button[aria-label^=\"Open {label}\"]",
+    "means": "A worktree's row in the phone's drawer, named by the start of its task or branch; a long press opens its menu."
+  },
+  "operator.doneQuestion": {
+    "selector": "[data-operator-children-done-dialog]",
+    "means": "The question Done asks while sessions an agent runs for its own work still run: stop them or let them finish."
+  },
+  "chat.sidePanelScroller": {
+    "selector": "[data-chat-column=\"pinned\"] [data-scrollbar=\"chat\"]",
+    "means": "The scrolling transcript of the chat in the context panel."
+  },
+  "chat.sidePanelAnswer": {
+    "selector": "[data-chat-column=\"pinned\"] [data-message-select-unit^=\"answer:\"]",
+    "means": "The text of an answer in the chat in the context panel."
+  },
+  "chat.formOption": {
+    "selector": "[data-scrollbar=\"chat\"] button",
+    "means": "An answer of a question the agent asks, shown as a card at the end of the transcript; pair it with its label."
+  },
+  "chat.formSubmit": {
+    "selector": "[data-scrollbar=\"chat\"] button",
+    "text": "Submit",
+    "means": "The Submit button of a question card at the end of the transcript."
+  },
+  "settings.search": {
+    "selector": "input[placeholder=\"Search settings\"]",
+    "means": "The search field at the top of Settings."
+  },
+  "settings.chip": {
+    "selector": "[data-settings-item=\"{item}\"] button[aria-pressed]",
+    "means": "A choice of a Settings row that offers a few, by the row's search anchor; pair it with its label."
+  },
+  "settings.chipOn": {
+    "selector": "[data-settings-item=\"{item}\"] button[aria-pressed=\"true\"]",
+    "means": "The chosen choice of that row; pair it with its label."
+  },
+  "chat.sidePanelAllowOnce": {
+    "selector": "[data-chat-column=\"pinned\"] button",
+    "text": "Allow once",
+    "means": "Allow once on a permission request shown in the chat in the context panel."
+  },
+  "chat.sidePanelEditor": {
+    "selector": "[data-chat-column=\"pinned\"] [data-chat-input=\"true\"] .cm-content[contenteditable=\"true\"]",
+    "means": "The composer's text field of the chat in the context panel."
+  },
+  "settings.searchResult": {
+    "selector": "[role=\"dialog\"] button",
+    "means": "A result of the Settings search in the list on the left; pair it with its title."
+  },
+  "chat.fold": {
+    "selector": "[data-live-turn-activity] button[aria-expanded]",
+    "means": "The Activity header of a turn in Collapsed activity mode; a click opens or closes the turn's tool rows."
+  },
+  "chat.foldOpen": {
+    "selector": "[data-live-turn-activity] button[aria-expanded=\"true\"]",
+    "means": "An Activity header whose fold is open."
+  },
+  "chat.anyToolRow": {
+    "selector": "[data-scrollbar=\"chat\"] [role=\"button\"][class*=\"group/tool\"]",
+    "means": "A tool call row anywhere in the transcript, the row of a !command the user ran included; pair it with text."
+  },
+  "chat.changedFile": {
+    "selector": "[data-message-id] button[aria-label=\"Open {path}\"][title=\"{path}\"]",
+    "means": "A file the turn changed, as a pill under the latest turn's answer (Settings > Chat: changed files)."
+  },
+  "timeline.message": {
+    "selector": "[role=\"dialog\"] [data-timeline-message-id]",
+    "means": "A message in the conversation timeline that Mod+K then T opens; pair it with the message's text."
+  }
 }

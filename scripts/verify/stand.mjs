@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import process from "node:process"
 
@@ -87,6 +87,50 @@ const writeSettings = (dataDir, home, project) => {
     defaultModel: DEFAULT_MODEL,
   }, null, 2))
   return id
+}
+
+// The user's profile (Settings > Chat and the like) lives in `preferences.json`,
+// mirrored into `settings.json`; the server reads both on every settings
+// request. A scenario that changed a setting and failed before changing it
+// back must not hand it to the next one, so the reset drops the profile and
+// keeps the stand's own model.
+const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROOT, "packages/web/server/lib/opencode/settings-registry.json"), "utf8")).fields)
+  .filter(([, field]) => field.scope === "profile")
+  .map(([key]) => key)
+
+const dropProfile = (dataDir) => {
+  const file = join(dataDir, "settings.json")
+  const settings = JSON.parse(readFileSync(file, "utf8"))
+  for (const key of PROFILE_KEYS) delete settings[key]
+  writeFileSync(file, JSON.stringify({ ...settings, defaultModel: DEFAULT_MODEL }, null, 2))
+  rmSync(join(dataDir, "preferences.json"), { force: true })
+}
+
+// What the profile holds in both files, in a form two reads can compare.
+const readProfile = (dataDir) => {
+  const settings = JSON.parse(readFileSync(join(dataDir, "settings.json"), "utf8"))
+  const preferencesFile = join(dataDir, "preferences.json")
+  const preferences = existsSync(preferencesFile) ? JSON.parse(readFileSync(preferencesFile, "utf8")).fields ?? {} : {}
+  const values = (record, read) => Object.keys(record).filter((key) => PROFILE_KEYS.includes(key)).sort().map((key) => [key, read(record[key])])
+  return JSON.stringify([values(settings, (value) => value), values(preferences, (field) => field?.value ?? field?.surfaces ?? null)])
+}
+
+// The server keeps running through the reset. A read of the settings seeds a
+// missing preferences file from what it read (the server's defaults after a
+// drop), so a read it began before the drop can write the old profile back.
+// Drop, read through the API, and repeat until two rounds leave the same
+// profile: a stale read lands in at most one of them.
+const resetProfile = async (dataDir, apiUrl) => {
+  let previous = null
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    dropProfile(dataDir)
+    await fetch(`${apiUrl}/api/config/settings`).catch(() => null)
+    const current = readProfile(dataDir)
+    if (current === previous) return
+    previous = current
+    await wait(100)
+  }
+  throw new Error(`The profile settings in ${dataDir} kept changing during the reset`)
 }
 
 const opencodeConfig = (fixturePort, deadPort) => {
@@ -274,6 +318,7 @@ const attachStand = (info) => {
     }
     gitIn(info.project, ["reset", "-q", "--hard", "HEAD"])
     gitIn(info.project, ["clean", "-fdq"])
+    await resetProfile(info.data, info.apiUrl)
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }
   return { ...info, cli, cliInBackground, reset, describe: () => info, stop: async () => undefined, stopApi: outsideControl, startApi: outsideControl }
