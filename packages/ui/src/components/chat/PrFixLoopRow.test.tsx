@@ -22,7 +22,7 @@ beforeAll(() => {
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true,
@@ -30,7 +30,12 @@ beforeAll(() => {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
-  globalThis.fetch = async () => Response.json({}, { status: 503 });
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+    // Directory bootstrap is unrelated to the loop row's seeded state.
+    if (path === '/api/fs/home') return new Promise<Response>(() => {});
+    return Response.json({}, { status: 503 });
+  }, originalFetch);
 });
 afterAll(async () => {
   globalThis.fetch = originalFetch;
@@ -103,4 +108,3 @@ describe('a loop watching a ready PR', () => {
     } finally { await view.close(); }
   });
 });
-

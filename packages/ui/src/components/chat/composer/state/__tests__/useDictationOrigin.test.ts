@@ -7,10 +7,23 @@ import { readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistenc
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { createComposerText } from '../composerText';
 import { useDictationOrigin, type DictationOriginControls } from '../useDictationOrigin';
 
 const started: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'started' };
 const switchedTo: ChatDraftIdentity = { ...started, sessionId: 'switched-to' };
+
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
 
 function renderComposer(initialText = '') {
     const dom = installHookTestDom();
@@ -21,14 +34,12 @@ function renderComposer(initialText = '') {
     const result = { text: '', keptNotices: 0, dictation: null as DictationOriginControls | null };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const [message, setMessage] = React.useState(initialText);
-        const messageRef = React.useRef(message);
+        const { text, setMessage } = useProbeText(initialText);
         const confirmedMentionsRef = React.useRef(new Set<string>());
         const identityRef = React.useRef<ChatDraftIdentity | null>(identity);
-        React.useEffect(() => { messageRef.current = message; }, [message]);
         React.useEffect(() => { identityRef.current = identity; }, [identity]);
         const { restoreDraft } = useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity,
+            text, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: initialText, identity: started },
         });
         result.dictation = useDictationOrigin({
@@ -36,7 +47,7 @@ function renderComposer(initialText = '') {
             restoreDraft,
             onKeptForOrigin: () => { result.keptNotices += 1; },
         });
-        result.text = message;
+        result.text = text.get();
         return null;
     }
 

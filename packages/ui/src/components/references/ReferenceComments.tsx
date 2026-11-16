@@ -4,6 +4,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
@@ -101,16 +102,20 @@ const ThreadRest: React.FC<{
 
     if (!open) {
         return (
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className={cn('mt-1 inline-flex items-center gap-1 typography-meta hover:text-foreground', REFERENCE_META_TEXT)}
-                aria-expanded={false}
-            >
-                <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
-                {summary}
-                <Icon name="arrow-right-s" className="size-3.5 opacity-70" />
-            </button>
+            <HoverTooltip label={t('contextTooltips.tracker.showThread')}>
+                <span className="inline-flex">
+                    <button
+                        type="button"
+                        onClick={() => setOpen(true)}
+                        className={cn('mt-1 inline-flex items-center gap-1 typography-meta hover:text-foreground', REFERENCE_META_TEXT)}
+                        aria-expanded={false}
+                    >
+                        <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
+                        {summary}
+                        <Icon name="arrow-right-s" className="size-3.5 opacity-70" />
+                    </button>
+                </span>
+            </HoverTooltip>
         );
     }
 
@@ -160,14 +165,18 @@ const ThreadRest: React.FC<{
                                 <span className="font-medium text-muted-foreground">{reply.author ?? '—'}</span>
                                 {relativeLabel(t, reply.createdAt, now) ? <span>{relativeLabel(t, reply.createdAt, now)}</span> : null}
                                 {onAttachComment ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onAttachComment(reply)}
-                                        className="ms-auto inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/reply:opacity-100"
-                                    >
-                                        <Icon name="attachment-2" className="size-3.5" />
-                                        {t('gitView.pr.actions.sendToAgent')}
-                                    </button>
+                                    <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
+                                        <span className="inline-flex ms-auto">
+                                            <button
+                                                type="button"
+                                                onClick={() => onAttachComment(reply)}
+                                                className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/reply:opacity-100"
+                                            >
+                                                <Icon name="attachment-2" className="size-3.5" />
+                                                {t('gitView.pr.actions.sendToAgent')}
+                                            </button>
+                                        </span>
+                                    </HoverTooltip>
                                 ) : null}
                             </div>
                             <CommentBody comment={reply} />
@@ -209,32 +218,48 @@ const ThreadRest: React.FC<{
             ) : null}
             <div className="mt-1 flex flex-wrap items-center gap-1 -ms-1.5">
                 {actions && thread.canReply && !replying ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setReplying(true)} disabled={busy !== null}>
-                        <Icon name="chat-1" className="size-3.5" />
-                        {t('references.picker.thread.reply')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.tracker.replyToThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setReplying(true)} disabled={busy !== null}>
+                                <Icon name="chat-1" className="size-3.5" />
+                                {t('references.picker.thread.reply')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {actions && thread.canResolve ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleResolved()} disabled={busy !== null || settling}>
-                        {busy === 'resolve' || settling
-                            ? <Icon name="loader-4" className="size-3.5 animate-spin" />
-                            : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
-                        {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
-                    </Button>
+                    <HoverTooltip label={t(thread.resolved ? 'contextTooltips.tracker.reopenThread' : 'contextTooltips.tracker.resolveThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleResolved()} disabled={busy !== null || settling}>
+                                {busy === 'resolve' || settling
+                                    ? <Icon name="loader-4" className="size-3.5 animate-spin" />
+                                    : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
+                                {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {setAnswer && answer?.canChange ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleAnswer()} disabled={busy !== null || settling}>
-                        {busy === 'answer' || settling
-                            ? <Icon name="loader-4" className="size-3.5 animate-spin" />
-                            : <Icon name={answer.chosen ? 'arrow-go-back' : 'checkbox-circle'} className="size-3.5" />}
-                        {t(answer.chosen ? 'references.picker.discussion.unmarkAnswer' : 'references.picker.discussion.markAnswer')}
-                    </Button>
+                    <HoverTooltip label={t(answer.chosen ? 'contextTooltips.tracker.unmarkAnswer' : 'contextTooltips.tracker.markAnswer')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleAnswer()} disabled={busy !== null || settling}>
+                                {busy === 'answer' || settling
+                                    ? <Icon name="loader-4" className="size-3.5 animate-spin" />
+                                    : <Icon name={answer.chosen ? 'arrow-go-back' : 'checkbox-circle'} className="size-3.5" />}
+                                {t(answer.chosen ? 'references.picker.discussion.unmarkAnswer' : 'references.picker.discussion.markAnswer')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {thread.resolved ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setOpen(false)}>
-                        <Icon name="arrow-up-s" className="size-3.5" />
-                        {t('references.picker.thread.collapse')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.tracker.hideThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setOpen(false)}>
+                                <Icon name="arrow-up-s" className="size-3.5" />
+                                {t('references.picker.thread.collapse')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
             </div>
         </>
@@ -293,7 +318,7 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                             ) : (
                                 <span className={cn('shrink-0 font-mono typography-micro', REFERENCE_META_TEXT)}>{sha}</span>
                             )}
-                            <span className="min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
+                            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
                             {commit.author ? (
                                 <span className={cn('inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 self-center typography-micro', REFERENCE_META_TEXT)}>
                                     {commit.avatarUrl ? (
@@ -346,14 +371,18 @@ export const ReferenceComments: React.FC<{
                                         </span>
                                     ) : null}
                                     {onAttachComment ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onAttachComment(entry)}
-                                            className="ms-auto inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                                        >
-                                            <Icon name="attachment-2" className="size-3.5" />
-                                            {t('gitView.pr.actions.sendToAgent')}
-                                        </button>
+                                        <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
+                                            <span className="inline-flex ms-auto">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onAttachComment(entry)}
+                                                    className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                                                >
+                                                    <Icon name="attachment-2" className="size-3.5" />
+                                                    {t('gitView.pr.actions.sendToAgent')}
+                                                </button>
+                                            </span>
+                                        </HoverTooltip>
                                     ) : null}
                                 </div>
                                 {entry.thread ? (

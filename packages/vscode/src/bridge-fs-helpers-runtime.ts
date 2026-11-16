@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -115,8 +116,8 @@ export const readUriAsAttachment = async (
 };
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
-  const normalizedCandidate = path.resolve(candidatePath);
-  const normalizedParent = path.resolve(parentPath);
+  const normalizedCandidate = normalizeWindowsDriveLetter(path.resolve(candidatePath));
+  const normalizedParent = normalizeWindowsDriveLetter(path.resolve(parentPath));
   return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
 };
 
@@ -295,6 +296,7 @@ const searchFilesystemFiles = async (
   includeHidden: boolean,
   respectGitignore: boolean,
   timeBudgetMs?: number,
+  signal?: AbortSignal,
 ) => {
   const normalizedQuery = (query || '').trim().toLowerCase();
   const matchAll = normalizedQuery.length === 0;
@@ -317,6 +319,7 @@ const searchFilesystemFiles = async (
   const MAX_CONCURRENCY = 10;
 
   while (queue.length > 0 && !reachedSearchStop()) {
+    signal?.throwIfAborted();
     if (deadline && Date.now() > deadline) {
       if (workspaceSearch) throw new Error('File search exceeded its time limit');
       break;
@@ -330,6 +333,7 @@ const searchFilesystemFiles = async (
     );
 
     for (let index = 0; index < batch.length; index += 1) {
+      signal?.throwIfAborted();
       if (deadline && Date.now() > deadline) {
         if (workspaceSearch) throw new Error('File search exceeded its time limit');
         break;
@@ -435,6 +439,7 @@ export const searchDirectory = async (
   limit = 60,
   includeHidden = false,
   respectGitignore = true,
+  signal?: AbortSignal,
 ) => {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
   const rootPath = directory
@@ -444,7 +449,7 @@ export const searchDirectory = async (
 
   const sanitizedQuery = query?.trim() || '';
   if (includeHidden || !respectGitignore) {
-    return searchFilesystemFiles(rootPath, sanitizedQuery, limit, includeHidden, respectGitignore, 30_000);
+    return searchFilesystemFiles(rootPath, sanitizedQuery, limit, includeHidden, respectGitignore, 30_000, signal);
   }
   if (!sanitizedQuery) {
     return searchFilesystemFiles(rootPath, '', limit, includeHidden, respectGitignore);

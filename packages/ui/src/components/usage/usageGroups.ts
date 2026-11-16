@@ -1,9 +1,10 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
-import { formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
+import { formatWindowLabel } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
-import { useQuotaStore } from '@/stores/useQuotaStore';
+import { useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import type { QuotaProviderId, UsageWindow } from '@/types';
+import { selectVisibleModelEntries } from './usageModelSelection';
 
 export type UsageLimitRow = {
   key: string;
@@ -16,6 +17,7 @@ export type UsageProviderGroup = {
   providerId: QuotaProviderId;
   providerName: string;
   planLabel?: string | null;
+  accountLabel?: string | null;
   rows: UsageLimitRow[];
   /** Provider-level message: a fetch error, or "nothing reported". */
   status: string | null;
@@ -37,10 +39,11 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const selectedQuotaModels = useQuotaStore((state) => state.selectedModels);
+  const providers = useQuotaProviders();
 
   return React.useMemo<UsageProviderGroup[]>(() => {
     const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
-    return QUOTA_PROVIDERS
+    return providers
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
       .filter((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
@@ -56,9 +59,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
 
         const modelEntries = Object.entries(result?.usage?.models ?? {});
         const providerSelectedModels = selectedQuotaModels[providerMeta.id] ?? [];
-        const visibleModelEntries = providerSelectedModels.length > 0
-          ? modelEntries.filter(([modelName]) => providerSelectedModels.includes(modelName))
-          : modelEntries;
+        const visibleModelEntries = selectVisibleModelEntries(providerMeta.id, modelEntries, providerSelectedModels);
         for (const [modelName, modelUsage] of visibleModelEntries) {
           const entries = Object.entries(modelUsage.windows ?? {});
           if (entries.length === 0) continue;
@@ -87,9 +88,10 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           providerId: providerMeta.id,
           providerName: providerMeta.name,
           planLabel: result?.planLabel,
+          accountLabel: result?.accountLabel,
           rows,
           status,
         };
       });
-  }, [dropdownProviderIds, quotaResults, refreshErrors, selectedQuotaModels, t]);
+  }, [dropdownProviderIds, providers, quotaResults, refreshErrors, selectedQuotaModels, t]);
 };

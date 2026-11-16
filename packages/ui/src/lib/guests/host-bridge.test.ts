@@ -33,6 +33,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   shellStop: overrides.shellStop ?? (async () => ({ stopped: true })),
   filesWatch: overrides.filesWatch ?? (async () => {}),
   filesUnwatch: overrides.filesUnwatch ?? (() => {}),
+  microphoneOpen: overrides.microphoneOpen ?? (async () => {}),
+  microphoneClose: overrides.microphoneClose ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
   setStatusSummary: overrides.setStatusSummary ?? (() => {}),
@@ -56,6 +58,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   generate: overrides.generate ?? (async () => ({ ok: true, result: { text: '' } })),
   setBadge: overrides.setBadge ?? (() => {}),
   resize: overrides.resize ?? (() => {}),
+  answerBlock: overrides.answerBlock ?? (async () => {}),
   openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
   planRead: overrides.planRead ?? (async () => ({ ok: false as const, code: 'NOT_GRANTED' as const, message: 'no' })),
@@ -191,6 +194,16 @@ describe('answerGuestMessage', () => {
       payload: { surfaceId: 'git' },
     }, effects({ openSurface: () => ({ ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' }) }));
     expect(reply).toMatchObject({ type: 'result', id: 'oc-3b', ok: false, code: 'NO_DIRECTORY' });
+  });
+
+  test('a block answer reaches the block, and a refusal tells the frame why', async () => {
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'block-answer', id: 'answer-1', payload: { text: 'Explain' } };
+    const seen: string[] = [];
+    const sent = await answerGuestMessage(message, effects({ answerBlock: async (text) => { seen.push(text); } }));
+    expect(seen).toEqual(['Explain']);
+    expect(sent).toMatchObject({ type: 'result', id: 'answer-1', ok: true });
+    const refused = await answerGuestMessage(message, effects({ answerBlock: async () => { throw new Error('answerBlock works only from a click.'); } }));
+    expect(refused).toMatchObject({ ok: false, error: 'answerBlock works only from a click.', code: 'HOST_REJECTED' });
   });
 
   test('writes clipboard text', async () => {

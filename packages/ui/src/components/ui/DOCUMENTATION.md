@@ -13,13 +13,51 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - Command palette recent sessions and session-name search share the session
   admission filter. Their raw global cache remains complete; registering a
   destination updates the open palette through its project/worktree subscriptions.
+- Command palette extension entries (session actions, slash commands) are
+  search-only and run what the session header menu and the composer run: a
+  session action needs a current session and reads it when picked; a command
+  waits in the main composer for its argument and is sent by the user. The
+  palette and the slash menu drop the same reserved names
+  (`reservedComposerCommandNames`). An entry's `keywords` (the extension's
+  name, a command's description) find it too, ranked below entries the query
+  matches by their own text, so "task" lists the command `/task` before an
+  action of the Task Board extension, and the highlight stays on the title.
+- The command palette is its input and one list: no filter chips, tabs or
+  typed flags, and nothing kept between openings. Text such as `project:foo`
+  is searched as it is typed, and Tab keeps its default behavior.
+- With a query the list has a Sessions group (active sessions, by title,
+  project, worktree or folder) and right under it an Archived group (archived
+  sessions, by title only, three at most). The other name groups sort around
+  them by their best match, and Messages comes last.
+- Message hits are a preview of three; "Show all" opens a view of message hits
+  only, for the same query, with paging. Escape, Backspace on an empty input
+  and the Back row return to the full list, and a second Escape closes the
+  palette. The view is local state and resets on every opening.
+- The palette asks for message hits of active and archived conversations alike
+  (`lifecycle: 'all'`) and lists a hit only when its folder passes the session
+  admission filter. A hit is marked archived when the archived-session cache
+  has its session; the active cache clears a stale mark.
+- A second request asks for archived conversations alone
+  (`lifecycle: 'archived'`). Its hits that the first request has not listed
+  follow the preview's three, three at most, and in "Show all" form an Archived
+  group with its own paging.
+- An archived session or message hit opens through `openSessionLink`, which
+  selects the session and leaves it archived.
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
 - `ActionToolbar` takes the actions a document has, which depend on what the document is and never on its mode, so a mode switch moves no button. Its groups sit apart by space; with `fold`, unpinned actions move into "More actions" from the end of the row while it does not fit, after `start` gave up its width.
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
+- A bottom sheet's list is built from `MobileSheetList`: `MobileSheetRow` for every option and action, `MobileSheetSection` for its captions, and `MobileSheetSearch` in `MobileOverlayPanel`'s `subheader`, so the field stays put while the list scrolls. The chosen row takes the selection fill and a check. The model sheet draws its own rows to the same measures, because its list is virtual.
+- On a phone `DialogContent` is a bottom sheet: `mobile.css` shapes every dialog through `data-slot`, so callers keep one markup for desktop and phone, and the layer's keyboard rider follows the whole keyboard. Tablet layouts and a dialog with `items-start` on its layer keep their centred window.
 - Every scroller a user sees draws the app's overlay scrollbar, never the native one: `ScrollableOverlay` for a scroller the caller renders, `AttachedOverlayScrollbar` for one a library creates (CodeMirror's `.cm-scroller`), `PopupOverlayScrollbar` for a popup that scrolls itself (`DialogContent`, `DropdownMenuContent`, `ContextMenuContent`, the framed `Textarea`). A new `overflow-auto` element goes through one of them. Only fallback screens after a crash keep the native bar, so they depend on nothing that may have failed.
 - `OverlayScrollbar` draws a thumb only on an axis whose computed overflow is `auto` or `scroll`: a scroller its owner switched to `hidden`, or a menu left at `visible`, overflows without scrolling and shows none.
 
 ## Decisions
+
+### Which tooltip a control takes
+
+`Tooltip` is the base, for anything that is not a plain button, such as a whole row or a label. `ButtonTooltip` (`action-toolbar.tsx`) is one button that sits alone, disabled or not: its span takes the hover a disabled button refuses, and a menu trigger goes inside it. `HoverTooltip` (`row-tooltip.tsx`) is a button repeated in a list that mounts and unmounts rows, such as the transcript: it mounts a root only while hovered, adds no DOM, and needs no provider. `DelegatedTooltip` (`row-tooltip.tsx`) is the buttons of a list that keeps its rows mounted: controls carry `data-row-tooltip`, and one tooltip listens on the list. A `Tooltip` per row in either list would keep thousands of roots for a label that shows at most once.
+
+`HoverTooltip` and `DelegatedTooltip` run their own delay, 300 ms as in the app's `TooltipProvider`, because a tooltip with no trigger of its own never reads the provider.
 
 ### Why KeepAlive snapshots before hiding
 
@@ -35,6 +73,35 @@ so it cannot provide the same capture guarantee. Same-key updates do not capture
 ### Why hover dismissal follows the opening reason
 
 Base UI 1.4 has no opening DOM event when a caller changes the controlled `open` prop, so it treats that popup as hover-dismissible. Filtering can shrink it away from a stationary pointer and close it during typing. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
+
+### Why archived results are a separate group and not a setting
+
+Archived sessions and their messages are always part of the palette's search.
+Sessions get an Archived group of their own under the active ones, and a
+message hit from one carries an "Archived" tag. A synced setting
+"Show archived sessions in command palette", off by default, did this before:
+a search that found nothing gave no hint that the answer sat in the archive,
+and the setting brought typed flags, a Filters menu and a status line to
+explain why results were missing. A separate, short group keeps archived rows
+from crowding active ones without anything to configure.
+
+### Why archived message hits get a request of their own
+
+Hits come newest first, and archived conversations are usually the oldest: in
+one list they sat pages below every active hit, and the preview of three never
+showed one. The first request still asks for every lifecycle, so hits of
+unknown lifecycle stay listed; the archived request only adds what that list
+has not reached, and an archived hit the list reaches later is shown there
+once. A server that ignores the lifecycle parameter answers the archived
+request with unmarked hits, and the palette then drops that answer whole.
+
+### Why a message hit of unknown lifecycle is shown as active
+
+A server older than the lifecycle fields sends hits without `archived` and
+ignores the lifecycle parameter. The palette asks for everything, so nothing
+has to be hidden: the session caches mark the hits they know, and the rest
+are listed without the tag. Hiding them, as an active-only request once
+required, would drop every hit from a session the caches have not loaded.
 
 ### Why a scrolling popup gets a sibling frame and not a wrapper
 

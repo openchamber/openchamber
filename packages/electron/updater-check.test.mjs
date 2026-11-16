@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { checkForDesktopUpdate, downloadPendingDesktopUpdate, isDowngrade, markDesktopUpdateDownloaded } from './updater-check.mjs';
+import { checkForDesktopUpdate, describeCheckFailure, downloadPendingDesktopUpdate, isDowngrade, markDesktopUpdateDownloaded } from './updater-check.mjs';
 
 test('signals failed checks without replacing an existing pending update', async () => {
   const pendingUpdate = { version: '2.0.0', electronUpdate: { id: 'existing' } };
@@ -11,9 +11,21 @@ test('signals failed checks without replacing an existing pending update', async
       currentVersion: '1.0.0',
       pendingUpdate,
     }),
-    /Unable to check for updates: feed unavailable.*network connection/,
+    /Unable to check for updates \(feed unavailable\)$/,
   );
   assert.deepEqual(pendingUpdate, { version: '2.0.0', electronUpdate: { id: 'existing' } });
+});
+
+test('names a failed check by its status or network code, without the response dump', () => {
+  const gatewayTimeout = Object.assign(
+    new Error('504 "method: GET url: https://github.com/o/r/releases/download/v2.7.0/latest-mac.yml\n\n Data:\n <html><body><h1>504 Gateway Time-out</h1></body></html>\n\n " Headers: { "content-type": "text/html" }'),
+    { statusCode: 504 },
+  );
+  assert.equal(describeCheckFailure(gatewayTimeout), 'HTTP 504');
+  assert.equal(describeCheckFailure(new Error('HttpError: 502 Bad Gateway\nHeaders: {}')), 'HTTP 502');
+  assert.equal(describeCheckFailure(new Error('net::ERR_INTERNET_DISCONNECTED')), 'ERR_INTERNET_DISCONNECTED');
+  assert.equal(describeCheckFailure(new Error('getaddrinfo ENOTFOUND github.com')), 'ENOTFOUND');
+  assert.equal(describeCheckFailure(new Error('Cannot parse feed\nmore details')), 'Cannot parse feed');
 });
 
 test('treats missing update feed (404) as no update available', async () => {
@@ -167,4 +179,13 @@ test('drops the downloaded payload when a newer version appears', async () => {
   assert.equal(result.available, true);
   assert.equal(result.pendingUpdate.version, '2.1.0');
   assert.equal(result.pendingUpdate.downloaded, undefined);
+});
+
+test('a missing manifest on the mirror is a failed check, so GitHub is asked', async () => {
+  await assert.rejects(checkForDesktopUpdate({
+    autoUpdater: { checkForUpdates: async () => { throw new Error('HttpError: 404 Not Found'); } },
+    currentVersion: '2.7.0',
+    pendingUpdate: null,
+    missingFeedIsError: true,
+  }), /Unable to check for updates \(HTTP 404\)/);
 });

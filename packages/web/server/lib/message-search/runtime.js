@@ -19,8 +19,8 @@ const envelopeSchema = z.object({ directory: z.string().nullish() });
 const payloadDirectorySchema = z.object({ properties: z.object({ directory: z.string() }) });
 
 /**
- * Owns the search index for this server's OpenCode. Search is opt-in
- * (`messageSearchEnabled`): while it is off nothing runs, no file is opened,
+ * Owns the search index for this server's OpenCode. Search is on unless the
+ * user turned it off (`messageSearchEnabled`): while it is off nothing runs, no file is opened,
  * no event is looked at. Turning it on opens the index, follows the event
  * stream and walks the session list, which fills in whatever changed while it
  * was off. Turning it off stops all of that and keeps the file, so the next
@@ -35,6 +35,8 @@ export const createMessageSearchRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   globalEventHub,
+  getArchivedSessions = async () => null,
+  applyOwnedArchiveState = (session) => session,
   // () => Promise<{ enabled: boolean, reasoning: boolean }>, from settings.json.
   readSettings,
   logger = console,
@@ -83,7 +85,7 @@ export const createMessageSearchRuntime = ({
   const startEngine = () => {
     const store = openMessageSearchStore(open(indexPath));
     reconcileReasoning(store);
-    const indexer = createMessageSearchIndexer({ store, createClient, includeReasoning: () => reasoning, logger });
+    const indexer = createMessageSearchIndexer({ store, createClient, includeReasoning: () => reasoning, getArchivedSessions, applyOwnedArchiveState, logger });
     const unsubscribeEvents = globalEventHub.subscribeEvent((event) => {
       const envelope = envelopeSchema.safeParse(event);
       const directory = envelope.success && envelope.data.directory !== 'global' ? envelope.data.directory ?? '' : '';
@@ -91,6 +93,7 @@ export const createMessageSearchRuntime = ({
         const own = payloadDirectorySchema.safeParse(payload);
         indexer.processPayload(payload, directory || (own.success ? own.data.properties.directory : ''));
       }
+      indexer.processArchiveEvent(event?.payload);
     });
     const unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
       if (status?.type === 'connect') indexer.onConnected();
@@ -180,7 +183,7 @@ export const createMessageSearchRuntime = ({
      * answer then says so instead of pretending nothing matched. `null`
      * overall means no index is running.
      */
-    search: ({ query, sessionId, directories, role, includeReasoning, before, limit, order }) => {
+    search: ({ query, sessionId, directories, role, includeReasoning, lifecycle = 'all', before, limit, order }) => {
       if (!engine) return null;
       const match = toMatchExpression(query);
       if (!match) return { status: 'query-too-short', hits: [] };
@@ -192,6 +195,7 @@ export const createMessageSearchRuntime = ({
         role,
         // Stray rows from a switch that just flipped off stay out too.
         includeReasoning: reasoning && includeReasoning !== false,
+        lifecycle,
         before,
         limit: size + 1,
         order,
@@ -208,10 +212,39 @@ export const createMessageSearchRuntime = ({
           createdAt: hit.createdAt,
           sessionTitle: hit.sessionTitle,
           directory: hit.directory,
+          archived: hit.archivedAt !== null,
           snippet: buildSnippet(hit.text, terms),
         })),
         // Pages by row: a reply and its reasoning share the message id.
         next: hits.length > size && last ? { createdAt: last.createdAt, id: last.rowId } : null,
+        index: engine.indexer.status(),
+      };
+    },
+
+    searchSessions: ({ query, directories, role, includeReasoning, lifecycle = 'all', before, limit, exclude = [] }) => {
+      if (!engine) return null;
+      const match = toMatchExpression(query);
+      if (!match) return { status: 'query-too-short', hits: [] };
+      const size = Math.min(Math.max(1, limit), 100);
+      const result = engine.store.searchSessions({ match, directories, role, includeReasoning: reasoning && includeReasoning !== false, lifecycle, before, limit: size + 1, exclude, withTotals: !before });
+      const terms = toSearchTerms(query);
+      const page = result.hits.slice(0, size);
+      const last = page.at(-1);
+      return {
+        status: 'ok',
+        hits: page.map((hit) => ({
+          sessionId: hit.sessionId,
+          sessionTitle: hit.sessionTitle,
+          directory: hit.directory,
+          archived: hit.archivedAt !== null,
+          messageId: hit.messageId,
+          role: hit.role,
+          createdAt: hit.createdAt,
+          snippet: buildSnippet(hit.text, terms),
+          matchCount: hit.matchCount,
+        })),
+        next: result.hits.length > size && last ? { createdAt: last.createdAt, sessionId: last.sessionId } : null,
+        totals: result.totals,
         index: engine.indexer.status(),
       };
     },

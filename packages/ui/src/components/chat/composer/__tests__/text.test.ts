@@ -5,8 +5,10 @@ import {
     appendWithLineBreaks,
     buildImagePasteInsertion,
     getMarkdownAutoPairEdit,
+    getOrderedListContinuationEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
+    withLeadingSlashCommand,
 } from '../text';
 
 describe('appendWithLineBreaks', () => {
@@ -50,6 +52,28 @@ describe('appendInlineText', () => {
 
     test('the addition is trimmed before joining', () => {
         expect(appendInlineText('hello', '  world  ')).toBe('hello world ');
+    });
+});
+
+describe('withLeadingSlashCommand', () => {
+    test('the draft becomes the argument', () => {
+        expect(withLeadingSlashCommand('DEMO-2', 'task')).toBe('/task DEMO-2');
+        expect(withLeadingSlashCommand('  DEMO-2', 'task')).toBe('/task DEMO-2');
+    });
+
+    test('an empty draft leaves room for the argument', () => {
+        expect(withLeadingSlashCommand('', 'task')).toBe('/task ');
+        expect(withLeadingSlashCommand('/task', 'task')).toBe('/task ');
+    });
+
+    test('a draft that already starts with the command keeps its text', () => {
+        expect(withLeadingSlashCommand('/task DEMO-2', 'task')).toBe('/task DEMO-2');
+        expect(withLeadingSlashCommand('/task\nnotes', 'task')).toBe('/task\nnotes');
+    });
+
+    test('another command or a longer name is part of the argument', () => {
+        expect(withLeadingSlashCommand('/tasks x', 'task')).toBe('/task /tasks x');
+        expect(withLeadingSlashCommand('/pr 12', 'task')).toBe('/task /pr 12');
     });
 });
 
@@ -153,6 +177,76 @@ describe('getMarkdownAutoPairEdit', () => {
             insert: '*ell*',
             selectionStart: 2,
             selectionEnd: 5,
+        });
+    });
+});
+
+describe('getOrderedListContinuationEdit', () => {
+    test('continues a numbered item with the next number at the same indentation', () => {
+        expect(getOrderedListContinuationEdit('  1. item', 9, 9)).toEqual({
+            from: 9,
+            to: 9,
+            insert: '\n  2. ',
+            selectionStart: 15,
+            selectionEnd: 15,
+        });
+    });
+
+    test('keeps the delimiter the user typed', () => {
+        expect(getOrderedListContinuationEdit('1) item', 7, 7)?.insert).toBe('\n2) ');
+        expect(getOrderedListContinuationEdit('3. item', 7, 7)?.insert).toBe('\n4. ');
+    });
+
+    test('a bare marker continues too', () => {
+        expect(getOrderedListContinuationEdit('1.', 2, 2)?.insert).toBe('\n2. ');
+        expect(getOrderedListContinuationEdit('1. ', 3, 3)?.insert).toBe('\n2. ');
+    });
+
+    test('continues when the item has trailing text after its marker', () => {
+        const line = 'open the file, then run 1. tests';
+        expect(getOrderedListContinuationEdit(line, line.length, line.length)).toBeNull();
+        expect(getOrderedListContinuationEdit('1. open the file', 16, 16)?.insert).toBe('\n2. ');
+    });
+
+    test('only the line end counts', () => {
+        expect(getOrderedListContinuationEdit('1. item', 4, 4)).toBeNull();
+        expect(getOrderedListContinuationEdit('1. item\nplain', 11, 11)).toBeNull();
+    });
+
+    test('a selection or a line that is not a list is left alone', () => {
+        expect(getOrderedListContinuationEdit('1. item', 0, 7)).toBeNull();
+        expect(getOrderedListContinuationEdit('version 2.', 10, 10)).toBeNull();
+        expect(getOrderedListContinuationEdit('1.item', 6, 6)).toBeNull();
+        expect(getOrderedListContinuationEdit('- item', 6, 6)).toBeNull();
+    });
+
+    describe('fenced code', () => {
+        const atEnd = (value: string) => getOrderedListContinuationEdit(value, value.length, value.length);
+
+        test('a numbered line inside a closed fence stays a plain newline', () => {
+            const value = '```\n1. item\n```';
+            const caret = '```\n1. item'.length;
+            expect(getOrderedListContinuationEdit(value, caret, caret)).toBeNull();
+
+            const tildes = '~~~\n1) item\n~~~';
+            const tildeCaret = '~~~\n1) item'.length;
+            expect(getOrderedListContinuationEdit(tildes, tildeCaret, tildeCaret)).toBeNull();
+        });
+
+        test('an unclosed fence runs to the end of the prompt', () => {
+            expect(atEnd('```ts\n1. item')).toBeNull();
+            expect(atEnd('~~~\n1. item')).toBeNull();
+        });
+
+        test('only a matching fence closes the block', () => {
+            expect(atEnd('```\n~~~\n1. item')).toBeNull();
+            expect(atEnd('~~~\n```\n1. item')).toBeNull();
+            expect(atEnd('````\n```\n1. item')).toBeNull();
+        });
+
+        test('a real list after a closed fence continues', () => {
+            expect(atEnd('```\ncode\n```\n1. item')?.insert).toBe('\n2. ');
+            expect(atEnd('~~~\ncode\n~~~\n\n1) item')?.insert).toBe('\n2) ');
         });
     });
 });

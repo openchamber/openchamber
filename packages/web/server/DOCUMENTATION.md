@@ -23,6 +23,9 @@ project/session executors before they can subscribe or start.
 - Notifications may observe live session state locally. Project metadata is
   delegated; session metadata writers, automation and local terminal execution
   stay on the agent server.
+- Memory dreaming, extension service lifetimes, waits, session todos and shared
+  pages run only on the agent side. The front door creates neither their
+  executors nor their background schedules; their project routes are forwarded.
 - Plain single-server mode retains the existing runtime composition.
 
 ## Decisions

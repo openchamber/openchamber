@@ -64,8 +64,13 @@ Each step is one send and the end of the turn it starts.
    runtime's, wired in `server/index.js` for sessions it has marked Auto)
    picks the model for this prompt's text and switches the session onto it.
    A routing failure fails the attempt before anything is admitted. Then the
-   session's project knowledge is synced, as for a UI send, the context goes
-   as synthetic messages with `resume: false`, and the prompt last. Any other
+   session's project knowledge is synced, as for a UI send. A send with
+   nonblank context reads the session record and commits a staged revert
+   (`POST /session/:id/revert/commit`), because OpenCode's commit deletes
+   everything admitted past the revert's boundary and the prompt's own commit
+   would delete the context admitted just before it. A failed read or commit
+   fails the attempt with nothing admitted. Then the context goes as synthetic
+   messages with `resume: false`, and the prompt last. Any other
    session keeps the model and agent it holds. The UI puts the dialog's model
    and agent on a review session it reuses from an earlier review, since a new
    one is created on them.

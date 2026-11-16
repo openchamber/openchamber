@@ -1,18 +1,13 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { useComposerStatusChip, type ComposerStatusRowId } from '@/components/chat/composer/state/composerStatusChips';
 import { Spinner } from '@/components/ui/spinner';
 
 interface ComposerStatusStripProps {
-  /** Its place in the phone's chip line. */
-  chipId: ComposerStatusRowId;
   icon: IconName;
   /** A spinner says the wait is active work, not a pause. */
   spin?: boolean;
   text: string;
-  /** The shorter label its phone chip shows. */
-  chipLabel: string;
 }
 
 /**
@@ -21,8 +16,7 @@ interface ComposerStatusStripProps {
  * for its space. It says why nothing happens yet, so the wait does not look
  * stuck; it offers no action.
  */
-export const ComposerStatusStrip: React.FC<ComposerStatusStripProps> = React.memo(({ chipId, icon, spin = false, text, chipLabel }) => {
-  useComposerStatusChip(chipId, { icon, label: chipLabel, spin });
+export const ComposerStatusStrip: React.FC<ComposerStatusStripProps> = React.memo(({ icon, spin = false, text }) => {
   return (
     <div role="status" className="border-b border-edge">
       <div className="flex oc-composer-row items-center gap-2 ps-3 pe-3">

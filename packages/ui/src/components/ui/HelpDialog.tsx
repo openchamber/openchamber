@@ -12,6 +12,7 @@ import {
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   getShortcutAction,
+  isShortcutAvailable,
   formatShortcutForDisplay,
   type ShortcutActionId,
 } from "@/lib/shortcuts";
@@ -111,9 +112,10 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          keys: [formatShortcutForDisplay('mod+shift+alt+n')],
+          id: 'new_window',
           descriptionKey: "helpDialog.item.newWindow",
           icon: "window",
+          keys: '',
         },
       ],
     },
@@ -148,6 +150,16 @@ export const HelpDialog: React.FC = () => {
           icon: 'list-unordered',
           keys: '',
         },
+        {
+          id: 'open_new_worktree_dialog',
+          icon: 'git-branch',
+          keys: '',
+        },
+        {
+          id: 'add_project',
+          icon: 'folder-add',
+          keys: '',
+        },
         { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: "text", keys: '' },
         {
           id: 'toggle_prompt_navigator',
@@ -166,6 +178,51 @@ export const HelpDialog: React.FC = () => {
           icon: 'arrow-up-double',
           keys: '',
         },
+        {
+          id: 'toggle_selection_mode',
+          icon: 'checkbox-multiple',
+          keys: '',
+        },
+        {
+          id: 'toggle_chats_section',
+          icon: 'text',
+          keys: '',
+        },
+        {
+          id: 'toggle_pinned_section',
+          icon: 'pushpin',
+          keys: '',
+        },
+        {
+          id: 'toggle_work_section',
+          icon: 'eye',
+          keys: '',
+        },
+        {
+          id: 'toggle_detailed_rows',
+          icon: 'list-unordered',
+          keys: '',
+        },
+        {
+          id: 'pin_current_session',
+          icon: 'pushpin',
+          keys: '',
+        },
+        {
+          id: 'copy_current_session_id',
+          icon: 'file-copy',
+          keys: '',
+        },
+        {
+          id: 'toggle_work_current_session',
+          icon: 'checkbox-circle',
+          keys: '',
+        },
+        {
+          id: 'open_multi_run',
+          icon: 'git-merge',
+          keys: '',
+        },
       ],
     },
     {
@@ -182,6 +239,31 @@ export const HelpDialog: React.FC = () => {
           id: 'toggle_context_panel_expanded',
           descriptionKey: 'helpDialog.item.toggleContextPanelExpanded',
           icon: "layout-right",
+          keys: '',
+        },
+        {
+          id: 'collapse_sessions_all',
+          icon: 'contract-up-down',
+          keys: '',
+        },
+        {
+          id: 'expand_sessions_all',
+          icon: 'expand-up-down',
+          keys: '',
+        },
+        {
+          id: 'open_notes',
+          icon: 'sticky-note',
+          keys: '',
+        },
+        {
+          id: 'open_todos',
+          icon: 'checkbox-circle',
+          keys: '',
+        },
+        {
+          id: 'show_context_usage',
+          icon: 'pie-chart',
           keys: '',
         },
         {
@@ -230,13 +312,53 @@ export const HelpDialog: React.FC = () => {
           icon: "settings-3",
           keys: '',
         },
+        {
+          id: 'open_archive',
+          icon: 'archive',
+          keys: '',
+        },
+        {
+          id: 'open_overview',
+          icon: 'compass-3',
+          keys: '',
+        },
+        {
+          id: 'show_opencode_status',
+          icon: 'pulse',
+          keys: '',
+        },
+        {
+          id: 'reload_ui',
+          icon: 'refresh',
+          keys: '',
+        },
+        {
+          id: 'restart_opencode',
+          icon: 'restart',
+          keys: '',
+        },
+        {
+          id: 'toggle_list_grouping',
+          icon: 'layout-right',
+          keys: '',
+        },
+        {
+          id: 'toggle_project_display',
+          icon: 'folder',
+          keys: '',
+        },
+        {
+          id: 'cycle_project_sort',
+          icon: 'list-unordered',
+          keys: '',
+        },
       ],
     },
   ];
 
   const renderSection = (section: ShortcutSection) => (
     <div key={section.categoryKey}>
-      <h3 className="typography-meta font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+      <h3 className="typography-ui-label font-medium text-muted-foreground mb-2">
         {t(section.categoryKey)}
       </h3>
       <div className="space-y-1">
@@ -245,7 +367,7 @@ export const HelpDialog: React.FC = () => {
             const action = shortcut.id ? getShortcutAction(shortcut.id) : undefined;
             const descriptionKey = shortcut.descriptionKey
               ?? (action?.customizable ? action.settingsLabelKey : undefined);
-            if (!descriptionKey) return null;
+            if (!descriptionKey || (action && !isShortcutAvailable(action))) return null;
             // This dialog lists what the keyboard can do right now;
             // an action without a binding belongs to the command
             // palette and Settings, not here.
@@ -273,7 +395,8 @@ export const HelpDialog: React.FC = () => {
                     {t(descriptionKey)}
                   </span>
                 </div>
-                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
+                {/* The leader only guides the eye to the keys: well under the text. */}
+                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border opacity-35" />
                 <div className="flex shrink-0 items-center gap-1">
                   {(Array.isArray(displayKeys) ? displayKeys : [displayKeys]).map((keyCombo: string, i: number) => (
                     <React.Fragment key={`${keyCombo}-${i}`}>
@@ -282,7 +405,9 @@ export const HelpDialog: React.FC = () => {
                           {t('helpDialog.keyCombiner.or')}
                         </span>
                       )}
-                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-edge-muted">
+                      {/* A keycap is a tone step above the dialog, the same in both
+                          themes and in Settings > Shortcuts; no outline. */}
+                      <kbd className="oc-tile-inset inline-flex items-center gap-1 rounded px-1.5 py-0.5 typography-meta text-foreground">
                         {keyCombo}
                       </kbd>
                     </React.Fragment>

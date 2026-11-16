@@ -98,10 +98,12 @@ const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BACKPRESSURE_POLL_MS = 20;
 
 // Bodies smaller than this are fully buffered before the loopback request is
-// sent, so a tunneled body that lost frames (relay reconnect, dropped HttpBody
-// frames) can never reach the loopback server as an empty/truncated chunked
+// sent, so a tunneled body that lost all its frames or its StreamEnd (relay
+// reconnect) never reaches the loopback server as an empty/unfinished chunked
 // body — the server rejects those with a bare 400, surfacing as the mobile
-// app's "Failed to send message (400)". Larger bodies stream live as before.
+// app's "Failed to send message (400)". Buffering cannot see a body that lost
+// only some of its frames: the consecutive frame counter in e2ee.js catches
+// that by failing the channel. Larger bodies stream live as before.
 const BODY_BUFFER_MAX_BYTES = 512 * 1024;
 // While the body is still being buffered, abort the stream if it never
 // completes, so a stalled tunnel converts into an ambiguous transport failure
@@ -320,12 +322,13 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
 
     // Body-carrying request. Buffer the tunneled body frames and forward the
-    // COMPLETE body only once StreamEnd arrives. Forwarding a body that lost
-    // frames through the tunnel (relay reconnect, dropped HttpBody frames)
-    // reaches the loopback server as an empty/truncated chunked body, which it
-    // rejects with a bare 400 (empty response body) — the "Failed to send
-    // message (400)" seen from the mobile APK. Bodies above BODY_BUFFER_MAX_BYTES
-    // stream live so large uploads are not fully buffered.
+    // COMPLETE body only once StreamEnd arrives. Forwarding a body whose frames
+    // or StreamEnd never arrived (relay reconnect) reaches the loopback server
+    // as an empty/unfinished chunked body, which it rejects with a bare 400
+    // (empty response body) — the "Failed to send message (400)" seen from the
+    // mobile APK. Frames lost from the middle of a body are caught by the
+    // consecutive frame counter (e2ee.js), not here. Bodies above
+    // BODY_BUFFER_MAX_BYTES stream live so large uploads are not fully buffered.
     const buffered = [];
     let bufferedBytes = 0;
     let bodyFrameCount = 0;

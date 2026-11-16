@@ -9,6 +9,8 @@
  * - `openrouter`, `vercel`: the same System One API through OpenRouter or
  *   Vercel AI Gateway, with the key the user saved for that provider in
  *   OpenCode.
+ * - `gemini`: Google's Decisions API with a Gemini key saved in OpenChamber,
+ *   else the Google key saved in OpenCode or its environment variable.
  * - `typesafe`: TypeSafe's own API with a key saved in OpenChamber.
  * - `custom`: any endpoint that speaks the System One API (a self-hosted
  *   gateway, a company proxy), with the URL, model and optional key saved in
@@ -17,10 +19,14 @@
  * The user picks one. A pick that cannot be used right now (the promotion
  * ended, the key was removed) falls back to the first usable key, so Jev
  * stays available while the user has one. The promotion needs no credential,
- * so it is never a fallback: only a pick sends anything there. No usable
+ * so it is never a fallback: only a pick sends anything there. Gemini is never
+ * one either: a Google key in OpenCode is no choice to send excerpts to
+ * Google, so only picking it does. No usable
  * source means no Jev: the safety net and Auto are not offered.
  */
 import {
+  GEMINI_DECISIONS_API_URL,
+  GEMINI_DECISIONS_MODEL,
   JEV_API_URL,
   JEV_MODEL,
   OPENROUTER_JEV_API_URL,
@@ -34,7 +40,7 @@ import {
 } from './defaults.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 
-export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'typesafe', 'custom'];
+export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom'];
 // What the user set up in OpenChamber for Jev comes before keys borrowed from OpenCode.
 const FALLBACK_ORDER = ['typesafe', 'custom', 'openrouter', 'vercel', 'zen-key'];
 
@@ -92,7 +98,7 @@ const LEGACY_SOURCES = ['zen-promo', 'zen-key', 'typesafe'];
  * TypeSafe key always won, so that stays the default when one is present;
  * otherwise nothing is sent anywhere until the user picks.
  */
-export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, customEndpoint, zenPromotionActive }) => {
+export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint, zenPromotionActive }) => {
   const chosen = selected ?? (typesafeKey ? 'typesafe' : 'off');
   const usable = {
     off: true,
@@ -100,6 +106,7 @@ export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey
     'zen-key': Boolean(zenKey),
     openrouter: Boolean(openrouterKey),
     vercel: Boolean(vercelKey),
+    gemini: Boolean(geminiKey),
     typesafe: Boolean(typesafeKey),
     custom: Boolean(customEndpoint),
   };
@@ -117,7 +124,7 @@ export const resolveClassifier = ({ selected, typesafeKey, zenKey, openrouterKey
  * `classifier` as clients from v2.0.2 read it: their schema knows only the
  * first three sources and rejects the whole routing state on any other id,
  * which would hide Auto and the safety net on an older phone app connected to
- * a newer server. With Off, OpenRouter, Vercel or a custom endpoint in play they get null and
+ * a newer server. With Off, OpenRouter, Vercel, Gemini or a custom endpoint in play they get null and
  * show the provider page as unavailable; the features keep working.
  */
 export const legacyClassifier = (classifier) => {
@@ -127,7 +134,7 @@ export const legacyClassifier = (classifier) => {
 };
 
 /** The request target for a usable source. */
-export const classifierEndpoint = (source, { typesafeKey, zenKey, openrouterKey, vercelKey, customEndpoint }) => {
+export const classifierEndpoint = (source, { typesafeKey, zenKey, openrouterKey, vercelKey, geminiKey, customEndpoint }) => {
   if (source === 'custom') {
     const headers = {};
     if (customEndpoint.key) headers.authorization = `Bearer ${customEndpoint.key}`;
@@ -141,6 +148,10 @@ export const classifierEndpoint = (source, { typesafeKey, zenKey, openrouterKey,
   }
   if (source === 'vercel') {
     return { url: VERCEL_JEV_API_URL, model: VERCEL_JEV_MODEL, headers: { authorization: `Bearer ${vercelKey}` } };
+  }
+  // Google answers 401 to a bearer key; a key in the URL would end up in logs.
+  if (source === 'gemini') {
+    return { url: GEMINI_DECISIONS_API_URL, model: GEMINI_DECISIONS_MODEL, headers: { 'x-goog-api-key': geminiKey }, format: 'gemini' };
   }
   // Every Zen call names OpenChamber, so zen can see or throttle it.
   if (source === 'zen-key') {

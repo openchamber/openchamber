@@ -21,6 +21,25 @@ OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, li
 
 Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ramas: OpenChamber le pone a la rama un nombre provisional y apunta la nueva sesión a ella. Cuando el agente le pone nombre a la tarea, también renombra la rama según ella, por ejemplo `fix/login-timeout`, siempre que la rama no se haya subido todavía.
 
+## Crea worktrees con tu propia herramienta
+
+Cada worktree nuevo es un checkout desde cero, así que en un proyecto grande pueden pasar minutos instalando dependencias antes de que se ejecute nada. Una herramienta copy-on-write, en cambio, crea el worktree como un clon de un checkout que ya tienes: `node_modules`, `.venv` y los resultados de compilación vienen incluidos y no ocupan espacio extra en disco hasta que cambian.
+
+Para usar una, abre los ajustes del proyecto, ve a **Worktrees** y escribe el comando de tu herramienta en **Creación de worktrees**. OpenChamber crea primero la rama y luego ejecuta el comando en la raíz del proyecto con dos variables de entorno:
+
+- `$WORKTREE_PATH` es la carpeta donde crear el worktree. Todavía no existe.
+- `$WORKTREE_BRANCH` es la rama que se debe activar ahí. Ya existe.
+
+Este comando hace lo mismo que OpenChamber cuando no hay ninguno; pon el comando de tu herramienta en lugar de `git worktree add`:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+Después, el worktree aparece en la barra lateral como cualquier otro, y los comandos de configuración del proyecto se ejecutan en él. Si la herramienta guarda el checkout en otro sitio y deja un enlace en `$WORKTREE_PATH`, OpenChamber trabaja en la carpeta real. Si el comando falla, OpenChamber muestra su salida y elimina la rama que creó. Eliminar el worktree más adelante funciona aunque la herramienta lo haya bloqueado.
+
+El comando es solo tuyo: no se guarda en el repositorio, así que los compañeros que no tienen la herramienta siguen con la creación habitual. Deja el campo vacío para volver a git. Los worktrees de un pull request que viene del fork de otra persona siempre usan git.
+
 ## En la barra lateral
 
 Un worktree es una fila en la barra lateral, con todas sus sesiones debajo. Dentro de su proyecto aparece entre las demás sesiones del proyecto según su actividad más reciente, así que un worktree en el que acabas de trabajar queda cerca de arriba. La fila muestra el nombre de la tarea en cuanto el agente se lo pone (hasta entonces, el título de la última sesión en la que trabajaste ahí), el pull request o issue que sigue como una marca de color, y si alguna sesión ahí está en marcha o tiene novedades para ti. Un worktree creado para un pull request o una issue empieza con el título de ese elemento hasta que el agente elige un nombre más corto. Pasa el cursor por encima para ver la rama. Haz clic para abrir la última sesión en la que trabajaste ahí; para desplegar la lista, pasa el cursor por el icono de rama de su izquierda y haz clic en la flecha que aparece en su lugar. Su menú cambia el nombre de la tarea, mueve el worktree a una carpeta del proyecto, lo archiva o lo elimina. En el teléfono, toca la flecha de la fila para desplegar la lista y desliza la fila hacia un lado para marcarla como hecha, cambiar el nombre de la tarea, archivar el worktree o eliminarlo. Consulta [Sesiones en curso](/es/sessions-in-work/) para ver cómo entran y salen los trabajos del bloque En curso.

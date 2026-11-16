@@ -185,11 +185,11 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
               key={child.id}
               onClick={directory ? () => openChildSession(child.id, label) : undefined}
               ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
-              // The smaller status glyph sits centred in the panel's 14px icon
+              // The smaller status glyph sits centred in the panel's 13px icon
               // slot, so it lines up under the section icon and the label
               // starts where every other row's does.
               leading={(
-                <span className="flex size-3.5 shrink-0 items-center justify-center">
+                <span className="flex size-[13px] shrink-0 items-center justify-center">
                   <Icon name={icon} className="size-3" style={iconColor ? { color: iconColor } : undefined} />
                 </span>
               )}

@@ -132,7 +132,7 @@ describe('getDefaultModels for the claude provider', () => {
 });
 
 describe('getDefaultModels for the OpenCode Zen provider', () => {
-  test('keeps every model the workspace served', () => {
+  test('keeps every Zen model the workspace served', () => {
     const models = ['big-pickle', 'minimax-m3.1-flash-free', 'mimo-v2.6-flash-free'];
 
     expect(getDefaultModels('opencode', models)).toEqual(models);

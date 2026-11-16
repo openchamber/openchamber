@@ -3,13 +3,18 @@ import { requestPinTo } from '@/components/session/sidebar/sections/sectionActio
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import { CollapsedActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
 import { DirectoryActionIndicator } from '@/components/session/sidebar/sessions/DirectoryActionIndicator';
+import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
+import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useRunWork } from '@/components/session/sidebar/sessions/useRunWork';
-import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
+import { isPinnedZoneRowKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { useSessionDraftRow } from '@/components/session/sidebar/works/useSessionDraftRow';
 import { useWorktreeWork } from '@/components/session/sidebar/works/useWorktreeWork';
+import { useWorkRowGuestMarks } from '@/components/session/sidebar/sessions/useRowGuestMarks';
+import { MobileGuestMarks } from './MobileGuestMarks';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { SpaceStatusMark } from '@/components/session/spaces/SpaceStatus';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -18,12 +23,12 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileRunProviderLogos } from '../MobileRunProviderLogos';
 import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
+import { MobileRowMenu } from './MobileRowMenu';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
@@ -60,10 +65,13 @@ export const MobileWorktreeRow: React.FC<{
   const { revealed, renaming } = useMobileRowSwipe(row.key);
   const work = useWorktreeWork({ group: row.group, projectId: row.projectId, collapsed: row.collapsed, onNavigate: actions.close });
   const { worktree, space, spaceName, project, refs, label, secondName, branch, title, inWork, selected, finishing, worktreeRemoving, activityState } = work;
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? row.projectId ?? null, directory: work.directory, branch });
+  const marks = <MobileGuestMarks marks={guestMarks} onOpenRow={() => work.open()} />;
+  const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(row.projectId, row.mixed && row.detailed);
   const expandable = !row.empty;
-  const expanded = row.forceExpanded || !row.collapsed;
-  const toggle = expandable && !row.forceExpanded ? () => onToggle(row.groupKey) : undefined;
+  const expanded = !row.collapsed;
+  const toggle = expandable ? () => onToggle(row.groupKey) : undefined;
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const after = (action: () => void) => () => {
     setRevealed(false);
@@ -142,10 +150,9 @@ export const MobileWorktreeRow: React.FC<{
     </span>
   ) : space ? <SpaceStatusMark spaceId={space.id} /> : null;
   const directoryIndicator = row.group.directory ? <DirectoryActionIndicator directory={row.group.directory} /> : null;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
-  const pinMark = work.pinned && !pinnedSectionShown
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
+  const pinMark = work.pinned && !isPinnedZoneRowKey(row.key)
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
 
@@ -162,9 +169,11 @@ export const MobileWorktreeRow: React.FC<{
           : <>{titleText}{missing}{pinMark}{directoryIndicator}{stateMark}{duration}</>}
         secondLine={<>
           {mixedProject ? <MobileProjectIcon project={mixedProject} size="xs" /> : null}
+          {mixedProject && projectNamed ? <TimelineProjectName project={mixedProject} separated={false} /> : null}
           {branchMark}
-          {secondName ? <span dir="auto" className="block min-w-0 truncate typography-micro">{secondName}</span> : null}
-          <span className="ms-auto flex shrink-0 items-center">{ref}</span>
+          {/* Beside the project's name the task's name is left out, as on the desktop. */}
+          {secondName && !(mixedProject && projectNamed && secondName === title) ? <span dir="auto" className="block min-w-0 truncate typography-micro">{secondName}</span> : null}
+          <span className="ms-auto flex shrink-0 items-center gap-1.5">{ref}{marks}</span>
         </>}
       />
     );
@@ -186,6 +195,7 @@ export const MobileWorktreeRow: React.FC<{
           {missing}
           {pinMark}
           {ref}
+          {marks}
           {directoryIndicator}
           {stateMark}
           {duration}
@@ -195,7 +205,45 @@ export const MobileWorktreeRow: React.FC<{
   }
 
   const slots = (work.workAction ? 1 : 0) + (work.canRename ? 1 : 0) + (space ? 1 : 0) + (work.canPin ? 1 : 0) + (work.canArchive ? 1 : 0) + (worktree && !worktreeRemoving ? 1 : 0);
+  // The long press menu: what the swipe has no room for, then its own actions.
+  const pinWork = () => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } });
+  const menu = (
+    <>
+      {work.canMarkUnread ? (
+        <ContextMenuItem onClick={work.toggleRead}>
+          <Icon name={work.hasUnread ? 'chat-check' : 'checkbox-circle'} className="me-1 size-4" />
+          {work.hasUnread ? t('sessions.sidebar.session.menu.markRead') : t('sessions.sidebar.session.menu.markUnread')}
+        </ContextMenuItem>
+      ) : null}
+      {work.workAction ? (
+        <ContextMenuItem disabled={finishing || worktreeRemoving} onClick={work.toggleWork}>
+          <Icon name={inWork ? 'check' : 'eye'} className="me-1 size-4" />
+          {inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canRename ? (
+        <ContextMenuItem onClick={() => useMobileSidebarRowsStore.getState().startRename(row.key)}>
+          <Icon name="edit" className="me-1 size-4" />
+          {t('sessions.sidebar.work.menu.rename')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canPin ? (
+        <ContextMenuItem onClick={pinWork}>
+          <Icon name={work.pinned ? 'unpin' : 'pushpin'} className="me-1 size-4" />
+          {work.pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canArchive ? (
+        <ContextMenuItem disabled={finishing} onClick={() => { void work.finish(true); }}>
+          <Icon name="archive" className="me-1 size-4" />
+          {t('sessions.sidebar.work.menu.archive')}
+        </ContextMenuItem>
+      ) : null}
+    </>
+  );
+
   return (
+    <MobileRowMenu disabled={revealed || renaming || worktreeRemoving} menu={menu}>
     <MobileSwipeActionsRow
       actionsWidth={slots * ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
@@ -223,7 +271,7 @@ export const MobileWorktreeRow: React.FC<{
         ) : null}
         {space ? (
           <MobileSwipeAction
-            icon="more-2"
+            icon="more"
             label={t('spaces.actions.menuAria', { label })}
             revealed={revealed}
             onClick={after(() => useSpacesStore.getState().openActionsSheet(space.id))}
@@ -234,7 +282,7 @@ export const MobileWorktreeRow: React.FC<{
             icon={work.pinned ? 'unpin' : 'pushpin'}
             label={work.pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}
             revealed={revealed}
-            onClick={after(() => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } }))}
+            onClick={after(pinWork)}
           />
         ) : null}
         {work.canArchive ? (
@@ -261,6 +309,7 @@ export const MobileWorktreeRow: React.FC<{
     >
       {content}
     </MobileSwipeActionsRow>
+    </MobileRowMenu>
   );
 };
 
@@ -282,9 +331,10 @@ export const MobileRunRow: React.FC<{
   const activityNodes = React.useMemo(() => [...row.laneNodes], [row.laneNodes]);
   const activityState = useCollapsedSessionActivityState({ nodes: activityNodes, blockingSessionIds: row.blockingSessionIds });
   const activity = activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
+  const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(row.projectId, row.detailed && row.renderContext === 'timeline-mixed');
-  const expanded = row.forceExpanded || row.expanded;
-  const toggle = row.laneNodes.length > 0 && !row.forceExpanded ? () => toggleParent(row.expansionKey) : undefined;
+  const expanded = row.expanded;
+  const toggle = row.laneNodes.length > 0 ? () => toggleParent(row.expansionKey) : undefined;
   const laneCount = run.lanes.length;
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const after = (action: () => void) => () => {
@@ -333,8 +383,10 @@ export const MobileRunRow: React.FC<{
           : <>{titleText}{activity}</>}
         secondLine={<>
           {mixedProject ? <MobileProjectIcon project={mixedProject} size="xs" /> : null}
+          {mixedProject && projectNamed ? <TimelineProjectName project={mixedProject} separated={false} /> : null}
           {runMark}
-          <span className="block min-w-0 flex-1 truncate typography-micro">
+          {/* Its own width as the basis, so the project's name gives way first. */}
+          <span className="block min-w-0 flex-auto truncate typography-micro">
             {laneCount === 1
               ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
               : t('sessions.sidebar.run.laneCountPlural', { count: laneCount })}
@@ -406,6 +458,7 @@ export const MobileDraftRow: React.FC<{
   const { draft } = row;
   const { revealed } = useMobileRowSwipe(row.key);
   const { isOpen, firstLine, attachmentCount, label, open, discard } = useSessionDraftRow(draft, actions.close);
+  const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(draft.projectId ?? null, row.detailed && row.mixed);
   const branch = useGitBranchLabel(row.detailed ? draft.directory : null);
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
@@ -455,6 +508,7 @@ export const MobileDraftRow: React.FC<{
           firstLine={titleText}
           secondLine={<>
             {mixedProject ? <MobileProjectIcon project={mixedProject} size="xs" /> : null}
+          {mixedProject && projectNamed ? <TimelineProjectName project={mixedProject} separated={false} /> : null}
             {pen}
             {branch ? <span className="block min-w-0 truncate typography-micro">{branch}</span> : null}
             {attachment ? <span className="ms-auto flex shrink-0 items-center">{attachment}</span> : null}

@@ -152,4 +152,24 @@ describe('OpenCode API proxy agent wiring', () => {
       expect(agent).toBeInstanceOf(https.Agent);
     }
   });
+
+  it('puts the MCP sign-in routes in front of the generic proxy', () => {
+    const order = [];
+    const apiProxy = () => {};
+    createProxyMiddlewareMock.mockImplementation(() => apiProxy);
+    const app = createStubApp();
+    app.use = (...args) => {
+      if (args.includes(apiProxy)) order.push('proxy');
+    };
+
+    registerOpenCodeProxy(app, {
+      ...createStubDeps(managedState()),
+      mcpOAuthSignIn: {
+        registerCallbackRoute: () => order.push('callback'),
+        registerStartRoutes: () => order.push('start'),
+      },
+    });
+
+    expect(order).toEqual(['callback', 'start', 'proxy']);
+  });
 });

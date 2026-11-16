@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -228,15 +229,23 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
           placeholder={t('goToLineDialog.field.linePlaceholderShort')}
           className="h-6 w-20 rounded-md border-edge bg-transparent px-2 typography-meta"
         />
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={handleSubmit}
-          disabled={!view || lineNumber === null}
-          className="h-6 px-2"
-        >
-          {t('goToLineDialog.actions.go')}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+            <span className="inline-flex">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={handleSubmit}
+                disabled={!view || lineNumber === null}
+                className="h-6 px-2"
+              >
+                {t('goToLineDialog.actions.go')}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.goToLine')}</TooltipContent>
+        </Tooltip>
       </div>
     );
   }

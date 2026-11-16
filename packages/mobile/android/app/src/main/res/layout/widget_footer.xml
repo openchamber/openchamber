@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="horizontal" android:gravity="center_vertical">
+    <TextView android:id="@+id/widget_timestamp"
+        android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:text="@string/widget_open_to_sync"
+        android:textColor="#89867c" android:textSize="11sp" android:maxLines="1" android:ellipsize="end"/>
+    <FrameLayout android:id="@+id/widget_refresh"
+        android:layout_width="36dp" android:layout_height="36dp"
+        android:contentDescription="@string/widget_refresh">
+        <ImageView android:id="@+id/widget_refresh_icon"
+            android:layout_width="18dp" android:layout_height="18dp"
+            android:layout_gravity="center" android:src="@drawable/ic_widget_refresh"
+            android:importantForAccessibility="no"/>
+    </FrameLayout>
+</LinearLayout>

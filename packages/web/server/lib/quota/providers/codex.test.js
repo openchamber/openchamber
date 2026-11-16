@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
   readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
@@ -6,8 +10,17 @@ vi.mock('../../opencode/auth.js', () => ({
 
 import { fetchQuota } from './codex.js';
 
+let codexHome;
+
+beforeEach(() => {
+  codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+  process.env.CODEX_HOME = codexHome;
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.CODEX_HOME;
+  fs.rmSync(codexHome, { recursive: true, force: true });
 });
 
 const mockUsage = (rateLimit) => {
@@ -130,5 +143,98 @@ describe('Codex quota windows', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+  });
+});
+
+describe('Codex usage through the Codex CLI sign-in', () => {
+  const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+  const CLI_USAGE = { email: 'cli@example.com', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } };
+  const tokenWithEmail = (email) => `h.${Buffer.from(JSON.stringify({ 'https://api.openai.com/profile': { email } })).toString('base64url')}.s`;
+
+  const signInCli = () => fs.writeFileSync(
+    path.join(codexHome, 'auth.json'),
+    JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+  );
+
+  // The usage endpoint refuses OpenCode's token and accepts the CLI's.
+  const stubUsageEndpoint = (cliStatus = 200) => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      if (init.headers.Authorization !== 'Bearer cli-token') return Response.json(REFUSED, { status: 401 });
+      return Response.json(cliStatus === 200 ? CLI_USAGE : { error: { type: 'invalid_jwt' } }, { status: cliStatus });
+    }));
+    return calls;
+  };
+
+  it('reads the numbers with the CLI sign-in and names its account', async () => {
+    signInCli();
+    const calls = stubUsageEndpoint();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(42);
+    expect(result.accountLabel).toBe('cli@example.com');
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toBe('https://chatgpt.com/backend-api/wham/usage');
+    expect(calls[1].headers['ChatGPT-Account-Id']).toBe('acct_cli');
+  });
+
+  it('names the account from the CLI token when the answer carries no email', async () => {
+    fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({ tokens: { access_token: tokenWithEmail('cli@example.com') } }));
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => init.headers.Authorization === 'Bearer test-token'
+      ? Response.json(REFUSED, { status: 401 })
+      : Response.json({ rate_limit: CLI_USAGE.rate_limit })));
+
+    expect((await fetchQuota()).accountLabel).toBe('cli@example.com');
+  });
+
+  it('keeps the usage-page message when the CLI request fails', async () => {
+    signInCli();
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (init.headers.Authorization === 'Bearer test-token') return Response.json(REFUSED, { status: 401 });
+      throw new Error('fetch failed');
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+  });
+
+  it('keeps the usage-page message without a CLI sign-in', async () => {
+    const calls = stubUsageEndpoint();
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps the usage-page message when the endpoint refuses the CLI token too', async () => {
+    signInCli();
+    stubUsageEndpoint(401);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+  });
+
+  it('never consults the CLI for a legacy sign-in', async () => {
+    signInCli();
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push(init.headers.Authorization);
+      return Response.json({ rate_limit: { primary_window: { used_percent: 7, limit_window_seconds: 18000 } } });
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows['5h'].usedPercent).toBe(7);
+    expect(result.accountLabel).toBeUndefined();
+    expect(calls).toEqual(['Bearer test-token']);
   });
 });

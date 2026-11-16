@@ -17,14 +17,22 @@ const OPEN_POPUP_SELECTOR = [
 ].join(', ');
 
 const overlayLayers: Array<{ close: () => void }> = [];
+const overlayListeners = new Set<() => void>();
+
+const notifyOverlayListeners = (): void => {
+  overlayListeners.forEach((listener) => listener());
+};
 
 /** Registers an open overlay; the returned function unregisters it. */
 export function registerBackLayer(close: () => void): () => void {
   const layer = { close };
   overlayLayers.push(layer);
+  notifyOverlayListeners();
   return () => {
     const index = overlayLayers.indexOf(layer);
-    if (index >= 0) overlayLayers.splice(index, 1);
+    if (index < 0) return;
+    overlayLayers.splice(index, 1);
+    notifyOverlayListeners();
   };
 }
 
@@ -34,6 +42,36 @@ export function isTopmostBackLayer(close: () => void): boolean {
 
 export function isInsideOpenPopup(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(OPEN_POPUP_SELECTOR) !== null;
+}
+
+/** Whether `closeTopmostBackLayer` has something to close. */
+export function hasOpenBackLayer(): boolean {
+  return overlayLayers.length > 0 || isInsideOpenPopup(document.activeElement);
+}
+
+/**
+ * Calls the listener when `hasOpenBackLayer` may have changed. A popup counts
+ * while it holds focus, so focus moves are its signal. They are read a task
+ * later: focus crossing between two fields passes through the body.
+ */
+export function subscribeBackLayers(listener: () => void): () => void {
+  let timer: number | null = null;
+  const handleFocusChange = () => {
+    if (timer !== null) return;
+    timer = window.setTimeout(() => {
+      timer = null;
+      listener();
+    }, 0);
+  };
+  overlayListeners.add(listener);
+  document.addEventListener('focusin', handleFocusChange);
+  document.addEventListener('focusout', handleFocusChange);
+  return () => {
+    if (timer !== null) window.clearTimeout(timer);
+    overlayListeners.delete(listener);
+    document.removeEventListener('focusin', handleFocusChange);
+    document.removeEventListener('focusout', handleFocusChange);
+  };
 }
 
 /** Closes the topmost layer; false when nothing above the shell is open. */

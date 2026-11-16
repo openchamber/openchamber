@@ -4,7 +4,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArchiveStore } from './archive-store.js';
-import { createSessionArchive } from './session-archive.js';
+import { createOpenCodeClient } from './opencode-client.js';
+import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 
 const tempDirs = [];
 
@@ -18,6 +19,7 @@ const makeStore = (entries) => {
 afterEach(() => {
   while (tempDirs.length > 0) fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const tagged = (tag) => Object.assign(new Error(tag), { _tag: tag });
@@ -126,5 +128,39 @@ describe('session archive', () => {
     await expect(archive.isArchived('ses_unknown')).resolves.toBe(false);
     await expect(archive.isArchived('ses_down')).resolves.toBe(false);
     expect(openCode.readArchivedAt).not.toHaveBeenCalledWith('ses_file');
+  });
+
+  it('tells archived, active and unknown apart for a caller that would wake the session', async () => {
+    const store = makeStore({ ses_file: 500, ses_restored: null });
+    const openCode = fakeOpenCode({ archived: { ses_upstream: 900, ses_active: null }, failures: { ses_down: 'Unavailable' } });
+    const archive = createSessionArchive({ store, openCode });
+    const { signal } = new AbortController();
+
+    await expect(archive.archiveState('ses_file')).resolves.toBe('archived');
+    await expect(archive.archiveState('ses_restored')).resolves.toBe('active');
+    await expect(archive.archiveState('ses_upstream', { signal })).resolves.toBe('archived');
+    await expect(archive.archiveState('ses_active')).resolves.toBe('active');
+    // OpenCode does not know it: nothing to wake, the delivery hears 404.
+    await expect(archive.archiveState('ses_unknown')).resolves.toBe('active');
+    await expect(archive.archiveState('ses_down')).resolves.toBe('unknown');
+    expect(openCode.readArchivedAt).toHaveBeenCalledWith('ses_upstream', { signal });
+  });
+
+  it('cancels a stalled OpenCode read through the caller\'s signal, and calls it unknown', async () => {
+    const entered = Promise.withResolvers();
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      entered.resolve(init.signal);
+      return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    }));
+    const archive = createSessionArchive({
+      store: makeStore(),
+      openCode: createOpenCodeSessionArchive({ clientFor: () => createOpenCodeClient({ baseUrl: 'http://opencode.test', headers: {} }) }),
+    });
+    const controller = new AbortController();
+    const state = archive.archiveState('ses_hanging', { signal: controller.signal });
+    const signal = await entered.promise;
+    controller.abort(new DOMException('Archive read timed out', 'TimeoutError'));
+    await expect(state).resolves.toBe('unknown');
+    expect(signal.aborted).toBe(true);
   });
 });

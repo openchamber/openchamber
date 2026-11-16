@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   clampLiveBrowserTabs,
+  dropIdleAgentTabs,
   LIVE_BROWSER_TABS_DEFAULT,
   LIVE_BROWSER_TABS_MAX,
   LIVE_BROWSER_TABS_MIN,
@@ -34,6 +35,19 @@ describe('pickLiveBrowserTabs', () => {
 
   test('leaves a tab that was never used asleep', () => {
     expect(pickLiveBrowserTabs(['a'], new Set(['a', 'b']), 5).has('b')).toBe(false);
+  });
+});
+
+describe('dropIdleAgentTabs', () => {
+  test('drops only agent tabs used before the cutoff', () => {
+    const agentTabs = new Set(['agent-old', 'agent-new']);
+    const lastUsed = new Map([['agent-old', 10], ['agent-new', 100], ['user', 0]]);
+    expect(dropIdleAgentTabs(['user', 'agent-old', 'agent-new'], agentTabs, lastUsed, 50)).toEqual(['user', 'agent-new']);
+  });
+
+  test('keeps an agent tab with no recorded use, and returns the same list when nothing is idle', () => {
+    const recent = ['agent'];
+    expect(dropIdleAgentTabs(recent, new Set(['agent']), new Map(), 50)).toBe(recent);
   });
 });
 

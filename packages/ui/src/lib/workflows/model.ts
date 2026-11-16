@@ -8,7 +8,7 @@ import { z } from 'zod';
  */
 
 const agentStateSchema = z.enum(['queued', 'running', 'completed', 'failed', 'stopped']);
-const runStateSchema = z.enum(['awaiting-approval', 'running', 'completed', 'failed', 'stopped', 'declined']);
+export const workflowRunStateSchema = z.enum(['awaiting-approval', 'running', 'completed', 'failed', 'stopped', 'declined']);
 
 const workflowAgentSchema = z.object({
   key: z.string().min(1),
@@ -40,7 +40,7 @@ export const workflowRunSchema = z.object({
   directory: z.string(),
   name: z.string(),
   description: z.string(),
-  state: runStateSchema,
+  state: workflowRunStateSchema,
   attempt: z.number(),
   createdAt: z.number(),
   startedAt: z.number().optional(),

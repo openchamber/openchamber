@@ -9,7 +9,8 @@
         "id": "github-token",
         "name": "Repository Explorer",
         "icon": "github",
-        "entry": "panel/index.html"
+        "entry": "panel/index.html",
+        "mobile": true
       },
       "attach": "panel",
       "page": true,

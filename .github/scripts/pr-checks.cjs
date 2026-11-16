@@ -1,6 +1,7 @@
 // Checks every pull request goes through. pr-intake acts on them (closes,
-// labels, comments); pr-review runs no model on a PR that fails one. Both
-// workflows load this file from the base checkout, never from the PR head.
+// labels, comments); pr-review runs no model on a PR that fails one. Workflows
+// load this file from the base checkout, never from the PR head; stale loads it
+// for the team label only.
 //
 // - The contribution gate: a PR from outside the team needs a linked issue
 //   that is a bug report or a feature request the maintainer marked `accepted`.
@@ -22,6 +23,12 @@ const GATE_LABEL = {
 };
 
 const GATE_MARKER = "<!-- pr-intake:needs-accepted-issue -->";
+
+const TEAM_LABEL = {
+  name: "team",
+  color: "5319e7",
+  description: "Opened by a maintainer. Never closed as stale.",
+};
 
 const COMMITTED_MEDIA = {
   label: {
@@ -83,6 +90,18 @@ const hasRepoAccess = async ({ github, owner, repo, pr }) => {
   if (["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association)) return true;
   const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: pr.user.login });
   return ["admin", "maintain", "write", "triage"].includes(data.role_name ?? data.permission);
+};
+
+// `role_name` tells maintain from write, which `permission` reports alike. An
+// account that no longer exists has no role.
+const isMaintainer = async ({ github, owner, repo, username }) => {
+  try {
+    const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
+    return ["admin", "maintain"].includes(data.role_name);
+  } catch (error) {
+    if (error.status === 404) return false;
+    throw error;
+  }
 };
 
 // Issues the PR closes (`Fixes #N`, `Closes`, `Resolves`, or linked in the
@@ -201,9 +220,11 @@ module.exports = {
   GATE_LABEL,
   GATE_MARKER,
   MISSING_SCREENSHOTS,
+  TEAM_LABEL,
   evaluateContributionGate,
   evaluateVisualEvidence,
   hasMarkerComment,
+  isMaintainer,
   isWaived,
   listPullFiles,
 };

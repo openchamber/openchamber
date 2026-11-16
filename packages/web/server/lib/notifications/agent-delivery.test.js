@@ -14,7 +14,7 @@ const event = (kind, properties = {}) => ({
     ...properties,
   },
 });
-const kinds = ['goal', 'review', 'browser-help', 'pull-request'];
+const kinds = ['goal', 'review', 'share-answer', 'browser-help', 'pull-request'];
 const setup = ({ settings = {}, visible = false, focused = false, goalStatus = 'complete', failMetadata = false } = {}) => {
   const fetchImpl = vi.fn(async () => {
     if (failMetadata) throw new Error('agent_unreachable');
@@ -22,19 +22,20 @@ const setup = ({ settings = {}, visible = false, focused = false, goalStatus = '
   });
   const sendPushToAllUiSessions = vi.fn(async () => {});
   const sendApnsToAllUiSessions = vi.fn(async () => {});
+  const clearApnsNotifications = vi.fn(async () => {});
   const readSettingsFromDisk = vi.fn(async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', ...settings }));
   const emitDesktopNotification = vi.fn();
   const broadcastUiNotification = vi.fn();
   const deliverToExtensionChannels = vi.fn();
   const buildTemplateVariables = vi.fn(async () => { throw new Error('local metadata is forbidden'); });
   const runtime = createNotificationTriggerRuntime({
-    readSettingsFromDisk, sendPushToAllUiSessions, sendApnsToAllUiSessions,
+    readSettingsFromDisk, sendPushToAllUiSessions, sendApnsToAllUiSessions, clearApnsNotifications,
     fetchImpl, buildOpenCodeUrl: (route) => `http://agent.test${route}`, getOpenCodeAuthHeaders: () => ({}),
     isAnyInteractiveClientVisible: () => visible, getIsWindowFocused: () => focused,
     emitDesktopNotification, broadcastUiNotification, deliverToExtensionChannels, buildTemplateVariables,
   });
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('raw fetch is forbidden'); }));
-  return { runtime, fetchImpl, readSettingsFromDisk, sendPushToAllUiSessions, sendApnsToAllUiSessions, emitDesktopNotification, broadcastUiNotification, deliverToExtensionChannels, buildTemplateVariables };
+  return { runtime, fetchImpl, readSettingsFromDisk, sendPushToAllUiSessions, sendApnsToAllUiSessions, clearApnsNotifications, emitDesktopNotification, broadcastUiNotification, deliverToExtensionChannels, buildTemplateVariables };
 };
 
 describe('owner push delivery for agent runtime announcements', () => {
@@ -49,7 +50,7 @@ describe('owner push delivery for agent runtime announcements', () => {
     expect(owner.deliverToExtensionChannels).not.toHaveBeenCalled();
     expect(owner.buildTemplateVariables).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(owner.fetchImpl).toHaveBeenCalledTimes(kind === 'goal' || kind === 'review' ? 1 : 0);
+    expect(owner.fetchImpl).toHaveBeenCalledTimes(['goal', 'review', 'share-answer'].includes(kind) ? 1 : 0);
     const data = owner.sendPushToAllUiSessions.mock.calls[0][0].data;
     if (kind === 'browser-help') expect(data.url).toBe('/?session=ses_agent&panel=server-browser');
     if (kind === 'pull-request') expect(data).toEqual({ url: '/', type: 'pull-request' });
@@ -64,11 +65,52 @@ describe('owner push delivery for agent runtime announcements', () => {
     expect(owner.fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each(['goal', 'review'])('gates %s with the owner completion toggle', async (kind) => {
+  it.each(['goal', 'review', 'share-answer'])('gates %s with the owner completion toggle', async (kind) => {
     const owner = setup({ settings: { notifyOnCompletion: false } });
     await owner.runtime.deliverAgentNotification(event(kind));
     expect(owner.sendPushToAllUiSessions).not.toHaveBeenCalled();
     expect(owner.sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it.each(['goal', 'review', 'share-answer'])('clears delegated %s pushes under their canonical session tag', async (kind) => {
+    const owner = setup();
+    await owner.runtime.deliverAgentNotification(event(kind));
+    const push = owner.sendPushToAllUiSessions.mock.calls[0][0];
+    const tag = `${kind === 'share-answer' ? 'share' : kind}-ses_agent`;
+    expect(push.tag).toBe(tag);
+    expect(push.data.nid).toBeTypeOf('string');
+    await owner.runtime.clearSessionPushNotifications('ses_agent');
+    expect(owner.clearApnsNotifications).toHaveBeenCalledExactlyOnceWith({ tags: [`${tag}@${push.data.nid}`], badge: 0 });
+  });
+
+  it('drops a delegated settlement viewed while its metadata was being read', async () => {
+    const owner = setup();
+    let resolveMetadata;
+    owner.fetchImpl.mockImplementationOnce(() => new Promise((resolve) => { resolveMetadata = resolve; }));
+    const pending = owner.runtime.deliverAgentNotification(event('goal'));
+    await vi.waitFor(() => expect(owner.fetchImpl).toHaveBeenCalledTimes(1));
+    await owner.runtime.clearSessionPushNotifications('ses_agent');
+    resolveMetadata(Response.json({ data: { title: 'Private session' } }));
+    await pending;
+    expect(owner.sendPushToAllUiSessions).not.toHaveBeenCalled();
+    expect(owner.sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('keeps a toast-only shared answer off owner device push', async () => {
+    const owner = setup();
+    await owner.runtime.deliverAgentNotification(event('share-answer', { toastOnly: true, showWhenFocused: true }));
+    expect(owner.fetchImpl).not.toHaveBeenCalled();
+    expect(owner.sendPushToAllUiSessions).not.toHaveBeenCalled();
+    expect(owner.sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('keeps a delegated shared answer through the turn its delivery wakes', async () => {
+    const owner = setup();
+    await owner.runtime.deliverAgentNotification(event('share-answer', { skipTurnStart: true }));
+    await owner.runtime.clearSessionPushNotifications('ses_agent', { turnStart: true });
+    expect(owner.clearApnsNotifications).not.toHaveBeenCalled();
+    await owner.runtime.clearSessionPushNotifications('ses_agent', { turnStart: true });
+    expect(owner.clearApnsNotifications).toHaveBeenCalledTimes(1);
   });
 
   it('gates PR updates independently and keeps browser help independent of question and notify-tool toggles', async () => {

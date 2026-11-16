@@ -102,6 +102,12 @@ A clickable element can be draggable at the same time: keep `onClick` on the but
 
 Reordering variable-width chips across wrapped rows is a documented rough edge in dnd-kit's box strategies. `rectSortingStrategy` is the best the strategy-based approach offers without instability. If a design needs bulletproof cross-row feedback, switch UX: render a **drop-position indicator** (a line/gap showing where it will land) and keep items static during the drag (no reorder until drop) — this avoids both overlap and the oscillation loop, at the cost of more code. Discuss before building it.
 
+## Testing a Drag
+
+The agent browser panel cannot drag. Drive a real one over CDP in headless Chrome (`scripts/perf/cdp.mjs`, `CdpClient`): `Input.dispatchMouseEvent` `mousePressed`, many `mouseMoved` steps 30–60 ms apart, then `mouseReleased`, with `Page.captureScreenshot` clips mid-drag. Run it against an isolated dev instance (`openchamber-change-discipline`, `references/live-dev-instance.md`).
+
+In the session sidebar, rows carry `[data-sidebar-row-key]`, and the DragOverlay copy is `[inert][aria-hidden=true].cursor-grabbing`: compare its top with the pointer at each step. Session folders are created with `POST /api/session-folders`. A session-to-folder drop needs complete folder authority for its project (`folderAuthorityByOwner`); an isolated instance may never reach it, and the drop then stays disabled.
+
 ## Completion Criteria
 
 Verify every applicable rule on desktop and touch. Wrapping layouts must preserve item width, reflow across rows, allow taps and scrolling before long-press activation, and reorder exactly once on drag end with stable IDs.

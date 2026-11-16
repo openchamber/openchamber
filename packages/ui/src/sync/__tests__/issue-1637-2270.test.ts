@@ -51,6 +51,7 @@ mock.module("../session-ui-store", () => ({
 mock.module("../sync-refs", () => ({
   getDirectoryState: () => null,
   getAllSyncSessions: () => [],
+  getAllSyncSessionMap: () => new Map(),
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registerSessionDirectoryCalls.push({ sessionID, directory })
@@ -76,6 +77,8 @@ mock.module("@/stores/useConfigStore", () => ({
       hasEverConnected: true,
     }),
   },
+  selectCatalogLoadedForDirectory: () => false,
+  selectConfigAgentsForDirectory: () => [],
 }))
 
 mock.module("../input-store", () => ({

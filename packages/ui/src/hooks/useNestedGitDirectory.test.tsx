@@ -50,6 +50,7 @@ test('a root repository offers its nested repositories and keeps its selection (
     const directories = new Map(useGitStore.getState().directories);
     directories.set(directory, {
       isGitRepo: unborn !== null,
+      repoUnreadable: null,
       status: unborn === null ? null : status(unborn),
       branches: null,
       log: null,
@@ -149,6 +150,25 @@ test('a root repository offers its nested repositories and keeps its selection (
 
     // App bootstrap asks for the home folder on its own; no git reads happened.
     expect(requested.filter((path) => path !== '/api/fs/home')).toEqual([]);
+
+    // A selected repository Git cannot read is dropped like a stale one, so
+    // the picker stays reachable; only an unreadable root takes the surface.
+    await update(() => {
+      const directories = new Map(useGitStore.getState().directories);
+      const appState = directories.get(app);
+      if (appState) directories.set(app, { ...appState, isGitRepo: null, status: null, repoUnreadable: 'fatal: detected dubious ownership' });
+      useGitStore.setState({ directories });
+    });
+    expect(useGitStore.getState().nestedRepoSelection.has(root)).toBe(false);
+    expect(useGitStore.getState().staleClearedSelections.get(root)?.has(app)).toBe(true);
+    expect(current().unreadable).toBeNull();
+    await update(() => {
+      const directories = new Map(useGitStore.getState().directories);
+      const rootState = directories.get(root);
+      if (rootState) directories.set(root, { ...rootState, isGitRepo: null, repoUnreadable: 'fatal: detected dubious ownership' });
+      useGitStore.setState({ directories });
+    });
+    expect(current().unreadable).toEqual({ directory: root, message: 'fatal: detected dubious ownership' });
   } finally {
     await act(async () => { reactRoot.unmount(); });
     globalThis.fetch = originalFetch;
@@ -197,6 +217,7 @@ test('opening a surface rescans the repositories under an established root', asy
   const directories = new Map(useGitStore.getState().directories);
   directories.set(root, {
     isGitRepo: true,
+    repoUnreadable: null,
     status: { ...status(false), current: 'main' },
     branches: null,
     log: null,

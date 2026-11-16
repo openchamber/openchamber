@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { localMcpStore, withLocalMcpPlugin } from './local-mcp-runtime';
+import { applyPluginSwitchPolicies, setPluginSwitch } from './plugin-switches';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-local-mcp-launch-'));
 const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
@@ -53,3 +54,26 @@ test('keeps one managed plugin registration when preparing a later launch', asyn
   assert.deepEqual(JSON.parse(second.OPENCODE_CONFIG_CONTENT || 'null').plugins,
     JSON.parse(first.OPENCODE_CONFIG_CONTENT || 'null').plugins);
 });
+
+for (const userOwnsConfig of [false, true]) {
+  test(`keeps local MCP injection alongside plugin denials with user-owned config ${userOwnsConfig}`, async () => {
+    // Given a disabled plugin and inherited plugins in a managed launch.
+    const directory = fs.mkdtempSync(path.join(root, 'switches-'));
+    setPluginSwitch(directory, 'plugin:disabled-plugin', false);
+    const env = { OPENCODE_CONFIG: userOwnsConfig ? '/user/opencode.json' : undefined,
+      OPENCODE_CONFIG_CONTENT: '{"plugins":["user-plugin"]}' };
+
+    // When the launch composes local MCP injection with the upstream switch layer.
+    const launch = await withLocalMcpPlugin(env);
+    applyPluginSwitchPolicies(launch, directory, { userOwnsConfig });
+
+    // Then both the user's plugin and the managed MCP plugin remain available,
+    // and the disabled plugin stays denied in the correct configuration layer.
+    const content = JSON.parse(launch.OPENCODE_CONFIG_CONTENT || 'null');
+    assert.deepEqual(content.plugins, ['user-plugin', path.join(root, 'data', 'mcp-project-local', 'plugin')]);
+    const configPath = launch.OPENCODE_CONFIG;
+    assert.ok(configPath);
+    const policies = userOwnsConfig ? content.policies : JSON.parse(fs.readFileSync(configPath, 'utf8')).policies;
+    assert.deepEqual(policies, [{ action: 'integration.use', resource: 'plugin:disabled-plugin', effect: 'deny' }]);
+  });
+}

@@ -69,7 +69,7 @@ export const SidebarRefLinks: React.FC<{ items: readonly SidebarRefLink[]; direc
         >
           <SidebarRefLinkHeading item={item} directory={directory} />
           {item.title ? (
-            <span className="min-w-0 truncate ps-[18px] text-muted-foreground">{item.title}</span>
+            <span dir="auto" className="oc-ui-start-align min-w-0 truncate ps-[18px] text-muted-foreground">{item.title}</span>
           ) : null}
         </button>
       ))}

@@ -24,9 +24,9 @@ const serviceModules = async (root, folder, fs) => {
 };
 
 /**
- * What the host loads from a package: the manifest, the panel icon, each
- * page with the scripts, links, and images it loads, and the service's
- * scripts. Read from the manifest itself, so a package that does not load yet
+ * What the host loads from a package: the manifest, the panel icon, the
+ * provider logos, each page with the scripts, links, and images it loads, and
+ * the service's scripts. Read from the manifest itself, so a package that does not load yet
  * still names the files its build will write. Anything else a service writes
  * beside them does not count.
  */
@@ -37,6 +37,7 @@ const loadedFiles = async (root, fs) => {
   if (!parsed?.ok) return files;
   const contributes = parsed.manifest.contributes;
   if (contributes.panel.icon.toLowerCase().endsWith('.svg')) files.push(contributes.panel.icon);
+  files.push(...Object.values(contributes.providerLogos ?? {}));
   const pages = [
     contributes.panel.entry,
     contributes.background?.entry,

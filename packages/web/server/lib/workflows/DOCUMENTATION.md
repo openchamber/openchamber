@@ -34,7 +34,13 @@ the run's card and the Workflows panel open them.
   allow for `openchamber_workflow_answer`. Also posts the report as a synthetic
   message.
 - `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
-- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run.
+- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run. A
+  settled run (finished, report delivered) stays in memory only as
+  `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
+  `summarizeRun` to give the same summary. `get` reads the whole run from its
+  file. Kept whole, 35 real runs held 12 MB of the server's heap; light, 1.7 MB.
+  `list()` therefore hands out light runs for settled ones: read a run's
+  prompts or answers through `get`.
 - `runtime.js`: the run lifecycle, the limits, replay, the report, and the
   agent tool's `workflow.*` actions (`executeAction`).
 - `routes.js`: the user's side for the chat card, the work-status panel and
@@ -133,6 +139,32 @@ session proposed. `workflow.save` writes a script to
   a run without `args` reads `{}`.
 - A report is minted with its message id before the first delivery attempt
   and saved, so a retry never delivers twice (409 counts as delivered).
+- `save()` captures an isolated snapshot at call time and rejects its own caller
+  on failure. Later queued writes still run in order. A failed first write never
+  publishes a run; a failed replacement retains the previous working object.
+  `get()` and `list()` return mutable working references, including unsaved
+  changes. Only a successful save establishes the snapshot read after restart.
+- Approval and resume reserve the run before awaiting their checkpoint, so
+  overlapping admissions start one execution. A failed checkpoint rejects before
+  starting the worker and restores the prior fields, logs and shared references.
+  A saved-workflow start uses the same checkpoint; failure leaves its proposed
+  run waiting and retains any new, empty parent session.
+- An agent-start checkpoint precedes child creation. The child-ID checkpoint
+  precedes its first prompt. Failure sends no prompt and leaves any already-created
+  empty child available. A failure before child creation refunds its agent count;
+  existing interruption accounting stays unchanged. Agent checkpoint failures resolve `agent()` to null;
+  final-save failures cannot replace an answer with a rejected promise.
+- A terminal state and its report ID must commit before delivery, including
+  `deliverPending()`. If the worker ended but the terminal save fails, its ended
+  working state stays visible, its report is withheld, and the execution releases
+  resources. The same undelivered report stays in memory to protect the last
+  durable snapshot from retention. Existing logs and server warnings expose the
+  failure. Restart reads
+  the last successful disk snapshot and never reruns agents automatically.
+- A failed delivered-marker save retains the delivered flag and the same report
+  ID in memory. Restart reconciles that ID through OpenCode's 409 response; it
+  neither rolls back the posted report nor reruns its agents. Recovery failure of
+  one stale run withholds that report without blocking other runs.
 - A run that was `running` when the server stopped is marked `stopped` with
   "OpenChamber restarted…" on the next start; its report goes out once the
   OpenCode event hub connects (`deliverPending`). The run records the server
@@ -141,9 +173,9 @@ session proposed. `workflow.save` writes a script to
   start identity matches. A reused PID with a different identity is recovered
   as stopped. Every skipped run is logged in the server console, without
   writing to the other owner's run file.
-- A run is in the runtime's `active` map from the moment it is `running`
-  until its end is saved; a stop that arrives before the worker exists is
-  honoured once it does. The report goes out after the run left `active`, so a
+- A run is in the runtime's `active` map from admission until its worker ends
+  and its terminal checkpoint settles, including failure. A stop before the worker
+  exists is honoured once it does. The report goes out after the run left `active`, so a
   slow delivery never holds a finished run as running.
 - Only a `failed` or `stopped` run resumes. Completed answers an attempt did
   not ask for again stay on the run for the next attempt.
@@ -157,6 +189,23 @@ session proposed. `workflow.save` writes a script to
   has not gone out.
 
 ## Decisions
+
+### Why working references and call-time snapshots have separate contracts
+
+Execution closures, replay and report cancellation share run and report object
+identity. Keeping those working objects preserves their coordination, while each
+queued write owns a separate immutable snapshot. Admission replaces only the
+fields it changes and copies logs before appending, so rollback preserves nested
+history and references without keeping a second standing copy of every run.
+
+### Why terminal-save failure keeps the ended working state
+
+The worker has ended, so restoring `running` would claim activity with no worker.
+The ended state remains visible with a diagnostic and a withheld report. Newly minted
+reports are ineligible during their checkpoint as well as after failure; reading
+working objects from the store cannot establish permission to deliver them.
+The failed report object stays undelivered in memory because removing it would
+make the ended run eligible for pruning and delete its last durable snapshot.
 
 ### Why recovery compares process start identity
 

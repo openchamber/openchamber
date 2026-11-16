@@ -13,7 +13,7 @@ globalThis.fetch = async (input: string | URL | Request) => {
   return Response.json(payload);
 };
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
   Text: browser.Text, customElements: browser.customElements,
@@ -56,7 +56,7 @@ test('a proposal uses rich diffs, names the file without file actions, and copie
   expect(diffRoot?.querySelector('[data-line][data-line-type="change-addition"]')?.textContent).toContain('const next = 2;');
   expect(diffRoot?.querySelectorAll('[data-diff-header], button')).toHaveLength(0);
   expect(host.textContent).toContain('src/example.ts');
-  expect(Array.from(host.querySelectorAll('button'), (button) => button.title)).toEqual(['Copy code']);
+  expect(Array.from(host.querySelectorAll('button'), (button) => button.getAttribute('aria-label'))).toEqual(['Copy code']);
   expect(host.querySelectorAll('a, [data-openchamber-file-link]')).toHaveLength(0);
   expect(serializeRenderedMarkdown(host)).toBe(`\`\`\`diff\n${patch}\n\`\`\``);
   const copied: string[] = [];

@@ -1,4 +1,5 @@
 import { normalizePath } from '@/lib/pathNormalization';
+import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { countSyncPersistenceSerialization } from '@/sync/performance-diagnostics';
 
@@ -136,6 +137,8 @@ export const writeChatDraft = (
   confirmedMentions: Iterable<string>,
 ): void => {
   if (!identity) return;
+  // A share link's key is never written to storage.
+  text = withoutShareLinkKeys(text);
   const envelope = readEnvelope();
   const key = getChatDraftIdentityKey(identity);
   const mentions = Array.from(new Set(confirmedMentions));

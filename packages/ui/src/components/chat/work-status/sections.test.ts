@@ -19,8 +19,30 @@ describe('section registry', () => {
 
   test('preserves chosen positions and appends missing sections once', () => {
     const order = sanitizeWorkStatusSectionOrder(['pinned', 'repository', 'pinned', 'obsolete', 'session']);
-    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'contextSources']);
+    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp']);
+    // Tasks, added later, goes after Subagents wherever the user put it.
+    expect(sanitizeWorkStatusSectionOrder(['subagents', 'session', 'repository', 'usage', 'contextSources', 'telemetry', 'workflows', 'mcp', 'pinned']))
+      .toEqual(['subagents', 'tasks', 'session', 'repository', 'usage', 'contextSources', 'telemetry', 'workflows', 'mcp', 'pinned']);
     expect(sanitizeWorkStatusSectionOrder(JSON.parse(JSON.stringify(order)))).toEqual(order);
+  });
+
+  test('a saved old default follows Context sources up, however the later sections were appended', () => {
+    const moved = ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned'];
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const withTasks = (order: string[]) => order.flatMap((id) => (id === 'subagents' ? ['subagents', 'tasks'] : [id]));
+    expect(sanitizeWorkStatusSectionOrder(savedDefault, false)).toEqual(withTasks(moved));
+    expect(sanitizeWorkStatusSectionOrder(withTasks(moved), false)).toEqual(withTasks(moved));
+    expect(sanitizeWorkStatusSectionOrder(['session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources', 'telemetry', 'workflows'], false))
+      .toEqual(['session', 'repository', 'usage', 'contextSources', 'subagents', 'tasks', 'mcp', 'pinned', 'telemetry', 'workflows']);
+  });
+
+  test('an arranged order keeps Context sources where it is', () => {
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const custom = ['repository', 'session', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const withTasks = (order: string[]) => order.flatMap((id) => (id === 'subagents' ? ['subagents', 'tasks'] : [id]));
+    expect(sanitizeWorkStatusSectionOrder(savedDefault)).toEqual(withTasks(savedDefault));
+    expect(sanitizeWorkStatusSectionOrder(custom, false)).toEqual(withTasks(custom));
+    expect(sanitizeWorkStatusSectionOrder([...savedDefault, 'ext:git-graph'], false)).toEqual(withTasks([...savedDefault, 'ext:git-graph']));
   });
 
   test('every section has a label, and every label a section', () => {

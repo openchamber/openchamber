@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-    GLIDE_START_GRACE_MS,
-    isFollowGlideUnderWay,
     resolveFollowGlideTarget,
     resolveFollowStop,
     resolvePageRevealTarget,
@@ -45,25 +43,5 @@ describe('resolvePageRevealTarget', () => {
 
     test('leaves a page already in view where it is', () => {
         expect(resolvePageRevealTarget({ top: 2600, bottom: 2800 }, 2300, 600, 50)).toBeNull();
-    });
-});
-
-describe('isFollowGlideUnderWay', () => {
-    const glide = { lastTop: 1000, issuedAt: 0, stateEnd: 1400 };
-
-    test('a glide still moving toward an unchanged end is left to finish', () => {
-        expect(isFollowGlideUnderWay(glide, 1100, 1400, 500)).toBe(true);
-        // Not moved yet, but only just issued.
-        expect(isFollowGlideUnderWay(glide, 1000, 1400, GLIDE_START_GRACE_MS - 1)).toBe(true);
-    });
-
-    test('a glide is re-aimed once the end moved on', () => {
-        expect(isFollowGlideUnderWay(glide, 1100, 1450, 500)).toBe(false);
-    });
-
-    test('a glide that stopped is checked against the true end again', () => {
-        // Stopped short where it landed: the scroll no longer moves.
-        expect(isFollowGlideUnderWay(glide, 1000, 1400, 500)).toBe(false);
-        expect(isFollowGlideUnderWay(null, 1100, 1400, 500)).toBe(false);
     });
 });

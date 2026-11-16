@@ -13,6 +13,7 @@ import { z, type ZodType } from 'zod';
 
 import type { ProjectEntry } from '@/lib/api/types';
 import { isCustomProviderIcon, type CustomProviderIcon } from '@/lib/customProviderIcons';
+import { customProviderLogoSchema, type CustomProviderLogo } from '@/lib/customProviderLogos';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
 
@@ -137,6 +138,17 @@ export const parseCustomProviderIcons: SettingsParser<Record<string, CustomProvi
   }
   return result;
 };
+
+/** Provider ID -> uploaded logo metadata; malformed entries are dropped one by one. */
+export const parseCustomProviderLogos = fromSchema(looseObject.transform((record) => {
+  const result: Record<string, CustomProviderLogo> = {};
+  for (const [providerID, logo] of Object.entries(record)) {
+    const normalizedProviderID = providerID.trim();
+    const parsed = customProviderLogoSchema.safeParse(logo);
+    if (normalizedProviderID && parsed.success) result[normalizedProviderID] = parsed.data;
+  }
+  return result;
+}));
 
 const modelRefSchema = z.object({
   providerID: nonEmptyTrimmed,
@@ -413,6 +425,17 @@ export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, 
   const legacy = z.boolean().safeParse(raw.queueModeEnabled);
   if (!legacy.success) return undefined;
   return legacy.data ? 'queue' : 'steer';
+};
+
+const chatWidthSchema = z.enum(['default', 'wider', 'full']);
+
+/** Legacy `wideChatLayoutEnabled` → `chatWidth`: the old wide layout is today's Full. */
+export const parseChatWidth: SettingsParser<'default' | 'wider' | 'full'> = (value, raw) => {
+  const direct = chatWidthSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  const legacy = z.boolean().safeParse(raw.wideChatLayoutEnabled);
+  if (!legacy.success) return undefined;
+  return legacy.data ? 'full' : 'default';
 };
 
 const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'summary']));

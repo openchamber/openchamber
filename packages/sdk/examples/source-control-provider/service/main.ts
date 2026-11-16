@@ -420,6 +420,9 @@ const unsupported: Handler = async (_call, _input, request) => {
 };
 
 const handlers = {
+  // This example declares only token auth. A CLI-backed variant implements
+  // auth.status and reads through its CLI, as described in the README.
+  'auth.status': unsupported,
   'auth.verify': async (call) => {
     const { data } = await api<GiteaUser>(call, 'GET', '/user');
     const user: SourceControlForgeUser = { id: data.id, login: data.login };

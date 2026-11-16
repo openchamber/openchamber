@@ -8,8 +8,14 @@ let setup: ProjectSetup;
 let patches: Array<Record<string, unknown>> = [];
 let saveOk = true;
 
+let readFails = false;
+
 mock.module('./openchamberConfig', () => ({
   getProjectSetup: mock(async () => setup),
+  fetchProjectSetup: mock(async () => {
+    if (readFails) throw new Error('HTTP 500');
+    return setup;
+  }),
   updateProjectSetup: mock(async (_project: unknown, patch: Record<string, unknown>) => {
     patches.push(patch);
     return saveOk;
@@ -22,6 +28,7 @@ const {
   resetSharedSetupTrust,
   resolveWorktreeSetupCommands,
   resolveWorktreeSetupCommandsOrCancel,
+  resolveWorktreeTeardownCommands,
   settleSharedTrustConfirmation,
 } = await import('./sharedTrustConfirmation');
 
@@ -29,6 +36,7 @@ const baseSetup = (): ProjectSetup => ({
   trust: { hash: 'sha256:abc', trusted: false },
   setupWorktree: ['bun install', 'cp .env.example .env'],
   setupWorktreeWait: false,
+  teardownWorktree: ['docker compose down', 'rm -f .dev.pid'],
   projectActions: [{ id: 'dev', name: 'Dev', command: 'bun run dev', source: 'shared' }],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -37,6 +45,7 @@ const baseSetup = (): ProjectSetup => ({
     path: '.openchamber/project.json',
     setupWorktree: ['bun install'],
     setupWorktreeWait: null,
+    teardownWorktree: ['docker compose down'],
     projectActions: [{ id: 'dev', name: 'Dev', command: 'bun run dev' }],
     draftStarters: [],
     plansDir: null,
@@ -45,6 +54,8 @@ const baseSetup = (): ProjectSetup => ({
     setupWorktree: ['cp .env.example .env'],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: ['rm -f .dev.pid'],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -58,6 +69,7 @@ describe('shared trust confirmation', () => {
     setup = baseSetup();
     patches = [];
     saveOk = true;
+    readFails = false;
     if (getSharedTrustConfirmationSnapshot()) settleSharedTrustConfirmation('skip');
   });
 
@@ -162,6 +174,80 @@ describe('shared trust confirmation', () => {
     const pending = ensureSharedSetupTrusted(project, setup);
     settleSharedTrustConfirmation('trust');
     expect(await pending).toBe(true);
+  });
+
+  test('teardown asks with the shared teardown commands; skip or closing runs only the personal ones', async () => {
+    const pending = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    const request = getSharedTrustConfirmationSnapshot();
+    expect(request?.teardownCommands).toEqual(['docker compose down']);
+    expect(request?.dismissChoice).toBe('skip');
+
+    settleSharedTrustConfirmation('skip');
+    expect(await pending).toEqual(['rm -f .dev.pid']);
+    expect(patches).toEqual([]);
+  });
+
+  test('teardown runs the shared commands, then the personal ones, once trusted', async () => {
+    const pending = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    settleSharedTrustConfirmation('trust');
+    expect(await pending).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(patches).toEqual([{ sharedTrustHash: 'sha256:abc' }]);
+  });
+
+  test('two teardowns in one project share one prompt and its answer', async () => {
+    const first = resolveWorktreeTeardownCommands(project);
+    const second = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.teardownCommands).toEqual(['docker compose down']);
+
+    settleSharedTrustConfirmation('trust');
+    expect(await first).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(await second).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(patches).toEqual([{ sharedTrustHash: 'sha256:abc' }]);
+    expect(getSharedTrustConfirmationSnapshot()).toBeNull();
+  });
+
+  test('a later prompt waits for an open teardown prompt, and each gets its own answer', async () => {
+    const otherProject = { id: 'other', path: '/other' };
+    const teardown = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    await Promise.resolve();
+    const newSetup = resolveWorktreeSetupCommandsOrCancel(otherProject);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.project).toEqual(project);
+
+    settleSharedTrustConfirmation('trust');
+    expect(await teardown).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.project).toEqual(otherProject);
+
+    settleSharedTrustConfirmation('skip');
+    expect(await newSetup).toEqual(['cp .env.example .env']);
+  });
+
+  test('teardown without shared commands never asks', async () => {
+    setup.shared.teardownWorktree = [];
+    setup.teardownWorktree = ['rm -f .dev.pid'];
+    expect(await resolveWorktreeTeardownCommands(project)).toEqual(['rm -f .dev.pid']);
+    expect(getSharedTrustConfirmationSnapshot()).toBeNull();
+  });
+
+  test('teardown nobody started by hand never asks: untrusted shared commands reject, trusted ones run', async () => {
+    await expect(resolveWorktreeTeardownCommands(project, { ask: false })).rejects.toThrow('not trusted yet');
+    expect(getSharedTrustConfirmationSnapshot()).toBeNull();
+
+    setup.trust.trusted = true;
+    expect(await resolveWorktreeTeardownCommands(project, { ask: false })).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(getSharedTrustConfirmationSnapshot()).toBeNull();
+  });
+
+  test('teardown rejects when the setup cannot be read, so the removal stops', async () => {
+    readFails = true;
+    await expect(resolveWorktreeTeardownCommands(project)).rejects.toThrow('HTTP 500');
   });
 
   test('reset forgets the recorded answer', async () => {

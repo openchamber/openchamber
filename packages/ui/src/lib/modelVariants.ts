@@ -20,6 +20,17 @@ export const listModelVariantIds = (variants: ModelVariantSource): string[] => {
   return Object.keys(variants);
 };
 
+/**
+ * The level the effort shortcut moves to from `current`: the first level
+ * after "Default" (`null` or no choice), the next one after a level, and
+ * `null` ("Default") after the last level or after one the model lacks.
+ */
+export const nextThinkingVariant = (variants: readonly string[], current: string | null | undefined): string | null => {
+  if (current === null || current === undefined) return variants[0] ?? null;
+  const index = variants.indexOf(current);
+  return index >= 0 ? variants[index + 1] ?? null : null;
+};
+
 /** Names of the thinking levels a model exposes, empty when it has none. */
 export const modelVariantNames = (model: { readonly variants?: ModelVariantSource } | undefined): string[] =>
   listModelVariantIds(model?.variants);

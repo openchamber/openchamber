@@ -38,6 +38,16 @@ Use literal inference (`as const`) only when the surrounding type does not alrea
 
 Never edit `packages/ui/src/components/icon/sprite.ts` manually. The generator scans source usages, maps names to Remixicon, and regenerates the sprite.
 
+## Provider Marks
+
+A Git host or other provider mark (the `icon.path` in a server provider descriptor such as `packages/web/server/lib/forgejo/descriptor.js`) is the provider's real logo, redrawn in the line style of the other provider marks, never a generic drawing of what the name suggests:
+
+- monochrome `currentColor`, a 24x24 box with about 2px inset, line weight about 2px like Remixicon;
+- readable at 16px: simplify detail when it blurs (Gerrit's mark keeps one -/+ pair instead of two);
+- when the logo's license requires attribution, credit it in a comment beside the path (Forgejo: CC BY-SA 4.0, by Caesar Schinas).
+
+Gitea's teacup is OpenChamber's own drawing, not Gitea's logo; replacing it is an open product question.
+
 ## Key Files
 
 - Component: `packages/ui/src/components/icon/Icon.tsx`

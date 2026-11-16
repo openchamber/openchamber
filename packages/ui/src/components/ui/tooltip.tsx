@@ -260,6 +260,12 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   showArrow?: boolean;
   /** An element to place the tooltip by other than its trigger, for one tooltip shared by many rows. */
   anchor?: React.ComponentProps<typeof BaseTooltip.Positioner>["anchor"];
+  /**
+   * `label` (default) is a short hint on the tooltip glass. `card` is a block
+   * of details, such as a model's facts beside a picker row: it opens over
+   * content like a menu, so it takes the popover's glass and floating light.
+   */
+  surface?: "label" | "card";
 };
 
 function TooltipContent({
@@ -271,6 +277,7 @@ function TooltipContent({
   style,
   showArrow = false,
   anchor,
+  surface = "label",
   ...props
 }: ContentProps) {
   return (
@@ -283,7 +290,8 @@ function TooltipContent({
               // data-instant is set when moving between grouped tooltips
               // (shared TooltipProvider): reposition without replaying the
               // full exit/enter animation.
-              "oc-glass-tooltip text-[var(--surface-elevated-foreground)] border border-edge oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
+              surface === "card" ? "oc-glass-popover oc-glass-floating" : "oc-glass-tooltip border border-edge",
+              "text-[var(--surface-elevated-foreground)] oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
               showArrow ? "overflow-visible" : "overflow-hidden",
               className
             )}

@@ -106,7 +106,7 @@ describe('Linear identity strings', () => {
     test('picker and composer keys are linear:IDENTIFIER, upper-cased', () => {
         expect(referencePickerItemKey({ source: 'tracker', provider: 'linear', item: { ...summary, identifier: 'eng-12' } })).toBe('linear:ENG-12');
         expect(composerReferenceKey({ kind: 'tracker-item', provider: 'linear', identifier: 'eng-12', title: 't', url: 'u', contextText: '' })).toBe('linear:ENG-12');
-        expect(toLinkedIssue({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 't', url: 'u', contextText: '' }, 1).id).toBe('linear:ENG-12');
+        expect(toLinkedIssue({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 't', url: 'u', contextText: '' }, 1)?.id).toBe('linear:ENG-12');
     });
 
     test('a branch started from an issue is issue-IDENTIFIER, before the dialog adds its slug', () => {

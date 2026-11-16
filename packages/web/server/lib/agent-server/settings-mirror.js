@@ -7,8 +7,8 @@ const BOOLEAN_KEYS_V1 = Object.freeze([
   'messageSearchEnabled', 'messageSearchReasoningEnabled',
   'agentControlToolEnabled', 'agentScheduleToolEnabled', 'agentWebToolEnabled', 'agentNotifyToolEnabled',
   'agentRenderToolEnabled', 'agentImageToolEnabled', 'agentSecretToolEnabled', 'agentToolsCodeMode',
-  'agentMemoryToolEnabled', 'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled',
-  'autoDeleteEnabled', 'sessionRetentionOnlyArchived', 'mergedWorktreeCleanupEnabled', 'worktreeArchiveOnDoneEnabled',
+  'agentMemoryToolEnabled', 'agentMemoryDreamingEnabled', 'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentUsageToolEnabled',
+  'autoDeleteEnabled', 'sessionRetentionOnlyArchived', 'sessionRetentionIncludeInWork', 'mergedWorktreeCleanupEnabled', 'worktreeArchiveOnDoneEnabled',
   'autoCreateWorktree', 'allowPromptingSubagentSessions', 'queueModeEnabled', 'smallModelUseDefault',
   'sessionRecapEnabled', 'sessionSuggestionEnabled', 'sessionWorkEnabled', 'sessionReviewOfferEnabled',
   'sessionGoalEnabled', 'sessionGoalDefaultBudgetEnabled', 'responseStyleEnabled',
@@ -17,6 +17,7 @@ const STRING_KEYS_V1 = Object.freeze([
   'locale', 'lastDirectory', 'activeProjectId', 'opencodeBinary', 'permissionDefaultMode', 'browserProvider', 'agentImageModel',
   'sessionRetentionAction', 'terminalShell', 'defaultGitIdentityId', 'githubClientId', 'githubScopes', 'gitlabClientId',
   'defaultModel', 'defaultVariant', 'defaultAgent', 'smallModelOverride', 'smallModelVariant',
+  'agentMemoryDreamingModel', 'agentMemoryDreamingVariant',
   'walkthroughModelOverride', 'walkthroughModelVariant', 'fallbackModel', 'fallbackVariant', 'zenModel',
   'lastSelectedModel', 'sessionGoalChecker', 'prStackConflictMode', 'globalBehaviorPrompt',
   'responseStylePreset', 'responseStyleCustomInstructions', 'inputHistoryScope', 'followUpBehavior',
@@ -28,12 +29,13 @@ const STRING_ARRAY_KEYS_V1 = Object.freeze([
   'accountSwitchProviders', 'terminalLoginShells', 'favoriteAgents', 'recentAgents', 'providerOrder',
 ]);
 // These are wire values the agent's sanitizer accepts as a clear or reset.
-// Empty model strings become an own undefined property AFTER sanitization,
-// which replaces the old value in the merge and removes it from both files.
+// Model clears either become an own undefined property after sanitization
+// or stay empty strings, as dreaming requires. Both replace the stale value.
 const CLEAR_VALUES_V1 = Object.freeze({
   ...Object.fromEntries([
     'lastDirectory', 'opencodeBinary', 'defaultGitIdentityId', 'defaultModel', 'defaultVariant', 'defaultAgent',
     'smallModelOverride', 'smallModelVariant', 'walkthroughModelOverride', 'walkthroughModelVariant',
+    'agentMemoryDreamingModel', 'agentMemoryDreamingVariant',
     'fallbackModel', 'fallbackVariant', 'zenModel', 'globalBehaviorPrompt', 'responseStyleCustomInstructions',
   ].map((key) => [key, ''])),
   ...Object.fromEntries([...STRING_ARRAY_KEYS_V1, 'projects', 'serverBrowserOpenChamberOrigins'].map((key) => [key, Object.freeze([])])),

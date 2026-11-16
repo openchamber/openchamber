@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -83,9 +85,16 @@ export const ReviewSubmitForm: React.FC<{
                     <p className="min-w-0 flex-1 typography-meta text-muted-foreground">{t(count === 1 ? 'review.submit.hint.one' : 'review.submit.hint.other')}</p>
                     {/* A phone has no room for four buttons in a row, so this rare one folds to its icon. */}
                     {isMobile ? (
-                        <Button size="icon" variant="ghost" className="size-8 shrink-0 text-muted-foreground" disabled={busy !== null} aria-label={t('review.discard.button')} title={t('review.discard.button')} onClick={() => void discard()}>
-                            {busy === 'discard' ? <Spinner className="size-4" /> : <Icon name="delete-bin" className="size-4" />}
-                        </Button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex shrink-0">
+                                    <Button size="icon" variant="ghost" className="size-8 shrink-0 text-muted-foreground" disabled={busy !== null} aria-label={t('review.discard.button')} onClick={() => void discard()}>
+                                        {busy === 'discard' ? <Spinner className="size-4" /> : <Icon name="delete-bin" className="size-4" />}
+                                    </Button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('review.discard.button')}</TooltipContent>
+                        </Tooltip>
                     ) : null}
                 </div>
             ) : null}
@@ -100,10 +109,17 @@ export const ReviewSubmitForm: React.FC<{
                 ) : null}
                 {labels.model === 'verdict' && canJudge ? (
                     <>
-                        <Button size="sm" variant="outline" className={buttonClass} disabled={busy !== null || !body} title={t('sourceBoard.reply.requestChangesHint')} onClick={() => void send('request-changes')}>
-                            {busyIcon('request-changes')}
-                            {t('sourceBoard.reply.requestChanges')}
-                        </Button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex min-w-0">
+                                    <Button size="sm" variant="outline" className={buttonClass} disabled={busy !== null || !body} onClick={() => void send('request-changes')}>
+                                        {busyIcon('request-changes')}
+                                        {t('sourceBoard.reply.requestChanges')}
+                                    </Button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('sourceBoard.reply.requestChangesHint')}</TooltipContent>
+                        </Tooltip>
                         <Button size="sm" variant="outline" className={buttonClass} disabled={busy !== null} onClick={() => void send('approve')}>
                             {busyIcon('approve')}
                             {t('sourceBoard.reply.approve')}
@@ -144,8 +160,6 @@ export const ReviewSubmitButton: React.FC<{
     const [open, setOpen] = React.useState(false);
     const count = reviewDraftCount(review);
     const label = count > 0 ? t('review.submit.buttonWithCount', { count }) : t('review.submit.button');
-    // A phone's header has no room for the word, so the button is its icon and the count.
-    const shortLabel = count > 0 ? String(count) : null;
     const form = <ReviewSubmitForm review={review} provider={provider} voteLabels={voteLabels} onDone={() => setOpen(false)} />;
     const content = (
         <>
@@ -158,9 +172,9 @@ export const ReviewSubmitButton: React.FC<{
     if (isMobile) {
         return (
             <>
-                <Button size="sm" className={cn('h-7 flex-shrink-0 gap-1.5 px-2', className)} aria-label={label} onClick={() => setOpen(true)}>
+                <Button variant="outline" className={cn('flex-shrink-0', className)} aria-label={label} onClick={() => setOpen(true)}>
                     <Icon name="search-eye" className="size-4" />
-                    {shortLabel ? <span className="typography-ui-label">{shortLabel}</span> : null}
+                    {label}
                 </Button>
                 <MobileOverlayPanel open={open} onClose={() => setOpen(false)} title={t('review.submit.button')}>
                     <div className="p-3">{form}</div>
@@ -170,13 +184,21 @@ export const ReviewSubmitButton: React.FC<{
     }
     return (
         <Popover.Root open={open} onOpenChange={setOpen}>
-            <Popover.Trigger render={<Button size="sm" className={cn('h-7 flex-shrink-0 gap-1.5 px-2', className)} aria-label={label} />}>
-                {content}
-            </Popover.Trigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="inline-flex flex-shrink-0">
+                        <Popover.Trigger render={<Button size="sm" className={cn('h-7 flex-shrink-0 gap-1.5 px-2', className)} aria-label={label} />}>
+                            {content}
+                        </Popover.Trigger>
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.diff.reviewSubmit')}</TooltipContent>
+            </Tooltip>
             <Popover.Portal>
                 <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
                     <Popover.Popup aria-label={t('review.submit.button')} className={cn(dropdownMenuPopupClass, 'w-[34rem] max-w-[calc(100vw-2rem)] p-3')}>
                         {form}
+                        <GlassRedrawGuard />
                     </Popover.Popup>
                 </Popover.Positioner>
             </Popover.Portal>

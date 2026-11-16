@@ -19,24 +19,25 @@ import { TodosSection } from './TodosSection';
 import { ContextPanelHeaderSlotProvider, ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { useProjectTodoSend } from './useProjectTodoSend';
+import { sortTodosWithCompletedLast } from './todoList';
 import { KnowledgeSearchBar } from './KnowledgeSearchBar';
 import { KnowledgeBackButton } from './KnowledgeEntryView';
 import { KnowledgeSplit } from './KnowledgeSplit';
 import { Button } from '@/components/ui/button';
+import { DelegatedTooltip } from '@/components/ui/row-tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { memoryDeleteKey, noteDeleteKey, planDeleteKey, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
-import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
+import { useSessionKnowledgePins } from './useSessionKnowledgePins';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useGuestPlanProviders } from '@/lib/guests/plans/useGuestPlanProviders';
 import { ExtensionPlansSection } from './ExtensionPlansSection';
-import {
-  extensionPlanEntryId,
-  parseExtensionPlanEntryId,
-  visibleExtensionPlans,
-  type ExtensionPlanSelection,
-} from '@/lib/guests/plans/selection';
+import { extensionPlanEntryId, parseExtensionPlanEntryId, visibleExtensionPlans, type ExtensionPlanSelection } from '@/lib/guests/plans/selection';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+
+/** Opens at once, the way a tooltip with no trigger of its own has to. */
+const ROW_TOOLTIP_CLASS = 'transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -59,13 +60,12 @@ type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
 
 const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory'];
 
-/** Panel width from which entries open beside the list instead of over it. */
-const SPLIT_MIN_WIDTH = 900;
-
-const sortTodosWithCompletedLast = (items: ProjectTodoItem[]): ProjectTodoItem[] => [
-  ...items.filter((todo) => !todo.completed),
-  ...items.filter((todo) => todo.completed),
-];
+/**
+ * Panel width from which entries open beside the list instead of over it: the
+ * 380px list column plus about 640px for the entry. At 900 the entry got some
+ * 500px, narrower than the list it sat beside.
+ */
+const SPLIT_MIN_WIDTH = 1040;
 
 /**
  * Notes, todos, plans and agent memory for the active project.
@@ -99,43 +99,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     (state) => (projectContextId ? state.entries[projectContextId] : undefined) ?? EMPTY_PROJECT_CONTEXT_ENTRY,
   );
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const { pinnedNoteIds, pinnedPlanIds, togglePin: toggleSessionPin } = useSessionKnowledgePins();
   const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
-  const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
-  const setDraftProjectContextPin = useSessionUIStore((state) => state.setDraftProjectContextPin);
-  const [sessionPins, setSessionPins] = React.useState<SessionProjectContextPins>({ notes: [], plans: [] });
-
-  React.useEffect(() => {
-    if (newSessionDraft.open) {
-      setSessionPins(newSessionDraft.projectContextPins ?? { notes: [], plans: [] });
-      return;
-    }
-    let cancelled = false;
-    void fetchSessionKnowledgeSummary(currentSessionDirectory, currentSessionId).then((summary) => {
-      if (!cancelled) {
-        setSessionPins({
-          notes: summary.notes.map((note) => note.id),
-          plans: summary.plans.map((plan) => plan.id),
-        });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, newSessionDraft.projectContextPins]);
-
-  const toggleSessionPin = React.useCallback(async (kind: 'note' | 'plan', id: string, pinned: boolean) => {
-    if (newSessionDraft.open) {
-      setDraftProjectContextPin(kind, id, pinned);
-      return true;
-    }
-    if (!currentSessionId || !currentSessionDirectory) return false;
-    const next = await setSessionProjectContextPin(currentSessionDirectory, currentSessionId, kind, id, pinned);
-    if (!next) return false;
-    setSessionPins(next);
-    return true;
-  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, setDraftProjectContextPin]);
-
-  const pinnedNoteIds = React.useMemo(() => new Set(sessionPins.notes), [sessionPins.notes]);
-  const pinnedPlanIds = React.useMemo(() => new Set(sessionPins.plans), [sessionPins.plans]);
 
   // The whole feature is one switch: with memory off there is nothing for the
   // agent to manage, so showing the user what is stored would be pointless.
@@ -158,6 +123,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   // A node in state rather than a ref: the panel first renders without its
   // root while no project is selected, and must start measuring once it has one.
   const [rootNode, setRootNode] = React.useState<HTMLDivElement | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const attachRoot = React.useCallback((node: HTMLDivElement | null) => {
+    rootRef.current = node;
+    setRootNode(node);
+  }, []);
   const [panelWidth, setPanelWidth] = React.useState(0);
   React.useLayoutEffect(() => {
     const root = rootNode;
@@ -259,14 +229,38 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openExtensionPlan = React.useCallback((selection: ExtensionPlanSelection) => (
     openEntryIn('plans', extensionPlanEntryId(selection))
   ), [openEntryIn]);
-
-  // Extension plans live in a worktree, so they follow the session's own
-  // directory (a worktree of this project) and fall back to the project root.
-  // Chats have no worktree and no extension plans.
   const extensionPlanDirectory = projectRef && projectRef.id !== CHAT_DRAFT_PROJECT_ID
-    ? (currentSessionDirectory || projectRef.path)
+    ? currentSessionDirectory || projectRef.path
     : null;
   const extensionPlans = useGuestPlanProviders(extensionPlanDirectory, visible && activeTab === 'plans');
+  // A todo an agent filed under a plan opens that plan: in the host's own
+  // viewer where it has one (mobile), else in the Plans tab.
+  const openPlanFromTodo = React.useCallback((planId: string) => {
+    const plan = contextEntry.plans.find((entry) => entry.id === planId);
+    if (!plan || !projectRef) return;
+    if (onOpenPlan) {
+      onOpenPlan({ id: plan.id, title: plan.title, projectRef });
+      return;
+    }
+    setStoredTab('plans');
+    openEntryIn('plans', plan.id);
+  }, [contextEntry.plans, onOpenPlan, openEntryIn, projectRef, setStoredTab]);
+  /**
+   * A plan moved while open beside the list. Its file moved and its id may
+   * have changed, so the view opens again on the plan as it is now; the view
+   * wrote its typing before the move (`openPlanViews`).
+   */
+  const [planViewGeneration, setPlanViewGeneration] = React.useState(0);
+  // Read when the move ends, which can be after the user opened something else
+  // or another project, where the same plan id may name another plan.
+  const openEntryRef = React.useRef({ entry: openEntry, projectContextId });
+  openEntryRef.current = { entry: openEntry, projectContextId };
+  const handlePlanMoved = React.useCallback((projectId: string, previousId: string, movedId: string) => {
+    const { entry: current, projectContextId: shownProjectId } = openEntryRef.current;
+    if (shownProjectId !== projectId || current?.section !== 'plans' || current.id !== previousId) return;
+    setOpenEntry({ section: 'plans', id: movedId });
+    setPlanViewGeneration((generation) => generation + 1);
+  }, []);
   const trimmedQuery = query.trim().toLowerCase();
 
   // Completed items sink to the bottom in the list; storage order is untouched.
@@ -424,14 +418,15 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     [projectRef, saveTodos, t]
   );
 
-  const sections: Array<{ id: ProjectContextTab; icon: IconName; label: string; count: number; unseen: number }> = React.useMemo(() => ([
-    { id: 'notes', icon: 'sticky-note', label: t('rightSidebar.contextNotesTodo.tabs.notes'), count: counts.notes, unseen: 0 },
-    { id: 'todos', icon: 'checkbox-circle', label: t('rightSidebar.contextNotesTodo.tabs.todos'), count: counts.todos, unseen: 0 },
-    { id: 'plans', icon: 'file-text', label: t('rightSidebar.contextNotesTodo.tabs.plans'), count: counts.plans, unseen: 0 },
+  const sections: Array<{ id: ProjectContextTab; icon: IconName; label: string; tooltip: string; count: number; unseen: number }> = React.useMemo(() => ([
+    { id: 'notes', icon: 'sticky-note', label: t('rightSidebar.contextNotesTodo.tabs.notes'), tooltip: t('contextTooltips.workspace.section.notes'), count: counts.notes, unseen: 0 },
+    { id: 'todos', icon: 'checkbox-circle', label: t('rightSidebar.contextNotesTodo.tabs.todos'), tooltip: t('contextTooltips.workspace.section.todos'), count: counts.todos, unseen: 0 },
+    { id: 'plans', icon: 'file-text', label: t('rightSidebar.contextNotesTodo.tabs.plans'), tooltip: t('contextTooltips.workspace.section.plans'), count: counts.plans, unseen: 0 },
     ...(memoryVisible ? [{
       id: 'memory' as const,
       icon: 'brain-4' as IconName,
       label: t('rightSidebar.contextNotesTodo.tabs.memory'),
+      tooltip: t('contextTooltips.workspace.section.memory'),
       count: counts.memory,
       // What the agent stored without asking deserves the glance, so it gets
       // its own mark beside the total instead of hiding inside it.
@@ -464,14 +459,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const renderSectionTab = (section: typeof sections[number], showLabel: boolean, interactive: boolean) => {
     const isActive = activeTab === section.id;
     const unseenTitle = t('rightSidebar.contextNotesTodo.memory.unseenTitle', { count: section.unseen });
-    return (
+    const tab = (
       <button
         key={section.id}
         type="button"
         tabIndex={interactive ? undefined : -1}
         onClick={interactive ? () => setStoredTab(section.id) : undefined}
         aria-current={isActive ? 'page' : undefined}
-        title={section.label}
         className={cn(
           'flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -487,13 +481,23 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         {section.unseen > 0 ? (
           <span
             className="rounded-full bg-[var(--status-success)]/15 px-1 typography-micro font-medium leading-4 text-[var(--status-success-text)]"
-            title={unseenTitle}
             aria-label={unseenTitle}
           >
             {`+${section.unseen}`}
           </span>
         ) : null}
       </button>
+    );
+    // The strip measured for fit is never shown, so it needs no tooltips.
+    if (!interactive) return tab;
+    return (
+      <Tooltip key={section.id}>
+        <TooltipTrigger asChild>{tab}</TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          {section.tooltip}
+          {section.unseen > 0 ? <div className="text-muted-foreground">{unseenTitle}</div> : null}
+        </TooltipContent>
+      </Tooltip>
     );
   };
 
@@ -525,18 +529,22 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           {sections.map((section) => renderSectionTab(section, activeTab === section.id, false))}
         </div>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={toggleSearch}
-        aria-pressed={searchOpen}
-        className={cn('h-7 w-7 flex-shrink-0 p-0', searchOpen && 'bg-interactive-selection text-interactive-selection-foreground')}
-        title={searchLabel}
-        aria-label={searchLabel}
-      >
-        <Icon name="search" className="h-3.5 w-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={toggleSearch}
+            aria-pressed={searchOpen}
+            className={cn('h-7 w-7 flex-shrink-0 p-0', searchOpen && 'bg-interactive-selection text-interactive-selection-foreground')}
+            aria-label={searchLabel}
+          >
+            <Icon name="search" className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{searchOpen ? t('chat.search.close') : searchLabel}</TooltipContent>
+      </Tooltip>
     </div>
   );
 
@@ -549,6 +557,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       pinnedPlanIds={pinnedPlanIds}
       onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
       selectedPlanId={split ? openPlanId : null}
+      onPlanMoved={handlePlanMoved}
       // Hosts that own a fullscreen plan surface (mobile) keep it; on the
       // desktop panel the plan opens here, in place of the list or beside it.
       onOpenPlan={onOpenPlan ?? openPlan}
@@ -590,6 +599,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           own title row inside the panel body. */}
       <ContextPanelHeaderSlotProvider value={null}>
         <PlanView
+          key={planViewGeneration}
           visible={visible}
           leading={withBack ? (
             <KnowledgeBackButton
@@ -599,6 +609,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           ) : null}
           savedProjectPlan={{ projectRef, planId }}
           onNavigatedToChat={() => setOpenEntry(null)}
+          onClose={() => setOpenEntry(null)}
         />
       </ContextPanelHeaderSlotProvider>
     </React.Suspense>
@@ -606,7 +617,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   };
 
   return (
-    <div ref={setRootNode} className={cn('flex h-full min-h-0 w-full min-w-0 flex-col', className)}>
+    <div ref={attachRoot} className={cn('flex h-full min-h-0 w-full min-w-0 flex-col', className)}>
       {inPanelHeader ? (
         <ContextPanelHeaderToolbar>{toolbar}</ContextPanelHeaderToolbar>
       ) : (
@@ -656,7 +667,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           // width instead of rows stretched edge to edge.
           <div className={cn(wide && 'mx-auto max-w-3xl')}>
             <TodosSection
+              projectPath={projectRef.path}
               todos={todos}
+              plans={contextEntry.plans}
+              onOpenPlan={openPlanFromTodo}
               query={query}
               disabled={isLoading}
               canCreateWorktree={canCreateWorktree}
@@ -690,6 +704,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         ) : null}
       </ScrollableOverlay>
       </div>
+
+      <DelegatedTooltip containerRef={rootRef} className={ROW_TOOLTIP_CLASS} />
 
       <TodoSendDialog
         open={send.pendingSendTarget !== null}

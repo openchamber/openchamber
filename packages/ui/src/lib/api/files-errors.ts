@@ -5,18 +5,23 @@ export type FilesystemErrorReason =
   | 'already-exists'
   | 'not-found'
   | 'not-directory'
+  | 'too-large'
+  | 'outside-workspace'
   | 'invalid-response'
   | 'unknown';
 
 export class FilesystemError extends Error {
   readonly reason: FilesystemErrorReason;
   readonly status?: number;
+  /** The server's size ceiling, set when an upload was rejected for its size. */
+  readonly maxBytes?: number;
 
-  constructor(message: string, options: { reason?: FilesystemErrorReason; status?: number } = {}) {
+  constructor(message: string, options: { reason?: FilesystemErrorReason; status?: number; maxBytes?: number } = {}) {
     super(message);
     this.name = 'FilesystemError';
     this.reason = options.reason ?? 'unknown';
     this.status = options.status;
+    this.maxBytes = options.maxBytes;
   }
 }
 
@@ -36,6 +41,8 @@ export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReaso
     case 'already-exists':
     case 'not-found':
     case 'not-directory':
+    case 'too-large':
+    case 'outside-workspace':
     case 'invalid-response':
       return value;
     default:

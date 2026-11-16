@@ -189,6 +189,34 @@ describe('createVSCodeGitAPI network operations', () => {
   });
 });
 
+describe('createVSCodeGitAPI worktree removal', () => {
+  beforeEach(() => { messages.length = 0; });
+
+  test('a delete and a teardown wait for the extension host as long as its teardown runs', async () => {
+    const git = createVSCodeGitAPI();
+    assert.ok(git.worktree?.remove && git.worktree.teardown && git.deleteGitWorktree);
+    // Fake timers start before the requests exist, so a bridge timeout, if one
+    // were armed, would fire on the tick below.
+    mock.timers.enable({ apis: ['setTimeout'] });
+    let calls: Array<Promise<{ success: boolean }>>;
+    try {
+      calls = [
+        git.worktree.remove('/workspace/repo', { directory: '/workspace/wt', teardownCommand: 'docker compose down' }),
+        git.deleteGitWorktree('/workspace/repo', { directory: '/workspace/wt', teardownCommand: 'docker compose down' }),
+        git.worktree.teardown('/workspace/repo', { directory: '/workspace/wt', teardownCommand: 'docker compose down' }),
+      ];
+      mock.timers.tick(10 * 60 * 1000);
+    } finally {
+      mock.timers.reset();
+    }
+    const requests = messages.filter((message) => message.type.startsWith('api:git/worktrees'));
+    assert.deepEqual(requests.map((message) => message.type), ['api:git/worktrees', 'api:git/worktrees', 'api:git/worktrees/teardown']);
+    assert.deepEqual(requests[2].payload, { directory: '/workspace/repo', worktreeDirectory: '/workspace/wt', teardownCommand: 'docker compose down' });
+    for (const request of requests) respond(request, { success: true });
+    assert.deepEqual(await Promise.all(calls), [{ success: true }, { success: true }, { success: true }]);
+  });
+});
+
 describe('createVSCodeGitAPI author profiles and remotes', () => {
   beforeEach(() => { messages.length = 0; });
 
@@ -216,5 +244,21 @@ describe('createVSCodeGitAPI author profiles and remotes', () => {
     assert.deepEqual(await reading, [
       { name: 'origin', fetchUrl: 'https://example.com/team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
     ]);
+  });
+});
+
+describe('createVSCodeGitAPI repository check', () => {
+  test("turns the extension's GIT_REPOSITORY_UNREADABLE into the shared error with Git's message", async () => {
+    messages.length = 0;
+    const { GitRepositoryUnreadableError } = await import('@openchamber/ui/lib/gitRepositoryUnreadable');
+    const git = createVSCodeGitAPI();
+    const checking = git.checkIsGitRepository('/repo');
+    const request = await nextMessage();
+    assert.equal(request.type, 'api:git/check');
+    const message = "fatal: detected dubious ownership in repository at '/repo'";
+    listeners.dispatchEvent(new MessageEvent('message', {
+      data: { id: request.id, type: request.type, success: false, error: message, code: 'GIT_REPOSITORY_UNREADABLE' },
+    }));
+    await assert.rejects(checking, (error) => error instanceof GitRepositoryUnreadableError && error.message === message);
   });
 });

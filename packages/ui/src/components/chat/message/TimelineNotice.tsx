@@ -8,8 +8,10 @@
  * going through `ChatMessage`. So does a background subagent run, which v2
  * reports as a synthetic message (see `@/lib/opencode/subagent-run`), and the
  * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`), and a session notice that landed
- * between turns (see `@/lib/opencode/session-notices`).
+ * `@/lib/opencode/dispatched-session`), a workflow run's report, the answer
+ * another person sent to a shared page (see `@/lib/share-pages/answer`), and a
+ * session notice that landed between turns (see
+ * `@/lib/opencode/session-notices`).
  */
 
 import React from 'react';
@@ -19,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
+import { QuietAction } from './parts/ToolResultParts';
 import { getLastOutputLine } from './parts/toolOutput';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
@@ -27,6 +30,7 @@ import { readOpenChamberResume, type OpenChamberResume } from '@/lib/opencode/op
 import { fixLoopTitle } from './fixLoopNoticeTitle';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { readWorkflowReport, type WorkflowReport } from '@/lib/workflows/report';
+import { readShareAnswer, type ShareAnswer } from '@/lib/share-pages/answer';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
@@ -35,6 +39,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
@@ -52,6 +57,15 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     const running = message.status === 'running';
     const failed = message.status === 'failed';
     const summary = message.summary.trim();
+    const model = message.status === 'completed' && message.model
+        ? `${message.model.providerID}/${message.model.id}`
+        : undefined;
+    const title = (
+        <>
+            {running ? t('chat.compaction.running') : failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}
+            {model ? <bdi className="font-normal break-all" style={{ color: 'var(--tools-description)' }} title={model}> · {model}</bdi> : null}
+        </>
+    );
 
     // A compaction reads like a thinking row: one collapsible tool-style line
     // whose body is the summary as Markdown. The summary streams in while the
@@ -69,11 +83,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 presentation={{
                     icon: failed ? 'error-warning' : 'scissors',
                     iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
-                    title: running
-                        ? t('chat.compaction.running')
-                        : failed
-                            ? t('chat.compaction.failed')
-                            : t('chat.compaction.completed'),
+                    title,
                     expandLabel: t('chat.compaction.showSummary'),
                     collapseLabel: t('chat.compaction.hideSummary'),
                     markdownVariant: 'assistant',
@@ -81,13 +91,13 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 }}
             />
             {!running && !summary ? (
-                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-title)' }}>
+                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-description)' }}>
                     <Icon
                         name={failed ? 'error-warning' : 'scissors'}
                         className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
                         style={failed ? undefined : { color: 'var(--tools-icon)' }}
                     />
-                    <span className="font-medium">{failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}</span>
+                    <span>{title}</span>
                 </div>
             ) : null}
             {message.error ? (
@@ -314,10 +324,9 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
                     maxHeightClassName: 'max-h-[60vh]',
                 }}
                 actions={(
-                    <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
-                        <Icon name="external-link" className="h-3.5 w-3.5" />
-                        {t('chat.dispatchedSession.open')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
+                        <QuietAction icon="external-link" label={t('chat.dispatchedSession.open')} onClick={handleOpen} />
+                    </HoverTooltip>
                 )}
             />
         </NoticeRow>
@@ -435,15 +444,47 @@ const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: Workfl
     );
 };
 
+/**
+ * The answer another person sent to a page this session shared: one collapsed
+ * line naming who answered and what, opening to what they sent, like a
+ * workflow report. The card of the share call above keeps every recipient's
+ * state.
+ */
+const ShareAnswerNotice: React.FC<{ message: SyntheticMessage; answer: ShareAnswer }> = ({ message, answer }) => {
+    const { t } = useI18n();
+    // The summary in one line; the card above names the page.
+    const summary = answer.summary?.replace(/\s+/g, ' ') ?? answer.title.trim();
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={answer.output}
+                blockId={message.id}
+                presentation={{
+                    icon: 'survey',
+                    title: summary
+                        ? t('chat.sharePage.answer.title', { label: answer.label, summary })
+                        : t('chat.sharePage.answer.titleUntitled', { label: answer.label }),
+                    expandLabel: t('chat.sharePage.answer.show'),
+                    collapseLabel: t('chat.sharePage.answer.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
     const resume = React.useMemo(() => (run || dispatched ? undefined : readOpenChamberResume(message)), [message, run, dispatched]);
     const workflow = React.useMemo(() => (run || dispatched ? undefined : readWorkflowReport(message)), [dispatched, message, run]);
+    const shareAnswer = React.useMemo(() => (run || dispatched || workflow ? undefined : readShareAnswer(message)), [dispatched, message, run, workflow]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
     if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
     if (resume) return <OpenChamberResumeNotice message={message} resume={resume} />;
-    return workflow ? <WorkflowReportNotice message={message} report={workflow} /> : null;
+    if (workflow) return <WorkflowReportNotice message={message} report={workflow} />;
+    return shareAnswer ? <ShareAnswerNotice message={message} answer={shareAnswer} /> : null;
 };
 
 /**

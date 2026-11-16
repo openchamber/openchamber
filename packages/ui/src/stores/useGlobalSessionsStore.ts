@@ -63,9 +63,21 @@ type GlobalSessionsState = {
   rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionHead: () => Promise<boolean>;
+  /**
+   * Reads the newest page for a surface that lists only recent sessions and
+   * keeps no complete list (the desktop Mini Chat). The page is merged without
+   * authority; resolves false when it could not be read.
+   */
+  refreshRecentSessions: () => Promise<boolean>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applySessionMutations: (mutations: readonly GlobalSessionMutation[]) => void;
+  /**
+   * A change to the session that waits for its turn's end
+   * (`session-event-router.ts`) is still a mutation: a load that started
+   * before it must not overwrite the record it will apply to. Publishes no list.
+   */
+  noteDeferredSessionUpdate: (sessionId: string) => void;
   upsertSession: (session: Session) => void;
   upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
@@ -77,6 +89,9 @@ type GlobalSessionsState = {
 
 const PAGE_SIZE = 500;
 const HEAD_PAGE_SIZE = 20;
+// The Mini Chat switcher lists ten root sessions; their sub-agent sessions and
+// archived records share the newest-first page with them.
+const RECENT_PAGE_SIZE = 50;
 const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
 type DirectoryRefreshEpoch = {
   isCurrent: () => boolean;
@@ -118,6 +133,7 @@ const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promi
 
 let inflightLoad: Promise<LoadResult> | null = null;
 let inflightHead: Promise<boolean> | null = null;
+let inflightRecent: Promise<boolean> | null = null;
 // True while a page of an unfinished load is being merged. The managed-chats
 // snapshot is written from complete loads only, never from a partial list.
 let mergingSessionPage = false;
@@ -142,6 +158,26 @@ const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> =
   return next;
 };
 
+// A `session.patched` can change any of these without advancing `updated`, so
+// a signature without them reads a usage or selection patch as no change and
+// drops it.
+const sessionUsageSignature = (session: Session): string => [
+  sessionSpendSignature(session),
+  sessionSelectionSignature(session),
+].join(':');
+
+// What every step of a running turn changes (OpenCode reports usage after each
+// step). The sidebar paints none of it.
+const sessionSpendSignature = (session: Session): string => `${session.cost ?? 0}:${JSON.stringify(session.tokens ?? null)}`;
+
+const sessionSelectionSignature = (session: Session): string => [
+  JSON.stringify(session.model ?? null),
+  JSON.stringify(session.permissions ?? null),
+  JSON.stringify(session.outcome ?? null),
+  JSON.stringify(session.revert ?? null),
+  session.subpath ?? null,
+].join(':');
+
 const getSessionSignature = (session: Session): string => {
   return [
     session.id,
@@ -156,6 +192,7 @@ const getSessionSignature = (session: Session): string => {
     session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
+    sessionUsageSignature(session),
   ].join(':');
 };
 
@@ -168,18 +205,28 @@ const getSessionStructuralSignature = (session: Session): string => {
     session.time?.created ?? 0,
     session.time?.archived ?? 0,
     // A finished turn and a view of it decide the unread mark, so they publish
-    // at once instead of waiting with the recency-only updates.
+    // at once instead of waiting with the deferred updates. So does a
+    // selection change. Spend (cost, tokens) is left out: each step of a turn
+    // changes it, and publishing it rebuilt the whole sidebar once per step.
     session.time?.idle ?? 0,
     session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
+    sessionSelectionSignature(session),
   ].join(':');
 };
 
-export const isGlobalSessionRecencyOnlyUpdate = (existing: Session, incoming: Session): boolean => {
+/**
+ * Whether `incoming` differs from the published `existing` only in what a
+ * running turn changes at every step: `time.updated` and spend. Such an update
+ * waits for the turn's end (`session-event-router.ts`); anything else
+ * publishes at once.
+ */
+export const isGlobalSessionDeferrableUpdate = (existing: Session, incoming: Session): boolean => {
   const merged = mergeSessionDirectoryMetadata(incoming, existing);
-  return existing.time?.updated !== merged.time?.updated
-    && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
+  const changed = existing.time?.updated !== merged.time?.updated
+    || sessionSpendSignature(existing) !== sessionSpendSignature(merged);
+  return changed && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
 };
 
 /**
@@ -738,6 +785,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => applySessionMutations(state, mutations));
   },
 
+  noteDeferredSessionUpdate: (sessionId) => {
+    set((state) => mutationRevisionPatch(state, [sessionId]));
+  },
+
   // The module-init seed and runtime reset read the persisted snapshot before
   // the server-resolved chats root is available, so relocated directories are
   // filtered out of the stale sidebar paint until this runs after the warm-up.
@@ -756,6 +807,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     loadGeneration += 1;
     inflightLoad = null;
     inflightHead = null;
+    inflightRecent = null;
     getDirectoryRefreshEpoch();
     set({
       ...buildManagedChatSessionsState(readPersistedSessionSeed()),
@@ -921,6 +973,52 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     inflightHead = headPromise;
     void headPromise.finally(() => { if (inflightHead === headPromise) inflightHead = null; });
     return headPromise;
+  },
+
+  refreshRecentSessions: async () => {
+    // A complete list is kept current from its head; a running complete load
+    // answers for this one.
+    if (get().hasLoaded || inflightLoad) return get().refreshSessionHead();
+    if (inflightRecent) return inflightRecent;
+    const generation = loadGeneration;
+    const baselineRevision = get().mutationRevision;
+    const recentPromise = (async () => {
+      try {
+        await ensureChatsRootDirectory();
+        if (generation !== loadGeneration) return false;
+        get().rehydrateManagedChatSessions();
+        let spaceMarks: SpaceMark[] = [];
+        const sessions = await listGlobalSessionPages(listSessionPage, {
+          pageSize: RECENT_PAGE_SIZE,
+          onSpaces: (spaces) => { spaceMarks = spaces ?? []; },
+          stopAfterPage: () => true,
+        });
+        if (generation !== loadGeneration) return false;
+        // A complete load that started meanwhile publishes its own snapshot.
+        if (get().hasLoaded || inflightLoad) return true;
+        useSpacesStore.getState().applyMarks(spaceMarks);
+        const page = splitGlobalSessionsByArchived(sessions);
+        mergingSessionPage = true;
+        try {
+          set((state) => mergeSessionPage(state, page.active, page.archived, baselineRevision));
+        } finally {
+          mergingSessionPage = false;
+        }
+        const committed = get().entityById;
+        raiseSessionOrderingBaselines(page.active.flatMap((session) => {
+          const record = committed.get(session.id);
+          return record && !record.time?.archived ? [record] : [];
+        }));
+        return true;
+      } catch (error) {
+        // The lists stay as they were: an unread page says nothing about them.
+        if (generation === loadGeneration) console.warn('[GlobalSessions] Failed to read recent sessions:', error);
+        return false;
+      }
+    })();
+    inflightRecent = recentPromise;
+    void recentPromise.finally(() => { if (inflightRecent === recentPromise) inflightRecent = null; });
+    return recentPromise;
   },
 
   refreshSessionsForDirectories: async (directories, fallbackActive) => {
@@ -1122,6 +1220,34 @@ export const ensureGlobalSessionsLoaded = async (fallbackActive?: Session[]): Pr
 export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise<LoadResult> => {
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
 };
+
+// When the last complete load committed on this runtime; 0 before one. A
+// complete load always publishes a new `authoritativeSessions`, and a runtime
+// switch clears it.
+let completeLoadAt = 0;
+useGlobalSessionsStore.subscribe((state, previous) => {
+  if (state.authoritativeSessions === previous.authoritativeSessions) return;
+  completeLoadAt = state.authoritativeSessions ? Date.now() : 0;
+});
+
+/**
+ * The read for a list that has no poller and reads when it is shown (the
+ * mobile sessions sheet). The event stream keeps the list current, so a
+ * complete snapshot younger than `completeMaxAgeMs` is checked at its head
+ * only; an older, missing or failed one is read again in full. With thousands
+ * of sessions the complete read is many pages, which every opening of the
+ * sheet paid for through the relay.
+ */
+export const refreshGlobalSessionsWhenShown = async (completeMaxAgeMs: number, fallbackActive?: Session[]): Promise<void> => {
+  const state = useGlobalSessionsStore.getState();
+  const fresh = completeLoadAt > 0 && state.status === 'ready' && Date.now() - completeLoadAt < completeMaxAgeMs;
+  if (fresh) await state.refreshSessionHead();
+  else await state.loadSessions(fallbackActive);
+};
+
+export const refreshRecentGlobalSessions = (): Promise<boolean> => (
+  useGlobalSessionsStore.getState().refreshRecentSessions()
+);
 
 export const refreshGlobalSessionsForDirectories = async (
   directories: Iterable<string>,

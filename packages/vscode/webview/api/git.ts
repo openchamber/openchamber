@@ -3,7 +3,8 @@
  * Uses bridge messages to communicate with the extension host
  */
 
-import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { BridgeRequestError, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from '@openchamber/ui/lib/gitRepositoryUnreadable';
 import { GitNetworkOperationRequestError } from '@openchamber/ui/lib/api/types';
 import { gitIdentityProfilesSchema } from '@openchamber/ui/lib/api/git-identity';
 import { readRepositoryContext, readRepositoryRemotes } from './git-remotes';
@@ -19,6 +20,7 @@ import type {
   GitWorktreeValidationResult,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  TeardownGitWorktreePayload,
   GitWorktreeSnapshotPayload,
   GitWorktreeSnapshotResult,
   GitIdentityProfile,
@@ -36,6 +38,21 @@ import type {
 const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeBootstrapStatus> => {
   return sendBridgeMessage<GitWorktreeBootstrapStatus>('api:git/worktrees/bootstrap-status', { directory });
 };
+
+// No bridge timeout: the extension host runs the teardown commands first and
+// gives them 5 minutes. Giving up in the webview would report a failure, put
+// the sessions back, and then watch the host remove the worktree anyway.
+const removeWorktreeThroughBridge = (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => (
+  sendBridgeMessageWithOptions<{ success: boolean }>('api:git/worktrees', {
+    directory,
+    method: 'DELETE',
+    body: {
+      directory: payload.directory,
+      deleteLocalBranch: payload.deleteLocalBranch === true,
+      teardownCommand: payload.teardownCommand,
+    },
+  }, { timeoutMs: 0 })
+);
 
 // Author profiles live in webview memory for the lifetime of the view, as they
 // always have. Nothing applies them to a repository in this runtime, and the
@@ -197,7 +214,15 @@ const runCompatibilityOperation = async (entry: CompatibilityOperation): Promise
 
 export const createVSCodeGitAPI = (): GitAPI => ({
   checkIsGitRepository: async (directory: string): Promise<boolean> => {
-    return sendBridgeMessage<boolean>('api:git/check', { directory });
+    try {
+      return await sendBridgeMessage<boolean>('api:git/check', { directory });
+    } catch (error) {
+      // The extension's probe names a Git that could not answer with this code.
+      if (error instanceof BridgeRequestError && error.code === GIT_REPOSITORY_UNREADABLE) {
+        throw new GitRepositoryUnreadableError(error.message);
+      }
+      throw error;
+    }
   },
 
   getGitStatus: async (directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> => {
@@ -293,23 +318,15 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   createGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
     if (payload.changeRequestSource || payload.ensureRemoteUrl) return unsupportedNetworkOperation();
-    return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees', {
+    // The host waits for a project's create command, which may run for minutes.
+    return sendBridgeMessageWithOptions<GitWorktreeCreateResult>('api:git/worktrees', {
       directory,
       method: 'POST',
       ...(payload || {}),
-    });
+    }, payload.createCommand ? { timeoutMs: 0 } : undefined);
   },
 
-  deleteGitWorktree: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => {
-    return sendBridgeMessage<{ success: boolean }>('api:git/worktrees', {
-      directory,
-      method: 'DELETE',
-      body: {
-        directory: payload.directory,
-        deleteLocalBranch: payload.deleteLocalBranch === true,
-      },
-    });
-  },
+  deleteGitWorktree: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => removeWorktreeThroughBridge(directory, payload),
 
   planNetworkOperation: async (request: GitNetworkOperationRequest): Promise<GitNetworkOperationPlan> => {
     if (request.operation !== 'delete-remote-branch') return unsupportedNetworkOperation();
@@ -486,16 +503,14 @@ export const createVSCodeGitAPI = (): GitAPI => ({
         ...(payload || {}),
       });
     },
-    remove: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => {
-      return sendBridgeMessage<{ success: boolean }>('api:git/worktrees', {
+    remove: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => removeWorktreeThroughBridge(directory, payload),
+    teardown: async (directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }> => (
+      sendBridgeMessageWithOptions<{ success: boolean }>('api:git/worktrees/teardown', {
         directory,
-        method: 'DELETE',
-        body: {
-          directory: payload.directory,
-          deleteLocalBranch: payload.deleteLocalBranch === true,
-        },
-      });
-    },
+        worktreeDirectory: payload.directory,
+        teardownCommand: payload.teardownCommand,
+      }, { timeoutMs: 0 })
+    ),
     snapshot: async (directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult> => {
       return sendBridgeMessage<GitWorktreeSnapshotResult>('api:git/worktrees/snapshot', { directory, ref: payload.ref });
     },

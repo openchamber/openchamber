@@ -24,6 +24,36 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('round-trips custom selection approval text and clearing it without resetting omitted preferences', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      for (const text of ['  认可此方案 👍  ', '']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ selectionApprovalText: text })));
+        expect(parsed).toEqual({ selectionApprovalText: text });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(readAutoSaveSnapshot().selectionApprovalText).toBe(text);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setSelectionApprovalText('other');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().selectionApprovalText).toBe(text);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      useUIStore.getState().setSelectionApprovalText('Keep this');
+      applySettingsToStores({});
+      expect(useUIStore.getState().selectionApprovalText).toBe('Keep this');
+      expect(parseSettingsDocument({ selectionApprovalText: null })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 42 })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 'x'.repeat(1001) })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
   test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {
     const dom = installHookTestDom();
     window.__zustand_config_store__ = useConfigStore;
@@ -162,6 +192,40 @@ describe('settings registry', () => {
     }
   });
 
+  test('section order: a saved default moves on apply, a dragged order stays', () => {
+    const original = useUIStore.getState();
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    // Sections added after an order was saved land in it: Tasks after Subagents.
+    const savedWithTasks = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    try {
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder.slice(0, 4)).toEqual(['session', 'repository', 'usage', 'contextSources']);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(false);
+
+      useUIStore.getState().setWorkStatusSectionOrder(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+
+      useUIStore.setState({ workStatusSectionOrderExplicit: false });
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+    } finally {
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('section order: the local store migration moves a saved default', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    if (!migrate) throw new Error('Expected a migration');
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(await migrate({ workStatusSectionOrder: savedDefault }, 26)).toMatchObject({
+      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned'],
+    });
+  });
+
   test('restores section order from the actual local persisted projection', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();
@@ -252,6 +316,16 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
   });
 
+  test('reads the old Wide chat layout switch as the Full chat width until a width is picked', () => {
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'full' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: false }))
+      .toEqual({ wideChatLayoutEnabled: false, chatWidth: 'default' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true, chatWidth: 'wider' }))
+      .toEqual({ wideChatLayoutEnabled: true, chatWidth: 'wider' });
+    expect(parseSettingsDocument({ chatWidth: 'wide' })).toEqual({});
+  });
+
   test('applies only the fields a snapshot carries and leaves the rest alone', () => {
     useUIStore.getState().setTerminalShell('fish');
     useUIStore.getState().setShowReasoningTraces(true);
@@ -316,4 +390,22 @@ describe('custom stt endpoint path setting', () => {
     expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
     expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
   });
+});
+
+test('the server\'s message search value replaces whatever the client remembered', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { applySettingsToStores } = await import('./registry');
+  const before = useUIStore.getState().messageSearchEnabled;
+  try {
+    // A client that remembered the old default (off) follows a server that resolved it to on.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({ messageSearchEnabled: true });
+    expect(useUIStore.getState().messageSearchEnabled).toBe(true);
+    // A settings payload without the key (VS Code) leaves the client's value alone.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({});
+    expect(useUIStore.getState().messageSearchEnabled).toBe(false);
+  } finally {
+    useUIStore.setState({ messageSearchEnabled: before });
+  }
 });

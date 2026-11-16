@@ -23,8 +23,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
-import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectEntry, TrackerContainer } from '@/lib/api/types';
@@ -235,25 +235,19 @@ export const SourceBoardRepositoryPicker: React.FC<{
                 <Button variant="ghost" size="sm" aria-label={ariaLabel} aria-haspopup="dialog" onClick={() => setOpen(true)} className={triggerClass}>
                     {triggerContent}
                 </Button>
-                <MobileOverlayPanel open={open} title={ariaLabel} onClose={() => { setOpen(false); setQuery(''); }}>
-                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                        <Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-9" />
-                        <div className="flex flex-col">
-                            {entries.length === 0 ? (
-                                <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
-                            ) : entries.map((entry) => (
-                                <button
-                                    key={entry.value}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => choose(entry)}
-                                >
-                                    <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                                    {entry.value === selectedValue ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                <MobileOverlayPanel
+                    open={open}
+                    title={ariaLabel}
+                    onClose={() => { setOpen(false); setQuery(''); }}
+                    subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={searchLabel} />}
+                >
+                    {entries.length === 0 ? (
+                        <div role="status" className="px-3 py-6 text-center typography-meta text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
+                    ) : entries.map((entry) => (
+                        <MobileSheetRow key={entry.value} selected={entry.value === selectedValue} onClick={() => choose(entry)}>
+                            {entry.label}
+                        </MobileSheetRow>
+                    ))}
                 </MobileOverlayPanel>
             </>
         );

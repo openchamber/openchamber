@@ -41,7 +41,7 @@ describe('collapsed activity scalar selector', () => {
       const watches = usePrWatchStore.getState();
       replaceGlobalSessionStatusById(new Map());
       const watch: PrWatch = { sessionID: 'watched', directory: '/workspace', url: 'https://github.com/org/repo/pull/1', number: 1, title: 'Review', status: 'pending', startedAt: 1 };
-      usePrWatchStore.setState({ bySession: new Map([['watched', watch]]) });
+      usePrWatchStore.setState({ bySession: new Map([['watched', [watch]]]) });
       usePendingQuestionsStore.setState({ bySession: scenario.question
         ? new Map([['watched', { directory: '/workspace', title: 'Pick', callID: 'question' }]]) : new Map() });
       if (scenario.permission) applyGlobalBlockingRequestEvents('/workspace', [{

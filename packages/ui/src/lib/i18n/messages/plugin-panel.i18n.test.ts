@@ -38,6 +38,8 @@ const requiredKeys = [
   'contextRail.surface.plugin.badgeAriaPlural',
   'contextRail.surface.plugin.badgeTooltipSingle',
   'contextRail.surface.plugin.badgeTooltipPlural',
+  'contextRail.surface.plugin.listeningAria',
+  'contextRail.surface.plugin.listeningTooltip',
   'chat.chatInput.toast.guestCommandNothing',
   'chat.chatInput.toast.guestCommandFailed',
   'chat.chatInput.toast.guestCommandUnavailable',

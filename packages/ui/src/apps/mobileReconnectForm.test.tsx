@@ -54,7 +54,7 @@ test('manual reconnect preserves secure headers through success and password can
   let connected = 0;
   const onConnected = () => { connected += 1; };
   const input = async (selector: string, value: string) => {
-    const element = container.querySelector<HTMLInputElement>(selector);
+    const element = document.querySelector<HTMLInputElement>(selector);
     if (!element) throw new Error(`Missing input ${selector}`);
     await act(async () => {
       Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value')!.set!.call(element, value);
@@ -63,8 +63,13 @@ test('manual reconnect preserves secure headers through success and password can
     });
   };
   const click = async (selector: string) => {
-    const element = container.querySelector<HTMLButtonElement>(selector);
+    const element = document.querySelector<HTMLButtonElement>(selector);
     if (!element) throw new Error(`Missing button ${selector}`);
+    await act(async () => element.click());
+  };
+  const clickText = async (text: string) => {
+    const element = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === text);
+    if (!element) throw new Error(`Missing button ${text}`);
     await act(async () => element.click());
   };
   const settle = async (done: () => boolean) => {
@@ -78,8 +83,9 @@ test('manual reconnect preserves secure headers through success and password can
     const saved = (await upsertMobileConnection({ label: 'Protected', candidates: [{ kind: 'direct', url }], requestHeaders: config }))[0];
     const secretSnapshot = [...secrets.entries()];
     await act(async () => root.render(<I18nProvider><MobileConnectionWelcome onConnected={onConnected} /></I18nProvider>));
+    await clickText('Connect by address');
     await input('input[type="url"]', url);
-    await act(async () => container.querySelector('input[type="url"]')!.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () => document.querySelector('input[type="url"]')!.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     await settle(() => connected === 1);
     expect(received.length).toBeGreaterThan(0);
     expect(received.every((header) => header === 'synthetic-secret')).toBe(true);
@@ -88,21 +94,24 @@ test('manual reconnect preserves secure headers through success and password can
 
     authenticated = false;
     received.length = 0;
-    await act(async () => container.querySelector('input[type="url"]')!.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    await settle(() => Boolean(container.querySelector('input[type="password"]')));
-    await click('button[type="button"]');
+    await act(async () => document.querySelector('input[type="url"]')!.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle(() => Boolean(document.querySelector('input[type="password"]')));
+    await clickText('Use another server');
     expect(await loadMobileConnectionHeaders(saved.id)).toEqual(config);
     expect([...secrets.entries()]).toEqual(secretSnapshot);
     expect(received.every((header) => header === 'synthetic-secret')).toBe(true);
 
     await act(async () => root.render(<I18nProvider><MobileInstancesSurface onConnect={onConnected} onActiveConnectionDeleted={() => {}} /></I18nProvider>));
-    await settle(() => Boolean(container.querySelector('[aria-label="Edit"]')));
-    await click('[aria-label="Edit"]');
-    await settle(() => Boolean(container.querySelector('input[value="synthetic-secret"]')));
+    await settle(() => Boolean(document.querySelector('[aria-label="Actions for Protected"]')));
+    expect(document.body.textContent).toContain('Connected · Local network');
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Connect')).toBe(false);
+    await click('[aria-label="Actions for Protected"]');
+    await clickText('Edit');
+    await settle(() => Boolean(document.querySelector('input[value="synthetic-secret"]')));
     await click('[aria-label="Remove header"]');
-    expect(container.querySelector('form')!.checkValidity()).toBe(true);
+    expect(document.querySelector('form')!.checkValidity()).toBe(true);
     await click('form button[type="submit"]');
-    await settle(() => !container.querySelector('form'));
+    await settle(() => !document.querySelector('form'));
     expect(await loadMobileConnectionHeaders(saved.id)).toBeUndefined();
     expect((await loadMobileConnections())[0].requestHeadersKey).toBeUndefined();
     expect(secrets.size).toBe(0);
@@ -110,14 +119,15 @@ test('manual reconnect preserves secure headers through success and password can
     const relay = { relayUrl: 'wss://relay.example/tunnel', serverId: 'relay-only', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' } };
     const relaySaved = (await upsertMobileConnection({ label: 'Relay only', candidates: [{ kind: 'relay', relay }] }))[0];
     await act(async () => root.render(<I18nProvider><MobileInstancesSurface key="relay" onConnect={onConnected} onActiveConnectionDeleted={() => {}} /></I18nProvider>));
-    await settle(() => Boolean(container.querySelector('[aria-label="Edit"]')));
-    await click('[aria-label="Edit"]');
-    await settle(() => Boolean(container.querySelector('form')));
-    expect(container.querySelector('form input[type="url"]')).toBeNull();
-    expect(container.querySelector('form fieldset')).toBeNull();
+    await settle(() => Boolean(document.querySelector('[aria-label="Actions for Relay only"]')));
+    await click('[aria-label="Actions for Relay only"]');
+    await clickText('Edit');
+    await settle(() => Boolean(document.querySelector('form')));
+    expect(document.querySelector('form input[type="url"]')).toBeNull();
+    expect(document.querySelector('form fieldset')).toBeNull();
     await input('form input', '');
-    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    await settle(() => !container.querySelector('form'));
+    await act(async () => document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle(() => !document.querySelector('form'));
     const retainedRelay = (await loadMobileConnections()).find((connection) => connection.id === relaySaved.id);
     expect(retainedRelay?.label).toBe('Relay only');
     expect(retainedRelay?.candidates).toEqual([{ kind: 'relay', relay }]);

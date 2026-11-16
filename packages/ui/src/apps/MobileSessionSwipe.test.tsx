@@ -4,10 +4,10 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { toast } from 'sonner';
 
-import { I18nProvider } from '@/lib/i18n';
-import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH } from './MobileSessionSwipe';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
+import { MobileSessionRowActions, MobileSwipeActionsRow, ROW_ACTIONS_WIDTH, ROW_ACTION_SLOT_WIDTH } from './MobileSessionSwipe';
 
-test('mobile session swipe actions copy the exact ID and close only after a successful copy', async () => {
+test('mobile swipe keeps every action reachable in narrow LTR and RTL rows and closes after copying', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -34,6 +34,8 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
   Object.defineProperty(dom.document, 'execCommand', { configurable: true, value: () => false });
 
   const sessionId = 'ses_exact-mobile-session-id_42';
+  const originalLocale = useI18nStore.getState().locale;
+  let extraActions = false;
   const changes: boolean[] = [];
   let setRevealed: (next: boolean) => void = () => {};
   const container = document.createElement('div');
@@ -53,7 +55,7 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
 
     return (
       <MobileSwipeActionsRow
-        actionsWidth={ROW_ACTIONS_WIDTH}
+        actionsWidth={ROW_ACTIONS_WIDTH + (extraActions ? 3 * ROW_ACTION_SLOT_WIDTH : 0)}
         revealed={revealed}
         onRevealedChange={onRevealedChange}
         actions={(
@@ -63,6 +65,9 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
             revealed={revealed}
             confirmingDelete={false}
             onRevealedChange={onRevealedChange}
+            pin={extraActions ? { pinned: false, onToggle: () => undefined } : undefined}
+            priority={extraActions ? { priority: false, onToggle: () => undefined } : undefined}
+            work={extraActions ? { inWork: false, onToggle: () => undefined } : undefined}
           />
         )}
       >
@@ -104,8 +109,51 @@ test('mobile session swipe actions copy the exact ID and close only after a succ
     expect(errorToast.mock.calls[0]?.[0]).toBe('Failed to copy session ID');
     expect(changes).toEqual([]);
     expect(container.querySelector('[aria-hidden="false"] [aria-label="Copy session ID"]')).not.toBeNull();
+
+    extraActions = true;
+    await act(async () => root.render(<I18nProvider><Harness /></I18nProvider>));
+    const row = container.querySelector<HTMLDivElement>('.overflow-hidden');
+    const actions = row?.querySelector<HTMLDivElement>('[aria-hidden]');
+    const content = actions?.nextElementSibling;
+    if (!row || !actions || !(content instanceof HTMLElement)) throw new Error('Missing swipe row');
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 296 });
+    expect(actions.style.width).toBe('336px');
+    expect(actions.style.maxWidth).toBe('100%');
+    expect(actions.querySelectorAll('button')).toHaveLength(7);
+
+    const touch = (type: string, clientX: number) => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperty(event, 'touches', { value: [{ clientX, clientY: 0 }] });
+      row.dispatchEvent(event);
+    };
+    for (const locale of ['en', 'ar'] as const) {
+      await act(async () => {
+        useI18nStore.setState({ locale });
+        setRevealed(false);
+      });
+      changes.length = 0;
+      const sign = locale === 'ar' ? -1 : 1;
+      const clamp = sign === -1 ? 'max' : 'min';
+      await act(async () => {
+        touch('touchstart', 0);
+        // Over half the 296px row, but under half the 336px preferred strip.
+        touch('touchmove', sign * 150);
+        touch('touchend', sign * 150);
+      });
+      expect(changes).toEqual([true]);
+      expect(content.style.transform).toBe(`translateX(${clamp}(${sign * 336}px, ${sign * 100}%))`);
+      expect(getCopyButton().tabIndex).toBe(0);
+      await act(async () => {
+        touch('touchstart', 0);
+        touch('touchmove', -sign * 150);
+        touch('touchend', -sign * 150);
+      });
+      expect(changes).toEqual([true, false]);
+      expect(content.style.transform).toBe('none');
+    }
   } finally {
     await act(async () => root.unmount());
+    useI18nStore.setState({ locale: originalLocale });
     clipboard.mockRestore();
     successToast.mockRestore();
     errorToast.mockRestore();

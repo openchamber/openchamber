@@ -24,9 +24,8 @@ it('a foreground server keeps its selected binary after dropping an app shell en
     process.env[INJECTED_ENV_KEY] = 'OPENCODE_BINARY,OPENCHAMBER_DIST_DIR';
     const serve = createServeCommand({
       serverPath: fixture,
-      bunBin: process.execPath,
       checkOpenCodeCLI: async () => selectedBinary,
-      getPreferredServerRuntime: () => 'node',
+      getServerRuntimeBinary: () => process.execPath,
       setForegroundServerActive: () => {},
       setForegroundShutdown: () => {},
     });
@@ -60,9 +59,8 @@ it('a front door starts without looking for an OpenCode of its own', async () =>
     let looked = 0;
     const serve = createServeCommand({
       serverPath: fixture,
-      bunBin: process.execPath,
       checkOpenCodeCLI: async () => { looked += 1; throw new Error('Unable to locate the opencode CLI'); },
-      getPreferredServerRuntime: () => 'node',
+      getServerRuntimeBinary: () => process.execPath,
       setForegroundServerActive: () => {},
       setForegroundShutdown: () => {},
     });

@@ -39,30 +39,10 @@ afterEach(async () => {
   }
 });
 
-const archiveButton = () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Search the archive') ?? null;
+test('says nothing matched and sends the user nowhere else: the search already covered the archive', async () => {
+  await act(async () => root.render(<I18nProvider><SidebarSearchEmptyState /></I18nProvider>));
 
-test('hands the query to the Archive page and clears the sidebar search', async () => {
-  let resets = 0;
-  await act(async () => root.render(
-    <I18nProvider>
-      <SidebarSearchEmptyState query="relay" showArchive resetSessionSearch={() => { resets += 1; }} />
-    </I18nProvider>,
-  ));
   expect(document.body.textContent).toContain('No matching sessions');
-  const button = archiveButton();
-  if (!button) throw new Error('Archive button missing');
-  await act(async () => button.click());
-  expect(useUIStore.getState().isArchivePageOpen).toBe(true);
-  expect(useUIStore.getState().archivePageSearch).toBe('relay');
-  expect(resets).toBe(1);
-});
-
-test('offers no Archive page where there is none', async () => {
-  await act(async () => root.render(
-    <I18nProvider>
-      <SidebarSearchEmptyState query="relay" showArchive={false} resetSessionSearch={() => undefined} />
-    </I18nProvider>,
-  ));
-  expect(document.body.textContent).toContain('No matching sessions');
-  expect(archiveButton()).toBeNull();
+  expect(document.querySelectorAll('button, a')).toHaveLength(0);
+  expect(useUIStore.getState().isArchivePageOpen).toBe(false);
 });

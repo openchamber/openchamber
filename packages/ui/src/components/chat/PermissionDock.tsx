@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { PermissionRequest } from '@/types/permission';
 import { useScopedBlockingPermissions } from '@/sync/sync-context';
@@ -100,6 +101,8 @@ const PermissionDockRequest: React.FC<{
             ariaLabel={title}
             compact={collapsed}
             header={<>
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <button
                     type="button"
                     onClick={onToggleCollapsed}
@@ -121,24 +124,30 @@ const PermissionDockRequest: React.FC<{
                         </span>
                     ) : null}
                 </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{collapsed ? t('chat.permissionDock.expandAria') : t('chat.permissionDock.collapseAria')}</TooltipContent>
+                </Tooltip>
                 {/* One dot per pending request, the current one solid. */}
                 {!collapsed && permissions.length > 1 ? (
                     <div className="flex shrink-0 items-center gap-1" role="tablist">
                         {permissions.map((entry, index) => {
                             const label = t('chat.permissionDock.stepAria', { index: String(index + 1), tool: getPermissionToolPresentation(entry).name });
                             return (
-                                <button
-                                    key={entry.id}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={index === currentIndex}
-                                    aria-label={label}
-                                    title={label}
-                                    onClick={() => onSelect(entry.id)}
-                                    className="flex size-4 items-center justify-center"
-                                >
-                                    <span className={cn('block size-1.5 rounded-full transition-colors', index === currentIndex ? 'bg-primary' : 'bg-foreground/15')} />
-                                </button>
+                                <Tooltip key={entry.id}>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={index === currentIndex}
+                                            aria-label={label}
+                                            onClick={() => onSelect(entry.id)}
+                                            className="flex size-4 items-center justify-center"
+                                        >
+                                            <span className={cn('block size-1.5 rounded-full transition-colors', index === currentIndex ? 'bg-primary' : 'bg-foreground/15')} />
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+                                </Tooltip>
                             );
                         })}
                     </div>

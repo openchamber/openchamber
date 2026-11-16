@@ -6,6 +6,7 @@ import { useOpenChildSession } from '@/components/chat/work-status/useOpenChildS
 import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -114,15 +115,22 @@ const AgentDetails: React.FC<{ run: WorkflowRun; agent: WorkflowAgent; onOpenSes
             </div>
           </section>
           <section>
-            <button
-              type="button"
-              onClick={() => setPromptOpen((open) => !open)}
-              aria-expanded={promptOpen}
-              className="flex items-center gap-1 typography-micro font-medium text-muted-foreground hover:text-foreground"
-            >
-              <Icon name="arrow-right-s" className={cn('size-3.5 transition-transform', promptOpen && 'rotate-90 rtl:-rotate-90')} />
-              {t('workflows.panel.agent.prompt')}
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setPromptOpen((open) => !open)}
+                  aria-expanded={promptOpen}
+                  className="flex items-center gap-1 typography-micro font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <Icon name="arrow-right-s" className={cn('size-3.5 transition-transform', promptOpen && 'rotate-90 rtl:-rotate-90')} />
+                  {t('workflows.panel.agent.prompt')}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>
+                {t(promptOpen ? 'contextTooltips.workspace.workflow.promptHide' : 'contextTooltips.workspace.workflow.promptShow')}
+              </TooltipContent>
+            </Tooltip>
             {promptOpen ? (
               <ScrollableOverlay as="pre" dir="auto" outerClassName="mt-1 max-h-72" className="whitespace-pre-wrap break-words font-mono typography-micro text-foreground" disableHorizontal>{detail.prompt}</ScrollableOverlay>
             ) : null}
@@ -131,10 +139,15 @@ const AgentDetails: React.FC<{ run: WorkflowRun; agent: WorkflowAgent; onOpenSes
       ) : null}
       {onOpenSession ? (
         <div>
-          <Button type="button" size="xs" variant="ghost" onClick={onOpenSession}>
-            <Icon name="chat-4" className="size-3.5" />
-            {t('workflows.panel.agent.openSession')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" size="xs" variant="ghost" onClick={onOpenSession}>
+                <Icon name="chat-4" className="size-3.5" />
+                {t('workflows.panel.agent.openSession')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextTooltips.workspace.workflow.agentSession')}</TooltipContent>
+          </Tooltip>
         </div>
       ) : null}
     </div>

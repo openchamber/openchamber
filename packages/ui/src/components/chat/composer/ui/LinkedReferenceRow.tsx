@@ -12,6 +12,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 
 export interface LinkedReferenceRowProps {
@@ -46,12 +47,12 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
     return (
         <div
             className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background ps-2 pe-1 text-xs"
-            title={title}
         >
             <button
                 type="button"
                 onClick={onReopenPicker}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-start hover:opacity-80 transition-opacity"
+                title={title}
             >
                 {author?.avatarUrl && !authorBroken ? (
                     <img
@@ -66,39 +67,48 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                     </span>
                 ) : null}
                 <span className="text-muted-foreground flex-shrink-0">
-                    {numberLabel}
+                    {numberLabel === title ? null : numberLabel}
                     {author ? (
                         <span className="ms-1">
                             {t('chat.chatInput.linked.byAuthor', { author: author.login })}
                         </span>
                     ) : null}
                 </span>
-                <span className="text-foreground truncate max-w-[240px]">{title}</span>
+                <span dir="auto" className="text-foreground truncate max-w-[240px]">{title}</span>
                 {branches ? (
-                    <span className="min-w-0 truncate text-muted-foreground">
+                    <span dir="ltr" className="min-w-0 truncate text-muted-foreground">
                         {branches.head} → {branches.base}
                     </span>
                 ) : null}
             </button>
             <span className="flex items-center flex-shrink-0">
-                <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
-                    aria-label={openInBrowserLabel}
-                >
-                    <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
-                </a>
-                <button
-                    type="button"
-                    onClick={onRemove}
-                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
-                    aria-label={removeLabel}
-                    title={removeLabel}
-                >
-                    <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
+                {url ? <Tooltip>
+                    <TooltipTrigger asChild>
+                        <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                            aria-label={openInBrowserLabel}
+                        >
+                            <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
+                        </a>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{openInBrowserLabel}</TooltipContent>
+                </Tooltip> : null}
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={onRemove}
+                            className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                            aria-label={removeLabel}
+                        >
+                            <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{removeLabel}</TooltipContent>
+                </Tooltip>
             </span>
         </div>
     );

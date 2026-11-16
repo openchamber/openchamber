@@ -13,7 +13,7 @@
 
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 
-export const AGENT_BROWSER_PARTITION = 'persist:openchamber-agent-browser';
+export const AGENT_BROWSER_PARTITION = 'persist:openchamber-browser-agent';
 const USER_BROWSER_PARTITION = 'persist:openchamber-browser';
 
 /** Space previews retain their own proxy-restricted session. */

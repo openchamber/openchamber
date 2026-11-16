@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { runtimeFetch, type RuntimeFetchOptions } from '@/lib/runtime-fetch';
+import { useUIStore } from '@/stores/useUIStore';
 
 const SMALL_MODEL_TOAST_ID = 'small-model-unavailable';
 
@@ -9,6 +10,10 @@ const notifySmallModelUnavailable = (): void => {
   toast.error(formatMessage(dictionary, 'smallModel.toast.unavailable.title'), {
     id: SMALL_MODEL_TOAST_ID,
     description: formatMessage(dictionary, 'smallModel.toast.unavailable.description'),
+    action: {
+      label: formatMessage(dictionary, 'smallModel.toast.unavailable.action'),
+      onClick: () => useUIStore.getState().openSettingsAt('sessions', 'sessions.small-model'),
+    },
   });
 };
 

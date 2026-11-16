@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import {
   formatShortcutForDisplay,
   getShortcutBindingConflicts,
+  isMenuAcceleratorCombo,
   isRiskyBrowserShortcut,
   keyToShortcutToken,
   resolveShortcutEventKey,
@@ -67,9 +68,15 @@ interface RecordingOptions {
   maxKeys: number;
   /** On macOS Control and Command are separate keys and record separately. */
   macModifiers: boolean;
+  /** Backspace records as a key; by default it removes the last chord. */
+  recordBackspace: boolean;
 }
 
-const DEFAULT_RECORDING_OPTIONS: RecordingOptions = { maxKeys: DEFAULT_MAX_KEY_COUNT, macModifiers: isMacOS() };
+const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
+  maxKeys: DEFAULT_MAX_KEY_COUNT,
+  macModifiers: isMacOS(),
+  recordBackspace: false,
+};
 
 // `mod` is Command on macOS and Control elsewhere. On macOS a held Control is
 // its own `ctrl` modifier, so Ctrl+N never records as Cmd+N; elsewhere Meta is
@@ -160,7 +167,7 @@ export function updateShortcutRecordingState(
     return { ...state, livePreview: getModifierPreview(event, recordingOptions) };
   }
 
-  if (event.key === 'Backspace') {
+  if (event.key === 'Backspace' && !recordingOptions.recordBackspace) {
     return { chords: state.chords.slice(0, -1), livePreview: null, settled: false };
   }
 
@@ -229,10 +236,12 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   const exactConflict = customizableConflicts.find((conflict) => conflict.kind === 'exact');
   const contextualPrefixConflict = conflicts.find((conflict) => conflict.kind === 'contextual-prefix');
 
+  const unsupportedMenuKey = Boolean(action && 'nativeMenu' in action && combo && !isMenuAcceleratorCombo(combo));
+
   const close = () => onOpenChange(false);
   const confirm = () => {
     if (!recording.settled) setRecording(settleShortcutRecordingState);
-    if (!action || !combo || protectedConflict || prefixConflict) return;
+    if (!action || !combo || protectedConflict || prefixConflict || unsupportedMenuKey) return;
     onSave(action.id, combo, exactConflict?.action.id);
     close();
   };
@@ -290,7 +299,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
         >
           <div className="flex flex-wrap items-center justify-center gap-2">
             {recording.chords.map((chord, index) => (
-              <kbd key={`${chord}-${index}`} className="rounded-md border border-border bg-muted px-3 py-2 typography-ui-label text-foreground">
+              <kbd key={`${chord}-${index}`} className="oc-tile-inset rounded-md px-3 py-2 typography-ui-label text-foreground">
                 {formatShortcutForDisplay(chord)}
               </kbd>
             ))}
@@ -307,7 +316,11 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           </div>
         </div>
 
-        {recording.settled && protectedConflict ? (
+        {recording.settled && unsupportedMenuKey ? (
+          <p className="typography-meta text-[var(--status-error)]">
+            {t('settings.openchamber.keyboardShortcuts.error.menuKeyUnsupported')}
+          </p>
+        ) : recording.settled && protectedConflict ? (
           <p className="typography-meta text-[var(--status-error)]">
             {t('settings.openchamber.keyboardShortcuts.error.internalConflict')}
           </p>
@@ -341,7 +354,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           <Button
             type="button"
             size="sm"
-            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict)))}
+            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict) || unsupportedMenuKey))}
             onClick={confirm}
           >
             {t('settings.openchamber.keyboardShortcuts.actions.confirm')}

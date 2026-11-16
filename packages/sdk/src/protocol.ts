@@ -4,12 +4,15 @@ import { loopbackRequestSchema, loopbackRequestResultSchema, loopbackUrlRequestS
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema, guestStatusSummarySchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema, guestTooltipRequestSchema } from './popover-schemas.ts';
+import { GUEST_MICROPHONE_END_REASONS, GUEST_MICROPHONE_FRAME_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MAX, GUEST_MICROPHONE_SAMPLE_RATE_MIN } from './microphone.ts';
 import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import {
   SERVICE_STATUS_VALUES,
   ATTACH_PROVIDER_ID,
+  DEVICE_FORM_FACTORS,
+  DEVICE_POINTERS,
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
@@ -52,6 +55,7 @@ import {
   HOST_REQUEST_ERROR_CODES,
   type GuestMessage,
   type HostMessage,
+  GUEST_BLOCK_ANSWER_MAX,
 } from './contract.ts';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
 import {
@@ -121,6 +125,7 @@ const themeTokensSchema = z.object({
   error: z.string().min(1),
   info: z.string().min(1),
   font: z.string().min(1),
+  fontSize: z.string().min(1).optional(),
   mono: z.string().min(1),
   radius: z.string().min(1),
   syntaxKeyword: z.string().min(1).optional(),
@@ -217,6 +222,10 @@ const shellStopResultPayloadSchema = z.object({
   stopped: z.literal(true),
 });
 
+const microphoneOpenResultPayloadSchema = z.object({
+  opened: z.literal(true),
+});
+
 const hostResultPayloadSchema = z.union([
   loopbackUrlResultSchema,
   loopbackRequestResultSchema,
@@ -235,6 +244,7 @@ const hostResultPayloadSchema = z.union([
   fileListResultPayloadSchema,
   fileStatResultPayloadSchema,
   generateResultPayloadSchema,
+  microphoneOpenResultPayloadSchema,
 ]);
 
 const attachPayloadSchema = z.object({
@@ -280,9 +290,51 @@ const sessionItemSchema = z.object({
   truncated: z.boolean().optional(),
 }).refine((value) => JSON.stringify(value).length <= GUEST_ITEM_SESSION_MAX);
 
-// Message and session items carry a literal `kind`; the chip's optional
-// `kind` is `issue` / `pull`, so the three never overlap.
-const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, attachPayloadSchema]).nullable();
+const selectionItemSchema = z.object({
+  kind: z.literal('selection'),
+  action: z.string().trim().min(1).max(64),
+  sessionId: z.string().min(1),
+  directory: z.string().nullable(),
+  messageId: z.string().min(1),
+  text: z.string().max(GUEST_ITEM_MESSAGE_TEXT_MAX),
+});
+
+const fileItemSchema = z.object({
+  kind: z.literal('file'),
+  action: z.string().trim().min(1).max(64),
+  directory: z.string().nullable(),
+  path: z.string().min(1),
+  isDirectory: z.boolean(),
+});
+
+const diffItemSchema = z.object({
+  kind: z.literal('diff'),
+  action: z.string().trim().min(1).max(64),
+  directory: z.string().nullable(),
+  path: z.string().min(1),
+  startLine: z.number().int().min(0),
+  endLine: z.number().int().min(0),
+  side: z.enum(['additions', 'deletions']).optional(),
+});
+
+const linkItemSchema = z.object({
+  kind: z.literal('link'),
+  identifier: z.string().trim().min(1).max(GUEST_ATTACH_ID_MAX),
+  url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
+}).strict();
+
+// Action and link items carry a literal `kind`; the chip's optional `kind` is
+// `issue` / `pull`, so they never overlap.
+const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
+
+const devicePixels = z.number().finite().min(0);
+
+const deviceContextSchema = z.object({
+  formFactor: z.enum(DEVICE_FORM_FACTORS),
+  pointer: z.enum(DEVICE_POINTERS),
+  insets: z.object({ top: devicePixels, right: devicePixels, bottom: devicePixels, left: devicePixels }),
+  keyboard: devicePixels,
+});
 
 const readyPayloadSchema = z.object({
   theme: z.object({
@@ -292,10 +344,11 @@ const readyPayloadSchema = z.object({
   locale: z.string().min(1),
   directory: z.string().nullable(),
   session: sessionSnapshotSchema,
-  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file', 'popover']),
+  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file', 'popover', 'block']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
   item: guestItemSchema,
+  block: z.object({ name: z.string().min(1), args: z.record(z.string(), z.string()), answered: z.string().nullable() }).optional(),
   popover: z.object({ id: z.string().min(1).max(80), data: guestPopoverDataSchema }).strict().optional(),
   features: z.object({
     deviceStorage: z.literal(true).optional(),
@@ -303,8 +356,10 @@ const readyPayloadSchema = z.object({
     statusSummary: z.literal(true).optional(),
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
+    microphone: z.literal(true).optional(),
     tooltips: z.literal(true).optional(),
   }).optional(),
+  device: deviceContextSchema.optional(),
 });
 
 const hostResultSchema = z.object({
@@ -432,6 +487,11 @@ export const hostMessageSchema = z.union([
   }),
   z.object({
     ...envelope,
+    type: z.literal('service-event'),
+    payload: z.object({ topic: z.string().min(1), data: z.json() }),
+  }),
+  z.object({
+    ...envelope,
     type: z.literal('status-control-event'),
     payload: guestStatusControlEventSchema,
   }),
@@ -460,7 +520,7 @@ export const hostMessageSchema = z.union([
     ...envelope,
     type: z.literal('action'),
     id: z.string().min(1),
-    payload: z.union([messageItemSchema, sessionItemSchema]),
+    payload: z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema]),
   }),
   z.object({
     ...envelope,
@@ -494,6 +554,12 @@ export const hostMessageSchema = z.union([
     payload: z.object({ version: z.string().max(GUEST_FILE_EDITOR_VERSION_MAX) }),
   }),
   z.object({ ...envelope, type: z.literal('generate-late'), payload: lateGenerateResultSchema }),
+  z.object({
+    ...envelope,
+    type: z.literal('microphone-audio'),
+    payload: z.object({ samples: z.instanceof(Float32Array).refine((samples) => samples.length <= GUEST_MICROPHONE_FRAME_MAX) }),
+  }),
+  z.object({ ...envelope, type: z.literal('microphone-ended'), payload: z.object({ reason: z.enum(GUEST_MICROPHONE_END_REASONS) }) }),
 ]);
 
 const filePathSchema = z.string().min(1).max(GUEST_FILE_PATH_MAX).refine(isGuestFilePath);
@@ -561,6 +627,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX),
     }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('block-answer'),
+    id: z.string().min(1),
+    payload: z.object({ text: z.string().trim().min(1).max(GUEST_BLOCK_ANSWER_MAX) }),
   }),
   z.object({
     ...envelope,
@@ -769,6 +841,13 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('file-save') }),
   z.object({ ...envelope, type: z.literal('file-unsupported') }),
   z.object({ ...envelope, type: z.literal('generate-late-listen') }),
+  z.object({
+    ...envelope,
+    type: z.literal('microphone-open'),
+    id: z.string().min(1),
+    payload: z.object({ sampleRate: z.number().int().min(GUEST_MICROPHONE_SAMPLE_RATE_MIN).max(GUEST_MICROPHONE_SAMPLE_RATE_MAX) }).strict(),
+  }),
+  z.object({ ...envelope, type: z.literal('microphone-close'), id: z.string().min(1) }),
 ]);
 
 type ParsedHostMessage = z.infer<typeof hostMessageSchema>;

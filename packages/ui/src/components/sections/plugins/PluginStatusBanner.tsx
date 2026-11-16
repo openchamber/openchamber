@@ -81,7 +81,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
             <Icon name="error-warning" className="h-5 w-5 text-[var(--status-error)] shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
               <p className="typography-label text-[var(--status-error)]">{t('settings.plugins.status.failed.title')}</p>
-              <p className="typography-micro font-mono text-foreground mt-1 whitespace-pre-wrap break-words">
+              <p dir="ltr" className="typography-micro font-mono text-foreground mt-1 whitespace-pre-wrap break-words">
                 {load.error}
               </p>
               {load.ref ? (

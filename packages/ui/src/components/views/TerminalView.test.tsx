@@ -106,7 +106,11 @@ mock.module('@/contexts/useThemeSystem', () => ({
   }),
 }));
 mock.module('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => ({ monoFont: 'geist-mono' }) }));
-mock.module('@/lib/device', () => ({ useDeviceInfo: () => deviceInfo }));
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => deviceInfo,
+  // Dialogs ask whether to lay out as a tablet; these tests run on a phone or a desktop.
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => ({ addDraft: () => undefined }) }));
 mock.module('@/components/terminal/TerminalViewport', () => ({
@@ -283,7 +287,7 @@ describe('TerminalView project action tab indicator', () => {
     // What the panel hands to the draft stays on the draft's folder.
     const tabId = useTerminalStore.getState().getDirectoryState('/spaces/a1b2c3d4e5f6/repo')!.tabs[0]!.id;
     await act(async () => useTerminalStore.getState().setTabPreviewUrl('/spaces/a1b2c3d4e5f6/repo', tabId, 'https://preview.example.test'));
-    host.querySelector<HTMLElement>('[title="terminalView.preview.openTitle"]')?.click();
+    host.querySelector<HTMLElement>('[aria-label="terminalView.preview.openTitle"]')?.click();
     expect(openContextPreviewCalls).toEqual([['/repo', 'https://preview.example.test']]);
   });
 
@@ -424,7 +428,7 @@ describe('TerminalView project action tab indicator', () => {
     });
     await flushEffects();
     const paste = host.querySelector<HTMLButtonElement>('[aria-label="terminalView.actions.paste"]');
-    expect(paste?.previousElementSibling?.getAttribute('aria-label')).toBe('terminalView.actions.copySelection');
+    expect(paste?.parentElement?.previousElementSibling?.querySelector('[aria-label="terminalView.actions.copySelection"]')).not.toBeNull();
     expect(paste?.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('clipboard');
 
     const activeTabId = useTerminalStore.getState().getDirectoryState('/repo')!.activeTabId;
@@ -452,7 +456,7 @@ describe('TerminalView project action tab indicator', () => {
     expect(createSessionCalls.length).toBe(1);
     expect(createSessionCalls[0]?.cwd).toBe('/repo');
 
-    const previewButton = host.querySelector<HTMLElement>('[title="terminalView.preview.openTitle"]');
+    const previewButton = host.querySelector<HTMLElement>('[aria-label="terminalView.preview.openTitle"]');
     expect(previewButton).not.toBeNull();
     previewButton?.click();
     expect(openContextPreviewCalls).toEqual([['/repo-worktree', 'https://preview.example.test']]);

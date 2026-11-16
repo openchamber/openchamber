@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
   DndContext,
@@ -21,7 +22,6 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -57,6 +57,7 @@ import { useRepositoryHostProvider } from '@/components/references/referenceSour
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
+import { useGuestListeningStore } from '@/lib/guests/microphone';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
@@ -85,6 +86,8 @@ type RailItemProps = {
   badgeAriaLabel?: string | null;
   /** Extra tooltip line describing the badge; rendered under the description. */
   badgeDescription?: string | null;
+  /** The extension behind this icon has the microphone open: a red dot, over any badge. */
+  listening?: boolean;
   orderNumber?: number | null;
   showOrderNumber?: boolean;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
@@ -99,6 +102,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   badgeCount,
   badgeAriaLabel,
   badgeDescription,
+  listening = false,
   orderNumber,
   showOrderNumber,
   onSelect,
@@ -135,20 +139,20 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             data-context-surface={surface.id}
             className={cn(
               'flex h-7 w-7 touch-none select-none items-center justify-center rounded-md transition-colors',
+              // Selection, not an action: the neutral selection fill, so the
+              // accent stays with primary actions.
               isActive
-                ? 'text-primary'
+                ? 'oc-selected text-interactive-selection-foreground'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {surface.id === 'diff' ? (
-              <DiffViewIcon className="h-[17px] w-[17px]" />
-            ) : (
-              <GuestIcon
-                icon={surface.icon}
-                iconSrc={surface.iconSrc}
-                className="h-[17px] w-[17px]"
-              />
-            )}
+            {/* Every rail glyph is a plain outline in the rail's tone; the
+                diff's red and green tint read as a state it does not have. */}
+            <GuestIcon
+              icon={surface.icon}
+              iconSrc={surface.iconSrc}
+              className="h-[17px] w-[17px]"
+            />
             {showOrderNumber && orderNumber != null ? (
               <span
                 aria-hidden="true"
@@ -156,6 +160,13 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
               >
                 {orderNumber === 10 ? '0' : orderNumber}
               </span>
+            ) : listening ? (
+              // Steady while it lasts: the microphone being on is a state,
+              // not a wait.
+              <span
+                aria-hidden="true"
+                className="absolute inset-e-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--status-error)]"
+              />
             ) : hasBadge ? (
               // A dot says there is something; the count is in the tooltip
               // and, for Git, in words on the work-status panel.
@@ -338,9 +349,11 @@ export const ContextPanelRail: React.FC = () => {
 
   const guestSurfaces = useGuestSurfaces();
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
-  const clearGuestBadge = useGuestBadgeStore((state) => state.panelOpened);
+  const guestListening = useGuestListeningStore((state) => state.captureCountByGuest);
+  const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const workflowsShown = useWorkflowsSurfaceShown(tabs, effectiveDirectory || null);
+  const receivedPagesShown = hasReceivedPages(useReceivedPages());
   // One surface per open zone is on screen; each lights its rail icon.
   const shownModes = React.useMemo(
     () => shownContextModes(panelState, contextSurfaceZones),
@@ -357,9 +370,10 @@ export const ContextPanelRail: React.FC = () => {
       tabs,
       sourceControlConnected,
       workflowsShown,
+      receivedPagesShown,
       extras: guestSurfaces,
     }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
@@ -464,7 +478,9 @@ export const ContextPanelRail: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
         {groups.map((group, groupIndex) => (
           <React.Fragment key={contextSurfaceGroup(group[0])}>
-          {groupIndex > 0 ? <div aria-hidden="true" className="h-px w-4 shrink-0 bg-edge-strong" /> : null}
+          {/* Groups are set apart by space alone: a 6px spacer between two gaps
+              makes 22px against the 8px inside a group, plainly a new group. */}
+          {groupIndex > 0 ? <div aria-hidden="true" className="h-1.5 shrink-0" /> : null}
           <SortableContext items={group.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {group.map((surface) => {
             orderNumber += 1;
@@ -481,6 +497,8 @@ export const ContextPanelRail: React.FC = () => {
               : 0;
             const badgeCount = gitChangedCount > 0 ? gitChangedCount : guestBadgeCount > 0 ? guestBadgeCount : null;
             const isGuestBadge = badgeCount !== null && gitChangedCount === 0;
+            // Shown on the open panel too: it says who has the microphone.
+            const listening = isPluginContextPanelMode(surface.mode) && (guestListening[pluginIdFromMode(surface.mode)] ?? 0) > 0;
             return (
               <ContextPanelRailItem
                 key={surface.id}
@@ -490,7 +508,10 @@ export const ContextPanelRail: React.FC = () => {
                 label={label}
                 description={t(changeRequestCopy(surface.descriptionKey, changeRequestTerm))}
                 badgeCount={badgeCount}
-                badgeAriaLabel={badgeCount !== null
+                listening={listening}
+                badgeAriaLabel={listening
+                  ? t('contextRail.surface.plugin.listeningAria', { label })
+                  : badgeCount !== null
                   ? t(
                       isGuestBadge
                         ? (badgeCount === 1 ? 'contextRail.surface.plugin.badgeAriaSingle' : 'contextRail.surface.plugin.badgeAriaPlural')
@@ -498,7 +519,9 @@ export const ContextPanelRail: React.FC = () => {
                       { label, count: badgeCount },
                     )
                   : null}
-                badgeDescription={badgeCount !== null
+                badgeDescription={listening
+                  ? t('contextRail.surface.plugin.listeningTooltip')
+                  : badgeCount !== null
                   ? t(
                       isGuestBadge
                         ? (badgeCount === 1 ? 'contextRail.surface.plugin.badgeTooltipSingle' : 'contextRail.surface.plugin.badgeTooltipPlural')
@@ -529,7 +552,10 @@ export const ContextPanelRail: React.FC = () => {
             onClick={() => setIsSurfacesDialogOpen(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Icon name="equalizer-2" className="h-[17px] w-[17px]" />
+            {/* Choosing which surfaces show: one glyph for every control that
+                configures what a list shows (this, the Session card's sections,
+                the session sidebar's view options). */}
+            <Icon name="list-settings" className="h-[17px] w-[17px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>

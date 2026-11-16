@@ -9,10 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { ScrollShadow, ScrollShadowBands } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from '@/components/icon/Icon';
 import { ChangeRow } from './ChangeRow';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import {
   TREE_INDENT_PX,
   buildChangesTree,
@@ -22,6 +24,8 @@ import {
   type FlattenedTreeRow,
 } from './changesTree';
 import type { GitStatus } from '@/lib/api/types';
+import { useDeviceInfo } from '@/lib/device';
+import { longPressHandlers } from '@/lib/longPress';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -54,6 +58,8 @@ interface ChangesPanelProps {
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
   headerBackgroundClassName?: string;
+  /** The opaque colour behind the list; its edge fades are then bands, not a mask. */
+  scrollSurface?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
   /** Reverts every changed path across all groups; rendered once for the panel. */
   onRevertAll?: (paths: string[]) => Promise<void> | void;
@@ -86,11 +92,13 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   revertingPaths,
   isRevertingAll = false,
   headerBackgroundClassName = 'bg-sidebar',
+  scrollSurface,
   onVisiblePathsChange,
   onRevertAll,
   onRevertDirectory,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const isTreeView = gitChangesViewMode === 'tree';
@@ -337,15 +345,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             !isFirst && 'mt-1 border-t border-edge-muted'
           )}
         >
-          <button
-            type="button"
-            onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
-            className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-            aria-label={group.actionAllLabel}
-            title={group.actionAllLabel}
-          >
-            {group.actionSymbol}
-          </button>
+          <ButtonTooltip sideOffset={8} label={group.actionAllLabel} className="shrink-0">
+            <button
+              type="button"
+              onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
+              className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              aria-label={group.actionAllLabel}
+            >
+              {group.actionSymbol}
+            </button>
+          </ButtonTooltip>
 
           <button
             type="button"
@@ -376,8 +385,15 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
       return (
         <div
-          className={cn('group flex items-center gap-2 py-1.5 text-muted-foreground hover:text-foreground', ROW_PADDING_CLASSNAME)}
+          className={cn(
+            'group flex items-center gap-2 text-muted-foreground hover:text-foreground',
+            isMobile ? 'min-h-11 select-none' : 'py-1.5',
+            ROW_PADDING_CLASSNAME,
+          )}
           style={{ paddingInlineStart: `${depth * TREE_INDENT_PX}px` }}
+          {...(isMobile && group.showRevertActions !== false && onRevertDirectory && !isDirectoryReverting
+            ? longPressHandlers(() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length }))
+            : null)}
         >
           <button
             type="button"
@@ -414,9 +430,9 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                 type="button"
                 onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
                 disabled={isDirectoryReverting}
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                className={isMobile ? 'sr-only' : 'flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50'}
                 aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
-                title={t('gitView.changes.revertDirectoryTooltip')}
+                data-row-tooltip={t('gitView.changes.revertDirectoryTooltip')}
               >
                 {isDirectoryReverting ? (
                   <Icon name="loader-4" className="size-3.5 animate-spin" />
@@ -433,10 +449,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                 group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
                 { path: directory.path }
               )}
-              title={t(
-                group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
-                { path: directory.path }
-              )}
+              data-row-tooltip={t(group.actionSymbol === '+' ? 'contextTooltips.git.stageFolder' : 'contextTooltips.git.unstageFolder')}
             >
               {group.actionSymbol}
             </button>
@@ -444,7 +457,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [expandedDirectories, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
+    [expandedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
@@ -452,16 +465,18 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (row.type === 'revert-all') {
         return (
           <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME)}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setRevertAllOpen(true)}
-              disabled={isRevertingAll}
-              className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
-            >
-              <Icon name="arrow-go-back" className="size-3.5" />
-              {t('gitView.changes.revertAll')}
-            </Button>
+            <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.discardAll')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRevertAllOpen(true)}
+                disabled={isRevertingAll}
+                className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
+              >
+                <Icon name="arrow-go-back" className="size-3.5" />
+                {t('gitView.changes.revertAll')}
+              </Button>
+            </ButtonTooltip>
           </div>
         );
       }
@@ -517,7 +532,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const showDivider = React.useCallback(
     (index: number): boolean => {
       // The tree reads by indentation and guides; row dividers turn it into a table.
-      if (isTreeView) return false;
+      // The phone's lists are flat.
+      if (isTreeView || isMobile) return false;
       const row = rows[index];
       const previous = rows[index - 1];
       if (!row || !previous) return false;
@@ -525,7 +541,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (previous.type !== 'file' && previous.type !== 'directory') return false;
       return previous.groupIndex === row.groupIndex;
     },
-    [isTreeView, rows]
+    [isMobile, isTreeView, rows]
   );
 
   return (
@@ -533,6 +549,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
         <ScrollShadow
           ref={scrollRef}
+          surface={scrollSurface}
           className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
         >
           {shouldVirtualize ? (
@@ -583,7 +600,9 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             </div>
           )}
         </ScrollShadow>
+        {scrollSurface ? <ScrollShadowBands surface={scrollSurface} /> : null}
         <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
+        <DelegatedTooltip containerRef={scrollRef} sideOffset={8} />
       </div>
 
       {revertFileConfirm.dialog}

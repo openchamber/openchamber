@@ -8,8 +8,7 @@
  * decision. Measured on 144 goal-report turns (hand-written, labelled before
  * any answer was seen) plus 8 real goal turns: Jev 142/144 with both misses
  * on the safe side (a finished turn read as "continue"), gpt-6-luna 141/144.
- * Lab: ~/projects/openchamber-extensions/jev-goal-lab. Change the wording or
- * the thresholds only with a new run of it.
+ * Change the wording or the thresholds only with a new run of that measurement.
  */
 import { z } from 'zod';
 

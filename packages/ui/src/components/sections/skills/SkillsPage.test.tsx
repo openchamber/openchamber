@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   customElements: browser.customElements, localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   HTMLTextAreaElement: browser.HTMLTextAreaElement, Text: browser.Text, NodeList: browser.NodeList,
   Event: browser.Event, FocusEvent: browser.FocusEvent,
@@ -29,10 +29,6 @@ const { useSkillsStore } = await import('@/stores/useSkillsStore');
 const { ThemeSystemContext } = await import('@/contexts/theme-system-context');
 const { getDefaultTheme } = await import('@/lib/theme/themes');
 const { EditorView } = await import('@codemirror/view');
-const { plugin } = await import('bun');
-plugin({ name: 'skill-editor-worker-url', setup(build) {
-  build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
-} });
 const { SkillsPage } = await import('./SkillsPage');
 const theme = getDefaultTheme(false);
 const noThemeChange = (): never => { throw new Error('Unexpected theme change'); };

@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { JsonNode, WorkflowAnswer } from '@/lib/workflows/model';
@@ -70,14 +71,21 @@ export const WorkflowAnswerBlock: React.FC<{ answer: WorkflowAnswer }> = ({ answ
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => setRaw((current) => !current)}
-          aria-pressed={raw}
-          className="typography-micro text-muted-foreground hover:text-foreground"
-        >
-          {raw ? t('workflows.panel.answer.formatted') : t('workflows.panel.answer.raw')}
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setRaw((current) => !current)}
+              aria-pressed={raw}
+              className="typography-micro text-muted-foreground hover:text-foreground"
+            >
+              {raw ? t('workflows.panel.answer.formatted') : t('workflows.panel.answer.raw')}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>
+            {t(raw ? 'contextTooltips.workspace.workflow.answerFormatted' : 'contextTooltips.workspace.workflow.answerRaw')}
+          </TooltipContent>
+        </Tooltip>
       </div>
       {raw ? (
         <pre dir="ltr" className="overflow-x-auto whitespace-pre-wrap break-words font-mono typography-meta text-foreground">

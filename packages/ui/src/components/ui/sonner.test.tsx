@@ -45,21 +45,15 @@ describe('Toaster', () => {
     await act(async () => root.render(<Toaster />));
 
     const documentQueries = spyOn(document, 'querySelectorAll');
-    const pinnedToast = new Promise<void>((resolve) => {
-      const observer = new MutationObserver(() => {
-        const element = host.querySelector<HTMLElement>('[data-sonner-toast]');
-        if (element?.style.getPropertyPriority('box-shadow') !== 'important') return;
-        observer.disconnect();
-        resolve();
-      });
-      observer.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
-    });
-
     await act(async () => {
       toast('Saved');
     });
-    await act(async () => pinnedToast);
-    await settle();
+    // The observer pins the toast on its own schedule, which a loaded machine
+    // pushes past any fixed wait.
+    for (let tries = 0; tries < 100; tries += 1) {
+      await settle();
+      if (document.querySelector<HTMLElement>('[data-sonner-toast]')?.style.getPropertyPriority('box-shadow')) break;
+    }
 
     const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
     expect(toastElement).not.toBeNull();

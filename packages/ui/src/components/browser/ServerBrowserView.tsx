@@ -72,10 +72,10 @@ const ZOOM_MAX = 5;
 /** Mobile-sized presets get `mobile: true` so the service's layout matches what the picker promises. */
 const MOBILE_PRESET_IDS = new Set(['iphone-se', 'iphone-14', 'iphone-14-pro-max', 'pixel-7', 'ipad-mini', 'ipad-pro']);
 
-const toServiceViewport = (viewport: BrowserViewport): { mode: 'auto' | 'fixed'; mobile: boolean; width?: number; height?: number } => {
-  if (viewport.kind === 'fill') return { mode: 'auto', mobile: false };
+const toServiceViewport = (viewport: BrowserViewport) => {
+  if (viewport.kind === 'fill') return { mode: 'auto', mobile: false } as const;
   const mobile = viewport.kind === 'preset' && MOBILE_PRESET_IDS.has(viewport.id);
-  return { mode: 'fixed', mobile, width: viewport.width, height: viewport.height };
+  return { mode: 'fixed', mobile, width: viewport.width, height: viewport.height } as const;
 };
 
 /** The device bar shows the size the chat's page really has, which the agent may have chosen. */
@@ -692,6 +692,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
           colorScheme={scope?.colorScheme ?? 'system'}
           onColorSchemeChange={(scheme) => void serverBrowser.setColorScheme(scheme)}
           scale={1}
+          panelSize={scope?.viewport ?? { width: 0, height: 0 }}
         />
       ) : null}
       <ServerBrowserBanners

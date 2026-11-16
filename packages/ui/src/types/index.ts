@@ -1,4 +1,5 @@
 export type {
+  ExtensionQuotaProviderId,
   QuotaProviderId,
   UsageWindow,
   UsageWindows,

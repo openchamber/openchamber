@@ -22,7 +22,7 @@ const focusTarget = (event: FocusEvent): HTMLElement | null => {
   return target instanceof HTMLElement ? target : null;
 };
 
-const deepActiveElement = (): HTMLElement | null => {
+export const deepActiveElement = (): HTMLElement | null => {
   let active = document.activeElement;
   while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
   return active instanceof HTMLElement ? active : null;
@@ -63,11 +63,8 @@ export const useWebviewFocusGuard = (
     // A page can take focus on its very first load, before any focus change
     // has been seen here, so start from what holds it now.
     if (document.activeElement !== webview) lastFocusedRef.current = deepActiveElement();
-    const onFocusIn = (event: FocusEvent) => {
-      if (document.activeElement !== webview) {
-        lastFocusedRef.current = focusTarget(event);
-        return;
-      }
+    const guard = () => {
+      if (document.activeElement !== webview) return;
       const stage = stageRef.current;
       const agentDriving = agentActionsRef.current > agentFocusActionsRef.current
         || Date.now() < settleUntilRef.current;
@@ -75,8 +72,26 @@ export const useWebviewFocusGuard = (
       if (agentFocusActionsRef.current > 0) return;
       giveFocusBack();
     };
+    const onFocusIn = (event: FocusEvent) => {
+      if (document.activeElement !== webview) {
+        lastFocusedRef.current = focusTarget(event);
+        return;
+      }
+      guard();
+    };
+    // Focus a press inside the page takes moves to the view with no focusin
+    // here: the app's window only blurs. The view holds focus once that blur
+    // has run, so the check waits a task.
+    const onWindowBlur = (event: FocusEvent) => {
+      if (event.target !== window) return;
+      setTimeout(guard, 0);
+    };
     document.addEventListener('focusin', onFocusIn, true);
-    return () => document.removeEventListener('focusin', onFocusIn, true);
+    window.addEventListener('blur', onWindowBlur, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true);
+      window.removeEventListener('blur', onWindowBlur, true);
+    };
   }, [giveFocusBack, stageRef, webview]);
 
   /**
@@ -107,6 +122,8 @@ export const useWebviewFocusGuard = (
       agentActionsRef.current -= 1;
       settleUntilRef.current = Date.now() + AGENT_SETTLE_MS;
       releasePageFocus();
+      // Focus a press moved into the page was the agent's doing.
+      if (!userWasInPage && agentFocusActionsRef.current === 0) giveFocusBack();
     }
   }, [giveFocusBack, webview]);
 };

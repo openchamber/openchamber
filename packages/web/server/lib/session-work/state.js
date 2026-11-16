@@ -6,7 +6,7 @@
  * when nothing changes, so the store can decide against the record as it is
  * at write time.
  *
- * The rule the patches keep: sending a message opens, the user alone closes.
+ * The rule the patches keep: sending a message opens, only the user closes.
  * A message reopens a session the user closed, but only one sent after the
  * user closed it.
  */
@@ -22,6 +22,11 @@ const workSchema = z.object({
 });
 
 const metadataSchema = z.object({ openchamber: z.object({ work: workSchema }) });
+// The pin the UI writes (`packages/ui/src/lib/sessionPins.ts`): a pinned session is never in work.
+const pinnedSchema = z.object({ openchamber: z.object({ pinned: z.object({ at: z.number() }) }) });
+
+/** Whether the session is pinned, in Pinned or in one of the user's pin lists. */
+export const isPinnedMetadata = (metadata) => pinnedSchema.safeParse(metadata).success;
 const reviewOfferSchema = z.object({ openchamber: z.object({ reviewOffer: z.object({ at: z.number() }) }) });
 
 /** The session's work record, or null when it has none (or a malformed one). */
@@ -29,8 +34,9 @@ export const readWork = (metadata) => metadataSchema.safeParse(metadata).data?.o
 
 const patchOf = (work) => ({ openchamber: { work } });
 
-/** The user sent a message at `requestAt`. */
+/** The user sent a message at `requestAt`. A pinned session stays out of work. */
 export const openPatch = (metadata, { requestAt, now }) => {
+  if (isPinnedMetadata(metadata)) return null;
   const work = readWork(metadata);
   if (work?.state === 'open') return null;
   // Closed after this message was sent: the user's decision stands.
@@ -38,10 +44,30 @@ export const openPatch = (metadata, { requestAt, now }) => {
   return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
 };
 
-/** The turn that just ended looks like the end of the work. */
+/**
+ * The user put the session in work (`open`, Track) or marked it done, in the
+ * app or through an agent on their word. Done keeps when and by whom the work
+ * was opened; both drop Jev's hint. The same record the UI writes
+ * (`withSessionWorkState` in packages/ui).
+ */
+export const userStatePatch = (metadata, { state, now }) => {
+  if (readWork(metadata)?.state === state) return null;
+  // A pinned session is never in work; done still closes one an older build left open.
+  if (state === 'open' && isPinnedMetadata(metadata)) return null;
+  return patchOf(state === 'open'
+    ? { state: 'open', openedAt: now, openedBy: 'user', doneAt: null, suggestDoneAt: null }
+    : { state: 'done', doneAt: now, suggestDoneAt: null });
+};
+
+/**
+ * The turn that ended looks like the end of the work, and the user stayed
+ * quiet since. It replaces a review offer from the same turn.
+ */
 export const suggestDonePatch = (metadata, { now }) => {
   if (readWork(metadata)?.state !== 'open') return null;
-  return patchOf({ suggestDoneAt: now });
+  const patch = patchOf({ suggestDoneAt: now });
+  if (reviewOfferSchema.safeParse(metadata).success) patch.openchamber.reviewOffer = null;
+  return patch;
 };
 
 /** The turn that just ended handed over changes worth a look; any session. */

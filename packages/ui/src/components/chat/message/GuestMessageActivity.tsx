@@ -10,13 +10,13 @@ import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { TodoListOutput } from './parts/TodoListOutput';
 import { parseTodoChecklist } from './parts/todoList';
 
-const TONE_COLOR: Record<string, string> = {
+const TONE_COLOR = {
     neutral: 'var(--tools-icon)',
     info: 'var(--status-info)',
     success: 'var(--status-success)',
     warning: 'var(--status-warning)',
     error: 'var(--status-error)',
-};
+} as const satisfies Record<NonNullable<GuestMessagePresentation['rule']['tone']>, string>;
 
 const ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 

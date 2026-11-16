@@ -23,6 +23,7 @@ const wrap = (db, prepare) => {
   return {
     exec: (sql) => db.exec(sql),
     all: (sql, params = []) => statement(sql).all(...params),
+    iterate: (sql, params = []) => statement(sql).iterate(...params),
     get: (sql, params = []) => statement(sql).get(...params) ?? null,
     run: (sql, params = []) => {
       statement(sql).run(...params);

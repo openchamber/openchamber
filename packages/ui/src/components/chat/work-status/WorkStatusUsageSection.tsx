@@ -2,10 +2,11 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
-import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { compactQuotaValueLabel, formatQuotaResetLabel, formatQuotaResetShort, formatQuotaWindowValueLabel, isExtensionQuotaProviderId } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
@@ -14,7 +15,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { pickUsageHeadline } from './usageHeadline';
 import { WorkStatusRow, WorkStatusCollapsibleSection, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
-import type { UsageWindow } from '@/types';
+import { usageValueTone } from './usageValueTone';
 
 /**
  * Provider rate limits.
@@ -30,13 +31,6 @@ import type { UsageWindow } from '@/types';
  * whatever happens to be running.
  */
 
-const windowTone = (window: UsageWindow): 'default' | 'warning' | 'error' => {
-  const used = window.usedPercent;
-  if (typeof used !== 'number' || !Number.isFinite(used)) return 'default';
-  if (used >= 80) return 'error';
-  if (used >= 50) return 'warning';
-  return 'default';
-};
 
 export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visible = true }) => {
   const { t } = useI18n();
@@ -55,7 +49,8 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
 
   React.useEffect(() => {
     if (groups.length === 0) return;
-    preloadProviderLogos(groups.map((group) => group.providerId));
+    // An extension's icon comes from its package, not the logo set.
+    preloadProviderLogos(groups.map((group) => group.providerId).filter((id) => !isExtensionQuotaProviderId(id)));
   }, [groups]);
 
   useReportWorkStatusPresence('usage', groups.length > 0);
@@ -89,39 +84,56 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
           {headline && headlineMetric && headlineMetric !== '-' ? (
             <>
               <span className="truncate">{headline.row.label}</span>
-              <WorkStatusValue tone={windowTone(headline.row.window)}>{headlineMetric}</WorkStatusValue>
+              <WorkStatusValue tone={usageValueTone(headline.row.window) === 'muted' ? 'default' : usageValueTone(headline.row.window)}>{headlineMetric}</WorkStatusValue>
             </>
           ) : modeLabel}
         </span>
       )}
       action={(
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 text-muted-foreground"
-          onClick={() => void fetchQuotas(dropdownProviderIds)}
-          aria-label={t('settings.usage.sidebar.actions.refreshAria')}
-          title={t('settings.usage.sidebar.actions.refreshTitle')}
-          disabled={isLoading}
-        >
-          <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0 text-muted-foreground"
+                onClick={() => void fetchQuotas(dropdownProviderIds)}
+                aria-label={t('settings.usage.sidebar.actions.refreshAria')}
+                disabled={isLoading}
+              >
+                <Icon name="refresh" className={cn('size-[13px]', isLoading && 'animate-spin')} />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('settings.usage.sidebar.actions.refreshTitle')}</TooltipContent>
+        </Tooltip>
       )}
     >
-      {groups.map((group) => (
+      {groups.map((group, groupIndex) => (
         <React.Fragment key={group.providerId}>
           <WorkStatusRow
-            leading={<ProviderLogo providerId={group.providerId} className="size-3.5 shrink-0" />}
+            // Providers are set apart by space, not lines: 8px above each
+            // after the first. The name reads at regular weight in the text
+            // colour, its logo muted in the icon column.
+            className={groupIndex > 0 ? 'mt-2' : undefined}
+            leading={<QuotaProviderLogo providerId={group.providerId} className="size-[13px] shrink-0 text-muted-foreground" tint />}
             // A row value never shrinks, so a long status such as an error with
             // its fix sits in the label instead, at the end of the row. The status
             // keeps its width and the name gives way, down to a stub; past that
             // the status truncates, with the full text on hover.
             label={group.status && group.rows.length === 0 ? (
               <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 truncate font-semibold text-foreground">{group.providerName}</span>
+                <span className="min-w-0 truncate text-foreground">{group.providerName}</span>
                 <span dir="auto" className="ms-auto max-w-[calc(100%-2rem)] shrink-0 truncate">{group.status}</span>
               </span>
-            ) : <span className="font-semibold text-foreground">{group.providerName}</span>}
+            ) : (
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-foreground">{group.providerName}</span>
+                {group.accountLabel ? (
+                  <span className="min-w-0 truncate" title={group.accountLabel}>{group.accountLabel}</span>
+                ) : null}
+              </span>
+            )}
             tooltip={group.status && group.rows.length === 0 ? group.status : undefined}
           />
           {group.rows.map((row) => {
@@ -129,28 +141,38 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
               ? row.window.remainingPercent
               : row.window.usedPercent;
             const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
-            const resetLabel = formatQuotaResetLabel(
-              row.window.resetAt,
-              row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
-              timeFormatPreference,
-            );
+            const shownMetric = compactQuotaValueLabel(metricLabel);
+            const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
+            const resetLabel = formatQuotaResetShort(row.window.resetAt, resetFallback, timeFormatPreference);
+            const resetFull = formatQuotaResetLabel(row.window.resetAt, resetFallback, timeFormatPreference);
+            const rowLabel = row.subtitle ? `${row.subtitle} · ${row.label}` : row.label;
+            // The full figures, when the row shortened any of them.
+            const tooltipLines = [
+              shownMetric !== metricLabel ? `${rowLabel}: ${metricLabel}` : null,
+              resetFull && resetFull !== resetLabel ? resetFull : null,
+            ].filter((line): line is string => line !== null);
             return (
               <WorkStatusRow
                 key={`${group.providerId}-${row.key}`}
+                // Under the provider's name: the icon column stays empty, so
+                // the label starts at the label x.
+                leading={<span aria-hidden className="size-[13px] shrink-0" />}
+                muted
                 label={(
                   <span className="inline-flex min-w-0 items-baseline gap-1.5">
-                    <span className="truncate">
-                      {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
-                    </span>
+                    <span className="truncate">{rowLabel}</span>
                     {resetLabel ? (
                       <span className="shrink-0 text-[0.6875rem] text-muted-foreground">{resetLabel}</span>
                     ) : null}
                   </span>
                 )}
+                tooltip={tooltipLines.length > 0 ? (
+                  <span className="flex flex-col gap-0.5">{tooltipLines.map((line) => <span key={line}>{line}</span>)}</span>
+                ) : undefined}
                 value={metricLabel === '-' ? undefined : (
                   <span className="inline-flex items-center gap-1">
                     <UsageGiftResetButton window={row.window} providerId={group.providerId} />
-                    <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                    <WorkStatusValue tone={usageValueTone(row.window)}>{shownMetric}</WorkStatusValue>
                   </span>
                 )}
               />

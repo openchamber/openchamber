@@ -12,6 +12,7 @@ import { setSyncRefs } from "./sync-refs"
 const DIRECTORY = "/repo/agent selection"
 const SESSION_ID = "ses_agent_selection"
 const MODEL = { providerID: "provider", id: "model" }
+const OTHER_MODEL = { providerID: "provider", id: "other-model" }
 const session: Session = {
   id: SESSION_ID,
   projectID: "project",
@@ -28,8 +29,9 @@ const requests: Array<{ path: string; directory: string | null }> = []
 let manager: ChildStoreManager
 let restoreFetch = () => {}
 let serverAgent: string
-let respond: () => Response | Promise<Response>
-const serverResponse = () => Response.json({ data: { ...session, agent: serverAgent, location: { directory: DIRECTORY } } })
+let serverModel: Session["model"]
+let respond: (path: string) => Response | Promise<Response>
+const serverResponse = () => Response.json({ data: { ...session, agent: serverAgent, model: serverModel, location: { directory: DIRECTORY } } })
 const selectAgent = (agent?: string) => resolveSendSelection(SESSION_ID, DIRECTORY, {
   providerID: MODEL.providerID,
   modelID: MODEL.id,
@@ -39,6 +41,7 @@ const selectAgent = (agent?: string) => resolveSendSelection(SESSION_ID, DIRECTO
 beforeEach(() => {
   requests.length = 0
   serverAgent = "plan"
+  serverModel = MODEL
   respond = serverResponse
   switchRuntimeEndpoint({ apiBaseUrl: "http://agent-selection.test", runtimeKey: "agent-selection" })
   opencodeClient.reconnectToRuntimeBaseUrl()
@@ -49,7 +52,7 @@ beforeEach(() => {
     const url = new URL(input instanceof Request ? input.url : String(input))
     if (url.pathname === "/auth/url-token") return new Response(null, { status: 404 })
     requests.push({ path: url.pathname, directory: new Headers(init?.headers).get("x-opencode-directory") })
-    return respond()
+    return respond(url.pathname)
   })
   restoreFetch = () => transport.mockRestore()
 })
@@ -87,15 +90,29 @@ describe("send agent selection", () => {
     expect(requests).toHaveLength(1)
   })
 
-  test("a send without an agent keeps the model comparison and makes no server read", async () => {
+  test("a record another store holds suppresses an unchanged model when the directory store misses it", async () => {
+    manager.getChild(DIRECTORY)?.setState({ session: [] })
+    manager.ensureChild("/repo", { bootstrap: false }).setState({ session: [session] })
+
     expect(await selectAgent()).toEqual({ model: undefined, agent: undefined })
-    expect(requests).toHaveLength(0)
+  })
+
+  test("a send without an agent skips the switch when the server and the cache both match", async () => {
+    expect(await selectAgent()).toEqual({ model: undefined, agent: undefined })
+    expect(requests).toHaveLength(1)
   })
 
   test("a failed server read rejects instead of granting the cached agent authority", async () => {
     respond = () => new Response(null, { status: 503 })
 
     await expect(selectAgent("build")).rejects.toThrow()
+    expect(requests).toHaveLength(1)
+  })
+
+  test("a failed server read without an agent states the picked model explicitly instead of blocking", async () => {
+    respond = () => new Response(null, { status: 503 })
+
+    expect(await selectAgent()).toEqual({ model: MODEL })
     expect(requests).toHaveLength(1)
   })
 
@@ -125,12 +142,37 @@ describe("send agent selection", () => {
     }
   })
 
+  test("a send goes to the session's own directory when another store also holds it (#6262)", async () => {
+    const wasConnected = useConfigStore.getState().isConnected
+    useConfigStore.setState({ isConnected: true })
+    setActionRefs(manager, () => DIRECTORY)
+    setOptimisticRefs(() => {}, () => {})
+    manager.ensureChild("/chats/other", { bootstrap: false }).setState({ session: [session] })
+    respond = () => new Response(null, { status: 503 })
+    try {
+      await expect(routeMessage({
+        runtimeKey: getRuntimeKey(),
+        sessionId: SESSION_ID,
+        directory: DIRECTORY,
+        content: "Follow up",
+        providerID: MODEL.providerID,
+        modelID: MODEL.id,
+        agent: "build",
+      })).rejects.toThrow()
+
+      expect(requests[0]?.directory).toBe(encodeURIComponent(DIRECTORY))
+    } finally {
+      useConfigStore.setState({ isConnected: wasConnected })
+    }
+  })
+
   test("model and effort changes received during the agent read remain visible to the send", async () => {
     manager.getChild(DIRECTORY)?.setState({ session: [{ ...session, model: { ...MODEL, variant: "high" } }] })
     let started = () => {}
     const requested = new Promise<void>((resolve) => { started = resolve })
     let finish = (_response: Response) => {}
     const held = new Promise<Response>((resolve) => { finish = resolve })
+    serverModel = { ...MODEL, variant: "high" }
     respond = () => { started(); return held }
     const selection = resolveSendSelection(SESSION_ID, DIRECTORY, {
       providerID: MODEL.providerID,
@@ -163,4 +205,56 @@ describe("send agent selection", () => {
       expect(requests).toHaveLength(1)
     })
   }
+})
+
+describe("send model selection", () => {
+  test("a cached copy on the picked model cannot suppress a switch from the server's model (#6501)", async () => {
+    serverAgent = "build"
+    serverModel = OTHER_MODEL
+
+    expect(await selectAgent("build")).toEqual({ model: MODEL, agent: undefined })
+    expect(await selectAgent()).toEqual({ model: MODEL, agent: undefined })
+  })
+
+  test("a server that already records the default effort takes no switch to Default", async () => {
+    serverAgent = "build"
+    serverModel = { ...MODEL, variant: "default" }
+
+    const selection = await resolveSendSelection(SESSION_ID, DIRECTORY, {
+      providerID: MODEL.providerID,
+      modelID: MODEL.id,
+      variant: null,
+      agent: "build",
+    })
+
+    expect(selection).toEqual({ model: undefined, agent: undefined })
+  })
+
+  test("a send in a drifted session switches the server's model before the prompt (#6501)", async () => {
+    const wasConnected = useConfigStore.getState().isConnected
+    useConfigStore.setState({ isConnected: true })
+    setActionRefs(manager, () => DIRECTORY)
+    setOptimisticRefs(() => {}, () => {})
+    serverAgent = "build"
+    serverModel = OTHER_MODEL
+    respond = (path) => path === `/api/session/${SESSION_ID}` ? serverResponse() : new Response(null, { status: 503 })
+    try {
+      await routeMessage({
+        runtimeKey: getRuntimeKey(),
+        sessionId: SESSION_ID,
+        directory: DIRECTORY,
+        content: "Run on the picked model",
+        providerID: MODEL.providerID,
+        modelID: MODEL.id,
+        agent: "build",
+      }).catch(() => undefined)
+
+      expect(requests.map((request) => request.path).slice(0, 2)).toEqual([
+        `/api/session/${SESSION_ID}`,
+        `/api/session/${SESSION_ID}/model`,
+      ])
+    } finally {
+      useConfigStore.setState({ isConnected: wasConnected })
+    }
+  })
 })

@@ -4,8 +4,10 @@ export const meta = {
   phases: ['Sweep', 'Review', 'Report'],
 };
 
-// args: { prs?: number[], skip?: string[], date?: 'YYYY-MM-DD', models?: { sweep?, review?, report? } }
-// prs narrows the run to those PRs; skip leaves out PR numbers or author logins.
+// args: { prs?: number[], skip?: string[], include?: number[], date?: 'YYYY-MM-DD', models?: { sweep?, review?, report? } }
+// prs narrows the run to those PRs; skip leaves out PR numbers or author logins;
+// include puts PRs the maintainer picked in the review pool whatever their bucket;
+// sweep is a ready sweep answer, corrected by hand, that replaces the sweep agent.
 // Agree the models with the maintainer before the run.
 const REPO = 'openchamber/openchamber';
 const SKILL = '.agents/skills/triage-prs/SKILL.md';
@@ -13,6 +15,7 @@ const SOL = 'openai/gpt-6.1-sol';
 const models = { sweep: SOL, review: SOL, report: SOL, ...(args.models || {}) };
 const onlyPrs = Array.isArray(args.prs) ? args.prs.map(Number) : [];
 const skip = Array.isArray(args.skip) ? args.skip.map(String) : [];
+const include = Array.isArray(args.include) ? args.include.map(Number) : [];
 const prLink = (number) => `[#${number}](https://github.com/${REPO}/pull/${number})`;
 
 const prRef = {
@@ -126,10 +129,11 @@ phase('Sweep');
 const scopeLine = onlyPrs.length > 0
   ? `Work only on these PRs: ${onlyPrs.map((number) => `#${number}`).join(', ')}. Every one of them that is still open lands in exactly one output list.`
   : 'Work on every open PR in the queue. Every open PR lands in exactly one output list.';
-const sweep = await agent(`Run the mechanical sweep of the ${REPO} pull request queue. Read ${SKILL} first and follow its "Phase 1 — Mechanical sweep" exactly, including the timeline rule, the waiting-on-author bucket and the duplicate clusters. Read its "Standing decisions" too, so a PR that adds Russian localization goes to mechanicalCloses with template russian-locale.
+const sweep = args.sweep || await agent(`Run the mechanical sweep of the ${REPO} pull request queue. Read ${SKILL} first and follow its "Phase 1 — Mechanical sweep" exactly, including the timeline rule, the waiting-on-author bucket and the duplicate clusters. Read its "Standing decisions" too, so a PR that adds Russian localization goes to mechanicalCloses with template russian-locale.
 
 ${scopeLine}
 ${skip.length > 0 ? `Leave out, into "skipped" with a note, these PR numbers or author logins: ${skip.join(', ')}.` : ''}
+${include.length > 0 ? `The maintainer pulled these PRs into the review pool: ${include.map((number) => `#${number}`).join(', ')}. Each goes into groups whatever its author, labels or bucket, never into team, waiting or keptDrafts.` : ''}
 
 This is read-only: gh and git reads, no comments, labels, closes, checkouts or edits. No subagents.
 
@@ -144,6 +148,13 @@ Fill the answer:
 - groups: every other PR, the review pool, split into review groups. Order the groups smallest diff first. Put related PRs (same area, a duplicate keeper with its context) in one group of at most 4, and give a large or contentious PR its own group. note names the shared area, and for each PR with human activity beyond the bots says "pickup mode: <what was asked or answered>".`, { label: 'Sweep the queue', phase: 'Sweep', model: models.sweep, schema: sweepSchema });
 
 if (!sweep) throw new Error('The sweep agent gave no answer; nothing to review.');
+const sortedPrs = new Set([
+  ...[sweep.team, sweep.skipped, sweep.keptDrafts, sweep.waiting, sweep.mechanicalCloses].flat().map((pr) => pr.number),
+  ...sweep.groups.flatMap((group) => group.prs),
+]);
+if (onlyPrs.length === 0 && sortedPrs.size < sweep.openCount) {
+  throw new Error(`The sweep sorted ${sortedPrs.size} of ${sweep.openCount} open PRs; an incomplete sweep would pass for an empty queue.`);
+}
 const date = typeof args.date === 'string' && args.date ? args.date : sweep.date;
 log(`Sweep: ${sweep.openCount} open, ${sweep.groups.length} review groups, ${sweep.mechanicalCloses.length} mechanical closes, ${sweep.waiting.length} waiting on author`);
 

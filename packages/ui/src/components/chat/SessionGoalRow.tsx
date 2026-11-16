@@ -1,5 +1,4 @@
 import React from 'react';
-import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { useSessionStatus } from '@/sync/sync-context';
 import { useGoalObjectiveContent, useSessionGoal } from '@/hooks/useSessionGoal';
@@ -48,10 +47,6 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     }
   }, [sessionId, directory, busy, t]);
 
-  useComposerStatusChip('goal', sessionId && enabled && goal
-    ? { icon: 'target', label: objectiveContent || t('chat.goal.dialog.titleManage') }
-    : null);
-
   if (!sessionId || !enabled || !goal) {
     return null;
   }
@@ -66,9 +61,9 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     : (goal.tokensUsed > 0 ? t('chat.goal.usage.tokens', { used: formatGoalTokens(goal.tokensUsed) }) : null);
 
   const pauseResume = goal.status === 'active'
-    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, next: 'paused' as const }
+    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, tooltipKey: 'contextTooltips.chat.goalPause' as const, next: 'paused' as const }
     : (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited'
-      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, next: 'active' as const }
+      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, tooltipKey: 'contextTooltips.chat.goalResume' as const, next: 'active' as const }
       : null);
 
   return (
@@ -78,26 +73,10 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       aria-label={t('chat.goal.row.aria')}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      {objectiveContent ? (
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{objectiveContent}</span>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6} className="max-w-[min(480px,calc(100vw-24px))] whitespace-normal break-words text-start">
-            <span className="line-clamp-12 whitespace-pre-line">{objectiveContent}</span>
-          </TooltipContent>
-        </Tooltip>
-      ) : (
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{t('chat.goal.dialog.titleManage')}</span>
-      )}
-      {driverName ? (
-        <span
-          className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 text-[0.7rem] leading-none text-primary"
-          title={t('chat.goal.driver.title', { name: driverName })}
-        >
-          {driverName}
-        </span>
-      ) : null}
+      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-sm text-foreground" title={objectiveContent ?? undefined}>
+        {objectiveContent || t('chat.goal.dialog.titleManage')}
+      </span>
+      {driverName ? <span className="shrink-0 typography-meta text-muted-foreground" title={t('chat.goal.driver.title', { name: driverName })}>{driverName}</span> : null}
       {evaluating ? (
         // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
@@ -115,18 +94,25 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       ) : null}
       {pauseResume ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => void handleToggleStatus(pauseResume.next)}
-          onMouseDown={(event) => event.preventDefault()}
-          disabled={busy}
-          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        >
-          <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
-          {t(pauseResume.labelKey)}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleToggleStatus(pauseResume.next)}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={busy}
+                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+              >
+                <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
+                {t(pauseResume.labelKey)}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(pauseResume.tooltipKey)}</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );

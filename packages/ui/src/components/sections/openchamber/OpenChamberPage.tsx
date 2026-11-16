@@ -5,7 +5,7 @@ import { FinishedWorktreesSettings } from './FinishedWorktreesSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
-import { DefaultsSettings } from './DefaultsSettings';
+import { DefaultsSettings, SessionContextSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { VoiceSettings } from './VoiceSettings';
@@ -15,9 +15,9 @@ import { EnvironmentVariablesSettings } from './EnvironmentVariablesSettings';
 import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
-import { DesktopAppSettings } from './DesktopAppSettings';
+import { DesktopAppSettings, DesktopQuickAccessSettings } from './DesktopAppSettings';
 import { ChatSettings } from './ChatSettings';
-import { GeneralConnectionAndPrivacySettings, GeneralWorkspaceSettings } from './GeneralWorkspaceSettings';
+import { GeneralConnectionAndPrivacySettings, GeneralFilesAndTerminalSettings, GeneralInterfaceSettings } from './GeneralWorkspaceSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -87,24 +87,10 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         spaces: t('settings.openchamber.spaces.title'),
     }[section];
 
-    const pageDescription = {
-        general: t('settings.page.general.description'),
-        visual: t('settings.page.appearance.description'),
-        chat: t('settings.page.chat.description'),
-        sessions: t('settings.page.sessions.description'),
-        shortcuts: t('settings.page.shortcuts.description'),
-        git: undefined,
-        github: undefined,
-        notifications: t('settings.page.notifications.description'),
-        voice: t('settings.page.voice.description'),
-        tunnel: t('settings.page.tunnel.description'),
-        spaces: undefined,
-    }[section];
-
     return (
         <SettingsPageLayout
             title={pageTitle}
-            description={pageDescription}
+            namedBySidebar
             showSaveStatus
             className="openchamber-page-body"
         >
@@ -117,9 +103,11 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// General: the desktop app and quick access, files/terminal/panels, network
-// access and sign-in, links, the OpenCode CLI and environment, agent tools,
-// then message transport and privacy.
+// General, by what people come here for: the desktop app itself, the agent's
+// tools, how other devices reach this app, the window, global shortcuts, the
+// OpenCode CLI and its environment, files and the terminal, then trusted
+// links, message transport and privacy. The layout drops the divider above
+// whichever section renders first.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
@@ -129,15 +117,18 @@ const GeneralSectionContent: React.FC = () => {
     const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
     return (
         <>
-            {isLocalDesktop && <DesktopAppSettings />}
-            <GeneralWorkspaceSettings firstSection={!isLocalDesktop} />
+            {/* Remote hosts too: the Dock badge works there. */}
+            {isDesktopShell() && <DesktopAppSettings />}
+            {!isVSCode && <OpenChamberToolsSettings />}
             {isLocalDesktop && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
-            <AppLinkSecuritySettings />
+            <GeneralInterfaceSettings />
+            {isLocalDesktop && <DesktopQuickAccessSettings />}
             {!isVSCode && <OpenCodeCliSettings />}
             {/* Remounts on a runtime switch: the names come from that server. */}
             {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
-            {!isVSCode && <OpenChamberToolsSettings />}
+            <GeneralFilesAndTerminalSettings />
+            <AppLinkSecuritySettings />
             <GeneralConnectionAndPrivacySettings />
         </>
     );
@@ -166,14 +157,16 @@ const VisualSectionContent: React.FC = () => {
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;
 
-// Sessions section: Default model & agent, Session retention
+// Sessions: the models sessions run on, then what the sidebar shows and what
+// gets cleaned out of it, then the context mechanics (compaction, prompt cache).
 const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ runtimeEndpointEpoch }) => {
     return (
         <>
-            <DefaultsSettings key={runtimeEndpointEpoch} />
+            <DefaultsSettings key={`defaults-${runtimeEndpointEpoch}`} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
             {!isVSCodeRuntime() && <FinishedWorktreesSettings />}
+            <SessionContextSettings key={`context-${runtimeEndpointEpoch}`} />
         </>
     );
 };

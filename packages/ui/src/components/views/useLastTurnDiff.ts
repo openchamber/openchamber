@@ -22,6 +22,8 @@ type LastTurnDiff = {
     /** Files the last turn changed; null while unknown. */
     count: number | null;
     loaded: boolean;
+    /** The list is the answer to the session's current state, not one kept from an earlier read. */
+    settled: boolean;
     error: string | null;
     retry: () => void;
 };
@@ -41,7 +43,7 @@ export function useLastTurnDiff(
     const transcriptKey = useSessionMessagesSelector(enabled ? sessionId ?? '' : '', directory, selectTranscriptKey);
     const statusType = useSessionStatus(enabled ? sessionId ?? '' : '', directory)?.type;
     const running = statusType !== undefined && statusType !== 'idle';
-    const [result, setResult] = React.useState<{ sessionId: string; diffs: TurnSnapshotDiff[] } | null>(null);
+    const [result, setResult] = React.useState<{ sessionId: string; readKey: string; diffs: TurnSnapshotDiff[] } | null>(null);
     // A failed read is not "this turn changed nothing": it keeps its own state
     // and a retry, and the last good list stays until a read replaces it.
     const [failure, setFailure] = React.useState<{ sessionId: string; message: string } | null>(null);
@@ -51,6 +53,7 @@ export function useLastTurnDiff(
         nextAttempt();
     }, []);
     const waiting = running && !live;
+    const readKey = JSON.stringify([attempt, running, transcriptKey]);
 
     React.useEffect(() => {
         if (!enabled || !sessionId || waiting) return;
@@ -60,6 +63,7 @@ export function useLastTurnDiff(
                 if (cancelled) return;
                 setResult({
                     sessionId,
+                    readKey,
                     diffs: files.map((entry) => ({
                         file: entry.file,
                         patch: entry.patch,
@@ -78,9 +82,9 @@ export function useLastTurnDiff(
         return () => {
             cancelled = true;
         };
-        // `transcriptKey` and `running` are the triggers: a new step, a step
-        // finishing, or the turn going idle changes the answer.
-    }, [attempt, directory, enabled, running, sessionId, t, transcriptKey, waiting]);
+        // `readKey` is the trigger: a new step, a step finishing, or the turn
+        // going idle changes the answer.
+    }, [directory, enabled, readKey, sessionId, t, waiting]);
 
     // Another session's turn is never shown while this one's loads.
     const own = result && result.sessionId === sessionId ? result : null;
@@ -90,6 +94,7 @@ export function useLastTurnDiff(
         diffs,
         count: own && !waiting ? diffs.length : null,
         loaded: own !== null,
+        settled: own !== null && own.readKey === readKey,
         error,
         retry,
     };

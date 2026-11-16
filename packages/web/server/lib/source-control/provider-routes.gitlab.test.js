@@ -65,7 +65,7 @@ function makeStore(account = null) {
       current = { ...current, accounts: current.accounts.map((entry) => entry.id === accountId ? { ...entry, status: 'invalid', invalidReason: 'unauthorized' } : entry) };
       return true;
     }),
-    setCliDisabled: vi.fn(async (_instance, disabled) => { current = { ...current, cliDisabled: disabled }; return disabled; }),
+    setCliDisabled: vi.fn(async (_instance, disabled) => { current = { ...current, cliDisabled: disabled, cliActive: disabled ? false : current.cliActive }; return disabled; }),
     setCliActive: vi.fn(async (_instance, active) => { current = { ...current, cliActive: active }; return active; }),
   };
 }
@@ -134,6 +134,7 @@ function canonicalMutationOptions(overrides = {}) {
     update: vi.fn(async () => ({})),
     merge: vi.fn(async () => ({ merged: true })),
     ready: vi.fn(async () => ({ ready: true })),
+    draft: vi.fn(async () => ({ draft: true })),
     reconcileCreate: vi.fn(async () => ({ state: 'succeeded', result: {} })),
     reconcileExisting: vi.fn(async () => ({ state: 'outcome-unknown' })),
     comment: vi.fn(async () => undefined),
@@ -165,6 +166,7 @@ function canonicalMutationOptions(overrides = {}) {
     updateChangeRequest: calls.update,
     mergeChangeRequest: calls.merge,
     readyChangeRequest: calls.ready,
+    draftChangeRequest: calls.draft,
     reconcileCreateMutation: calls.reconcileCreate,
     reconcileChangeRequestMutation: calls.reconcileExisting,
     commentChangeRequest: calls.comment,
@@ -383,6 +385,7 @@ describe('GitLab routes', () => {
     ['update', { title: 'Updated' }, {}, 'update'],
     ['merge', { method: 'squash' }, { merged: true }, 'merge'],
     ['ready', {}, { ready: true }, 'ready'],
+    ['draft', {}, { draft: true }, 'draft'],
   ])('returns a compact canonical receipt for %s', async (route, fields, result, call) => {
     const setup = canonicalMutationOptions();
     const body = mutationBody({
@@ -1068,7 +1071,7 @@ describe('GitLab routes', () => {
       .get('/api/source-control/gitlab/capabilities').query({ instance: origin }).expect(200);
     expect(response.body.authenticationMethods).toMatchObject({ device: { available: true }, pat: { available: true }, cli: { available: false, reason: 'cli-unavailable' } });
     expect(response.body).toMatchObject({
-      projects: true, issues: true, changeRequests: true, draftChangeRequests: true,
+      projects: true, issues: true, changeRequests: true, draftChangeRequests: true, draftConversion: true,
       mergeChangeRequests: true, mergeMethods: ['merge', 'squash'], ci: true,
     });
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
@@ -1280,6 +1283,10 @@ describe('GitLab routes', () => {
     expect(store.setCliActive).toHaveBeenCalledWith(origin, true);
     expect(response.body).toMatchObject({ connected: true, user: { id: 9 }, cli: { active: true } });
     expect(store.setAccount).not.toHaveBeenCalled();
+
+    const removed = await request(app).delete('/api/source-control/gitlab/auth').query({ instance: origin, accountId: `${origin}#cli:9` }).expect(200);
+    expect(removed.body).toEqual({ removed: true });
+    expect(store.setCliActive).toHaveBeenLastCalledWith(origin, false);
   });
 
   it('rejects and reconciles a changed exact glab identity', async () => {
@@ -1309,6 +1316,68 @@ describe('GitLab routes', () => {
     await request(app).post('/api/source-control/gitlab/auth/cli').query({ instance: origin }).send({ disabled: false }).expect(200);
     const enabled = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
     expect(enabled.body).toMatchObject({ connected: false, cli: { available: true, disabled: false, active: false } });
+  });
+
+  it('keeps the glab switch through a network blip and reconnects when it clears', async () => {
+    const store = makeStore();
+    await store.setCliActive(origin, true);
+    const execFile = vi.fn(async () => ({ stdout: 'cli-token\n' }));
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => { throw new Error('offline'); })
+      .mockImplementation(async () => userResponse());
+    const app = appWith({ store, execFile, fetch });
+
+    const blip = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(store.setCliActive).not.toHaveBeenCalledWith(origin, false);
+
+    const recovered = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(recovered.body).toMatchObject({ connected: true, cli: { available: true, active: true } });
+  });
+
+  it('undoes the glab switch only when the login is really gone', async () => {
+    // glab ran and has no login for the host: both token reads came up empty.
+    const loggedOut = makeStore();
+    await loggedOut.setCliActive(origin, true);
+    const missingLogin = vi.fn(async () => { throw Object.assign(new Error('Command failed: glab'), { code: 1, stdout: '', stderr: `  x  gitlab.example.com has not been authenticated with glab. Run \`glab auth login --hostname gitlab.example.com\` to authenticate.\n` }); });
+    const loggedOutApp = appWith({ store: loggedOut, execFile: missingLogin, fetch: vi.fn(async () => userResponse()) });
+    await request(loggedOutApp).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(loggedOut.setCliActive).toHaveBeenCalledWith(origin, false);
+
+    // The instance refused the glab token.
+    const refused = makeStore();
+    await refused.setCliActive(origin, true);
+    const refusedApp = appWith({ store: refused, execFile: async () => ({ stdout: 'expired-token\n' }), fetch: vi.fn(async () => Response.json({}, { status: 401 })) });
+    await request(refusedApp).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(refused.setCliActive).toHaveBeenCalledWith(origin, false);
+  });
+
+  it('keeps the glab switch when the instance refuses the token without 401', async () => {
+    const store = makeStore();
+    await store.setCliActive(origin, true);
+    const app = appWith({ store, execFile: async () => ({ stdout: 'scoped-token\n' }), fetch: vi.fn(async () => Response.json({}, { status: 403 })) });
+
+    const response = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(response.body).toMatchObject({ connected: false });
+    expect(store.setCliActive).not.toHaveBeenCalledWith(origin, false);
+  });
+
+  it('lets the user turn off a glab switch kept after glab auth logout', async () => {
+    const store = makeStore();
+    await store.setCliActive(origin, true);
+    // The logout keeps the host in glab's config; the instance is down as well.
+    const execFile = vi.fn(async () => { throw Object.assign(new Error('Command failed: glab'), { code: 1, stdout: '', stderr: '  x  No token found (checked config and keyring).\n' }); });
+    const app = appWith({ store, execFile, fetch: vi.fn(async () => { throw new Error('offline'); }) });
+
+    const kept = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(kept.body).toMatchObject({ status: 'disconnected', connected: false, accounts: [], cli: { available: false, disabled: false, active: true } });
+
+    await request(app).post('/api/source-control/gitlab/auth/cli').query({ instance: origin }).send({ disabled: true }).expect(200);
+    expect(await store.readInstance(origin)).toMatchObject({ cliActive: false, cliDisabled: true });
+
+    // glab coming back no longer reconnects an instance the user turned off.
+    execFile.mockImplementation(async () => ({ stdout: 'cli-token\n' }));
+    const restored = await request(app).get('/api/source-control/gitlab/auth/status').query({ instance: origin }).expect(200);
+    expect(restored.body).toMatchObject({ connected: false, cli: { available: false, disabled: true, active: false } });
   });
 
   it('uses a glab login only after the user switches to it', async () => {

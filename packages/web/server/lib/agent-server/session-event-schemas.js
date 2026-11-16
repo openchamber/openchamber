@@ -53,9 +53,11 @@ export const sessionEventSchemas = {
 export const notificationEventSchemas = {
   'openchamber:notification': z.object({
     title: text.optional(), body: text.optional(), tag: id.optional(),
-    kind: z.enum(['ready', 'error', 'question', 'permission', 'goal', 'review', 'plugin', 'browser-help', 'pull-request']).optional(),
+    kind: z.enum(['ready', 'error', 'question', 'permission', 'goal', 'review', 'share-answer', 'plugin', 'browser-help', 'pull-request']).optional(),
     sessionId: optional(sessionId), directory: optional(directory), guestId: optional(id),
     requireHidden: z.boolean().optional(), showWhenFocused: z.boolean().optional(),
+    toastOnly: z.boolean().optional(), skipTurnStart: z.boolean().optional(),
+    goalStatus: z.enum(['complete', 'budgetLimited', 'blocked']).optional(),
   }),
   'openchamber:permission-auto-accept.updated': z.object({
     revision: time, sessions: z.record(sessionId, z.boolean()).optional(), modes: z.record(sessionId, z.enum(['ask', 'safety', 'auto'])),

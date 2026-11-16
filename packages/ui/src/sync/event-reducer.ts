@@ -136,6 +136,7 @@ export type SessionMaterializationReason =
   | "child-session-discovered"
   | "ensure-session-messages"
   | "stream-reconnect"
+  | "stream-replayed"
   | "transport-switch"
   | "stale-status-resync"
   | "settled-running-tool"

@@ -98,7 +98,11 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
   };
 
   const chip = (value: PermissionMode, label: string) => {
-    const { icon, color } = MODE_ICON[value];
+    // The mode's colour only on the chosen one, as the composer's permission
+    // control shows it: a mode is not a state, so the others take the text
+    // colour, and an unavailable one fades icon and all.
+    const { icon } = MODE_ICON[value];
+    const color = value === shown ? MODE_ICON[value].color : undefined;
     return {
       value,
       label: (

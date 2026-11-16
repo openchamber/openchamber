@@ -73,6 +73,19 @@ describe('shellMessagePage', () => {
     expect(parts[3].state).toEqual(completed());
   });
 
+  test('keeps which action an OpenChamber envelope answers and whether it succeeded', () => {
+    const envelope = (ok) => JSON.stringify({ schemaVersion: 1, ok, action: 'memory.save', data: { memory: { title: 'Uses bun' } } });
+    const marker = (name, text) => shellMessagePage(page([tool(name, completed({ content: [{ type: 'text', text }], metadata: {} }))]), new Set())
+      .data[0].content[0].state.metadata[CONTENT_SHELL_METADATA_KEY];
+    expect(marker('execute', envelope(true)).envelope).toEqual({ ok: true, action: 'memory.save' });
+    expect(marker('execute', JSON.stringify(envelope(false))).envelope).toEqual({ ok: false, action: 'memory.save' });
+    expect(marker('openchamber_memory', JSON.stringify(JSON.parse(envelope(true)), null, 2)).envelope).toEqual({ ok: true, action: 'memory.save' });
+    // A script's own answer, another tool, or text that only looks like one stays a plain marker.
+    expect(marker('execute', '{"saved":true}')).toEqual({ chars: 14 });
+    expect(marker('shell', envelope(true)).envelope).toBeUndefined();
+    expect(marker('execute', '{"schemaVersion":1, broken').envelope).toBeUndefined();
+  });
+
   test('does not mark a call that had no result to leave out', () => {
     const part = shellMessagePage(page([tool('glob', completed({ content: [], metadata: { count: 0 } }))]), new Set()).data[0].content[0];
     expect(part.state.metadata).toEqual({ count: 0 });

@@ -75,10 +75,12 @@ export function describeUiBlockReplyAnswer(fields: BlockField[], data: UiBlockRe
 /**
  * A page's answer in words: the button, then each filled field as
  * "label: value", then the user's note under `noteLabel`. It is the summary
- * shown under a page that waited.
+ * shown under a page that waited, and the line a shared page's answer shows.
+ * The Send button the form adds itself says nothing about the answer, so
+ * `withButton` is false for it and the summary starts with the values.
  */
-export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerData, noteLabel: string): string {
-  const lines = [data.value ? `${data.button} · ${data.value}` : data.button];
+export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerData, noteLabel: string, withButton = true): string {
+  const lines = withButton ? [data.value ? `${data.button} · ${data.value}` : data.button] : [];
   for (const field of fields) {
     const value = data.values[field.name];
     const text = Array.isArray(value) ? value.join(', ') : value?.trim();
@@ -88,6 +90,16 @@ export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerD
   if (data.note) lines.push(`${noteLabel}: ${data.note}`);
   return lines.join('\n');
 }
+
+/**
+ * Whether a page's answer names the button that sent it. A button is the
+ * answer when it is one of several choices, or the only thing the page asks.
+ * A lone button under fields only sends them, like the form's own Send, so
+ * the summary leaves it out: "Send · send" says nothing.
+ */
+export const pageAnswerNamesButton = (decisionCount: number, fieldCount: number): boolean => (
+  decisionCount > 1 || (decisionCount === 1 && fieldCount === 0)
+);
 
 // The server takes a page answer's summary up to this length (render-page.js);
 // the full values travel in the answer's data.

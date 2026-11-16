@@ -8,7 +8,11 @@
     # OpenCode CLI, pinned to the tag matching OpenChamber's OpenCode 2.x
     # requirement. Keep in sync with packages/electron/package.json
     # (opencodeCli.version) and the @opencode/client pin. Bump all together.
-    opencode.url = "github:anomalyco/opencode/v2.2.5";
+    # OpenCode 2.3.0 targets Bun 1.4.4. Built with nixpkgs' Bun 1.4.2 it
+    # compiles, then exits on start with "Export named 'extension' not found
+    # in module 'ws'" (its ws workaround, anomalyco/opencode#61518), so keep
+    # nixpkgs on Bun 1.4.4 or newer.
+    opencode.url = "github:anomalyco/opencode/v2.3.0";
   };
 
   outputs =
@@ -63,15 +67,17 @@
                   node_modules = pkgs.callPackage "${opencode}/nix/node_modules.nix" {
                     rev = opencode.rev or "dirty";
                     # A tag can carry stale hashes: OpenCode's bot refreshes
-                    # nix/hashes.json on dev after the release. v2.2.5 changed
-                    # dependencies after the last refresh, so its own hashes
-                    # fail. Keyed by tag, so a bump falls back to upstream's.
+                    # nix/hashes.json on dev after the release, and v2.2.5
+                    # through v2.3.0 all changed dependencies after the last
+                    # refresh. Keyed by tag and system; a missing entry falls
+                    # back to upstream's. The hash also follows nixpkgs' Bun,
+                    # so a nixpkgs update in flake.lock can change it.
                     hash =
                       {
-                        "v2.2.5" = {
-                          "x86_64-linux" = "sha256-+GgLX4lq8fPOJVoDGp220uiCTLB0ZwrBkcNo36q9MZU=";
-                          "aarch64-linux" = "sha256-x903Q+5ThC84PQjCp/4Id/2pRXT7YtYNFHfkLvFsO+0=";
-                          "aarch64-darwin" = "sha256-bp2jsa4iX5jX4O3vWQC9TRSwsAtnkzXX86O90NaJdq8=";
+                        "v2.3.0" = {
+                          "x86_64-linux" = "sha256-PYcpyYP/i0e6ZIt27u1tFYbjU4Cl848w77dU1NiIEls=";
+                          "aarch64-linux" = "sha256-95R+aINaP8helQQKdiLTTVm9qYBxqklIc6w8G7F3t6k=";
+                          "aarch64-darwin" = "sha256-ewGKM0UKTv+97MLpscGMDbx7qsGZXxloRfmJNfY5MMo=";
                         };
                       }.${opencodeTag}.${system}
                         or (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};

@@ -230,7 +230,11 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         clearStreamingState();
 
         try {
-            await audio.start();
+            // Cancel, Finish or unmount while the microphone prompt was open
+            // already ended this recording: nothing is left to time or stream.
+            if (!(await audio.start())) {
+                return;
+            }
             startDurationTracking();
             // Open the stream eagerly so audio uploads while the user speaks
             // and only the tail is left to transcribe on stop.

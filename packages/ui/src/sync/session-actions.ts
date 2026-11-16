@@ -15,12 +15,17 @@ import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcr
 import { useSessionUIStore } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
+  formReleaseKey,
+  formToolLink,
+  formTurnHold,
+  noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
   submitRecoveredAnswer,
+  useRecoverableQuestionsStore,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveSendSelection } from "./session-selection"
+import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -30,11 +35,15 @@ import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
+import { createMessageQueueTarget, useMessageQueueStore } from "@/stores/messageQueueStore"
+import { followSessionTabMove } from "@/lib/sessionTabs"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
-import { registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessionMap, getDirectoryState, registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
@@ -54,20 +63,22 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
 import { getRestartInterruption, withoutRestartInterruption } from "@/lib/sessionRestartInterruption"
 import { getPendingQuestion, withoutPendingQuestion } from "@/lib/questions/pendingQuestion"
 import { withSessionPriority } from "@/lib/sessionPriority"
-import { withSessionPinned } from "@/lib/sessionPins"
+import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { markSessionUnreadSeen } from "./session-unread"
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
+import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { isFormRequestNotFoundError } from "./form-request-error"
+import { ConnectionLostError } from "./connection-lost-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -76,6 +87,7 @@ import { trackPromptInFlight } from "./prompts-in-flight"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
@@ -352,7 +364,8 @@ export async function moveSessionToDirectory(
   session: Session,
   sourceDirectory: string,
   destinationDirectory: string,
-  expectedRuntimeKey?: string,
+  /** The caller's runtime instance (`captureRuntimeInstance`); false once the app talks to another server. */
+  isCurrent?: () => boolean,
 ): Promise<void> {
   const creation = waitForSessionCreation(session.id)
   const confirmed = creation ? await creation : undefined
@@ -360,10 +373,9 @@ export async function moveSessionToDirectory(
 
   // If the runtime changed during the move request, the server move
   // already happened, but we must not publish stale local state to the UI/stores.
-  if (isStaleRuntime(expectedRuntimeKey)) return
+  if (isCurrent && !isCurrent()) return
 
-  const moved = relocateSession(confirmed ?? session, confirmed?.directory ?? sourceDirectory, destinationDirectory)
-  useGlobalSessionsStore.getState().upsertSession(moved)
+  relocateSession(confirmed ?? session, confirmed?.directory ?? sourceDirectory, destinationDirectory)
 }
 
 /**
@@ -376,8 +388,11 @@ export async function moveSessionToDirectory(
 export function adoptSessionMove(sessionId: string, sourceDirectory: string, destinationDirectory: string): void {
   // A session created under a path the server then canonicalized has its
   // record in the destination already and only its first message at the source.
+  // A session no open folder lists still has its worktree attachment, folders
+  // and tabs here; the global list's record, which took the move, stands in.
   const session = _childStores?.getChild(sourceDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
     ?? _childStores?.getChild(destinationDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
   if (!session) return
   relocateSession(session, sourceDirectory, destinationDirectory)
 }
@@ -438,7 +453,28 @@ function relocateSession(session: Session, sourceDirectory: string, destinationD
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
   dropSessionLiveStateOutside(session.id, destinationDirectory)
   registerSessionDirectory(session.id, destinationDirectory)
-  useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
+  const ui = useSessionUIStore.getState()
+  ui.setSessionDirectory(session.id, destinationDirectory)
+  // The attachment is this client's own idea of the session's worktree. A
+  // move can leave that worktree (or enter another one), and grouping reads
+  // the attachment before the session's directory, so it must follow the move.
+  const destinationWorktree = findWorktreeHoldingDirectory(
+    [...ui.availableWorktreesByProject.values()].flat(),
+    destinationDirectory,
+  )
+  ui.setWorktreeMetadata(session.id, destinationWorktree ?? null, destinationDirectory)
+  // Sidebar folders belong to a project root, worktree or space; a folder of
+  // the place the session left would keep listing it there.
+  useSessionFoldersStore.getState().followSessionMove(session.id, destinationDirectory, destinationWorktree?.path ?? null)
+  // The sidebar and the session switcher read the global list; a move from an
+  // agent or another client arrives only as an event, so waiting for the next
+  // poll would leave the old directory in place until it runs.
+  useGlobalSessionsStore.getState().upsertSession(moved)
+  // The local (VS Code) queue is keyed by directory too; a queued message
+  // follows its session instead of waiting under the directory it left.
+  const queueTarget = createMessageQueueTarget(session.id, destinationDirectory)
+  if (queueTarget) useMessageQueueStore.getState().followSessionMove(queueTarget)
+  followSessionTabMove(session.id, destinationDirectory)
   return moved
 }
 
@@ -446,14 +482,9 @@ function dir() {
   return _getDirectory() || undefined
 }
 
-function connectionLostError(): Error {
+function connectionLostError(): ConnectionLostError {
   const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState()
-  const suffix = lastDisconnectReason
-    ? ` (${lastDisconnectReason})`
-    : hasEverConnected
-      ? ""
-      : " (never connected)"
-  return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
+  return new ConnectionLostError({ reason: lastDisconnectReason || null, everConnected: hasEverConnected })
 }
 
 // Wait briefly for the pipeline to re-establish connection before failing a
@@ -586,6 +617,22 @@ export function isSessionBusyNow(sessionId: string): boolean {
   return getSessionLiveActivity(sessionId) === "active"
 }
 
+/**
+ * Answers for a whole session tree, asking OpenCode when the stores cannot: a
+ * folder nobody opened has no status of its own, and one that is gone never
+ * will. "unknown" now means the read itself failed.
+ */
+export async function readSessionsLiveActivity(sessionIds: string[], directory: string): Promise<SessionLiveActivity> {
+  const activities = sessionIds.map(getSessionLiveActivity)
+  if (activities.includes("active")) return "active"
+  if (!activities.includes("unknown")) return "idle"
+
+  const activeStatuses = await opencodeClient.getActiveSessionStatuses(directory)
+  if (activeStatuses === null) return "unknown"
+  // An event that arrived during the read is newer than the snapshot.
+  return sessionIds.some((id) => activeStatuses[id] || isSessionBusyNow(id)) ? "active" : "idle"
+}
+
 async function abortDescendantIfBusy(sessionId: string, directory: string): Promise<void> {
   if (!isSessionBusyNow(sessionId)) return
   try {
@@ -692,6 +739,18 @@ export async function clearStagedRevert(sessionId: string): Promise<void> {
     sessionEvents.requestGitRefresh({ directory })
     fileTreeChanges.unknownChange(directory)
   }
+}
+
+/**
+ * Commits the session's staged revert ahead of input that OpenCode admits
+ * without committing it: a UI block answer or a shell command. Admitted while
+ * the revert is staged, that input lies past its boundary, and the next
+ * prompt's commit deletes it. The `session.revert.committed` event then trims
+ * the reverted tail, as it does after another client's prompt.
+ */
+export async function commitStagedRevert(sessionId: string, directory?: string | null): Promise<void> {
+  if (!findLiveSession(sessionId)?.revert) return
+  await opencodeClient.commitRevert(sessionId, directory)
 }
 
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
@@ -819,7 +878,7 @@ function restoreContextPartsToInput(
     const payload = readContextPart(part)
     if (!payload) continue
     const draft = draftFromContextPayload(payload)
-    if (draft) store.addDraft(target, draft)
+    if (draft) store.addDraft(target, draft, { written: true })
   }
 }
 
@@ -945,7 +1004,9 @@ function removeFormRequestFromChildStores(sessionId: string, requestId: string):
   for (const [, store] of stores.children) {
     const current = store.getState().form ?? {}
     let nextForm: typeof current | null = null
-    const sessionIds = new Set([sessionId, ...Object.keys(current)].filter(Boolean))
+    // Stores file a form under its own session, and a form id is unique only
+    // within its session: a same-id form of another session is another form.
+    const sessionIds = sessionId ? [sessionId] : Object.keys(current)
 
     for (const candidateSessionId of sessionIds) {
       const requests = current[candidateSessionId]
@@ -1056,6 +1117,53 @@ function getRequestReplyDirectory(
 ): string | undefined {
   return resolveDirectoryForBlockingRequest(type, sessionId, requestId)
     ?? getSessionReplyDirectory(sessionId)
+}
+
+/**
+ * A session's record wherever the client holds it: the given directory's
+ * slice, then every initialized store, then the global cache. The directory
+ * may not be the store that holds the record (a project holds its worktrees'
+ * sessions too), so a miss at one level widens to the next before counting as
+ * unknown.
+ */
+function findSessionRecordAnywhere(sessionId: string, directory: string | undefined): Session | undefined {
+  return getDirectoryState(directory)?.session.find((session) => session.id === sessionId)
+    ?? getAllSyncSessionMap().get(sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
+}
+
+/**
+ * The record and owning directory a blocking-request reply is addressed to.
+ * Ownership beats containment, and a guessed directory is only good for
+ * finding the record: when no store holds it, the record is read from the
+ * server first, so a worktree request is never answered by its parent's
+ * instance and dismissed on the resulting not-found (#6555). A failed read, or
+ * a runtime change during it, throws an error with no status and no not-found
+ * wording, so the request stays pending for a retry and nothing is sent. A
+ * location-scoped form has no session record and keeps its directory.
+ */
+async function resolveBlockingRequestTarget(
+  sessionId: string,
+  guessedDirectory: string | undefined,
+): Promise<{ record: Session | undefined; directory: string | undefined }> {
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return { record: undefined, directory: guessedDirectory }
+  let record = findSessionRecordAnywhere(sessionId, guessedDirectory)
+  if (record === undefined) {
+    const readIsCurrent = captureRuntimeInstance()
+    let fetched: Session
+    try {
+      fetched = await opencodeClient.getSession(sessionId, guessedDirectory)
+    } catch (error) {
+      // Nothing has left yet, so a failed read needs no send confirmation.
+      if (error instanceof Error) markDefiniteTransportFailure(error)
+      throw new Error("The reply was not sent because its session record could not be read.", { cause: error })
+    }
+    if (!readIsCurrent()) throw new Error("The reply was cancelled because the runtime changed.")
+    // A record an SSE event inserted during the read is newer than this
+    // snapshot, so it wins and the snapshot touches no store.
+    record = findSessionRecordAnywhere(sessionId, guessedDirectory) ?? fetched
+  }
+  return { record, directory: resolveSessionOwnedDirectory(record) ?? guessedDirectory }
 }
 
 // ---------------------------------------------------------------------------
@@ -1304,8 +1412,9 @@ export async function setSessionWorkState(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
+    // A pinned session is never in work: Track on one writes nothing.
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1374,7 +1483,8 @@ export async function setSessionPriority(
 /**
  * Pin or unpin a session for every client of the server. Bound to the server
  * it was clicked on, like the work state: a runtime switch mid-request writes
- * nothing to the new server and resolves null.
+ * nothing to the new server and resolves null. A pinned session is never in
+ * work, so pinning one that is closes its work in the same write.
  */
 export async function setSessionPinned(
   sessionId: string,
@@ -1384,8 +1494,11 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
+    return await patchSessionMetadata(sessionId, directory, (metadata) => {
+      const now = Date.now()
+      const next = withSessionPinned(metadata, pinned, now, list)
+      return pinned ? withSessionWorkClosed(next, now) : next
+    }, runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -2041,7 +2154,11 @@ async function restoreSessionTree(
   return { restoredIds, failedIds }
 }
 
-async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string): Promise<boolean> {
+async function restoreArchivedSession(
+  sessionId: string,
+  expectedRuntimeKey: string,
+  { relocate = true }: { relocate?: boolean } = {},
+): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
@@ -2084,7 +2201,7 @@ async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: str
     // Its worktree may have been removed while it sat in the archive; such a
     // session moves to its project root so it can be written to again. Loaded
     // lazily: the relocation module builds on this one.
-    if (!isStaleRuntime(expectedRuntimeKey)) {
+    if (relocate && !isStaleRuntime(expectedRuntimeKey)) {
       void import("@/lib/worktrees/relocateRestoredSession")
         .then((module) => module.relocateRestoredSessionWithNotice(sessionId))
         .catch((error: unknown) => console.warn("[session-actions] restored session relocation failed", error))
@@ -2105,8 +2222,10 @@ export type UnarchiveSessionsOptions = {
   expectedRuntimeKey?: string
   /**
    * Undo of an archive that just happened: put back exactly the sessions it
-   * moved, subsessions included. Without it a subsession is restored on its
-   * own only while its parent is active (`isRestorableOnItsOwn`).
+   * moved, subsessions included, where they were, even when their folder is
+   * gone. Without it a subsession is restored on its own only while its parent
+   * is active (`isRestorableOnItsOwn`), and a session whose folder is gone
+   * moves to its project.
    */
   undo?: boolean
 }
@@ -2143,7 +2262,7 @@ export async function unarchiveSessions(
     }
     if (settled.has(id)) continue
     if (options?.undo) {
-      if (await restoreArchivedSession(id, expectedRuntimeKey)) restoredIds.push(id)
+      if (await restoreArchivedSession(id, expectedRuntimeKey, { relocate: false })) restoredIds.push(id)
       else failedIds.push(id)
       settled.add(id)
       continue
@@ -2244,9 +2363,10 @@ export async function optimisticSend(input: {
   markBusy?: boolean
   /**
    * The actual API call. Receives the optimistic message id and the context
-   * with its optimistic ids, so the server's records reconcile in place.
+   * with its optimistic ids, so the server's records reconcile in place, and,
+   * while a revert is staged, the commit to run before any context is admitted.
    */
-  send: (messageID: string, context: SyntheticContextInput[]) => Promise<void>
+  send: (messageID: string, context: SyntheticContextInput[], commitRevert?: () => Promise<void>) => Promise<void>
 }): Promise<void> {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
@@ -2374,6 +2494,19 @@ export async function optimisticSend(input: {
 
   if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
+  // Whether the commit of the staged revert left, and whether the server
+  // answered it. A failed send puts the revert back only while the server
+  // still has it staged.
+  let revertCommitSent = false
+  let revertCommitted = false
+  const commitRevert = revertMessageID
+    ? async () => {
+        revertCommitSent = true
+        await opencodeClient.commitRevert(input.sessionId, targetDirectory)
+        revertCommitted = true
+      }
+    : undefined
+
   const releasePrompt = trackPromptInFlight(input.sessionId)
   // Only a request that left can have been accepted; a failure before it is certain.
   let requestSent = false
@@ -2395,7 +2528,7 @@ export async function optimisticSend(input: {
     await waitForConnectionOrThrow()
     assertRuntimeUnchanged()
     requestSent = true
-    await input.send(messageID, completeContext)
+    await input.send(messageID, completeContext, commitRevert)
   } catch (error) {
     if (input.ready && input.runtimeKey && input.runtimeKey !== getRuntimeKey()) throw error
     if (error instanceof SessionCreationError) {
@@ -2443,6 +2576,13 @@ export async function optimisticSend(input: {
     recordSendFailure(failureRecord)
     console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
+    let revertStaged = !revertCommitted
+    // A commit whose response was lost may have landed all the same; the
+    // session record, read once the connection is back, says which.
+    if (revertCommitSent && !revertCommitted && ambiguousFailure) {
+      revertStaged = await opencodeClient.getSession(input.sessionId, targetDirectory).then((record) => !!record.revert, () => true)
+    }
+
     // Rollback via optimistic infrastructure. Context the server admitted
     // before the failure comes back with the next history read. The records
     // are where the session lives now: a session created from a draft can
@@ -2461,7 +2601,7 @@ export async function optimisticSend(input: {
     let message = rollbackState.message
     let part = rollbackState.part
 
-    if (revertMessageID) {
+    if (revertMessageID && revertStaged) {
       session = rollbackState.session.map((candidate) => (
         candidate.id === input.sessionId ? { ...candidate, revert: sessionBeforeSend?.revert } as Session : candidate
       ))
@@ -2578,10 +2718,11 @@ export async function respondToPermission(
   directoryOverride?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = directoryOverride
-    || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  // An explicit directory comes from the event that raised the request.
+  const directory = directoryOverride || (await resolveBlockingRequestTarget(
+    sessionId,
+    resolveDirectoryForBlockingRequest("permission", sessionId, requestId) || getSessionDirectory(sessionId),
+  )).directory
   try {
     if (await opencodeClient.replyToPermission(sessionId, requestId, response, { directory }) !== true) {
       throw new Error("Permission reply failed")
@@ -2600,9 +2741,10 @@ export async function dismissPermission(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const { directory } = await resolveBlockingRequestTarget(
+    sessionId,
+    resolveDirectoryForBlockingRequest("permission", sessionId, requestId) || getSessionDirectory(sessionId),
+  )
   try {
     if (await opencodeClient.replyToPermission(sessionId, requestId, "reject", { directory }) !== true) {
       throw new Error("Permission dismissal failed")
@@ -2688,17 +2830,153 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 /** One filled-in form: every field the agent declared, keyed by field key. */
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
+/** What a form's session should run on next; a missing half stays as it is. */
+type FormSelection = {
+  model?: { providerID: string; modelID: string; variant?: string | null }
+  agent?: string
+}
+
+/**
+ * The selection of the composer that belongs to a form's session. The main
+ * chat's composer lives in the app-wide config, which follows the open chat's
+ * own session, so an open root session answers with what that composer shows.
+ * A review session answers the same way: the codebase treats it as an
+ * independent conversation even when an older record still carries
+ * `parentID`. Any other session, a pinned chat or a `/btw` fork, holds its
+ * picks per session, and a child session keeps its record whichever chat
+ * shows it, a workflow's binding included: the app-wide config can still
+ * hold the previous chat's selection when the child was just opened. The
+ * session's own unsent picks and saved effort always apply; a form reply
+ * reads a record no store holds from the server before this runs (#6555). A reply
+ * never copies another chat's model, agent or effort.
+ */
+function resolveFormSelection(record: Session | undefined, sessionId: string): FormSelection {
+  const picks = useSelectionStore.getState()
+  const agentPick = picks.getSessionAgentPick(sessionId) ?? undefined
+  // Only a record marking a non-review child diverts the open chat from the
+  // composer; a record read from the server classifies the same way (#6555).
+  if (
+    record
+    && (isReviewSession(record) || !record.parentID)
+    && useSessionUIStore.getState().currentSessionId === sessionId
+  ) {
+    const config = useConfigStore.getState()
+    return {
+      agent: agentPick ?? config.currentAgentName ?? undefined,
+      model: config.currentProviderId && config.currentModelId
+        ? {
+            providerID: config.currentProviderId,
+            modelID: config.currentModelId,
+            variant: config.currentVariantSelection.override === null ? null : config.currentVariant,
+          }
+        : undefined,
+    }
+  }
+  const recordModel = record?.model
+  const modelPick = picks.getSessionModelPick(sessionId)
+  const model = modelPick ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
+  const agent = agentPick ?? record?.agent
+  const savedEffort = model && agent
+    ? picks.getAgentModelVariantForSession(sessionId, agent, model.providerId, model.modelId)
+    : undefined
+  // An effort saved before a switch made elsewhere is older than the record.
+  const effortPicked = savedEffort !== undefined && !(recordModel
+    && picks.isSessionModelSwitched(sessionId, `${recordModel.providerID}/${recordModel.id}#${recordModel.variant ?? ""}`))
+  if (!model || (!modelPick && !effortPicked)) return { agent: agentPick }
+  const recordEffort = recordModel?.providerID === model.providerId && recordModel.id === model.modelId
+    ? recordModel.variant
+    : undefined
+  return {
+    agent: agentPick,
+    model: { providerID: model.providerId, modelID: model.modelId, variant: effortPicked ? savedEffort : recordEffort },
+  }
+}
+
+/**
+ * Puts a form's session on its composer's selection before the answer resumes
+ * the turn, as a send does (#6053): an unchanged selection switches nothing,
+ * and a failed switch leaves the answer unsent. Auto reaches the session as
+ * the sentinel; the server routes the reply itself and switches to the real
+ * model before it forwards the answer. Returns what to settle once the answer
+ * is accepted.
+ */
+async function applyFormSelection(record: Session | undefined, sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
+  // No session owns a location-scoped form, so nothing can be switched for it.
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
+  const { model, agent } = resolveFormSelection(record, sessionId)
+  if (!model && !agent) return () => {}
+  const settleModelPick = model
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID, runtimeKey)
+    : undefined
+  const selection = await resolveCheckedSendSelection(sessionId, directory, {
+    // Without a model the agent half is all that is compared and used.
+    providerID: model?.providerID ?? "",
+    modelID: model?.modelID ?? "",
+    variant: model?.variant,
+    agent,
+  })
+  await opencodeClient.applySendSelection(
+    sessionId,
+    { model: model ? selection.model : undefined, agent: selection.agent },
+    directory,
+    runtimeKey,
+  )
+  return () => settleModelPick?.()
+}
+
+/**
+ * Puts a model picked in a session's composer, and not sent yet, on the session
+ * while its turn waits for an automatic retry. OpenCode reloads the session's
+ * model before every attempt, so the next attempt runs on the pick and the turn
+ * goes on, as when the limit-failover plugin switches from its retry hook. A
+ * pick made while the turn generates waits for the next send, or for this, if
+ * the turn falls into a retry wait first. Auto has no prompt to route here, so
+ * it waits for the next send too.
+ *
+ * The switch is sent without comparing the pick with the synced record: a pick
+ * reverted before the previous switch reached the record would read as
+ * unchanged. OpenCode ignores a switch to the model the session already runs.
+ */
+export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
+  const pick = useSelectionStore.getState().getSessionModelPick(sessionId)
+  if (!pick || isAutoModel(pick.providerId, pick.modelId)) return
+  const { model } = resolveFormSelection(findSessionRecordAnywhere(sessionId, directory), sessionId)
+  if (model?.providerID !== pick.providerId || model.modelID !== pick.modelId) return
+  const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID)
+  await opencodeClient.switchSessionModel(sessionId, { providerID: model.providerID, id: model.modelID, variant: model.variant }, directory)
+  settleModelPick()
+}
+
 export async function replyToForm(
   sessionId: string,
   formId: string,
   answer: FormAnswer,
 ): Promise<void> {
+  // The client resolves its server at call time, so everything past an await
+  // first proves it still works for the runtime the user answered in.
+  const isCurrentRuntime = captureRuntimeInstance()
+  const runtimeKey = getRuntimeKey()
+  const assertRuntimeCurrent = () => {
+    if (!isCurrentRuntime()) throw new Error("Form reply was cancelled because the runtime changed.")
+  }
   await waitForConnectionOrThrow()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
+  assertRuntimeCurrent()
   try {
-    if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
+    // Classification, the switches and the reply's owning instance all come
+    // from the form session's record, read from the server when no store
+    // holds it; a failed read leaves the answer unsent (#6555).
+    const { record, directory: replyDirectory } = await resolveBlockingRequestTarget(
+      sessionId,
+      getRequestReplyDirectory("form", sessionId, formId),
+    )
+    const settleSelection = await applyFormSelection(record, sessionId, replyDirectory, runtimeKey)
+    assertRuntimeCurrent()
+    if (await opencodeClient.replyToForm(sessionId, formId, answer, replyDirectory) !== true) {
       throw new Error("Form reply failed")
     }
+    // The stores belong to another server now, and this form is not on it.
+    if (!isCurrentRuntime()) return
+    settleSelection()
     // A successful reply is authoritative: the backend resolved the form, so
     // clear it from the local store deterministically instead of waiting for
     // the SSE `form.replied` event. A lost event (SSE gap) would leave the
@@ -2709,7 +2987,7 @@ export async function replyToForm(
     removeFormRequestFromChildStores(sessionId, formId)
     noteLocalFormReplied(formId)
   } catch (error) {
-    if (isFormRequestNotFoundError(error)) {
+    if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
       recoverStaleBlockingRequest(sessionId)
     }
@@ -2721,7 +2999,9 @@ export async function replyToForm(
 
 export async function cancelForm(sessionId: string, formId: string): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = getRequestReplyDirectory("form", sessionId, formId)
+  // A failed record read throws before the try: nothing was sent, so the form
+  // stays pending for a retry.
+  const { directory } = await resolveBlockingRequestTarget(sessionId, getRequestReplyDirectory("form", sessionId, formId))
   try {
     if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
       throw new Error("Form cancellation failed")
@@ -2810,33 +3090,18 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
   })
 }
 
-/**
- * Answer a question whose pending request was destroyed by an OpenCode server
- * restart or the inactivity eviction (see `@/lib/questions/orphanedQuestions`).
- * The server is re-checked authoritatively first: if the question is actually
- * still pending (the client merely lost it), it is answered through the
- * normal `form.reply` path so the waiting tool call resumes. Otherwise the
- * answers go to the agent as an OpenChamber message that wakes the session
- * (`@/lib/opencode/openchamber-resume`), answered by the session's own agent
- * and model, and the restart notice is cleared the way a sent message clears
- * it.
- *
- * The pending re-check failing is a hard error (never assume "not pending"
- * from a failed fetch — sending a duplicate message while the question is
- * still live would be destructive).
- */
+/** Answer a persisted question whose request was lost during a restart. */
 export async function answerOrphanedQuestion(
   question: OrphanedQuestion,
   answers: string[][],
 ): Promise<void> {
-  const runtimeKey = getRuntimeKey()
+  const isCurrentRuntime = captureRuntimeInstance()
   await waitForConnectionOrThrow()
-  if (isStaleRuntime(runtimeKey)) throw new Error("runtime changed")
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   const sessionId = question.sessionID
   const directory = getSessionDirectory(sessionId) || dir()
-
   const forms = await opencodeClient.listPendingForms({ directories: [directory] })
-  if (isStaleRuntime(runtimeKey)) throw new Error("runtime changed")
+  if (!isCurrentRuntime()) throw new Error("runtime changed")
   const pending = forms.map(projectQuestionForm).filter((form) => form !== null)
   const match = pending.find((candidate) =>
     candidate.sessionID === sessionId
@@ -2861,18 +3126,89 @@ export async function answerOrphanedQuestion(
       answers: orphanedAnswerPairs(question, answers),
     }),
   })
-  retireRestartInterruptionAfterSend(sessionId, directory)
+  if (isCurrentRuntime()) retireRestartInterruptionAfterSend(sessionId, directory)
+}
+
+/** The `releasedForms` keys of every open linked form in every store; other entries are stale. */
+function openFormReleaseKeys(): Set<string> {
+  const keys = new Set<string>()
+  for (const [, store] of _childStores?.children ?? []) {
+    for (const forms of Object.values(store.getState().form ?? {})) {
+      for (const form of forms ?? []) {
+        const tool = formToolLink(form)
+        if (tool) keys.add(formReleaseKey(form, tool))
+      }
+    }
+  }
+  return keys
+}
+
+const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: () => boolean }>()
+
+/**
+ * Read the tool call of an open form whose message is not loaded (#5391). A
+ * completed or failed call goes to `releasedForms`, which the send path and
+ * the composer's phase both read. Concurrent callers on the same runtime
+ * instance share one read; a read from before a switch is never shared, even
+ * after switching back. A failed read, one that finishes on another runtime,
+ * or one whose form is no longer open records nothing.
+ */
+function readFormToolLink(form: FormRequest): Promise<void> {
+  const tool = formToolLink(form)
+  if (!tool) return Promise.resolve()
+  const key = formReleaseKey(form, tool)
+  const existing = formToolReads.get(key)
+  if (existing?.isCurrentRuntime()) return existing.read
+  const isCurrentRuntime = captureRuntimeInstance()
+  const read = (async () => {
+    try {
+      const { directory } = await resolveBlockingRequestTarget(form.sessionID, getRequestReplyDirectory("form", form.sessionID, form.id))
+      const { parts } = await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)
+      if (!isCurrentRuntime() || formTurnHold(form, { [tool.messageID]: parts }) !== "released") return
+      const openKeys = openFormReleaseKeys()
+      if (openKeys.has(key)) noteFormToolReleased(key, openKeys)
+    } catch (error) {
+      console.error("[session-actions] Could not read the tool call of an open form:", error)
+    }
+  })().finally(() => {
+    if (formToolReads.get(key)?.read === read) formToolReads.delete(key)
+  })
+  formToolReads.set(key, { read, isCurrentRuntime })
+  return read
+}
+
+/** Start the read for each of the session's open forms whose tool call is not loaded (the composer's phase). */
+export function readUnloadedFormToolLinks(sessionId: string): void {
+  const releasedForms = useRecoverableQuestionsStore.getState().releasedForms
+  for (const [, store] of _childStores?.children ?? []) {
+    const state = store.getState()
+    for (const form of state.form?.[sessionId] ?? []) {
+      if (formTurnHold(form, state.part, releasedForms) === "unknown") void readFormToolLink(form)
+    }
+  }
+}
+
+type OpenFormCopy = { store: DirectoryStoreApi; sessionId: string; form: FormRequest }
+
+/** One verdict per form over every store that holds a copy: ended-call evidence from any copy releases it. */
+function formCopiesHold(copies: readonly OpenFormCopy[]): "holds" | "released" | "unknown" {
+  const releasedForms = useRecoverableQuestionsStore.getState().releasedForms
+  const holds = copies.map(({ store, form }) => formTurnHold(form, store.getState().part, releasedForms))
+  if (holds.includes("released")) return "released"
+  return holds.includes("unknown") ? "unknown" : "holds"
 }
 
 /**
- * Cancel every pending form for the session subtree rooted at `sessionId` (the
- * session itself plus any subagent children). Used by the chat send path:
- * sending a message while a form is open must supersede it so it cannot linger
- * or strand the session in a half-answered state.
+ * Cancel the pending forms that hold a turn in the session subtree rooted at
+ * `sessionId` (the session itself plus any subagent children). Used by the
+ * chat send path: sending a message while such a form is open must supersede
+ * it so it cannot strand the session in a half-answered state. A form whose
+ * tool call has ended (`formCopiesHold`) stays open and answerable. A runtime
+ * switch during a read stops the dismissal: nothing is removed or cancelled.
  *
- * The forms are removed from the local store OPTIMISTICALLY (before any network
- * call) so the prompt disappears instantly instead of waiting on the round
- * trip. Each form is then formally cancelled on the backend, which fires
+ * The cancelled forms are removed from the local store OPTIMISTICALLY (before
+ * the cancel call) so the prompt disappears instantly instead of waiting on the
+ * round trip. Each is then formally cancelled on the backend, which fires
  * `form.cancelled` for reconciliation.
  *
  * Returns true when at least one form was cancelled. Failures are swallowed (a
@@ -2891,7 +3227,8 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   const stores = _childStores
   if (!stores) return false
 
-  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; form: FormRequest }> = []
+  const isCurrentRuntime = captureRuntimeInstance()
+  const copiesByForm = new Map<string, OpenFormCopy[]>()
   for (const [, store] of stores.children) {
     const state = store.getState()
     const scopedIds = computeSubtreeIds(state.session, sessionId)
@@ -2901,29 +3238,42 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
       const requests = formsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
-        toDismiss.push({ store, sessionId: scopedId, form: request })
+        // A form id is unique only within its session.
+        const formKey = `${scopedId}\u0000${request.id}`
+        const copies = copiesByForm.get(formKey) ?? []
+        copies.push({ store, sessionId: scopedId, form: request })
+        copiesByForm.set(formKey, copies)
       }
     }
   }
 
+  const unread = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) === "unknown")
+  if (unread.length > 0) {
+    await Promise.all(unread.map((copies) => readFormToolLink(copies[0].form)))
+    // The stores belong to another server now; none of these forms is on it.
+    if (!isCurrentRuntime()) return false
+  }
+  // Decided after the reads, so evidence that arrived meanwhile from any copy counts.
+  const toDismiss = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) !== "released")
   if (toDismiss.length === 0) return false
 
   // Optimistically clear the forms from the local store so the prompt
   // disappears immediately, before the cancel round-trip.
-  for (const { sessionId: scopedSessionId, form } of toDismiss) {
+  for (const [{ sessionId: scopedSessionId, form }] of toDismiss) {
     removeFormRequestFromChildStores(scopedSessionId, form.id)
   }
 
   await Promise.all(
-    toDismiss.map(async ({ store, sessionId: scopedSessionId, form }) => {
+    toDismiss.map(async (copies) => {
+      const [{ sessionId: scopedSessionId, form }] = copies
       try {
         await cancelForm(scopedSessionId, form.id)
       } catch (error) {
         if (isFormRequestNotFoundError(error)) return
         // Swallow: a failed cancellation must not block the send. The form
-        // is still pending server-side, so it goes back where it was.
+        // is still pending server-side, so each copy goes back where it was.
         console.error("[session-actions] Failed to cancel open form on send:", error)
-        restoreFormRequest(store, scopedSessionId, form)
+        for (const copy of copies) restoreFormRequest(copy.store, copy.sessionId, copy.form)
       }
     }),
   )

@@ -4,9 +4,10 @@ import type { PluginFile } from '@/stores/usePluginsStore';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   Event: browser.Event, FocusEvent: browser.FocusEvent,
+  PointerEvent: browser.PointerEvent,
   Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement,
   MutationObserver: browser.MutationObserver, ResizeObserver: browser.ResizeObserver,
   getComputedStyle: browser.getComputedStyle.bind(browser),
@@ -19,9 +20,11 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => 
   if (url.pathname === '/api/fs/home') return Response.json({ home: '/test' });
   if (url.pathname === '/api/location') return Response.json({ data: { directory: '/test' } });
   if (url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+  if (url.pathname === '/api/config') return Response.json([]);
   throw new Error(`Unexpected request: ${url.pathname}`);
 });
 const { act } = await import('react');
+const { opencodeClient } = await import('@/lib/opencode/client');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { usePluginsStore, getPluginsScopeKey } = await import('@/stores/usePluginsStore');
@@ -29,6 +32,7 @@ const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
 const { PluginsPage } = await import('./PluginsPage');
 const { PluginsGrid } = await import('./PluginsGrid');
+const { catalogRefreshTasks } = await import('@/stores/catalogRefresh');
 const container = document.createElement('div');
 document.body.appendChild(container);
 const root = createRoot(container);
@@ -118,4 +122,155 @@ test('a declared local file keeps its editor and file delete action', async () =
   if (!deleteItem) throw new Error('Plugin file delete action missing');
   await act(async () => deleteItem.click());
   expect(deleted).toEqual([{ kind: 'file', id: 'memory-file', label: 'memory.ts' }]);
+});
+
+test('switches follow OpenChamber state, not a deny in the OpenCode config', async () => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }], activeProjectId: 'project' });
+  await act(async () => {
+    usePluginsStore.setState({
+      entries: [
+        { id: 'on', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'on', policyResource: 'plugin:on', switchState: 'on' },
+        { id: 'off', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'off', policyResource: 'plugin:off', switchState: 'off' },
+        { id: 'unavailable', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'unavailable', policyResource: 'plugin:unavailable', switchState: 'unavailable' },
+      ],
+      files: [],
+      selectedId: null,
+      draft: null,
+      runtime: { kind: 'ready', scope: getPluginsScopeKey('/project'), plugins: [] },
+      loadedDirectory: '/project',
+      loadedRuntimeKey: getRuntimeKey(),
+    });
+    root.render(<I18nProvider><PluginsGrid onAdd={() => {}} onDelete={() => {}} /></I18nProvider>);
+  });
+  // Let the policy read land: an empty config denies nothing.
+  await act(async () => {});
+
+  const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="switch"]'));
+  expect(switches.map((element) => [element.getAttribute('aria-checked'), element.hasAttribute('data-disabled')])).toEqual([
+    ['true', false],
+    ['false', false],
+    ['true', true],
+  ]);
+});
+
+test('keeps each switch disabled until its own request finishes', async () => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }], activeProjectId: 'project' });
+  const replies: Array<(result: { ok: boolean }) => void> = [];
+  await act(async () => {
+    usePluginsStore.setState({
+      entries: [
+        { id: 'first', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'first', policyResource: 'plugin:first', switchState: 'on' },
+        { id: 'second', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'second', policyResource: 'plugin:second', switchState: 'on' },
+      ],
+      files: [],
+      selectedId: null,
+      draft: null,
+      runtime: { kind: 'ready', scope: getPluginsScopeKey('/project'), plugins: [] },
+      loadedDirectory: '/project',
+      loadedRuntimeKey: getRuntimeKey(),
+      setEntryEnabled: () => new Promise((resolve) => { replies.push(resolve); }),
+    });
+    root.render(<I18nProvider><PluginsGrid onAdd={() => {}} onDelete={() => {}} /></I18nProvider>);
+  });
+  await act(async () => {});
+
+  const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="switch"]'));
+  await act(async () => switches[0]?.click());
+  await act(async () => switches[1]?.click());
+  expect(switches.map((element) => element.hasAttribute('data-disabled'))).toEqual([true, true]);
+
+  // The first reply must leave the second row disabled while its own request
+  // is still running.
+  await act(async () => replies[0]?.({ ok: true }));
+  expect(switches.map((element) => element.hasAttribute('data-disabled'))).toEqual([false, true]);
+
+  await act(async () => replies[1]?.({ ok: true }));
+  expect(switches.map((element) => element.hasAttribute('data-disabled'))).toEqual([false, false]);
+});
+
+test('an allow that beats the denial never reads as off, and the reason opens on tap', async () => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }], activeProjectId: 'project' });
+  const policySpy = spyOn(opencodeClient, 'getIntegrationPolicies').mockImplementation(async () => [
+    { resource: 'plugin:*', effect: 'allow', path: '/managed/policy.json' },
+  ]);
+  await act(async () => {
+    usePluginsStore.setState({
+      entries: [
+        { id: 'stored-off', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'stored-off', policyResource: 'plugin:stored-off', switchState: 'off' },
+        { id: 'server-said', kind: 'config', scope: 'user', parsedKind: 'npm', spec: 'server-said', policyResource: 'plugin:server-said', switchState: 'overridden' },
+      ],
+      files: [],
+      selectedId: null,
+      draft: null,
+      runtime: { kind: 'ready', scope: getPluginsScopeKey('/project'), plugins: [] },
+      loadedDirectory: '/project',
+      loadedRuntimeKey: getRuntimeKey(),
+    });
+    root.render(<I18nProvider><PluginsGrid onAdd={() => {}} onDelete={() => {}} /></I18nProvider>);
+  });
+  // The grid stays mounted between tests, so ask it to read the policies again.
+  await act(async () => usePluginsStore.getState().bumpPolicyRevision());
+  await act(async () => {});
+
+  const switches = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="switch"]'));
+  expect(switches.map((element) => [element.getAttribute('aria-checked'), element.hasAttribute('data-disabled')])).toEqual([
+    ['true', true],
+    ['true', true],
+  ]);
+  const hints = Array.from(container.querySelectorAll<HTMLButtonElement>('button.cursor-help'));
+  expect(hints).toHaveLength(2);
+  await act(async () => hints[0]?.click());
+  expect(hints[0]?.getAttribute('aria-expanded')).toBe('true');
+  policySpy.mockRestore();
+});
+
+test('OpenChamber\'s own old denial never reads as a rule, and the policy re-read settles it', async () => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }], activeProjectId: 'project' });
+  let policies: Array<{ resource: string; effect: 'allow' | 'deny'; path: string | null }> = [
+    { resource: 'plugin:file-layer', effect: 'deny', path: '/data/opencode.managed.json' },
+    { resource: 'plugin:env-layer', effect: 'deny', path: null },
+    { resource: 'plugin:users-rule', effect: 'deny', path: '/home/me/.config/opencode/opencode.json' },
+    { resource: 'plugin:users-*', effect: 'deny', path: null },
+  ];
+  const policySpy = spyOn(opencodeClient, 'getIntegrationPolicies').mockImplementation(async () => policies);
+  const rule = 'A rule in your OpenCode config blocks this plugin';
+  await act(async () => {
+    usePluginsStore.setState({
+      entries: ['file-layer', 'env-layer', 'users-rule', 'users-wildcard'].map((spec) => (
+        { id: spec, kind: 'config', scope: 'user', parsedKind: 'npm', spec, policyResource: `plugin:${spec}`, switchState: 'on' }
+      )),
+      files: [],
+      selectedId: null,
+      draft: null,
+      runtime: { kind: 'ready', scope: getPluginsScopeKey('/project'), plugins: [] },
+      loadedDirectory: '/project',
+      loadedRuntimeKey: getRuntimeKey(),
+    });
+    root.render(<I18nProvider><PluginsPage /></I18nProvider>);
+  });
+  await act(async () => usePluginsStore.getState().bumpPolicyRevision());
+  await act(async () => {});
+
+  const rows = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="switch"]'))
+    .map((element) => [element.getAttribute('aria-checked'), element.hasAttribute('data-disabled')]);
+  expect(rows()).toEqual([['true', false], ['true', false], ['false', true], ['false', true]]);
+
+  const detail = async (id: string): Promise<string> => {
+    const title = container.querySelector(`[title="${id}"]`)?.closest('button');
+    if (!title) throw new Error(`${id} card missing`);
+    await act(async () => title.click());
+    const text = container.textContent ?? '';
+    await act(async () => usePluginsStore.getState().setSelected(null));
+    return text;
+  };
+  expect(await detail('file-layer')).not.toContain(rule);
+  expect(await detail('users-rule')).toContain(rule);
+
+  // Another client switched `users-rule` on the same way: the config event is
+  // the only thing that tells this page.
+  policies = [];
+  await act(async () => { await catalogRefreshTasks('plugin')[0](); });
+  await act(async () => {});
+  expect(rows()).toEqual([['true', false], ['true', false], ['true', false], ['true', false]]);
+  policySpy.mockRestore();
 });

@@ -4,6 +4,7 @@ import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
 // The list by time holds every project's sessions, so it is titled Projects.
 export const ACTIVITY_TITLE_KEY = {
   priority: 'sessions.sidebar.activity.priorityTitle',
+  pages: 'sessions.sidebar.activity.pagesTitle',
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
   chats: 'sessions.sidebar.activity.chatsTitle',

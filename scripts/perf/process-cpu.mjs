@@ -15,6 +15,14 @@
  * inside the measured processes and a delta between two samples is exact.
  *
  * Percentages are of one core, matching Activity Monitor and `top`.
+ *
+ * Wakes come from macOS `top`, which reads every process's cumulative counts
+ * without root. One read takes about 0.4 s, so they are read around the
+ * measured window, never inside it. Context switches are the figure to compare:
+ * `idlew` counts only wakes out of an idle CPU package, so it reads near zero
+ * whenever anything else keeps the machine busy (measured: 0 to 5 per second
+ * next to a steady 300 context switches). Elsewhere both read as missing, never
+ * zero.
  */
 
 import { execFile } from "node:child_process"
@@ -79,14 +87,41 @@ const readServerCpuSeconds = async (processes) => {
   return result
 }
 
+/** Cumulative counters per pid from one `top` read, or null off macOS or on a failed read. */
+const readWakeups = async () => {
+  if (platform() !== "darwin") return null
+  const output = await run("top", ["-l", "1", "-stats", "pid,csw,idlew"])
+  const counters = new Map()
+  for (const line of output.split("\n")) {
+    const match = /^(\d+)\*?\s+(\d+)\+?\s+(\d+)\+?\s*$/.exec(line.trim())
+    if (match) counters.set(Number(match[1]), { contextSwitches: Number(match[2]), idleWakeups: Number(match[3]) })
+  }
+  return counters.size ? counters : null
+}
+
+const wakeupRates = (first, last, seconds, pid) => {
+  const start = first?.get(pid)
+  const end = last?.get(pid)
+  if (!start || !end || seconds <= 0) return null
+  return {
+    idleWakeupsPerSecond: round((end.idleWakeups - start.idleWakeups) / seconds),
+    contextSwitchesPerSecond: round((end.contextSwitches - start.contextSwitches) / seconds),
+  }
+}
+
 /**
  * Samples cumulative CPU seconds for every Chrome process and the given
  * server-side processes. Call `sample()` on a fixed cadence and `summarize()`
- * once at the end.
+ * once at the end; `sampleWakeups()` once on each side of the measured window.
  */
 export const createProcessCpuSampler = ({ browserClient, serverProcesses }) => {
   const samples = []
+  const wakeups = []
   const labels = new Map(serverProcesses.map((entry) => [`server:${entry.pid}`, entry.label]))
+
+  const sampleWakeups = async () => {
+    wakeups.push({ at: Date.now(), counters: await readWakeups() })
+  }
 
   const sample = async () => {
     const at = Date.now()
@@ -124,9 +159,11 @@ export const createProcessCpuSampler = ({ browserClient, serverProcesses }) => {
         perInterval.push(((current.cpuSeconds.get(key) - previous.cpuSeconds.get(key)) / seconds) * 100)
       }
       const cpuSeconds = last.cpuSeconds.get(key) - first.cpuSeconds.get(key)
+      const wakeupSeconds = ((wakeups.at(-1)?.at ?? 0) - (wakeups.at(0)?.at ?? 0)) / 1000
       processes.push({
         key,
         label,
+        ...wakeupRates(wakeups.at(0)?.counters, wakeups.at(-1)?.counters, wakeupSeconds, Number(key.split(":")[1])),
         cpuSeconds: round(cpuSeconds, 3),
         averagePercent: round((cpuSeconds / windowSeconds) * 100),
         p90Percent: percentile(perInterval, 0.9),
@@ -162,5 +199,5 @@ export const createProcessCpuSampler = ({ browserClient, serverProcesses }) => {
     }
   }
 
-  return { sample, summarize }
+  return { sample, sampleWakeups, summarize }
 }

@@ -18,14 +18,13 @@ that writes it:
 | Keys | Owner | Reached through |
 |---|---|---|
 | `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
-| `setup-worktree`, `setup-worktree-wait`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
-| `suggestedTasks` | `suggested-tasks/runtime.js` via `readSuggestedTasksSection` / `updateSuggestedTasksSection` on the same runtime; the module validates it | `/api/projects/:projectId/suggested-tasks/settings` |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
-(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `projectActions`, `draftStarters`,
+(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `teardownWorktree`, `projectActions`, `draftStarters`,
 `plansDir`, and `magicPrompts`, which `../magic-prompts` owns). The server reads it from the checkout the project id names
 (`projectPathFromId`). `GET /api/projects/:projectId/config`
 returns one merged view: what runs at the top level, plus `shared` and `personal`
@@ -35,10 +34,25 @@ blocks so a page can edit the personal file without copying a teammate's entry i
 |---|---|
 | `setupWorktree` | shared first, then personal; personal `setupWorktreeMode: "replace"` uses the personal list only |
 | `setupWorktreeWait` | personal when the personal file sets it, else shared, else `false` |
+| `teardownWorktree` | shared first, then personal; `setupWorktreeMode` does not apply, so a user who skips the team's setup still stops what the team's setup may have started |
 | `projectActions` | union by `id`; a personal action replaces the shared one with the same id; ids in personal `hiddenSharedActionIds` are dropped; every entry carries `source` |
 | `projectActionsPrimaryId` | personal only |
+| `createWorktreeCommand` | personal only (`personal.createWorktreeCommand`, `''` when unset); see below |
 | `draftStarters` | union by `type:name`, shared first, every entry carries `source` |
 | `plansDir` | shared only |
+
+`createWorktreeCommand` replaces `git worktree add` for this project's new
+worktrees (`../git/DOCUMENTATION.md`, *Worktree create command*). Clients send
+it with each creation as `createCommand`; the server's own creations
+(`session.create`, `session.moveToWorktree`) take it from `worktreeSetupOf`.
+
+### Why the create command is personal only
+
+It names a tool installed on one machine, such as a copy-on-write worktree
+tool. A shared value would make every teammate who pulls the repository create
+worktrees with a command they may not have, and every creation would fail for
+them. Personal only also keeps it out of the trust prompt: nothing a `git pull`
+brings in can change how worktrees are made.
 
 A shared file that exists but cannot be parsed (or names a `plansDir` outside the
 repo) is `shared.status: "invalid"` with a `reason`; the personal setup is still
@@ -80,13 +94,18 @@ and removes the file when only `version` is left.
 Shared setup commands and shared actions run on the machine of whoever pulls
 the repo, so they run only after the user has seen them. The view carries
 `trust: { hash, trusted }`: `hash` is `sharedTrustHashOf(shared)`, a SHA-256
-over the executable parts (`setupWorktree` and each action's `id`, `command`,
-`runIn`, actions sorted by id; names and icons do not count), or `null` when
-nothing executes. `trusted` is true when nothing executes or the personal
+over the executable parts (`setupWorktree`, `teardownWorktree` when it is not
+empty, and each action's `id`, `command`, `runIn`, actions sorted by id; names
+and icons do not count), or `null` when nothing executes. An empty teardown list
+stays out of the hashed document, so an answer recorded before teardown
+commands existed still matches. `trusted` is true when nothing executes or the personal
 file's `sharedTrust.hash` equals the current hash, so a pull that changes a
 command brings the prompt back. The client records an answer with a PUT of
 `sharedTrustHash` (`null` forgets it). The prompt itself lives in the shared
-UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
+UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`). A worktree the server
+makes for an agent has no client to ask, so `worktree-setup.js` gives the
+prompt's "skip" answer when the shared commands are not trusted: it leaves
+them out and returns them for the caller to report.
 
 ## Modules
 
@@ -95,7 +114,11 @@ session's unregistered host destination. It validates the directory, verifies
 the session still lives there, and checks the existing OpenCode fingerprint
 trust before appending. Empty configurations and already trusted fingerprints
 need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
-changed destination answers 409; failed writes answer 503. It creates no folder,
+changed destination answers 409; failed writes answer 503. A session OpenCode
+recorded under a symlinked spelling of the folder (`/tmp` for `/private/tmp`)
+is no changed destination: after registering, the route moves it in OpenCode
+to the canonical folder. The answer always names the session's canonical
+folder as `directory`. It creates no folder,
 runs no project code, and never changes active-project or directory pointers.
 A destination inside a registered project returns that project. A linked
 worktree whose repository (the trust assessment's `repositoryKey`) matches a

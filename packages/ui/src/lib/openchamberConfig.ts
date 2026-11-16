@@ -81,6 +81,8 @@ const sharedSchema = z.object({
   path: z.string(),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean().nullable(),
+  // Defaults keep a server from before teardown commands readable.
+  teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema),
   draftStarters: starterRefsSchema,
   plansDir: z.string().nullable(),
@@ -90,6 +92,9 @@ const personalSchema = z.object({
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean().nullable(),
   setupWorktreeMode: z.enum(['append', 'replace']),
+  teardownWorktree: z.array(z.string()).default([]),
+  /** Replaces the built-in `git worktree add`; `''` keeps it. Personal only. */
+  createWorktreeCommand: z.string().default(''),
   projectActions: z.array(projectActionSchema),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: starterRefsSchema,
@@ -102,6 +107,7 @@ const projectSetupSchema = z.object({
   trust: z.object({ hash: z.string().nullable(), trusted: z.boolean() }),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean(),
+  teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema.extend({ source: sourceSchema })),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: sourcedStartersSchema,
@@ -116,6 +122,9 @@ export type ProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean;
   setupWorktreeMode: 'append' | 'replace';
+  teardownWorktree: string[];
+  /** `''` goes back to the built-in creation. */
+  createWorktreeCommand: string;
   projectActions: OpenChamberProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarterRef[];
@@ -128,6 +137,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
   trust: { hash: null, trusted: true },
   setupWorktree: [],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -136,6 +146,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     path: '.openchamber/project.json',
     setupWorktree: [],
     setupWorktreeWait: null,
+    teardownWorktree: [],
     projectActions: [],
     draftStarters: [],
     plansDir: null,
@@ -144,6 +155,8 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     setupWorktree: [],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: [],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -225,6 +238,7 @@ export async function updateProjectSetup(project: ProjectRef, patch: ProjectSetu
 export type SharedProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
+  teardownWorktree: string[];
   projectActions: OpenChamberProjectAction[];
   draftStarters: DraftStarterRef[];
   plansDir: string | null;
@@ -265,6 +279,15 @@ export async function updateSharedProjectSetup(project: ProjectRef, patch: Share
  */
 export async function getWorktreeSetupCommands(project: ProjectRef): Promise<string[]> {
   return (await getProjectSetup(project)).setupWorktree;
+}
+
+/**
+ * The user's own command that creates this project's worktrees in place of
+ * `git worktree add`, or `''` for the built-in creation. A setup that cannot
+ * be read leaves the built-in creation, as it leaves no setup commands.
+ */
+export async function getWorktreeCreateCommand(project: ProjectRef): Promise<string> {
+  return (await getProjectSetup(project)).personal.createWorktreeCommand;
 }
 
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {

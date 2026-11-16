@@ -22,10 +22,10 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { ContextMenu as ContextMenuRoot, ContextMenuContent } from '@/components/ui/context-menu';
 import type { Session } from '@/lib/opencode/model';
 
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass } from '@/components/ui/dropdown-menu.styles';
+import { contextSessionMenuSlots, type SessionMenuSlots } from '@/components/session/sidebar/sessions/sessionMenuSlots';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
@@ -36,12 +36,14 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { sessionTabChatsScope, sessionTabScopeFor, sessionTabSeedFor } from '@/lib/sessionTabScope';
 import { activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { toggleSessionRead } from '@/components/session/sessionReadActions';
+import { openSessionInSidePanel } from '@/components/session/sessionSidePanel';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import { SessionProjectIcon } from './SessionProjectIcon';
@@ -67,16 +69,6 @@ const scrollTabsWithWheel = (event: React.WheelEvent<HTMLDivElement>) => {
 
 type SessionTab = { id: string; session: Session };
 
-export type SessionTabMenuComponents = {
-  Item: React.ComponentType<{
-    className?: string;
-    disabled?: boolean;
-    onClick?: React.MouseEventHandler;
-    children?: React.ReactNode;
-  }>;
-  Separator: React.ComponentType<{ className?: string }>;
-};
-
 export type SessionTabMenuArgs = {
   session: Session;
   open: boolean;
@@ -84,16 +76,7 @@ export type SessionTabMenuArgs = {
   select: () => void;
   closeOtherTabs: () => void;
   /** Menu primitives for the surface the menu opens in. */
-  components: SessionTabMenuComponents;
-};
-
-const contextComponents: SessionTabMenuComponents = {
-  Item: ({ className, ...props }) => (
-    <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...props} />
-  ),
-  Separator: ({ className, ...props }) => (
-    <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...props} />
-  ),
+  components: SessionMenuSlots;
 };
 
 /**
@@ -116,8 +99,9 @@ const SessionTabItem: React.FC<{
   renderMenu: (args: SessionTabMenuArgs) => React.ReactNode;
   closeOtherTabs: (id: string) => void;
   onMenuOpenChangeComplete?: (open: boolean) => void;
+  menuReturnsFocus?: () => boolean;
   children?: React.ReactNode;
-}> = ({ tab, tabNumber, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, children }) => {
+}> = ({ tab, tabNumber, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, menuReturnsFocus, children }) => {
   const { t } = useI18n();
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const tabPrefix = getEffectiveShortcutPrefix('switch_session_tab', shortcutOverrides);
@@ -134,7 +118,8 @@ const SessionTabItem: React.FC<{
   const turnActivity = useSessionTurnActivity(tab.id);
   const isStreaming = turnActivity !== null;
   const isUnread = useSessionUnread(tab.id);
-  const showUnread = isUnread && !isActive && !isStreaming;
+  const markedUnread = useSessionMarkedUnread(tab.id);
+  const showUnread = isUnread && (!isActive || markedUnread) && !isStreaming;
   const showDot = isStreaming || showUnread;
 
   const menuArgs: SessionTabMenuArgs = {
@@ -143,7 +128,7 @@ const SessionTabItem: React.FC<{
     isActive,
     select: () => onSelect(tab),
     closeOtherTabs: () => closeOtherTabs(tab.id),
-    components: contextComponents,
+    components: contextSessionMenuSlots,
   };
 
   return (
@@ -170,7 +155,20 @@ const SessionTabItem: React.FC<{
                   role="tab"
                   aria-selected={isActive}
                   tabIndex={isActive ? undefined : 0}
-                  onClick={isActive ? undefined : () => onSelect(tab)}
+                  onClick={(event) => {
+                    // Alt toggles the unread mark, Shift opens the session
+                    // in the side panel, as on a sidebar row.
+                    if (event.altKey) {
+                      toggleSessionRead(tab.id, isUnread, t);
+                      return;
+                    }
+                    const directory = resolveGlobalSessionDirectory(tab.session);
+                    if (event.shiftKey && directory && !isVSCodeRuntime()) {
+                      openSessionInSidePanel(tab.id, directory, title);
+                      return;
+                    }
+                    if (!isActive) onSelect(tab);
+                  }}
                   onDoubleClick={isPreview ? () => onPin(tab.id) : undefined}
                   onKeyDown={isActive ? undefined : (event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -253,17 +251,10 @@ const SessionTabItem: React.FC<{
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={title} shortcut={tabShortcut} /></TooltipContent>
         </Tooltip>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="app-region-no-drag z-50">
-            <ContextMenu.Popup
-              data-slot="dropdown-menu-content"
-              style={{ color: 'var(--surface-elevated-foreground)' }}
-              className={cn(dropdownMenuPopupClass, 'min-w-[190px]')}
-            >
-              {renderMenu(menuArgs)}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
+        {/* The shared menu: its glass, keyboard navigation and redraw guard. */}
+        <ContextMenuContent finalFocus={() => menuReturnsFocus?.() ?? true} className="min-w-[190px]">
+          {renderMenu(menuArgs)}
+        </ContextMenuContent>
       </ContextMenuRoot>
     </div>
   );
@@ -287,8 +278,13 @@ export const SessionTabsStrip: React.FC<{
   onMenuOpenChangeComplete?: (open: boolean) => void;
   /** While the active tab renames, its hover controls stay hidden. */
   suppressActiveTabControls?: boolean;
+  /**
+   * Whether a closing tab menu gives focus back to its tab. False while a
+   * Rename from the menu opens the title field, which takes the focus.
+   */
+  menuReturnsFocus?: () => boolean;
   children: React.ReactNode;
-}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, children }) => {
+}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, menuReturnsFocus, children }) => {
   const { t, direction } = useI18n();
   // The horizontal strategy assumes later tabs sit further right; RTL uses real rects.
   const isRtl = direction === 'rtl';
@@ -500,6 +496,7 @@ export const SessionTabsStrip: React.FC<{
                 renderMenu={renderMenu}
                 closeOtherTabs={handleCloseOthers}
                 onMenuOpenChangeComplete={onMenuOpenChangeComplete}
+                menuReturnsFocus={menuReturnsFocus}
               >
                 {tab.id === currentSessionId ? children : null}
               </SessionTabItem>

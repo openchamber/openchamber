@@ -22,11 +22,14 @@ const setupWith = (options: {
   hidden?: string[];
   sharedCommands?: string[];
   personalCommands?: string[];
+  sharedTeardown?: string[];
+  personalTeardown?: string[];
   replace?: boolean;
 }): ProjectSetup => ({
   trust: { hash: null, trusted: true },
   setupWorktree: [],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -35,6 +38,7 @@ const setupWith = (options: {
     path: '.openchamber/project.json',
     setupWorktree: options.sharedCommands ?? [],
     setupWorktreeWait: null,
+    teardownWorktree: options.sharedTeardown ?? [],
     projectActions: options.shared ?? [],
     draftStarters: [],
     plansDir: null,
@@ -43,6 +47,8 @@ const setupWith = (options: {
     setupWorktree: options.personalCommands ?? [],
     setupWorktreeWait: null,
     setupWorktreeMode: options.replace ? 'replace' : 'append',
+    teardownWorktree: options.personalTeardown ?? [],
+    createWorktreeCommand: '',
     projectActions: options.personal ?? [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -68,6 +74,8 @@ const recordingWriters = (fail?: keyof ProjectSetupWriters) => {
       hiddenSharedActionIds: writer('hiddenSharedActionIds'),
       personalCommands: writer('personalCommands'),
       sharedCommands: writer('sharedCommands'),
+      personalTeardownCommands: writer('personalTeardownCommands'),
+      sharedTeardownCommands: writer('sharedTeardownCommands'),
     } satisfies ProjectSetupWriters,
   };
 };
@@ -143,7 +151,7 @@ describe('team action visibility and deletion', () => {
 describe('setup commands', () => {
   test('lists team commands first and marks them skipped in "only my commands" mode', () => {
     const setup = setupWith({ sharedCommands: ['bun install'], personalCommands: ['cp .env'], replace: true });
-    expect(listSetupCommands(setup).map((entry) => [entry.command, entry.source, entry.skipped])).toEqual([
+    expect(listSetupCommands(setup, 'setup').map((entry) => [entry.command, entry.source, entry.skipped])).toEqual([
       ['bun install', 'shared', true],
       ['cp .env', 'personal', false],
     ]);
@@ -152,7 +160,7 @@ describe('setup commands', () => {
   test('editing writes the file the command lives in, and empty text removes it', async () => {
     const setup = setupWith({ sharedCommands: ['bun install', 'bun run build'] });
     const { writes, write } = recordingWriters();
-    const [first, second] = listSetupCommands(setup);
+    const [first, second] = listSetupCommands(setup, 'setup');
     await editSetupCommand(setup, write, first, ' bun install --frozen-lockfile ');
     await editSetupCommand(setup, write, second, '   ');
     expect(writes).toEqual([
@@ -164,7 +172,7 @@ describe('setup commands', () => {
   test('moving a command appends it to the other file before removing it from its own', async () => {
     const setup = setupWith({ sharedCommands: ['bun install'], personalCommands: ['cp .env'] });
     const { writes, write } = recordingWriters();
-    const personal = listSetupCommands(setup)[1];
+    const personal = listSetupCommands(setup, 'setup')[1];
     expect(await moveSetupCommand(setup, write, personal)).toBe(true);
     expect(writes).toEqual([
       { file: 'sharedCommands', value: ['bun install', 'cp .env'] },
@@ -175,7 +183,32 @@ describe('setup commands', () => {
   test('a new command goes to the end of personal settings', async () => {
     const setup = setupWith({ personalCommands: ['cp .env'] });
     const { writes, write } = recordingWriters();
-    await addSetupCommand(setup, write, ' make dev ');
+    await addSetupCommand(setup, write, 'setup', ' make dev ');
     expect(writes).toEqual([{ file: 'personalCommands', value: ['cp .env', 'make dev'] }]);
+  });
+});
+
+describe('teardown commands', () => {
+  test('list on their own, and "only my setup commands" does not skip the team\'s', () => {
+    const setup = setupWith({ sharedCommands: ['bun install'], sharedTeardown: ['docker compose down'], personalTeardown: ['rm -f .pid'], replace: true });
+    expect(listSetupCommands(setup, 'teardown').map((entry) => [entry.command, entry.source, entry.skipped])).toEqual([
+      ['docker compose down', 'shared', false],
+      ['rm -f .pid', 'personal', false],
+    ]);
+  });
+
+  test('edits, moves and additions write the teardown lists, never the setup ones', async () => {
+    const setup = setupWith({ sharedCommands: ['bun install'], sharedTeardown: ['docker compose down'], personalTeardown: ['rm -f .pid'] });
+    const { writes, write } = recordingWriters();
+    const [shared, personal] = listSetupCommands(setup, 'teardown');
+    await editSetupCommand(setup, write, shared, 'docker compose down -v');
+    await moveSetupCommand(setup, write, personal);
+    await addSetupCommand(setup, write, 'teardown', 'make stop');
+    expect(writes).toEqual([
+      { file: 'sharedTeardownCommands', value: ['docker compose down -v'] },
+      { file: 'sharedTeardownCommands', value: ['docker compose down', 'rm -f .pid'] },
+      { file: 'personalTeardownCommands', value: [] },
+      { file: 'personalTeardownCommands', value: ['rm -f .pid', 'make stop'] },
+    ]);
   });
 });

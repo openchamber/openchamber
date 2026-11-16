@@ -11,6 +11,7 @@
         "name": "Browser Provider Stub",
         "icon": "window",
         "entry": "panel/index.html",
+        "mobile": true,
         "dock": "top",
         "size": 40
       },

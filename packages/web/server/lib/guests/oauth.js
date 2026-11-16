@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import {
   GUEST_ACCOUNT_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
+  guestToolLinkSettingIds,
   isGuestRequestPath,
   resolveIntegrationApi,
   resolveIntegrationAuth,
@@ -179,13 +180,38 @@ export const encodeBasicCredential = (username, token) => Buffer.from(`${usernam
 
 export const guestRedirectUri = (origin, guestId) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
 
-/** With `integration`, `hasClient` is false for a client entered for endpoints the package no longer names. */
-export const toPublicGuestAuth = (entry, integration) => ({
-  connected: Boolean(entry?.accessToken),
-  account: typeof entry?.account === 'string' ? entry.account : '',
-  hasClient: integration ? Boolean(usableClientCredentials(entry, integration).clientId) : Boolean(entry?.clientId),
-  settings: entry?.settings && typeof entry.settings === 'object' ? { ...entry.settings } : {},
-});
+/**
+ * With `integration`, `hasClient` is false for a client entered for endpoints
+ * the package no longer names, and a `secret` field's value stays here: it is
+ * named in `secretsSet` when one is stored, and only the service reads it.
+ */
+export const toPublicGuestAuth = (entry, integration) => {
+  const stored = entry?.settings && typeof entry.settings === 'object' ? entry.settings : {};
+  const declared = integration?.settings ?? [];
+  const secretIds = new Set(declared.filter((field) => field.secret).map((field) => field.id));
+  // Only a field the package declares now and does not mark secret: a value
+  // stored while it was a secret stays here after an update stops declaring it.
+  const publicIds = new Set(declared.filter((field) => !field.secret).map((field) => field.id));
+  return {
+    connected: Boolean(entry?.accessToken),
+    account: typeof entry?.account === 'string' ? entry.account : '',
+    hasClient: integration ? Boolean(usableClientCredentials(entry, integration).clientId) : Boolean(entry?.clientId),
+    settings: Object.fromEntries(Object.entries(stored).filter(([key]) => publicIds.has(key))),
+    secretsSet: Object.keys(stored).filter((key) => secretIds.has(key) && stored[key]),
+  };
+};
+
+/**
+ * What a guest's card links read from its settings: the stored value of each
+ * field a `card.link.url` names, when the package declares the field now and
+ * does not mark it secret. An empty value and every other field are left out.
+ */
+export const toolLinkSettingsOf = (entry, guest) => {
+  const visible = toPublicGuestAuth(entry, guest.integration).settings;
+  return Object.fromEntries(guestToolLinkSettingIds(guest.tools)
+    .filter((id) => Object.hasOwn(visible, id) && typeof visible[id] === 'string' && visible[id] !== '')
+    .map((id) => [id, visible[id]]));
+};
 
 const readAccountLabel = (payload, name) => {
   if (!isPlainObject(payload) || typeof name !== 'string' || name === '') {

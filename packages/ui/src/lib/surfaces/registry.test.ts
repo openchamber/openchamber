@@ -43,6 +43,15 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, tabs: [{ mode: chat.mode }] }).some((s) => s.id === 'chat')).toBe(true);
   });
 
+  test('shows the shared pages surface while the server holds received pages, with or without a tab', () => {
+    const shown = (options: Partial<Parameters<typeof getVisibleContextRailSurfaces>[0]>) => getVisibleContextRailSurfaces({ ...baseOptions, ...options }).some((s) => s.id === 'pages');
+    expect(shown({})).toBe(false);
+    expect(shown({ receivedPagesShown: true })).toBe(true);
+    expect(shown({ tabs: [{ mode: 'pages', targetPath: 'rp_1' }] })).toBe(true);
+    // A user who hid it keeps it hidden.
+    expect(shown({ receivedPagesShown: true, hiddenSurfaces: ['pages'] })).toBe(false);
+  });
+
   test('the browser surface can be opened from the rail with no tab yet', () => {
     const browser = CONTEXT_SURFACES.find((surface) => surface.id === 'browser');
     expect(browser?.availability).toBe('always');

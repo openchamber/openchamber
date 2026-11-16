@@ -24,6 +24,7 @@ const declaration = (name) => {
 };
 const shared = {
   AGENT_BROWSER_PARTITION, BROWSER_PANEL_PARTITION, buildAgentBrowserPolicy,
+  BROWSING_PARTITIONS: [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION],
   isStandaloneBrowserPanelPartition, shouldCancelAgentBrowserRequest,
   spaceIdOfPreviewPartition,
 };
@@ -149,6 +150,7 @@ test('clear-data, capture and favicon use the agent session without accessing ap
   });
   const invoke = vm.runInNewContext(`${declaration('handleInvoke')}\nhandleInvoke;`, {
     ...shared, session: h.context.session, resolveBrowserPanelContents: resolve,
+    isBrowsingSession: (candidate) => [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION].some((partition) => candidate === h.fromPartition(partition)),
     FAVICON_MIME_TYPES: new Set(['image/png']), MAX_FAVICON_BYTES: 512 * 1024, Buffer, URL,
   });
   for (const partition of [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION]) await invoke(null, 'desktop_browser_clear_data', { partition, cookies: true });
@@ -174,6 +176,7 @@ test('agent links remain in their own view while human popups keep their existin
     currentAgentBrowserPolicy: () => buildAgentBrowserPolicy({ serverUrls: ['https://front.example'] }),
     browserPanelWindowOpenTarget, BrowserWindow: { fromWebContents: () => null },
     BROWSER_PANEL_POPUP_WEB_PREFERENCES: {},
+    browserPanelDriver: { run: async () => undefined },
     loadUrlInsideWebContents: (contents, url) => loads.push({ contents, url }),
   });
   for (const partition of [AGENT_BROWSER_PARTITION, BROWSER_PANEL_PARTITION]) {

@@ -120,7 +120,8 @@ const matchDescriptor = (url: URL, descriptor: SourceControlProviderDescriptor):
  * URL patterns. `descriptors` are in registry order.
  *
  * 1. A provider whose instance the host is known to be (a connected account's
- *    instance, or the provider's default instance) wins.
+ *    instance, or the provider's default instance) wins. A host that is one of
+ *    a known instance's aliases names that instance.
  * 2. Otherwise the only provider whose pattern matches.
  * 3. When several match, the first by `order`: an unknown host with
  *    `/issues/N` or `/pull/N` keeps reading as GitHub-shaped.
@@ -128,7 +129,7 @@ const matchDescriptor = (url: URL, descriptor: SourceControlProviderDescriptor):
 export const parseRepositoryItemUrl = (
   link: string,
   descriptors: readonly SourceControlProviderDescriptor[],
-  knownIdentities: ReadonlyArray<{ provider: string; instance: string }>,
+  knownIdentities: ReadonlyArray<{ provider: string; instance: string; instanceAliases?: readonly string[] }>,
 ): RepositoryItemUrlMatch | null => {
   let url: URL;
   try {
@@ -145,6 +146,9 @@ export const parseRepositoryItemUrl = (
     const known = descriptor.instances.defaultInstance === match.instance
       || knownIdentities.some((identity) => identity.provider === descriptor.id && identity.instance === match.instance);
     if (known) return match;
+    const aliased = knownIdentities.find((identity) => identity.provider === descriptor.id
+      && identity.instanceAliases?.includes(match.instance));
+    if (aliased) return { ...match, instance: aliased.instance };
     first ??= match;
   }
   return first;

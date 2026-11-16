@@ -1,8 +1,10 @@
-import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-config.js';
-import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
+import { appendManagedCommand, appendManagedPermissions, appendManagedPolicies, appendManagedPlugin, appendManagedSkills } from './managed-plugin-config.js';
 import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
+import { isSharingAvailable } from '../share-pages/relay-client.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
+import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
+import { EXTENSION_AUTHORING_COMMAND, materializeAuthoringSkill } from '../guests/agent-context.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -35,12 +37,17 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * only ever change across a restart.
  *
  * The file is OpenChamber-owned and holds `plugins`: the built-in plugins
- * OpenChamber disables, then its own plugin directories; and `permissions`
- * its tools need, such as the workflow answer tool denied everywhere but in
- * the sessions that allow it. OpenCode appends every layer's permissions to
- * each agent, so ours add to the user's rules and replace none. It sits above
+ * OpenChamber disables, then its own plugin directories; `policies`: the
+ * `integration.use` denials for the plugins switched off in OpenChamber; and
+ * `permissions` its tools need, such as the workflow answer tool denied
+ * everywhere but in the sessions that allow it. OpenCode appends every layer's
+ * permissions to each agent, so ours add to the user's rules and replace none.
+ * `skills` lists our extension-writing skill and the folders active extensions
+ * ship, and `commands` the command that starts extension work. It sits above
  * the user's global `opencode.json` and below their project config, so it never
- * shadows a project-level choice.
+ * shadows a project-level choice. The plugin folders active extensions ship
+ * come after OpenChamber's own plugins: OpenCode loads in list order, so an
+ * extension never shadows a managed tool.
  *
  * When the user's own environment already sets `OPENCODE_CONFIG`, that file is
  * theirs: OpenChamber does not hijack it and falls back to merging its plugins
@@ -58,6 +65,10 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
+ * @param {() => Promise<string[]>} [dependencies.listExtensionSkillDirectories] skill folders of active extensions
+ * @param {() => Promise<string[]>} [dependencies.listExtensionPluginDirectories] OpenCode plugin folders of active extensions
+ * @param {string} [dependencies.openchamberVersion] the running app, which the extension-writing skill pins its SDK to
+ * @param {() => { action: string, resource: string, effect: string }[]} [dependencies.readPluginDenials] the plugins switched off in OpenChamber
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -68,6 +79,10 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   limitFailoverRuntime = null,
   readSettings,
+  listExtensionSkillDirectories = async () => [],
+  listExtensionPluginDirectories = async () => [],
+  openchamberVersion,
+  readPluginDenials = () => [],
 }) => {
   // Fail at construction: a missing directory otherwise only surfaces when the
   // managed OpenCode child is about to spawn, leaving the server up without it.
@@ -81,9 +96,10 @@ export const createManagedConfigRuntime = ({
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
-  const writeConfigFile = async ({ disabled, directories, permissions }) => {
+  const writeConfigFile = async ({ disabled, directories, extensionPlugins, permissions, policies, skills, commands }) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
-    const config = { plugins: [...disabled, ...directories] };
+    const config = { plugins: [...disabled, ...directories, ...extensionPlugins], skills, commands };
+    if (policies.length > 0) config.policies = policies;
     if (permissions.length > 0) config.permissions = permissions;
     const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
@@ -112,15 +128,17 @@ export const createManagedConfigRuntime = ({
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
+    // Read at every write: a policy change rewrites this file (index.js).
+    const includeShare = includeRender && isSharingAvailable();
     const includeImage = settings?.agentImageToolEnabled === true;
     const includeSecret = settings?.agentSecretToolEnabled !== false;
+    const includeUsage = settings?.agentUsageToolEnabled === true;
     const includeWorkflow = settings?.agentWorkflowToolEnabled === true;
-    const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [await materializeLocalMcpPlugin({ dataDir })];
     let permissions = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeUsage || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the
@@ -130,7 +148,34 @@ export const createManagedConfigRuntime = ({
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
     const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
-    return { disabled, directories, permissions };
+    const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir, openchamberVersion });
+    const skills = [authoring.skillsRoot, ...await listExtensionSkillDirectories()];
+    const extensionPlugins = await listExtensionPluginDirectories();
+    return { disabled, directories, extensionPlugins, permissions, policies: readPluginDenials(), skills, commands: { [EXTENSION_AUTHORING_COMMAND]: authoring.command } };
+  };
+
+  let writing = null;
+  let writeAgain = false;
+  /**
+   * One write at a time. The catalog is read before the file is written, so
+   * two refreshes could land in read order and bring back what a pause just
+   * removed; a request during a write runs the whole read-then-write once
+   * more instead, so the file always ends with the newest catalog.
+   */
+  const writeLatestConfigFile = () => {
+    if (writing) {
+      writeAgain = true;
+      return writing;
+    }
+    writing = (async () => {
+      do {
+        writeAgain = false;
+        await writeConfigFile(await materializeEnabledPlugins());
+      } while (writeAgain);
+    })().finally(() => {
+      writing = null;
+    });
+    return writing;
   };
 
   /**
@@ -139,30 +184,34 @@ export const createManagedConfigRuntime = ({
    * call back without a restart.
    */
   const buildManagedChildEnv = async () => {
-    const enabled = await materializeEnabledPlugins();
     const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
     if (ownsConfigFile()) {
-      await writeConfigFile(enabled);
+      await writeLatestConfigFile();
       return { ...childEnv, OPENCODE_CONFIG: filePath };
     }
+    const enabled = await materializeEnabledPlugins();
     let content = env.OPENCODE_CONFIG_CONTENT;
-    for (const directory of [...enabled.disabled, ...enabled.directories]) {
+    for (const directory of [...enabled.disabled, ...enabled.directories, ...enabled.extensionPlugins]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
+    if (enabled.policies.length > 0) content = appendManagedPolicies(content, enabled.policies);
     if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);
+    content = appendManagedSkills(content, enabled.skills);
+    for (const [name, command] of Object.entries(enabled.commands)) content = appendManagedCommand(content, name, command);
     return { ...childEnv, OPENCODE_CONFIG_CONTENT: content };
   };
 
   /**
-   * Rewrite the managed config file after a managed-plugin setting changed, so
-   * the running OpenCode picks the new plugin list up. A no-op when the user
-   * owns `OPENCODE_CONFIG`; those installs still need a restart.
+   * Rewrite the managed config file after a managed-plugin setting or the
+   * extension catalog changed, so the running OpenCode picks the new plugin
+   * list up. A no-op when the user owns `OPENCODE_CONFIG`; those installs
+   * still need a restart.
    *
    * @returns {Promise<{updated: boolean, reason?: string}>}
    */
   const refreshManagedConfigFile = async () => {
     if (!ownsConfigFile()) return { updated: false, reason: 'external-config' };
-    await writeConfigFile(await materializeEnabledPlugins());
+    await writeLatestConfigFile();
     return { updated: true };
   };
 

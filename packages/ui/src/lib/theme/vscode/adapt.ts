@@ -53,11 +53,12 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     toward(seed, canvas, (color) => contrast(color, canvas) <= ceiling),
     neutral, (color) => minimum(color) >= floor,
   );
-  surface.foreground = text(surface.foreground, dark ? 13.6 : 9, 7);
+  const bodyCeiling = dark ? 15.4 : 13;
+  surface.foreground = text(surface.foreground, bodyCeiling, 7);
   // Dark palettes cap secondary text lower: there mid greys sit close
   // together, and a brighter secondary colour merges with resting titles.
   surface.mutedForeground = text(surface.mutedForeground, Math.min(dark ? 5.2 : 6, contrast(surface.foreground, canvas) * 0.7));
-  surface.elevatedForeground = text(surface.elevatedForeground, dark ? 13.6 : 9, 7);
+  surface.elevatedForeground = text(surface.elevatedForeground, bodyCeiling, 7);
 
   const accents = [authored['button.background'], authored['textLink.foreground'], authored['activityBarBadge.background'], authored['list.highlightForeground'], authored.focusBorder];
   primary.base = readable(accents.find((color) => color !== undefined && minimum(color) >= 3) ?? primary.base);
@@ -157,7 +158,7 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     tools.icon = surface.mutedForeground;
   }
   if (markdown) {
-    markdown.bold = mixColor(neutral, surface.foreground, 0.12, canvas);
+    markdown.bold = surface.foreground;
     markdown.italic = surface.foreground;
     markdown.blockquote = surface.mutedForeground;
     markdown.blockquoteBorder = border(markdown.blockquoteBorder ?? interactive.border, caps.divider);

@@ -7,8 +7,9 @@ import {
   connectHost,
   HostRequestError,
   isGuestMessageItem,
-  isGuestSessionItem,
+  isGuestAttachItem, isGuestLinkItem, isGuestSessionItem,
   type AttachIssueRequest,
+  type GuestLinkItem,
   type GuestMessageItem,
   type GuestSessionItem,
   type JsonValue,
@@ -199,6 +200,20 @@ const renderSessionAction = (item: GuestSessionItem): void => {
   mountButton(actions, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
 };
 
+// A `DEMO-2` or task link clicked in the chat (`contributes.links`): the
+// task it names, or a note that this board does not have it.
+const renderLink = (item: GuestLinkItem): void => {
+  const task = findTask(item.identifier);
+  if (task) {
+    renderDetails(attachPayload(task));
+    return;
+  }
+  const page = newPage();
+  mountBadge(page, { label: item.identifier, tone: 'warning' });
+  mountText(page, { text: item.url ? `This board has no task ${item.identifier}. [${item.url}](${item.url})` : `This board has no task ${item.identifier}.`, onOpenUrl: (href) => { void host.openUrl(href); } });
+  mountButton(page, { label: 'Close', variant: 'ghost', onClick: () => void host.close() });
+};
+
 host.onReady((ctx) => {
   applyHostReady(ctx, document.documentElement);
 });
@@ -212,7 +227,9 @@ host.onItem((item) => {
     renderMessageAction(item);
   } else if (isGuestSessionItem(item)) {
     renderSessionAction(item);
-  } else if (item) {
+  } else if (isGuestLinkItem(item)) {
+    renderLink(item);
+  } else if (isGuestAttachItem(item)) {
     renderDetails(item);
   } else {
     renderPicker();

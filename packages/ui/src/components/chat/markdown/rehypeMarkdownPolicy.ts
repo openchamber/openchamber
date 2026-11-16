@@ -2,6 +2,7 @@ import type { Element, Root, ElementContent } from 'hast';
 import { z } from 'zod';
 import { isAppLinkUrl } from '@/lib/url';
 import { isSessionDeepLink } from '@/lib/sessionLinks';
+import { parseExtensionInstallLink } from '@/lib/guests/install-link';
 
 const allowedAttributes = new Set(['align', 'alt', 'checked', 'colSpan', 'controls', 'disabled', 'height', 'href', 'media', 'open', 'playsInline', 'preload', 'rel', 'rowSpan', 'src', 'srcSet', 'start', 'target', 'title', 'type', 'width']);
 const urlAttribute = z.string();
@@ -23,7 +24,7 @@ function safeLink(value: string, vscode: boolean): boolean {
   if (value !== value.trim() || /\s/.test(value)) return false;
   return relativeOrHttp(value) || localFile(value) || isAppLinkUrl(value)
     || /^(?:mailto|tel|sms|callto|cid|xmpp|irc|ircs|news|nntp|feed|webcal):/i.test(value)
-    || (!vscode && isSessionDeepLink(value));
+    || (!vscode && (isSessionDeepLink(value) || parseExtensionInstallLink(value) !== null));
 }
 
 export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
@@ -51,6 +52,7 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
             || ['id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataFootnotes'].includes(key)
             || (key === 'dataOcAlert' && node.tagName === 'blockquote')
             || (key === 'dataOcReference' && node.tagName === 'a')
+            || (key === 'dataOcGuestLink' && node.tagName === 'a')
           );
           if (!allowedAttributes.has(key) && !generated) delete node.properties[key];
         }

@@ -62,6 +62,8 @@ const MODIFIER_LABELS: Record<ShortcutDisplayPlatform, Record<ShortcutModifier, 
 const KEY_LABEL_MAP: Record<string, string> = {
   comma: ',',
   period: '.',
+  minus: '-',
+  plus: '+',
   enter: 'Enter',
   escape: 'Esc',
   tab: 'Tab',
@@ -247,6 +249,17 @@ export function getShortcutConflict(left: ShortcutCombo, right: ShortcutCombo): 
   return sharesLeader && leftChords.length !== rightChords.length ? 'prefix' : undefined;
 }
 
+// The keys `convertShortcutComboToAccelerator` in packages/electron maps.
+const MENU_ACCELERATOR_KEY = /^(?:[a-z0-9]|f(?:[1-9]|1\d|2[0-4])|arrow(?:up|down|left|right)|space|tab|escape|backspace|delete|insert|home|end|pageup|pagedown|comma|period|plus|minus|enter|[/;'[\]\\`=])$/;
+
+/** A native menu accelerator is one chord: a key the menu can show, held with a modifier other than Shift. */
+export function isMenuAcceleratorCombo(combo: ShortcutCombo): boolean {
+  const parsed = parseShortcut(combo);
+  if (parsed?.chords.length !== 1) return false;
+  const { modifiers, key } = parsed.chords[0];
+  return MENU_ACCELERATOR_KEY.test(key) && (['mod', 'ctrl', 'alt', 'super'] as const).some((modifier) => modifiers.has(modifier));
+}
+
 export function isRiskyBrowserShortcut(combo: ShortcutCombo): boolean {
   if (isUnassignedShortcut(combo)) return false;
   const parsed = parseShortcut(combo);
@@ -349,6 +362,24 @@ export function eventMatchesShortcut(
   }
 
   return keyToShortcutToken(resolveShortcutEventKey(event)) === keyToShortcutToken(chord.key);
+}
+
+/**
+ * The second chord of a sequence pressed with the leader's modifiers still
+ * held: Ctrl+K then Ctrl+B for `mod+k b`.
+ */
+export function heldSequenceChord(leader: ShortcutCombo, chord: ShortcutCombo): ShortcutCombo | undefined {
+  const modifiers = parseShortcut(leader)?.chords[0]?.modifiers;
+  return modifiers && normalizeCombo([...modifiers, chord].join('+'));
+}
+
+export function eventMatchesHeldSequenceKey(
+  event: KeyboardEvent | React.KeyboardEvent,
+  leader: ShortcutCombo,
+  chord: ShortcutCombo,
+): boolean {
+  const held = heldSequenceChord(leader, chord);
+  return held !== undefined && eventMatchesShortcut(event, held);
 }
 
 export function isShortcutPrefixHeld(prefixCombo: ShortcutCombo, heldKeys: ReadonlySet<string>): boolean {

@@ -1,7 +1,5 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { OpenCode } from '@opencode/client';
 import type { Part } from '@/lib/opencode/model';
@@ -12,16 +10,6 @@ import { SyncProvider } from '@/sync/sync-context';
 import type { ChatMessageEntry, TurnGroupingContext } from '../lib/turns/types';
 import { projectTurnActivity } from '../lib/turns/projectTurnActivity';
 
-// Bun needs the asset URL that Vite normally supplies to the real renderer.
-plugin({
-  name: 'message-divider-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 const { default: MessageBody } = await import('./MessageBody');
 
 const unavailable = (): never => { throw new Error('Message rendering must not call runtime APIs'); };

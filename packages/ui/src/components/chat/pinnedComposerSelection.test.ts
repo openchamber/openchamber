@@ -32,6 +32,20 @@ describe('pinned composer selection', () => {
         expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: null, record }).variant).toBeNull();
     });
 
+    test('the record\'s "default" effort is no effort, as the main chat shows it', () => {
+        const unset = { ...record, model: { ...record.model, variant: 'default' } };
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: undefined, record: unset }).variant).toBeUndefined();
+    });
+
+    test('an effort saved as "default" is an explicit Default that still wins over the record', () => {
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: 'default', record }).variant).toBeNull();
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: ' default ', record }).variant).toBeNull();
+    });
+
+    test('a real effort saved for the session wins over the record\'s', () => {
+        expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: 'low', record }).variant).toBe('low');
+    });
+
     test('a session without a record or picks has no model of its own', () => {
         expect(resolvePinnedComposerSelection({ savedAgent: null, savedModel: null, savedVariant: undefined, record: undefined })).toEqual({
             agent: undefined,

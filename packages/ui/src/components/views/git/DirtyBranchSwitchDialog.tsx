@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 interface DirtyBranchSwitchDialogProps {
   open: boolean;
@@ -133,20 +134,21 @@ export const DirtyBranchSwitchDialog: React.FC<DirtyBranchSwitchDialogProps> = (
               }}
               className="min-w-0 flex-1 bg-transparent typography-meta text-foreground outline-none placeholder:text-muted-foreground"
             />
-            <button
-              type="button"
-              onClick={() => { void handleGenerate(); }}
-              disabled={isProcessing}
-              aria-label={t('gitView.commit.generate')}
-              title={t('gitView.commit.generate')}
-              className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
-              {pendingAction === 'generate' ? (
-                <Icon name="loader-4" className="size-4 animate-spin" />
-              ) : (
-                <Icon name="ai-generate-2" className="size-4 text-primary" />
-              )}
-            </button>
+            <ButtonTooltip sideOffset={8} label={t('gitView.commit.generateAria')} className="shrink-0">
+              <button
+                type="button"
+                onClick={() => { void handleGenerate(); }}
+                disabled={isProcessing}
+                aria-label={t('gitView.commit.generate')}
+                className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {pendingAction === 'generate' ? (
+                  <Icon name="loader-4" className="size-4 animate-spin" />
+                ) : (
+                  <Icon name="ai-generate-2" className="size-4 text-primary" />
+                )}
+              </button>
+            </ButtonTooltip>
           </div>
 
           <div className="flex items-center gap-2">

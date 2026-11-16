@@ -16,6 +16,7 @@ const setup: ProjectSetup = {
   trust: { hash: 'sha256:fixture', trusted: false },
   setupWorktree: ['true'],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -24,6 +25,7 @@ const setup: ProjectSetup = {
     path: '.openchamber/project.json',
     setupWorktree: ['true'],
     setupWorktreeWait: null,
+    teardownWorktree: [],
     projectActions: [],
     draftStarters: [],
     plansDir: null,
@@ -32,6 +34,8 @@ const setup: ProjectSetup = {
     setupWorktree: [],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: [],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -53,7 +57,7 @@ beforeEach(() => {
   );
   Object.assign(globalThis, {
     window: testWindow,
-    document: testWindow.document,
+    document: testWindow.document, Event: testWindow.Event, CustomEvent: testWindow.CustomEvent,
     navigator: testWindow.navigator,
     HTMLElement: testWindow.HTMLElement,
     Element: testWindow.Element,

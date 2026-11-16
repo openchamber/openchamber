@@ -18,6 +18,25 @@ bend one, raise it as a product question before building (root `AGENTS.md`).
 Tuned values (sheen, shadow, top line strength) were set by eye by the
 maintainer; keep them as they are unless asked.
 
+## Proposing a design
+
+- **Read the code first.** Before proposing how something should look or
+  behave, read the stores and components behind it: how the list is sorted,
+  what counts as active, what already groups it. A proposal guessed from a
+  screenshot rests on behavior the app does not have.
+- **Build variants from existing precedent.** Find the app's own pattern for
+  the job (the question tool's form fields, Settings chips, the Git and MCP
+  banners, the dotted leaders in the Keyboard Shortcuts dialog) and vary
+  that. An invented look hides the real flaws: a check inside a pill shifts
+  its layout, a segmented control reads as tabs.
+- **Draw variants with the real values.** Show them as an HTML page that uses
+  the exact values from our CSS (tile tone, radii, paddings, table borders).
+  A live screenshot works for one component that fits the viewport; crops of
+  the chat tend to miss the component. Image paths in such a page are whole
+  strings, never concatenated, or the images do not load.
+- **One component per question.** Ask about one component per page, never a
+  combined picker of several.
+
 ## Depth: controls stand up, layout lies flat
 
 The app has one rule for depth, and every surface follows from it:
@@ -68,11 +87,20 @@ design within it; the budget only tells you when a zone has grown loud.
   (success): finished, waiting to be read. Yellow (warning): waiting on the
   user (a question, a permission). Red: an error. Everything that is not a
   state (a pin, a picked effort, an agent's label text, a mode chip) is muted
-  or plain text; an agent keeps its colour on its icon only. One state per
+  or plain text; an agent keeps its colour on its icon only, and the
+  composer shows that icon muted at rest (`restingAgentColor`: its hue mixed
+  toward the muted text), while pickers and menus listing agents keep the
+  full colour. One state per
   spot: while a session waits on the user, its running mark and timer step
   aside for the yellow mark. A state's colour stays visible at rest; making
   it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
   coloured text), never colour that waits for a hover.
+- **Two tints are the app's voice, and stay.** The user's message bubble
+  carries the theme's warm tint and a faint ring: it marks the user's own
+  words, and a neutral bubble made the app read as washed out (users pushed
+  back on it). Inline code in prose has its own hue, kept apart from the
+  state colours (never the success green). Neither is a state, and a pass
+  that removes colour "because colour is for state" leaves both alone.
 - **Rarely used actions go in a menu, last in the row.** A row of icons that
   say nothing without a hover becomes the few everyday controls plus one
   "More" (`more` icon) at the end: the sidebar's pages, a file's actions
@@ -118,7 +146,9 @@ Using a control must not shift anything the user did not touch.
   visible stays visible in that slot; visibility is never a reason to grow the
   container.
 - **Grow away from the user's focus.** A row a composer mode adds goes above
-  the input, so the field the user types into stays put.
+  the input, so the field the user types into stays put; a row added below
+  pushes the field up while they type. This holds for every composer or input
+  redesign.
 - **States keep their size.** Selected, hover, active and loading states change
   colour and fill, never width, weight-driven reflow, padding or borders that
   appear from nothing. A button showing a spinner keeps its width; a skeleton
@@ -221,6 +251,15 @@ Controls in one row share one height.
   nobody needs to read may fade: separators (`·`, `/`), disabled controls,
   calendar days outside the month, large empty-state illustrations. Never
   muted text on a muted fill, or a list whose every line is grey.
+- **Activity rows: muted name, bright argument.** In the transcript's
+  activity list every row's name is muted at regular weight, icon included
+  (`--tools-description`, `--tools-icon`): tools, Thinking, groups, subagents,
+  MCP tools, notices. The detail is foreground (`--tools-title`) when it is
+  something the user scans for and acts on (a command, a path, a search
+  query, a URL, a skill or tool argument) and muted when it is prose (a
+  thinking preview, a description sentence, a summary), so a Thinking row is
+  muted throughout. Durations and counts stay muted, diff counts keep their
+  green and red, and a state colour (working mark, error red) still wins.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 
@@ -230,6 +269,44 @@ Controls in one row share one height.
   full); sidebar session rows are the exception and keep their faint fill.
 - Tooltips on dense rows open above their element so they never cover the
   neighbouring actions.
+
+## The phone
+
+The same control stays under the same spot of the thumb from screen to screen.
+Differences of a few pixels between screens read as drift, so reuse these
+instead of restating them.
+
+- **Top bar.** Every screen and drawer takes `MOBILE_HEADER_CLASS`,
+  `MOBILE_HEADER_BUTTON_CLASS` and `MOBILE_HEADER_TITLE_CLASS` from
+  `components/ui/mobileHeader.ts`: 56px tall, 40px round buttons centred 28px
+  from the edge, the title starting at 60px. Back is `arrow-left`, close is
+  `close`, in that bar, never drawn ad hoc.
+- **Touch sizes.** List rows are 44px (`min-h-11`), other touch controls at
+  least 36px. The in-app browser runs with a mouse and hides these: measure with
+  touch emulation (`scripts/perf/cdp.mjs`), and leave keyboard, camera and
+  native gestures to a real device.
+- **What opens.** Picking a value or searching opens a sheet
+  (`MobileOverlayPanel`, `MobileSheetList`): flat rows, a fill and a check on the
+  selected one, uppercase captions, flat search. A short list of 2 to 5 actions
+  stays a dropdown. Every dialog on a phone is a bottom sheet. The menu icon is
+  the horizontal `more`.
+- **Words over icons.** A phone has no tooltips. An icon stands alone only when
+  it reads by itself; otherwise the control says what it does in words. When
+  three worded actions do not fit one row, the most familiar icon gives up its
+  word.
+- **Hidden gestures.** A long press only repeats an action or guards a dangerous
+  one. Anything important also has a visible way in, through `···`.
+- **Less than the desktop.** Fine control stays off the phone when it costs
+  height: the editor's find is one row with no replace or options, the diff has
+  no whitespace toggle. Clear what a wider layout set, so a hidden option cannot
+  keep changing the result.
+- **Long names.** Lead with the file name, whole; the folder goes on a muted
+  line below and truncates first.
+- **Numbers.** Only what the client really knows. A long session holds just its
+  tail, so never sum over loaded messages and call it the session's total, and
+  label a figure with what it covers. Tokens read compact (`13.7M`).
+- **Colour marks state.** A control at rest is muted; colour means something
+  happened.
 
 ## Review before finishing
 

@@ -1,11 +1,19 @@
+// allow: SIZE_OK — catalog schema registry; contribution contracts are shared with the SDK.
 import {
   GUEST_ACTIONS_MAX,
+  GUEST_BLOCKS_MAX,
+  GUEST_BLOCK_ARGS_MAX,
+  GUEST_BLOCK_ARG_NAME,
+  GUEST_BLOCK_NAME,
   GUEST_CAPABILITIES,
   GUEST_COMMANDS_MAX,
   GUEST_COMMAND_NAME,
   GUEST_FILE_EDITORS_MAX,
   GUEST_FILE_EDITOR_PATTERNS_MAX,
   GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_LINK_ACTIONS,
+  GUEST_LINK_KEY,
+  GUEST_LINK_KEYS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_SESSION_EVENT_TYPES,
   GUEST_STATUS_SECTION_HEIGHT_MAX,
@@ -15,22 +23,31 @@ import {
   GUEST_STATUS_SOURCE_INTERVAL_MIN,
   GUEST_SURFACE_DOCKS,
   GUEST_TOOLS_MAX,
-  GUEST_TOOL_MATCH,
-  GUEST_TOOL_OUTPUTS,
   GUEST_MESSAGES_MAX,
   GUEST_LOOPBACK_PORT_MIN,
   GUEST_LOOPBACK_PORT_MAX,
   GUEST_MESSAGE_BODIES,
   GUEST_MESSAGE_TONES,
+  GUEST_TOOL_MATCH,
+  GUEST_TOOL_OUTPUTS,
+  TRACKER_URL_TEMPLATES_MAX,
+  isBuildableLinkTemplate,
+  GUEST_WAITS_MAX,
+  GUEST_WAIT_ID,
+  GUEST_WAIT_TITLE_MAX,
   isFileEditorPattern,
+  isGuestProviderLogoPath,
   isGuestRequestPath,
+  isOpenCodeProviderId,
 } from '@openchamber/sdk';
-import { guestPlanProvidersSchema, loopbackContributionSchema } from '@openchamber/sdk/schemas';
+import { guestPlanProvidersSchema, guestToolCardSchema, loopbackContributionSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+/** Characters in one stored setting value, as the server's auth store caps it. */
+const GUEST_TOOL_LINK_SETTING_MAX = 2000;
 const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Reuse the SDK declaration schema, extending only the server-owned resolution.
@@ -54,6 +71,7 @@ const publicIntegrationSchema = z.object({
   settings: z.array(z.object({
     id: z.string().regex(PANEL_ID),
     label: z.string().trim().min(1),
+    secret: z.literal(true).optional(),
   })).optional(),
 });
 
@@ -76,6 +94,8 @@ const publicServiceSchema = z.object({
   // catalog: every other extension must keep working.
   provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).optional().catch(undefined),
   surface: z.literal(true).optional().catch(undefined),
+  keepRunning: z.literal(true).optional().catch(undefined),
+  schedule: z.array(z.object({ id: z.string(), cron: z.string(), timezone: z.string().optional() })).optional().catch(undefined),
 });
 
 // The Git host a source-control provider extension adds, as the approval
@@ -130,19 +150,36 @@ const publicTrackerSchema = z.object({
   oauth: z.object({ scopes: z.array(z.string().trim().min(1).max(64)).max(32) }).optional(),
 });
 
+// The usage provider a `quota` service provides, as the approval dialog shows
+// it: the OpenCode providers whose credentials the service receives. A
+// malformed slice drops the field, never the row.
+const publicQuotaSchema = z.object({
+  providers: z.array(z.string().trim().min(1).max(64)).max(16),
+});
+
 const guestActionSchema = z.object({
   id: z.string().regex(PANEL_ID),
   label: z.string().trim().min(1),
   icon: z.string().trim().min(1).optional(),
-  where: z.enum(['message', 'session']),
+  where: z.enum(['message', 'session', 'selection', 'file', 'diff']),
   mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).optional(),
   payload: z.array(z.enum(['messages'])).optional(),
+  display: z.enum(['label', 'icon', 'both']).optional(),
 });
 
 const guestCommandSchema = z.object({
   name: z.string().regex(GUEST_COMMAND_NAME),
   description: z.string().trim().min(1).optional(),
+});
+
+const guestBlockSchema = z.object({
+  name: z.string().regex(GUEST_BLOCK_NAME),
+  description: z.string().trim().min(1),
+  args: z.array(z.string().regex(GUEST_BLOCK_ARG_NAME)).max(GUEST_BLOCK_ARGS_MAX),
+  entry: z.string().trim().min(1),
+  height: z.number().int().positive().optional(),
+  answers: z.boolean().optional(),
 });
 
 const guestToolSchema = z.object({
@@ -154,6 +191,8 @@ const guestToolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).optional(),
   columns: z.array(z.string().trim().min(1)).optional(),
+  // The SDK's own schema: a card is drawn from these templates, one of them an `href`.
+  card: guestToolCardSchema.optional(),
 });
 
 const guestMessageSchema = z.object({
@@ -178,6 +217,22 @@ export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
 
+// `contributes.links` as the server compiled it (`guests/links.js`): literal
+// keys, and link patterns the UI only runs, never a template it compiles.
+const publicLinksSchema = z.object({
+  action: z.enum(GUEST_LINK_ACTIONS),
+  keys: z.array(z.string().regex(GUEST_LINK_KEY)).max(GUEST_LINK_KEYS_MAX),
+  urls: z.object({
+    origin: z.string().refine((value) => URL.canParse(value) && new URL(value).protocol === 'https:' && new URL(value).origin === value),
+    identifierPattern: z.string().min(1),
+    patterns: z.array(z.object({
+      path: z.string().min(1),
+      query: z.object({ name: z.string().min(1) }).optional(),
+    })).min(1).max(TRACKER_URL_TEMPLATES_MAX),
+    itemTemplate: z.string().refine(isBuildableLinkTemplate).nullable(),
+  }).nullable(),
+}).refine((links) => links.keys.length > 0 || links.urls !== null);
+
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
   storageId: z.string().min(1).max(128).regex(STORAGE_ID).optional(),
@@ -188,6 +243,7 @@ const installedGuestSchema = z.object({
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
   panelBadge: z.enum(['unread', 'count']).optional(),
+  entryMobile: z.literal(true).optional().catch(undefined),
   backgroundEntry: z.string().trim().min(1).optional(),
   backgroundStart: z.enum(['on-demand', 'automatic']).optional(),
   version: z.string().trim().min(1).max(64).optional(),
@@ -196,6 +252,7 @@ const installedGuestSchema = z.object({
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),
   pageTitle: z.string().trim().min(1).max(200).optional(),
+  pageMobile: z.literal(true).optional().catch(undefined),
   statusEntry: z.string().trim().min(1).optional(),
   statusSource: z.object({
     path: z.string().refine(isGuestRequestPath),
@@ -213,13 +270,32 @@ const installedGuestSchema = z.object({
   loopback: publicLoopbackSchema.optional(),
   sourceControl: publicSourceControlSchema.optional().catch(undefined),
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
+  // Only what the approval dialog names; a malformed slice drops the field, never the row.
+  waits: z.array(z.object({
+    id: z.string().regex(GUEST_WAIT_ID),
+    title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
+  })).max(GUEST_WAITS_MAX).optional().catch(undefined),
   notifications: publicNotificationsSchema.optional().catch(undefined),
   tracker: publicTrackerSchema.optional().catch(undefined),
+  quota: publicQuotaSchema.optional().catch(undefined),
+  sessionControl: z.object({ content: z.boolean() }).optional().catch(undefined),
+  instructions: z.literal(true).optional().catch(undefined),
+  marks: z.literal(true).optional().catch(undefined),
+  skills: z.literal(true).optional().catch(undefined),
+  opencodePlugin: z.literal(true).optional().catch(undefined),
+  mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),
+  links: publicLinksSchema.optional().catch(undefined),
+  needsConfiguration: z.string().trim().min(1).optional().catch(undefined),
+  blocks: z.array(guestBlockSchema).max(GUEST_BLOCKS_MAX).optional(),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
   messages: z.array(guestMessageSchema).max(GUEST_MESSAGES_MAX).optional(),
   goal: z.object({ driver: z.string().min(1) }).optional(),
+  // Values a card link reads; a malformed slice costs those links, never the row.
+  toolLinkSettings: z.record(z.string().regex(PANEL_ID), z.string().min(1).max(GUEST_TOOL_LINK_SETTING_MAX)).optional().catch(undefined),
+  // A row with logos this build cannot read keeps the rest of the extension.
+  providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   plans: guestPlanProvidersSchema.optional(),
   capabilities: z.object({
@@ -237,8 +313,16 @@ const installedGuestSchema = z.object({
   update: guestUpdateSchema.optional(),
 });
 
+// A delivery state this build does not know draws nothing: the card would otherwise offer a button for a case it cannot describe.
+const openCodePluginsSchema = z.object({
+  delivery: z.enum(['file', 'restart', 'none', 'remote']),
+  globalConfigPath: z.string().nullable(),
+  inGlobalConfig: z.array(z.string()),
+});
+
 const catalogSchema = z.object({
   guests: z.array(z.unknown()),
+  opencodePlugins: openCodePluginsSchema.optional().catch(undefined),
 });
 
 // What Settings can still show of a row it cannot read, so the user can
@@ -258,7 +342,7 @@ export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
   try {
     const parsed = catalogSchema.safeParse(JSON.parse(json));
     if (!parsed.success) return null;
-    const catalog: GuestCatalog = { guests: [], unreadable: [] };
+    const catalog: GuestCatalog = { guests: [], unreadable: [], opencodePlugins: parsed.data.opencodePlugins ?? null };
     for (const row of parsed.data.guests) {
       const guest = installedGuestSchema.safeParse(row);
       if (guest.success) {

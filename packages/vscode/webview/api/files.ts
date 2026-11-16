@@ -5,7 +5,7 @@ import type {
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
 
-import { sendBridgeMessage } from './bridge';
+import { searchFilesRequest, sendBridgeMessage } from './bridge';
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 
@@ -35,15 +35,15 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
     const directory = normalizePath(payload.directory);
-    const data = await sendBridgeMessage<{
+    const data = await searchFilesRequest<{
       files?: Array<{ path?: string; relativePath?: string }>;
-    }>('api:fs:search', {
+    }>({
       directory,
       query: payload.query,
       limit: payload.maxResults,
       includeHidden: payload.includeHidden === true,
       respectGitignore: payload.respectGitignore !== false,
-    });
+    }, payload.signal);
 
     const files = Array.isArray(data?.files) ? data.files : [];
 

@@ -50,6 +50,7 @@ type WebFileMutationResponse = {
   path?: string;
   error?: string;
   reason?: FilesystemErrorReason;
+  maxBytes?: number;
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
@@ -160,6 +161,7 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
 
       const response = await runtimeFetch('/api/fs/search', {
         query: params,
+        signal: payload.signal,
         headers: directoryHeaders(getDirectory, directory),
       });
       if (!response.ok) {
@@ -355,6 +357,7 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
       throw new FilesystemError(error.error || 'Failed to upload file', {
         reason: parseFilesystemErrorReason(error.reason),
         status: response.status,
+        maxBytes: error.maxBytes,
       });
     }
 

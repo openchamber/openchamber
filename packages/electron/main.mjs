@@ -17,7 +17,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
-import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
+import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { createSessionLinkGate } from './session-link-gate.mjs';
@@ -29,6 +29,7 @@ import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from 
 import { clearAppCache } from './app-cache.mjs';
 import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
+import { createBrowserPanelDriver } from './browser-panel-driver.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -64,6 +65,7 @@ import {
   takeDeferredAppEvents,
   takeEarlyWindow,
   usesFramelessChrome,
+  usesLinuxNativeFrame,
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
@@ -101,6 +103,7 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
+import { menuAccelerator, normalizeMenuShortcuts } from './menu-shortcuts.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
 import { createCopyMenuAction } from './menu-copy-action.mjs';
 import {
@@ -114,6 +117,7 @@ import {
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
+  runLinuxSpecChain,
   fetchLinuxAppIcons,
   filterLinuxInstalledApps,
   readLinuxDesktopEntries,
@@ -133,6 +137,7 @@ import {
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
+import { browserPanelKeyAction, browserPanelMouseAction, runBrowserPanelAction } from './browser-panel-navigation.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
 import { AGENT_BROWSER_PARTITION, BROWSER_PANEL_PARTITION, buildAgentBrowserPolicy, isStandaloneBrowserPanelPartition, shouldCancelAgentBrowserRequest } from './agent-browser-policy.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
@@ -330,8 +335,8 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
-  // The channel the updater's feed was last pointed at (applyUpdaterChannel),
-  // and the update check in flight, if any.
+  // The channel the updater's feed was last
+  // pointed at (applyUpdaterChannel), and the update check in flight, if any.
   updaterChannel: null,
   updateCheck: null,
   updateDownloadPromise: null,
@@ -478,11 +483,11 @@ const flushRendererStorage = async () => {
   // The browser panel's logins: session cookies get an expiry so they outlive
   // the quit (browser-panel-cookies.mjs), and Chromium writes cookies to disk
   // on a timer, so a sign-in shortly before quitting would be lost with the rest.
-  const persistentPanelSessions = [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION].map((partition) => session.fromPartition(partition));
-  const panelCookies = persistentPanelSessions.map((panelSession) => keepSessionCookies(panelSession.cookies, {
+  const browsingSessions = BROWSING_PARTITIONS.map((partition) => session.fromPartition(partition));
+  const panelCookies = browsingSessions.map((browsingSession) => keepSessionCookies(browsingSession.cookies, {
     onError: (error) => log.warn('[electron] could not keep a browser panel session cookie:', error?.message || error),
   })
-    .then(() => panelSession.cookies.flushStore())
+    .then(() => browsingSession.cookies.flushStore())
     .catch((error) => {
       log.warn('[electron] browser panel cookie flush before quit failed:', error);
     }));
@@ -490,7 +495,7 @@ const flushRendererStorage = async () => {
     Promise.all([...pages, ...panelCookies]),
     new Promise((resolve) => setTimeout(resolve, RENDERER_STORAGE_FLUSH_TIMEOUT_MS)),
   ]);
-  for (const storageSession of [session.defaultSession, ...persistentPanelSessions]) {
+  for (const storageSession of [session.defaultSession, ...browsingSessions]) {
     try {
       storageSession.flushStorageData();
     } catch (error) {
@@ -1049,6 +1054,23 @@ const initialStartup = Promise.withResolvers();
 const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
+ * The browser panel's own session, kept separate from OpenChamber's.
+ *
+ * Every page the user opens in the panel shares this partition, which is what
+ * lets a dev-server login persist between sessions without touching the app's
+ * own storage.
+ */
+/**
+ * Tabs an agent opens browse here unless the user lets them share their own
+ * logins: a profile of the agent's, kept between runs, with none of the
+ * user's sessions (`BrowserPane.tsx` picks the partition).
+ */
+const BROWSER_AGENT_PARTITION = AGENT_BROWSER_PARTITION;
+const BROWSING_PARTITIONS = [BROWSER_PANEL_PARTITION, BROWSER_AGENT_PARTITION];
+/** The user's panel profile or the agent's: the sessions that browse the open web. */
+const isBrowsingSession = (candidate) => BROWSING_PARTITIONS.some((partition) => candidate === session.fromPartition(partition));
+
+/**
  * Denies device and location access to pages shown in the browser panel.
  *
  * Electron grants permission requests by default when no handler is set. The
@@ -1090,8 +1112,63 @@ const resolveBrowserPanelContents = (rawId) => {
   return target;
 };
 
-/** Panel pages the agent has worked in; their debugger session holds focus emulation. */
-const focusEmulatedPanelContents = new WeakSet();
+/** The agent's hands in panel pages, over each page's debugger session. */
+const browserPanelDriver = createBrowserPanelDriver();
+
+/**
+ * Agent uploads are written here, one folder per upload. A page reads the
+ * file only when its form sends it, so a folder stays a day; older ones are
+ * removed with the first upload of a run. A second app instance starting
+ * meanwhile must not take a running one's files, hence age and not a wipe.
+ */
+const BROWSER_UPLOAD_ROOT = path.join(app.getPath('temp'), 'openchamber-browser-uploads');
+const BROWSER_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const BROWSER_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
+let browserUploadsPruned = false;
+
+const pruneBrowserUploads = async () => {
+  if (browserUploadsPruned) return;
+  browserUploadsPruned = true;
+  const entries = await fsp.readdir(BROWSER_UPLOAD_ROOT).catch(() => []);
+  const cutoff = Date.now() - BROWSER_UPLOAD_KEEP_MS;
+  await Promise.all(entries.map(async (entry) => {
+    const folder = path.join(BROWSER_UPLOAD_ROOT, entry);
+    const stat = await fsp.stat(folder).catch(() => null);
+    if (stat && stat.mtimeMs < cutoff) await fsp.rm(folder, { recursive: true, force: true }).catch(() => {});
+  }));
+};
+
+const stagedUploadFilesSchema = z.array(z.object({ name: z.string(), base64: z.string() }));
+const browserDriveRequestSchema = z.object({ op: z.string(), files: z.array(z.string()).optional() }).passthrough();
+
+const isStagedBrowserUpload = (filePath) => {
+  const relative = path.relative(BROWSER_UPLOAD_ROOT, path.resolve(filePath));
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+const stageBrowserUpload = async (files) => {
+  await pruneBrowserUploads();
+  const folder = path.join(BROWSER_UPLOAD_ROOT, globalThis.crypto.randomUUID());
+  await fsp.mkdir(folder, { recursive: true });
+  let total = 0;
+  const paths = [];
+  const parsed = stagedUploadFilesSchema.safeParse(files);
+  if (!parsed.success) throw new Error('Every file needs a name and its data');
+  for (const [index, file] of parsed.data.entries()) {
+    // The name is a single path segment, so a file cannot land outside its folder.
+    const name = path.basename(file.name);
+    if (!name || name === '.' || name === '..') throw new Error('Every file needs a name');
+    const bytes = Buffer.from(file.base64, 'base64');
+    total += bytes.length;
+    if (total > BROWSER_UPLOAD_MAX_BYTES) throw new Error('The files are larger than an upload may be (25 MB)');
+    // A folder per file: two files may share a name, and the page sees the name.
+    await fsp.mkdir(path.join(folder, String(index)));
+    const target = path.join(folder, String(index), name);
+    await fsp.writeFile(target, bytes);
+    paths.push(target);
+  }
+  return paths;
+};
 
 /**
  * The sessions of the browser panel: human, agent, and one per isolated space.
@@ -1169,12 +1246,13 @@ const hardenPanelSession = (panelSession) => {
 };
 
 const hardenBrowserPanelSession = () => {
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  hardenPanelSession(panelSession);
+  for (const partition of BROWSING_PARTITIONS) {
+    const panelSession = session.fromPartition(partition);
+    hardenPanelSession(panelSession);
+    // Not a space's session: a space's pages open everything in place anyway.
+    panelSession.registerPreloadScript({ type: 'frame', filePath: resolveBrowserPanelPreloadPath() });
+  }
   const agentSession = session.fromPartition(AGENT_BROWSER_PARTITION);
-  hardenPanelSession(agentSession);
-  // No resource-type filter: Chromium checks redirects and WebSocket handshakes
-  // here too. Never install this policy on the human or space-preview sessions.
   agentSession.webRequest.onBeforeRequest((details, callback) => {
     try {
       callback({ cancel: shouldCancelAgentBrowserRequest({
@@ -1186,8 +1264,6 @@ const hardenBrowserPanelSession = () => {
       callback({ cancel: true });
     }
   });
-  // Only the user's session: agent and space pages open everything in place.
-  panelSession.registerPreloadScript({ type: 'frame', filePath: resolveBrowserPanelPreloadPath() });
 
   app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
     if (isPanelSession(contents.session) && shouldAllowBrowserPanelCertificateError({ url, error })) {
@@ -2052,6 +2128,31 @@ const takePendingSessionDeepLinks = () => {
   return taken;
 };
 
+// `openchamber://extensions/install?url=…`: any web page can raise this link, so
+// only an https repository passes, and the app asks before it fetches anything.
+const extensionInstallUrl = (link) => {
+  if (link.value !== 'install') return null;
+  const value = readDeepLinkQueryParam(link.raw, 'url');
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
+const takePendingExtensionInstalls = () => {
+  const taken = [];
+  for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
+    const link = pendingDeepLinks[index];
+    if (link.type !== 'extensions') continue;
+    pendingDeepLinks.splice(index, 1);
+    const url = extensionInstallUrl(link);
+    if (url) taken.unshift(url);
+  }
+  return taken;
+};
+
 const parseDeepLink = (raw) => {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -2217,6 +2318,16 @@ const dispatchDeepLink = (link) => {
     emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
+  if (link.type === 'extensions') {
+    const url = extensionInstallUrl(link);
+    if (!url) {
+      log.warn('[electron] invalid extension install link');
+      return;
+    }
+    focusForegroundWindow();
+    emitToPrimaryWindow('openchamber:install-extension', { url });
+    return;
+  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2232,7 +2343,7 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
     const link = pendingDeepLinks.shift();
-    if (link.type === 'session' && !includeSessions) {
+    if ((link.type === 'session' || link.type === 'extensions') && !includeSessions) {
       kept.push(link);
       continue;
     }
@@ -2255,7 +2366,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink() && (parsed.type !== 'session' || mainWindowSessionLinkGate.isListening())) {
+    if (isMainWindowReadyForDeepLink() && ((parsed.type !== 'session' && parsed.type !== 'extensions') || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -2291,6 +2402,16 @@ const closeTabOrWindow = () => {
     return;
   }
   target.close();
+};
+
+// The combos the renderer sends for menu items Settings can rebind. Until the
+// first update the menus use their built-in keys.
+let menuShortcuts = {};
+let appMenuLocale = 'en';
+const menuKey = (id, fallback) => menuAccelerator(menuShortcuts, id, fallback);
+
+const applyApplicationMenu = () => {
+  Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu(appMenuLocale) : buildAutoHiddenMenu());
 };
 
 const getMenuTargetWindow = () => {
@@ -2701,7 +2822,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
-  attachWindowVisibility(browserWindow, emitToWindow);
+  attachWindowEvents(browserWindow, emitToWindow);
 
   // Traffic lights disappear during dock-restore animation when using
   // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
@@ -2729,9 +2850,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   }
 
   browserWindow.on('resize', () => {
-    if (process.platform === 'darwin') {
-      emitToWindow(browserWindow, 'openchamber:window-resized');
-    }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
@@ -3328,7 +3446,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     icon: getWindowIconPath(),
     show: false,
     backgroundColor: resolveSplashBackgroundColor(),
-    frame: usesFramelessChrome() ? false : undefined,
+    frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
@@ -3388,11 +3506,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     browserWindow.on('focus', refreshTrafficLights);
   }
 
-  browserWindow.once('ready-to-show', () => {
-    showWindow(browserWindow);
-    browserWindow.focus();
-  });
-
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
@@ -3413,6 +3526,11 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
+
+  // Shown at once in the theme colour, as the main window is, so the window is
+  // on screen while its document loads.
+  showWindow(browserWindow);
+  browserWindow.focus();
 
   await navigateWindow(browserWindow, buildMiniChatUrl({ mode, sessionId, directory, projectId }));
   return browserWindow;
@@ -3664,7 +3782,7 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
 const UPDATER_E2E_BUILD = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
   && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
 
-const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel);
+const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel, APP_VERSION);
 
 /**
  * Points the updater at the chosen channel's feed; every check re-reads the
@@ -3676,10 +3794,10 @@ const applyUpdaterChannel = (channel) => {
   if (state.updaterChannel === channel) return;
   // An update found on the other channel is not this channel's; the next
   // check starts clean (a failed feed otherwise keeps it, #5921).
-  if (state.updaterChannel !== null) state.pendingUpdate = null;
+  if (state.updaterChannel !== null && state.updaterChannel !== channel) state.pendingUpdate = null;
   const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel });
-  // Both published feeds carry the Windows ARM64 manifest; the E2E fixture does not.
-  const updaterChannel = feed === PRODUCTION_UPDATER_FEED || feed === CANARY_UPDATER_FEED
+  // Every published feed carries the Windows ARM64 manifest; the E2E fixture does not.
+  const updaterChannel = [PRODUCTION_UPDATER_FEED, CANARY_UPDATER_FEED].includes(feed)
     ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
     : null;
   if (updaterChannel) {
@@ -3978,52 +4096,6 @@ const buildPlatformInstalledApps = async (apps) => {
     return buildWindowsInstalledApps(apps);
   }
   return buildInstalledApps(apps);
-};
-
-const spawnDetachedLinux = (program, args) => new Promise((resolve, reject) => {
-  const child = spawn(program, args, {
-    detached: true,
-    stdio: 'ignore',
-  });
-  let settled = false;
-  const finish = (callback, value) => {
-    if (settled) return;
-    settled = true;
-    callback(value);
-  };
-  child.once('error', (error) => finish(reject, error));
-  child.once('spawn', () => {
-    child.unref();
-    finish(resolve);
-  });
-});
-
-const runLinuxSpecChain = async (specs, appName) => {
-  if (!Array.isArray(specs) || specs.length === 0) {
-    throw new Error(`Failed to open in ${appName}: no launch candidates`);
-  }
-
-  const failures = [];
-  for (const spec of specs) {
-    if (spec.kind === 'default') {
-      if (spec.targetKind === 'file') {
-        shell.showItemInFolder(spec.targetPath);
-        return;
-      }
-      const errorMessage = await shell.openPath(spec.targetPath);
-      if (!errorMessage) return;
-      failures.push(`default opener: ${errorMessage}`);
-      continue;
-    }
-
-    try {
-      await spawnDetachedLinux(spec.program, spec.args);
-      return;
-    } catch (error) {
-      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
 const parseSshConfigImports = () => {
@@ -4530,29 +4602,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      *
      * nativeTheme.themeSource is app-wide and would drag OpenChamber's own
      * appearance along with it, so this goes through the page's own emulation
-     * instead. The debugger session has to stay attached: emulation is part of
-     * that session and resets the moment it detaches.
+     * in the driver's debugger session, which lasts as long as the page.
      */
     case 'desktop_browser_set_color_scheme': {
       const scheme = args.scheme === 'light' || args.scheme === 'dark' ? args.scheme : 'system';
       const target = resolveBrowserPanelContents(args.webContentsId);
-
-      if (!target.debugger.isAttached()) {
-        try {
-          target.debugger.attach('1.3');
-        } catch {
-          // DevTools owns the only debugger session a page can have.
-          throw new Error('Close DevTools for this page before changing its appearance');
-        }
-      }
-
-      await target.debugger.sendCommand('Emulation.setEmulatedMedia', scheme === 'system'
-        ? { features: [] }
-        : { features: [{ name: 'prefers-color-scheme', value: scheme }] });
-
-      if (scheme === 'system' && !focusEmulatedPanelContents.has(target)) {
-        // Nothing left to emulate; give the session back so DevTools can attach.
-        try { target.debugger.detach(); } catch { /* already gone */ }
+      try {
+        await browserPanelDriver.run(target, 'emulate', { colorScheme: scheme });
+      } catch {
+        throw new Error('This page could not be reached to change its appearance');
       }
       return { scheme };
     }
@@ -4565,26 +4623,46 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      * selects shut on blur) and is refused the clipboard. With focus emulated
      * the page keeps its own focus while the user's keystrokes still go to the
      * app; the pane gives the page real focus only when this fails. Sent before every
-     * focusing action, so a page that navigated since gets it again; emulation
-     * lives in the debugger session, which therefore stays attached.
+     * focusing action, so a page that navigated since gets it again.
      */
     case 'desktop_browser_keep_page_focused': {
       const target = resolveBrowserPanelContents(args.webContentsId);
-      if (!target.debugger.isAttached()) {
-        try {
-          target.debugger.attach('1.3');
-        } catch {
-          // DevTools holds the session; the page then behaves as it always did.
-          return { focused: false };
-        }
-      }
-      await target.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
-      if (!focusEmulatedPanelContents.has(target)) {
-        focusEmulatedPanelContents.add(target);
-        // DevTools taking the session ends the emulation with it.
-        target.debugger.once('detach', () => focusEmulatedPanelContents.delete(target));
+      try {
+        await browserPanelDriver.run(target, 'emulate', { focus: true });
+      } catch {
+        return { focused: false };
       }
       return { focused: true };
+    }
+
+    /**
+     * One step of an agent action on a panel page: list frames, run a script
+     * in a frame, or send real input (`browser-panel-driver.mjs`).
+     */
+    case 'desktop_browser_drive': {
+      const target = resolveBrowserPanelContents(args.webContentsId);
+      const request = browserDriveRequestSchema.safeParse(args);
+      if (!request.success) throw new Error('A browser driver step needs its operation');
+      const { op } = request.data;
+      if (op === 'setFiles') {
+        // Only files this shell staged for an upload go into a page.
+        const files = request.data.files ?? [];
+        if (!files.every((file) => isStagedBrowserUpload(file))) {
+          throw new Error('Only files staged for this upload can be attached');
+        }
+      }
+      return browserPanelDriver.run(target, op, args);
+    }
+
+    /**
+     * Writes the files of an agent's upload where the page's file input can
+     * read them. The bytes come from the OpenChamber server, which checked the
+     * paths; the server may be on another machine, so they travel as data.
+     */
+    case 'desktop_browser_stage_upload': {
+      const files = Array.isArray(args.files) ? args.files : [];
+      if (files.length === 0) throw new Error('No files to stage');
+      return { paths: await stageBrowserUpload(files) };
     }
 
     /**
@@ -4601,8 +4679,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // session of its own, so its page, whose icon URL the agent chose, gets none: the fetch is
       // the shell's own request and must reach nothing of the user's on the space's behalf.
       const view = resolveBrowserPanelContents(args.webContentsId);
-      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)
-        && view.session !== session.fromPartition(AGENT_BROWSER_PARTITION)) {
+      if (!isBrowsingSession(view.session)) {
         throw new Error('A space page has no favicon to fetch');
       }
       const target = typeof args.url === 'string' ? args.url.trim() : '';
@@ -4616,6 +4693,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Unsupported favicon URL');
       }
 
+      // In the page's own profile, the user's or the agent's: `net.fetch`
+      // ignores a session option and would send the app's own cookies.
       const response = await view.session.fetch(parsed.toString());
       if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
 
@@ -4638,7 +4717,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // is checked whole. A prefix would also accept a partition that merely
       // starts with one of these names.
       const partition = typeof args.partition === 'string' ? args.partition : '';
-      if (!isStandaloneBrowserPanelPartition(partition) && spaceIdOfPreviewPartition(partition) === null) {
+      if (!BROWSING_PARTITIONS.includes(partition) && spaceIdOfPreviewPartition(partition) === null) {
         throw new Error('Unsupported browser partition');
       }
       const storages = [];
@@ -4847,7 +4926,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             locale: normalizeMenuLocale(readPreferredLocale()),
             onAction: (action) => { void dispatchTrayAction(action); },
           });
-          app.dock.setMenu(template.length > 0 ? Menu.buildFromTemplate(template) : null);
+          // An empty menu clears it; Electron 45 rejects null here.
+          app.dock.setMenu(Menu.buildFromTemplate(template));
         }
         if (process.platform === 'win32' && app.isPackaged) {
           const jumpList = buildUnreadJumpList(args, {
@@ -4945,7 +5025,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'project',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {
@@ -4980,7 +5060,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'file',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {
@@ -5235,7 +5315,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (state.updateCheck && readUpdateChannel() !== state.updaterChannel) {
         await state.updateCheck.catch(() => null);
       }
-      applyUpdaterChannel(readUpdateChannel());
+      const channel = readUpdateChannel();
+      applyUpdaterChannel(channel);
       const currentVersion = APP_VERSION;
       const check = checkForDesktopUpdate({
         autoUpdater,
@@ -5431,6 +5512,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return pendingHostActions.splice(0, pendingHostActions.length);
 
+    case 'desktop_take_pending_extension_installs':
+      // Install links open in the main window only.
+      if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      return takePendingExtensionInstalls();
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
@@ -5522,8 +5607,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
         if (process.platform === 'darwin') {
-          Menu.setApplicationMenu(buildMacMenu(normalizeMenuLocale(args.locale)));
+          appMenuLocale = normalizeMenuLocale(args.locale);
+          applyApplicationMenu();
         }
+      }
+      return null;
+    }
+
+    case 'desktop_set_menu_shortcuts': {
+      const next = normalizeMenuShortcuts(args.shortcuts);
+      if (JSON.stringify(next) !== JSON.stringify(menuShortcuts)) {
+        menuShortcuts = next;
+        applyApplicationMenu();
       }
       return null;
     }
@@ -5611,7 +5706,7 @@ const buildMacMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Cmd+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Cmd+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5641,7 +5736,7 @@ const buildMacMenu = (locale = 'en') => {
       label: t('view'),
       submenu: [
         { label: t('toggleRightSidebar'), accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Cmd+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
@@ -5652,7 +5747,7 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Cmd+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5663,9 +5758,9 @@ const buildMacMenu = (locale = 'en') => {
         roleItem('minimize', 'minimize'),
         roleItem('zoom', 'zoom'),
         { type: 'separator' },
-        { label: t('zoomIn'), accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'CmdOrCtrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'CmdOrCtrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'CmdOrCtrl+0'), click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
@@ -5674,8 +5769,8 @@ const buildMacMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
-        { label: t('toggleDeveloperTools'), accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Cmd+Shift+L'), click: () => dispatchAction('download-logs') },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Cmd+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -5714,7 +5809,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Ctrl+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5742,10 +5837,10 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       submenu: [
         roleItem('reload', 'reload'),
         roleItem('forceReload', 'forceReload'),
-        { label: t('toggleDeveloperTools'), accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Ctrl+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('toggleRightSidebar'), accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Ctrl+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
@@ -5756,7 +5851,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Ctrl+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5772,17 +5867,17 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('previousSession'), click: () => dispatchAction('previous-session') },
         { label: t('nextSession'), click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: t('previousProject'), accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: t('nextProject'), accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        { label: t('previousProject'), accelerator: menuKey('previous_project', 'Ctrl+Alt+Up'), click: () => dispatchAction('previous-project') },
+        { label: t('nextProject'), accelerator: menuKey('next_project', 'Ctrl+Alt+Down'), click: () => dispatchAction('next-project') },
       ],
     },
     {
       label: t('window'),
       submenu: [
         roleItem('minimize', 'minimize'),
-        { label: t('zoomIn'), accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'Ctrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'Ctrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'Ctrl+0'), click: () => dispatchAction('zoom-reset') },
         roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
@@ -5792,7 +5887,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Ctrl+Shift+L'), click: () => dispatchAction('download-logs') },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -5820,12 +5915,12 @@ contextMenu({
   showCopyLink: true,
 });
 
-const loadUrlInsideWebContents = (contents, rawUrl) => {
+const loadUrlInsideWebContents = (contents, rawUrl, loadOptions) => {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (contents.isDestroyed()) return false;
-    void contents.loadURL(url.toString()).catch((error) => {
+    void contents.loadURL(url.toString(), loadOptions).catch((error) => {
       log.warn('[webview] failed to load popup URL in place:', error);
     });
     return true;
@@ -5880,6 +5975,31 @@ const trackBrowserPanelPopup = (contents, popup) => {
   });
 };
 
+/**
+ * Gives a popup the panel's user agent. The popup already runs in the panel's
+ * session, but Electron applies that session's user agent to a window.open
+ * window only on navigations the app starts (electron/electron#45897): the
+ * opener's own navigation sends Electron's default agent, and every later
+ * navigation in the popup inherits it. So the first navigation is cancelled
+ * before it sends anything and started again from here. A form posted into a
+ * new window keeps Electron's agent: starting it again would drop the form.
+ */
+const loadBrowserPanelPopupWithPanelUserAgent = (popup, { url, referrer }) => {
+  const contents = popup.webContents;
+  contents.once('will-navigate', (event, navigationUrl) => {
+    if (navigationUrl !== url) return;
+    event.preventDefault();
+    setImmediate(() => {
+      // The page may close its popup before this runs.
+      if (contents.isDestroyed()) return;
+      loadUrlInsideWebContents(contents, url, {
+        userAgent: contents.session.getUserAgent(),
+        httpReferrer: referrer,
+      });
+    });
+  });
+};
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'window') {
     guardAttachedWebviews(contents);
@@ -5887,8 +6007,6 @@ app.on('web-contents-created', (_event, contents) => {
   }
   if (contents.getType() !== 'webview') return;
 
-  // Internal Chromium pages may navigate without a network request. Refuse
-  // renderer-initiated navigation too; initial src is checked at attachment.
   if (contents.session === session.fromPartition(AGENT_BROWSER_PARTITION)) {
     const guardAgentNavigation = (event, url = event.url) => {
       try {
@@ -5903,12 +6021,30 @@ app.on('web-contents-created', (_event, contents) => {
     contents.on('will-redirect', guardAgentNavigation);
   }
 
-  // Pages of a space keep everything in their own view: a window or tab of
-  // theirs would leave the space's session for the user's.
-  const isUserPanelPage = () => contents.session === session.fromPartition(BROWSER_PANEL_PARTITION);
+  // Before the first paint: a page with no background of its own is drawn
+  // on white, as in a browser, rather than on the app behind the view.
+  browserPanelDriver.run(contents, 'emulate', { pageBackground: true }).catch((error) => {
+    log.warn(`[electron] could not give a panel page its default background: ${error?.message || error}`);
+  });
 
-  contents.setWindowOpenHandler(({ url, disposition, postBody }) => {
-    const target = isUserPanelPage()
+  contents.on('before-input-event', (event, input) => {
+    const action = browserPanelKeyAction(input, process.platform);
+    if (!action) return;
+    event.preventDefault();
+    runBrowserPanelAction(contents, action);
+  });
+  contents.on('before-mouse-event', (event, mouse) => {
+    const action = browserPanelMouseAction(mouse);
+    if (!action) return;
+    event.preventDefault();
+    if (mouse.type === 'mouseUp') runBrowserPanelAction(contents, action);
+  });
+
+  // Agent and space pages keep navigation inside their restricted session.
+  const isBrowsingPage = () => contents.session === session.fromPartition(BROWSER_PANEL_PARTITION);
+
+  contents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
+    const target = isBrowsingPage()
       ? browserPanelWindowOpenTarget({ url, disposition, hasPostBody: Boolean(postBody) })
       : 'in-place';
     if (target === 'popup') {
@@ -5920,6 +6056,13 @@ app.on('web-contents-created', (_event, contents) => {
           autoHideMenuBar: true,
           webPreferences: BROWSER_PANEL_POPUP_WEB_PREFERENCES,
         },
+        // Created here so the window is tied to this request and its form body.
+        createWindow: (options) => {
+          const popup = new BrowserWindow(options);
+          trackBrowserPanelPopup(contents, popup);
+          if (!postBody) loadBrowserPanelPopupWithPanelUserAgent(popup, { url, referrer });
+          return popup.webContents;
+        },
       };
     }
     if (target === 'tab' || target === 'background-tab') {
@@ -5928,10 +6071,6 @@ app.on('web-contents-created', (_event, contents) => {
       loadUrlInsideWebContents(contents, url);
     }
     return { action: 'deny' };
-  });
-
-  contents.on('did-create-window', (popup) => {
-    trackBrowserPanelPopup(contents, popup);
   });
 });
 
@@ -5982,6 +6121,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_switch_to_local',
   'desktop_new_window',
+  'desktop_set_menu_shortcuts',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',
   'desktop_set_window_title',
@@ -6026,6 +6166,9 @@ ipcMain.on('openchamber:read-runtime-config', (event) => {
       localOrigin: state.localOrigin || state.sidecarUrl || '',
       apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
       clientToken: state.clientToken || '',
+      // The asking window's own: a window opened for another host must not
+      // send the main window's headers there.
+      requestHeaders: sanitizeRuntimeRequestHeaders(BrowserWindow.fromWebContents(event.sender)?.__ocRuntimeConfig?.requestHeaders || {}),
     }
     : null;
 });
@@ -6446,11 +6589,9 @@ app.whenReady().then(async () => {
   hardenBrowserPanelSession();
   setupAutoUpdater();
 
+  applyApplicationMenu();
   if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(buildMacMenu());
     void applyDevDockIdentity({ app, electronDir: __dirname, log });
-  } else {
-    Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
   setupTray();
   applyDesktopMiniChatGlobalShortcut();

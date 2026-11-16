@@ -46,13 +46,13 @@ export const MobileConnectionHeaders: React.FC<{
               required={Boolean(header.name)}
             />
           </div>
-          <Button type="button" variant="ghost" size="lg" className="min-h-11" onClick={() => onChange(value.filter((item) => item.id !== header.id))} aria-label={t('settings.remoteInstances.direct.headers.removeAria')}>
-            <Icon name="close" className="size-5" />
+          <Button type="button" variant="ghost" size="icon" className="size-10" onClick={() => onChange(value.filter((item) => item.id !== header.id))} aria-label={t('settings.remoteInstances.direct.headers.removeAria')}>
+            <Icon name="close" className="size-4" />
           </Button>
         </div>
       ))}
-      <Button type="button" variant="outline" size="lg" className="min-h-11" onClick={() => onChange([...value, { id: crypto.randomUUID(), name: '', value: '' }])}>
-        <Icon name="add" className="size-5" />
+      <Button type="button" variant="outline" onClick={() => onChange([...value, { id: crypto.randomUUID(), name: '', value: '' }])}>
+        <Icon name="add" className="size-4" />
         {t('settings.remoteInstances.direct.headers.actions.add')}
       </Button>
     </fieldset>

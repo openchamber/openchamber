@@ -21,8 +21,8 @@ type Props = {
 const SECTION_ID = 'workflows';
 
 const StateGlyph: React.FC<{ icon: React.ComponentProps<typeof Icon>['name']; color?: string }> = ({ icon, color }) => (
-  // Centred in the panel's 14px icon slot, like the Subagents rows.
-  <span className="flex size-3.5 shrink-0 items-center justify-center">
+  // Centred in the panel's 13px icon slot, like the Subagents rows.
+  <span className="flex size-[13px] shrink-0 items-center justify-center">
     <Icon name={icon} className="size-3" style={color ? { color } : undefined} />
   </span>
 );
@@ -77,6 +77,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
                 key={run.id}
                 leading={<StateGlyph icon={look.icon} color={look.color} />}
                 label={run.name}
+                labelDir="auto"
                 tooltip={run.error ?? run.description}
                 onClick={() => openWorkflowRunInPanel(directory, sessionId, run.id)}
                 ariaLabel={[t('chat.workStatus.workflow.openRun', { name: run.name }), t(look.labelKey)].join('. ')}
@@ -135,6 +136,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
         className="ps-8"
         leading={<StateGlyph icon={look.icon} color={look.color} />}
         label={agent.label}
+        labelDir="auto"
         tooltip={agent.error ?? agent.preview}
         onClick={sessionOf ? () => openChildSession(sessionOf, agent.label) : undefined}
         ariaLabel={[t('chat.workStatus.workflow.openAgent', { name: agent.label }), t(look.labelKey)].join('. ')}
@@ -164,6 +166,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
               <WorkStatusRow
                 leading={<StateGlyph icon={look.icon} color={look.color} />}
                 label={run.name}
+                labelDir="auto"
                 tooltip={run.error ?? run.description}
                 onClick={() => toggle(run.id)}
                 ariaLabel={[run.name, t(look.labelKey)].join('. ')}
@@ -174,6 +177,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
                   <WorkStatusRow
                     className="ps-5"
                     label={phase.title ?? t('chat.workflow.phase.unphased')}
+                    labelDir={phase.title ? 'auto' : undefined}
                     value={phase.agents.length > 0 ? (
                       <WorkStatusValue tone="muted">{`${phase.done}/${phase.agents.length}`}</WorkStatusValue>
                     ) : null}

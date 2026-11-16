@@ -21,7 +21,7 @@ describe('local STT catalog', () => {
   it('every entry has the files its model type loads', () => {
     for (const [id, spec] of Object.entries(LOCAL_STT_MODEL_CATALOG)) {
       expect(Object.keys(spec.files).sort(), id).toEqual([...filesByType[spec.type]].sort());
-      expect(spec.archiveUrl, id).toMatch(/^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\/asr-models\//);
+      expect(spec.archiveUrl, id).toMatch(/^https:\/\/github\.com\/(k2-fsa\/sherpa-onnx|openchamber\/openchamber)\/releases\/download\/asr-models\//);
     }
   });
 

@@ -43,6 +43,7 @@ spot you add to:
   row everywhere, never radios on one page and chips on the next.
 - A text line belongs to one option and sits under its label (`description`,
   `footer`), never loose between two rows.
+- A new section goes where *Section Order* in `references/layout.md` puts it, which is rarely the bottom.
 - When a page passes about four sections or a scroll of mixed topics, split it
   into tabs (`references/layout.md`, Pages With Tabs) rather than adding more.
 
@@ -50,7 +51,7 @@ spot you add to:
 
 | Task | Required reference |
 |---|---|
-| Page skeleton, sections, hierarchy, nav placement, spacing, columns, responsiveness | `references/layout.md` |
+| Page skeleton, sections and their order, hierarchy, nav placement, spacing, columns, responsiveness | `references/layout.md` |
 | Field rows, checkboxes, radios, chips, selects, inputs, numeric steppers, info hints | `references/controls.md` |
 | Adding/moving controls, pages, availability, anchors, or search entries | `references/search.md` |
 
@@ -61,7 +62,7 @@ Load each reference whose task branch applies; reference loading is complete whe
 | Need | Shared primitive |
 |---|---|
 | Page wrapper (title, description, save status, scrolling, `@container`) | `SettingsPageLayout` |
-| Titled block with divider | `SettingsSection` (`divider={false}` for the first one) |
+| Titled block, set apart by space | `SettingsSection` |
 | Label left / control right | `SettingsFieldRow` |
 | Label above control (two-column cells, wide controls) | `SettingsStackedField` |
 | Boolean | `SettingsCheckboxRow` |

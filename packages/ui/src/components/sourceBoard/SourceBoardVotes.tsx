@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { REFERENCE_META_TEXT } from '@/components/references/referencePickerItems';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -40,22 +41,25 @@ export const SourceBoardVotes: React.FC<{
                     <div key={label.name} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="w-28 shrink-0 truncate typography-meta text-foreground" title={label.name}>{label.name}</span>
                         <span className="inline-flex flex-wrap items-center gap-1">
-                            {[...label.permitted].sort((left, right) => left - right).map((value) => (
-                                <Button
-                                    key={value}
-                                    type="button"
-                                    variant="chip"
-                                    size="xs"
-                                    className="tabular-nums"
-                                    aria-pressed={votes[label.name] === value}
-                                    aria-label={t('sourceBoard.vote.valueAria', { label: label.name, value: formatVoteValue(value) })}
-                                    title={descriptions.get(value)}
-                                    disabled={disabled}
-                                    onClick={() => pick(label.name, value)}
-                                >
-                                    {formatVoteValue(value)}
-                                </Button>
-                            ))}
+                            {[...label.permitted].sort((left, right) => left - right).map((value) => {
+                                const valueLabel = t('sourceBoard.vote.valueAria', { label: label.name, value: formatVoteValue(value) });
+                                return (
+                                    <ButtonTooltip key={value} label={descriptions.get(value) || valueLabel}>
+                                        <Button
+                                            type="button"
+                                            variant="chip"
+                                            size="xs"
+                                            className="tabular-nums"
+                                            aria-pressed={votes[label.name] === value}
+                                            aria-label={valueLabel}
+                                            disabled={disabled}
+                                            onClick={() => pick(label.name, value)}
+                                        >
+                                            {formatVoteValue(value)}
+                                        </Button>
+                                    </ButtonTooltip>
+                                );
+                            })}
                         </span>
                         {cast.length > 0 ? (
                             <span className={cn('min-w-0 truncate typography-meta', REFERENCE_META_TEXT)}>

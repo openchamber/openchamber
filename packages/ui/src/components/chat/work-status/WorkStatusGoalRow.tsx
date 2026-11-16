@@ -49,11 +49,12 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
         leading={(
           <Icon
             name={goal?.status ? 'target-fill' : 'target'}
-            className="size-3.5 shrink-0"
+            className="size-[13px] shrink-0"
             style={{ color: goal ? sessionGoalStatusColor[goal.status] : undefined }}
           />
         )}
         label={driverName ? `${objective} · ${driverName}` : objective}
+        labelDir="auto"
         onClick={() => setDialogOpen(true)}
         ariaLabel={t('chat.workStatus.goal.open')}
         // The row truncates to one line; long objectives (plans, pasted specs)

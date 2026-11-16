@@ -96,7 +96,7 @@ export const MediaArtifact: React.FC<{
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6">
-          <div className="typography-ui-label truncate text-foreground">{name}</div>
+          <div dir="auto" className="typography-ui-label truncate text-foreground">{name}</div>
           <audio
             src={src}
             controls

@@ -30,6 +30,7 @@ const KEY_TO_ACCELERATOR = {
   escape: 'Esc',
   backspace: 'Backspace',
   delete: 'Delete',
+  insert: 'Insert',
   home: 'Home',
   end: 'End',
   pageup: 'PageUp',

@@ -134,7 +134,7 @@ const GEMINI_3_MODEL = /^gemini-3[.-]/;
  * - Gemini 3.x models
  * - All Claude models
  * For the Claude provider: every model it reports a limit for.
- * For the OpenCode Zen provider: every model the workspace served, so the
+ * For the OpenCode Zen provider: every Zen model the workspace served, so the
  * first toggle keeps the rest of the list in view.
  */
 export function getDefaultModels(

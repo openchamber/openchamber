@@ -4,11 +4,14 @@ import { flushSync } from 'react-dom';
 import type { HighlightResult } from 'streamdown';
 import { MarkdownContent } from '../MarkdownRendererImpl';
 import { prepareExportHighlight } from './streamdownCode';
+import { loadMermaidRenderers } from './mermaidRenderers';
 import { I18nProvider } from '@/lib/i18n';
 import { normalizeMarkdownCopyContent } from './selectionMarkdown';
 
 /** Offline rendering shares the screen parser, policies and components. */
 export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null }): Promise<HTMLElement> {
+  // Diagrams draw synchronously below, so their renderer has to be here first.
+  if (/mermaid/i.test(text)) await loadMermaidRenderers().catch(() => null);
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;inset-inline-start:-100000px;top:0;width:720px;visibility:hidden;pointer-events:none';
   if (options.syntaxStyle) host.style.cssText += `;${options.syntaxStyle}`;

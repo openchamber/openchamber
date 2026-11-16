@@ -147,8 +147,43 @@ mock.module('@/lib/gitApi', () => ({
   },
 }));
 
+// The server's map of running sessions; null is a failed read, the default.
+let hostActiveSessions: Record<string, SessionStatus> | null = null;
+const hostStatusReads: string[] = [];
+
+// The server's answer to where a session is; by default a move shows as soon as it was requested.
+const serverSessionReads: { sessionId: string; directory: string }[] = [];
+// The folder each read went through: it picks the server asked.
+const sessionReadFolders: (string | null)[] = [];
+const defaultServerDirectory = (sessionId: string): string => (
+  [...moveCalls].reverse().find((call) => call.sessionId === sessionId)?.destinationDirectory ?? '/not-moved'
+);
+let serverDirectoryImplementation = defaultServerDirectory;
+// Holds a session read open, for a server that does not answer; gets the read's abort signal.
+let sessionReadGate: ((signal: AbortSignal | undefined) => Promise<void>) | null = null;
+// Runs before the server's map of running sessions answers, for a read that is still in flight.
+let hostStatusReadGate: ((read: number) => Promise<void>) | null = null;
+// Sessions whose move reached the local stores: the real move publishes only while its caller's server is current.
+const publishedMoves: string[] = [];
+
+mock.module('@/lib/opencode/client', () => ({
+  opencodeClient: {
+    getSession: async (sessionId: string, via?: string | null, signal?: AbortSignal) => {
+      if (sessionReadGate) await sessionReadGate(signal);
+      const directory = serverDirectoryImplementation(sessionId);
+      serverSessionReads.push({ sessionId, directory });
+      sessionReadFolders.push(via ?? null);
+      return { id: sessionId, directory };
+    },
+  },
+}));
+
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => '',
   substituteCommandVariables: (command: string) => command,
+}));
+mock.module('@/lib/sharedTrustConfirmation', () => ({
+  resolveWorktreeTeardownCommands: async () => [],
 }));
 
 mock.module('@/lib/worktreeSessionCreator', () => ({
@@ -164,6 +199,7 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   waitForWorktreeGitReady: mock((directory: string) => waitForWorktreeGitReadyImplementation(directory)),
   clearWorktreeBootstrapState: mock(),
+  getWorktreeBootstrapState: () => null,
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
   startWorktreeBootstrapWatcher: mock(),
@@ -201,11 +237,22 @@ const getSessionLiveActivity = (sessionId: string): 'unknown' | 'idle' | 'active
 };
 
 mock.module('@/sync/session-actions', () => ({
-  moveSessionToDirectory: (session: Session, sourceDirectory: string, destinationDirectory: string) => {
+  moveSessionToDirectory: async (session: Session, sourceDirectory: string, destinationDirectory: string, isCurrent?: () => boolean) => {
     moveCalls.push({ sessionId: session.id, sourceDirectory, destinationDirectory });
-    return moveSessionImplementation(session, sourceDirectory, destinationDirectory);
+    await moveSessionImplementation(session, sourceDirectory, destinationDirectory);
+    if (!isCurrent || isCurrent()) publishedMoves.push(session.id);
   },
-  getSessionLiveActivity,
+  // As the real one: the stores answer first, then the server's map of running sessions.
+  readSessionsLiveActivity: async (sessionIds: string[], directory: string) => {
+    const activities = sessionIds.map(getSessionLiveActivity);
+    if (activities.includes('active')) return 'active';
+    if (!activities.includes('unknown')) return 'idle';
+    hostStatusReads.push(directory);
+    if (hostStatusReadGate) await hostStatusReadGate(hostStatusReads.length);
+    if (hostActiveSessions === null) return 'unknown';
+    const running = hostActiveSessions;
+    return sessionIds.some((id) => running[id]) ? 'active' : 'idle';
+  },
   isSessionBusyNow: (sessionId: string) => getSessionLiveActivity(sessionId) === 'active',
 }));
 
@@ -231,8 +278,12 @@ mock.module('@/sync/sync-refs', () => ({
 
 const {
   moveSessionTreeToExistingWorktree,
+  moveWorktreeSessionsThenRemove,
   requestSessionTreeMove,
+  SessionMoveOutcomeUnknownError,
 } = await import('./sessionWorktreeMove');
+const { WorktreeKeepStoppedError } = await import('./worktreeRemovalFlow');
+const { switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 
 const makeSession = (id: string, directory = '/source'): Session => ({
   id,
@@ -291,7 +342,7 @@ const setStatuses = (directory: string, statuses: Record<string, State['session_
 };
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     if (predicate()) return;
     await Promise.resolve();
   }
@@ -983,3 +1034,239 @@ describe('moveSessionTreeToExistingWorktree', () => {
     expect(moveCalls).toEqual([]);
   });
 });
+
+describe('moveWorktreeSessionsThenRemove', () => {
+  const WORKTREE = '/worktrees/feature';
+  let removals = 0;
+
+  const stopReason = async (run: Promise<{ removed: boolean }>): Promise<string> => {
+    try {
+      await run;
+      return 'resolved';
+    } catch (error) {
+      return error instanceof WorktreeKeepStoppedError ? error.reason : String(error);
+    }
+  };
+
+  const keep = (sessions: Session[]) => moveWorktreeSessionsThenRemove({
+    worktreePath: WORKTREE,
+    projectDirectory: '/repo',
+    // The global list after the moves: only sessions not moved yet are still in the worktree.
+    readSessions: () => sessions.filter((session) => !moveCalls.some((call) => call.sessionId === session.id)),
+    removeWorktree: async () => {
+      removals += 1;
+      return true;
+    },
+  });
+
+  beforeEach(() => {
+    moveCalls.length = 0;
+    refreshCalls.length = 0;
+    metadataWrites.length = 0;
+    hostStatusReads.length = 0;
+    serverSessionReads.length = 0;
+    sessionReadFolders.length = 0;
+    serverDirectoryImplementation = defaultServerDirectory;
+    directoryStates.clear();
+    storedMetadata.clear();
+    hostActiveSessions = {};
+    removals = 0;
+    moveSessionImplementation = async () => {};
+    refreshImplementation = async () => {};
+    resolveProjectRefImplementation = () => ({ id: 'project-1', path: '/repo' });
+    sessionReadGate = null;
+    hostStatusReadGate = null;
+    publishedMoves.length = 0;
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
+    console.warn = () => {};
+  });
+
+  afterEach(() => {
+    console.warn = originalConsoleWarn;
+    hostActiveSessions = null;
+    sessionReadGate = null;
+    hostStatusReadGate = null;
+  });
+
+  const switchAway = () => switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-b.test', runtimeKey: 'runtime-b' });
+  const switchBack = () => switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
+  const tree = () => [{ ...makeSession('child', WORKTREE), parentID: 'root' }, makeSession('root', WORKTREE)];
+
+  // Nothing of the old server reaches the new one: no request, no store write, no rollback.
+  const expectNothingAfterSwitch = (movedBeforeSwitch: string[]) => {
+    expect(moveCalls.map((call) => call.sessionId)).toEqual(movedBeforeSwitch);
+    expect(publishedMoves).toEqual([]);
+    expect(metadataWrites).toEqual([]);
+    expect(refreshCalls).toEqual([]);
+    expect(serverSessionReads).toEqual([]);
+    expect(removals).toBe(0);
+  };
+
+  test('a server switch while the tree move reads whether its sessions run stops before any move', async () => {
+    // Read 1 is the delete's own check; read 2 the tree move's.
+    hostStatusReadGate = async (read) => {
+      if (read === 2) switchAway();
+    };
+
+    expect(await stopReason(keep(tree()))).toBe('switched');
+    expect(hostStatusReads).toHaveLength(2);
+    expectNothingAfterSwitch([]);
+  });
+
+  test('a server switch while the first subsession move is pending stops the tree and rolls nothing back', async () => {
+    moveSessionImplementation = async (session) => {
+      if (session.id === 'child') switchAway();
+    };
+
+    expect(await stopReason(keep(tree()))).toBe('switched');
+    expectNothingAfterSwitch(['child']);
+  });
+
+  test('switching away and back while a move is pending still stops it: the round trip is another instance', async () => {
+    moveSessionImplementation = async (session) => {
+      if (session.id !== 'child') return;
+      switchAway();
+      switchBack();
+    };
+
+    expect(await stopReason(keep(tree()))).toBe('switched');
+    expectNothingAfterSwitch(['child']);
+  });
+
+  test('a confirmation read the server never answers ends at the deadline and keeps the worktree', async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    // Never settles, not even on abort: the deadline must not wait for the read.
+    sessionReadGate = (signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    };
+    // The ten-second deadline, shortened; the poll interval stays.
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = Object.assign(
+      (handler: () => void, ms?: number) => realSetTimeout(handler, ms === 10_000 ? 20 : ms),
+      realSetTimeout,
+    );
+    try {
+      expect(await stopReason(keep([makeSession('root', WORKTREE)]))).toBe('unconfirmed');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(removals).toBe(0);
+  });
+
+  // No child store covers a worktree that was not opened since the page
+  // loaded, so the server's map answers for it.
+  test('moves a tree whose folder has no status store when the host lists nothing running', async () => {
+    const result = await keep([makeSession('child', WORKTREE), makeSession('root', WORKTREE)].map((session) => (
+      session.id === 'child' ? { ...session, parentID: 'root' } : session
+    )));
+
+    expect(moveCalls).toEqual([
+      { sessionId: 'child', sourceDirectory: WORKTREE, destinationDirectory: '/repo' },
+      { sessionId: 'root', sourceDirectory: WORKTREE, destinationDirectory: '/repo' },
+    ]);
+    expect(result).toEqual({ removed: true });
+    expect(removals).toBe(1);
+    // Once before anything moves, then before each move, for the worktree's folder.
+    expect(hostStatusReads).toEqual([WORKTREE, WORKTREE, WORKTREE, WORKTREE]);
+  });
+
+  test('a session the host reports running keeps the worktree and moves nothing', async () => {
+    hostActiveSessions = { root: { type: 'busy' } };
+
+    expect(await stopReason(keep([makeSession('root', WORKTREE)]))).toBe('busy');
+    expect(moveCalls).toEqual([]);
+    expect(removals).toBe(0);
+  });
+
+  test('a session that starts running between two moves stops the second one', async () => {
+    moveSessionImplementation = async (session) => {
+      if (session.id === 'first') hostActiveSessions = { second: { type: 'busy' } };
+    };
+
+    expect(await stopReason(keep([makeSession('first', WORKTREE), makeSession('second', `${WORKTREE}/sub`)]))).toBe('busy');
+    expect(moveCalls.map((call) => call.sessionId)).toEqual(['first']);
+    expect(removals).toBe(0);
+  });
+
+  test('a failed status read keeps the worktree as unknown', async () => {
+    hostActiveSessions = null;
+
+    expect(await stopReason(keep([makeSession('root', WORKTREE)]))).toBe('unknown');
+    expect(moveCalls).toEqual([]);
+    expect(removals).toBe(0);
+  });
+
+  test('a project registered inside the worktree is passed over for the worktree\'s project', async () => {
+    resolveProjectRefImplementation = () => ({ id: 'inside', path: `${WORKTREE}/ai` });
+
+    await keep([makeSession('root', `${WORKTREE}/ai`)]);
+
+    expect(moveCalls).toEqual([{ sessionId: 'root', sourceDirectory: `${WORKTREE}/ai`, destinationDirectory: '/repo' }]);
+  });
+
+  test('a move that loses its answer keeps the worktree and says the outcome is unknown', async () => {
+    moveSessionImplementation = async () => {
+      throw new Error('Request timed out');
+    };
+
+    await expect(keep([makeSession('root', WORKTREE)])).rejects.toBeInstanceOf(SessionMoveOutcomeUnknownError);
+    expect(removals).toBe(0);
+    expect(refreshCalls).toEqual([[WORKTREE, '/repo']]);
+  });
+
+  // OpenCode answers a move once it is queued; removing the folder before a
+  // runner there applies it left the session in the deleted folder.
+  test('removes the worktree only once the server places every moved session in the project', async () => {
+    let readsBeforeApplied = 2;
+    serverDirectoryImplementation = (sessionId) => {
+      if (sessionId === 'root' && readsBeforeApplied > 0) {
+        readsBeforeApplied -= 1;
+        return WORKTREE;
+      }
+      return defaultServerDirectory(sessionId);
+    };
+    let readsAtRemoval = -1;
+    const result = await moveWorktreeSessionsThenRemove({
+      worktreePath: WORKTREE,
+      projectDirectory: '/repo',
+      readSessions: () => [makeSession('root', WORKTREE)].filter((session) => !moveCalls.some((call) => call.sessionId === session.id)),
+      removeWorktree: async () => {
+        readsAtRemoval = serverSessionReads.length;
+        return true;
+      },
+    });
+
+    expect(result).toEqual({ removed: true });
+    expect(serverSessionReads).toEqual([
+      { sessionId: 'root', directory: WORKTREE },
+      { sessionId: 'root', directory: WORKTREE },
+      { sessionId: 'root', directory: '/repo' },
+    ]);
+    expect(readsAtRemoval).toBe(3);
+    // Through the destination, never the folder on screen, which can be an isolated space.
+    expect(sessionReadFolders).toEqual(['/repo', '/repo', '/repo']);
+  });
+
+  test('a move the server has not applied in time keeps the worktree', async () => {
+    // Each read takes five seconds of the clock, so the wait gives up on the second.
+    const realNow = Date.now;
+    let clock = realNow();
+    Date.now = () => clock;
+    serverDirectoryImplementation = () => {
+      clock += 5_000;
+      return WORKTREE;
+    };
+    try {
+      expect(await stopReason(keep([makeSession('root', WORKTREE)]))).toBe('unconfirmed');
+    } finally {
+      Date.now = realNow;
+    }
+    expect(moveCalls.map((call) => call.sessionId)).toEqual(['root']);
+    expect(serverSessionReads).toHaveLength(2);
+    expect(removals).toBe(0);
+  });
+});
+

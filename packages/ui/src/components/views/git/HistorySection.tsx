@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { assignLanes } from './gitGraph';
@@ -135,23 +136,25 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
 
   const loadMoreButton = log.all.length >= logMaxCount ? (
     <div className="flex justify-center py-2 border-t border-edge-muted">
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        onClick={() => onLogMaxCountChange(logMaxCount + 25)}
-        disabled={isLogLoading}
-        className="px-3 text-muted-foreground hover:text-foreground"
-      >
-        {isLogLoading ? (
-          <span className="flex items-center gap-1">
-            <Icon name="loader-4" className="size-3 animate-spin" />
-            {t('gitView.history.loadingMore')}
-          </span>
-        ) : (
-          t('gitView.history.loadMore')
-        )}
-      </Button>
+      <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.showOlderCommits')}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={() => onLogMaxCountChange(logMaxCount + 25)}
+          disabled={isLogLoading}
+          className="px-3 text-muted-foreground hover:text-foreground"
+        >
+          {isLogLoading ? (
+            <span className="flex items-center gap-1">
+              <Icon name="loader-4" className="size-3 animate-spin" />
+              {t('gitView.history.loadingMore')}
+            </span>
+          ) : (
+            t('gitView.history.loadMore')
+          )}
+        </Button>
+      </ButtonTooltip>
     </div>
   ) : null;
 
@@ -175,7 +178,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
               <span className="h-px flex-1 bg-edge" />
               <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
-                <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
+                <span dir="ltr" className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
                 {dividerIcon}
               </span>
               <span className="h-px flex-1 bg-edge" />
@@ -228,14 +231,16 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
                 onValueChange={(value) => onLogMaxCountChange(Number(value))}
                 disabled={isLogLoading}
               >
-                <SelectTrigger
-                  className="w-auto"
-                  disabled={isLogLoading}
-                >
-                  <SelectValue placeholder={t('gitView.history.commitsPlaceholder')}>
-                    {selectedLogSizeOption ? t(selectedLogSizeOption.labelKey) : undefined}
-                  </SelectValue>
-                </SelectTrigger>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.commitCount')}>
+                  <SelectTrigger
+                    className="w-auto"
+                    disabled={isLogLoading}
+                  >
+                    <SelectValue placeholder={t('gitView.history.commitsPlaceholder')}>
+                      {selectedLogSizeOption ? t(selectedLogSizeOption.labelKey) : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
+                </ButtonTooltip>
                 <SelectContent>
                   {LOG_SIZE_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={String(option.value)}>

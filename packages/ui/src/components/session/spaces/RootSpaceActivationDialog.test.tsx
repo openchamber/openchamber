@@ -1,4 +1,4 @@
-import React, { act } from 'react';
+import { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { Window } from 'happy-dom';
@@ -19,6 +19,7 @@ beforeEach(async () => {
   for (const [key, value] of Object.entries({
     window, document: window.document, navigator: window.navigator, IS_REACT_ACT_ENVIRONMENT: true,
     Element: window.Element, HTMLElement: window.HTMLElement, Node: window.Node, ShadowRoot: window.ShadowRoot,
+    Event: window.Event, CustomEvent: window.CustomEvent,
     MutationObserver: window.MutationObserver, ResizeObserver: window.ResizeObserver, getComputedStyle: window.getComputedStyle.bind(window),
     requestAnimationFrame: window.requestAnimationFrame.bind(window), cancelAnimationFrame: window.cancelAnimationFrame.bind(window),
   })) {

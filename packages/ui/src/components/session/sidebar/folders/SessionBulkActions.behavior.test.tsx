@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
+import { shortcutRegistry } from '@/lib/shortcuts';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { installHookTestDom } from '../test-utils/testDom';
@@ -24,6 +25,12 @@ mock.module('./BulkActionBar', () => ({
 
 mock.module('./ConfirmDialogs', () => ({
   BulkSessionDeleteConfirmDialog: () => null,
+}));
+
+// Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => ({ isMobile: false }),
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
 }));
 
 const { SessionBulkActions } = await import('./SessionBulkActions');
@@ -83,6 +90,9 @@ describe('SessionBulkActions public behavior', () => {
         </I18nProvider>,
       ));
       expect(bulkActionCapture).not.toBeNull();
+      // A row being renamed keeps the keys, so the shortcut declines.
+      // SAFETY: the handler reads only the event target.
+      expect(shortcutRegistry.get('sessions_bulk_delete')?.(new Event('keydown') as KeyboardEvent)).toBe(false);
       if (selection !== 'single') {
         expect([...useSessionMultiSelectStore.getState().selectedIds]).toEqual(['session-a', 'child-b', 'child-a']);
       }
@@ -100,6 +110,8 @@ describe('SessionBulkActions public behavior', () => {
       ]);
       await act(async () => bulkActionCapture?.onRemoveFromFolder());
       expect(removed).toEqual([{ scopeKey: '/workspace', ids: expectedIds }]);
+      await act(async () => useSessionMultiSelectStore.getState().disable());
+      expect(shortcutRegistry.get('sessions_bulk_delete')).toBeUndefined();
     } finally {
       await act(async () => root.unmount());
       useSessionFoldersStore.setState(originalFolders, true);

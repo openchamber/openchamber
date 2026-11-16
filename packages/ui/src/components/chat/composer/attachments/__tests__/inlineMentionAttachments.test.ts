@@ -5,6 +5,7 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 import {
     filterMissingInlineAttachments,
+    findMissingPaths,
     isMentionAlreadyAttached,
     type DirectoryLister,
 } from '../inlineMentionAttachments';
@@ -39,6 +40,25 @@ function lister(
         },
     };
 }
+
+describe('findMissingPaths', () => {
+    test('names only the paths a listing proves absent', async () => {
+        const failing: DirectoryLister = {
+            listLocalDirectory: async (directory) => {
+                if (directory === '/repo/gone') throw new FilesystemError('gone', { reason: 'not-found' });
+                if (directory === '/repo/locked') throw new Error('listing failed');
+                return [{ path: '/repo/src/README.md' }];
+            },
+        };
+
+        const missing = await findMissingPaths(
+            ['/repo/src/readme.md', '/repo/src/nope.ts', '/repo/gone/a.ts', '/repo/locked/a.ts'],
+            failing,
+        );
+
+        expect([...missing].sort()).toEqual(['/repo/gone/a.ts', '/repo/src/nope.ts']);
+    });
+});
 
 describe('filterMissingInlineAttachments', () => {
     test('keeps everything when no inline attachments exist', async () => {

@@ -3,7 +3,7 @@ import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
-import { redactRemoteUrl } from '../source-control/url-redaction.js';
+import { isDiskPathRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
 import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
 
@@ -125,6 +125,12 @@ export function registerGitRoutes(app, {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+  // Git could not tell whether the directory is a repository (`probeRepository`):
+  // its message goes to the client instead of a "not a repository" answer.
+  const isUnreadableRepositoryError = (error) => error?.code === 'GIT_REPOSITORY_UNREADABLE';
+  const unreadableRepositoryBody = (error) => ({ error: error.message, code: error.code });
+  // Every repository check a client acts on reports a Git that could not answer.
+  const probeOptions = { failOnGitError: true };
 
   const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
 
@@ -153,6 +159,14 @@ export function registerGitRoutes(app, {
     return worktrees;
   };
 
+  // A contributor-fork checkout runs no project command before its checkout
+  // trust passes, so its teardown is skipped. A provenance read that fails
+  // throws, and the removal keeps the worktree.
+  const isContributorCheckout = contributorProvenance?.read instanceof Function
+    ? async (worktreeDirectory) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
+    : undefined;
+  const worktreeTeardownCodeOf = (error) => (error?.code === 'WORKTREE_TEARDOWN_FAILED' ? error.code : undefined);
+
   const sendNetworkOperationError = (req, res, error) => {
     const code = isString(error?.code) ? error.code : 'UNKNOWN';
     const storageFailure = code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID';
@@ -177,6 +191,7 @@ export function registerGitRoutes(app, {
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
     else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
+    else if (code === 'INVALID_GIT_REMOTE_USERINFO') publicCode = 'REMOTE_URL_USERINFO';
     if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
     if (!publicCode && preservedCodes.includes(code)) publicCode = code;
     publicCode ??= 'UNKNOWN';
@@ -189,6 +204,7 @@ export function registerGitRoutes(app, {
       STALE_BINDING: 'Source control binding changed',
       STALE_CONFIG: 'Git repository configuration changed',
       REMOTE_CHANGED: 'Git remote or transport binding changed',
+      REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
       AUTHENTICATION_REQUIRED: 'Git authentication is required',
       DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
       CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
@@ -519,9 +535,12 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       res.json({ isGitRepository: isRepo });
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       if (isNonRepoGitError(error)) {
         console.warn('Git check treated non-repository path as not a git repo:', extractGitErrorText(error));
         return res.json({ isGitRepository: false });
@@ -593,7 +612,7 @@ export function registerGitRoutes(app, {
     };
     return readProjectBatch(req, res, async (directory) => {
       try {
-        const isRepo = await isGitRepository(directory);
+        const isRepo = await isGitRepository(directory, probeOptions);
         if (!isRepo) {
           return nonRepoEntry(directory);
         }
@@ -634,6 +653,9 @@ export function registerGitRoutes(app, {
         if (failures.length > 0) entry.errors = failures;
         return entry;
       } catch (error) {
+        if (isUnreadableRepositoryError(error)) {
+          return { directory, ...unreadableRepositoryBody(error) };
+        }
         if (isNonRepoGitError(error)) {
           return nonRepoEntry(directory);
         }
@@ -776,7 +798,7 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       if (!isRepo) {
         return res.json(nonRepoStatusPayload());
       }
@@ -790,6 +812,9 @@ export function registerGitRoutes(app, {
       const status = await getStatus(directory, { mode });
       res.json(status);
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       // Non-repo / GitError must not abort callers that enumerate projects or
       // sessions (e.g. sidebar discovery). Log a warning and continue.
       if (isNonRepoGitError(error)) {
@@ -904,10 +929,12 @@ export function registerGitRoutes(app, {
 
       const staged = req.query.staged === 'true';
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
 
       const { diff, submodule } = await getPathDiff(directory, {
         path,
         staged,
+        previousPath,
         contextLines: Number.isFinite(context) ? context : 3,
       });
 
@@ -971,10 +998,12 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.query.staged === 'true';
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
 
       const result = await getFileDiff(directory, {
         path: pathParam,
         staged,
+        previousPath,
       });
 
       res.json({
@@ -1010,12 +1039,14 @@ export function registerGitRoutes(app, {
 
       const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
 
       const diff = await getRangeDiff(directory, {
         base,
         head,
         includeWorkingTree: req.query.includeWorkingTree === 'true',
         path: pathParam,
+        previousPath,
         contextLines: Number.isFinite(context) ? context : 3,
       });
 
@@ -1023,6 +1054,25 @@ export function registerGitRoutes(app, {
     } catch (error) {
       console.error('Failed to get git range diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git range diff' });
+    }
+  });
+
+  app.get('/api/git/range-file-versions', async (req, res) => {
+    const { getRangeFileVersions } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const [base, head, filePath] = [req.query.base, req.query.head, req.query.path].map((value) => String(value ?? ''));
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!base || !head || !filePath) {
+        return res.status(400).json({ error: 'base, head and path parameters are required' });
+      }
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
+      res.json(await getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree: req.query.includeWorkingTree === 'true' }));
+    } catch (error) {
+      console.error('Failed to read file versions:', error);
+      res.status(500).json({ error: error.message || 'Failed to read file versions' });
     }
   });
 
@@ -1252,15 +1302,21 @@ export function registerGitRoutes(app, {
   });
 
   app.get('/api/git/remotes', async (req, res) => {
-    const { getRemotes } = await getGitLibraries();
+    const { getRemotes, getRepositoryRemoteUrls } = await getGitLibraries();
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const remotes = await getRemotes(directory);
-      res.json(remotes.map(toGitRemoteSummary));
+      const [remotes, addresses] = await Promise.all([getRemotes(directory), getRepositoryRemoteUrls(directory)]);
+      // Git operations here cannot use a remote on disk, so it is not offered.
+      // `getRemotes` reads an address with a space as empty, so the addresses
+      // that decide this come from the reader repository identity uses.
+      const onDisk = new Set(addresses
+        .filter((remote) => isDiskPathRemoteUrl(remote.fetchUrl) || isDiskPathRemoteUrl(remote.pushUrl))
+        .map((remote) => remote.name));
+      res.json(remotes.filter((remote) => !onDisk.has(remote.name)).map(toGitRemoteSummary));
     } catch (error) {
       console.error('Failed to get remotes:', error);
       res.status(500).json({ error: error.message || 'Failed to get remotes' });
@@ -1810,7 +1866,8 @@ export function registerGitRoutes(app, {
     }
   });
 
-  app.delete('/api/git/worktrees', async (req, res) => {
+  // A user action, so the teardown command gets the project's current environment, as creation does.
+  app.delete('/api/git/worktrees', userAction(async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {
       return res.status(501).json({ error: 'Worktree removal is not available' });
@@ -1833,6 +1890,8 @@ export function registerGitRoutes(app, {
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
@@ -1842,9 +1901,31 @@ export function registerGitRoutes(app, {
       res.json({ success: Boolean(result) });
     } catch (error) {
       console.error('Failed to remove worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to remove worktree' });
+      res.status(500).json({ error: error.message || 'Failed to remove worktree', code: worktreeTeardownCodeOf(error) });
     }
-  });
+  }));
+
+  // Runs a worktree's teardown commands without removing it: a delete that also
+  // removes the remote branch calls this first, so a failing teardown stops it
+  // before the remote branch goes.
+  app.post('/api/git/worktrees/teardown', userAction(async (req, res) => {
+    const { teardownWorktree } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
+    try {
+      await teardownWorktree(directory, {
+        directory: worktreeDirectory,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to tear down worktree:', error);
+      res.status(500).json({ error: error.message || 'Failed to tear down worktree', code: worktreeTeardownCodeOf(error) });
+    }
+  }));
 
   app.post('/api/git/worktrees/snapshot', async (req, res) => {
     const { snapshotWorktree } = await getGitLibraries();
@@ -2067,7 +2148,7 @@ export function registerGitRoutes(app, {
       }
 
       const isBinary = req.query.binary === 'true';
-      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      const result = await getCommitFileDiff(directory, hash, filePath, isBinary, String(req.query.previousPath ?? '') || undefined);
       res.json(result);
     } catch (error) {
       console.error('Failed to get commit file diff:', error);

@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: read
   issues: write
   pull-requests: write
 
@@ -20,6 +21,31 @@ jobs:
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+
+      - name: Checkout PR checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+
+      # actions/stale has no exemption by author, so maintainers' pull requests
+      # carry a label it skips. pr-intake sets it when a pull request opens; this
+      # catches what it missed, and a failed read stops the job before it can
+      # close a pull request that lacks the label.
+      - name: Label team pull requests
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { TEAM_LABEL, isMaintainer } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-checks.cjs`);
+            const { owner, repo } = context.repo;
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", per_page: 100 });
+            for (const pull of pulls) {
+              if (pull.labels.some((label) => label.name === TEAM_LABEL.name)) continue;
+              if (await isMaintainer({ github, owner, repo, username: pull.user.login })) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull.number, labels: [TEAM_LABEL.name] });
+              }
+            }
 
       - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
@@ -45,7 +71,7 @@ jobs:
             stale for 7 days with no activity. If this is still relevant, please
             comment or reopen the pull request.
           exempt-issue-labels: pinned,security,help wanted,accepted,enhancement,waiting:opencode
-          exempt-pr-labels: pinned,security,help wanted
+          exempt-pr-labels: pinned,security,help wanted,team
           remove-stale-when-updated: true
           labels-to-add-when-unstale: ""
           operations-per-run: 100

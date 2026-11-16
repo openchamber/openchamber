@@ -18,9 +18,14 @@ function legacyRootForHome(home: string | null | undefined): string | null {
   return normalized ? joinPath(normalized, '.config', 'openchamber', 'chats') : null;
 }
 
+const DOT_SEGMENT = /(?:^|\/)\.\.?(?:\/|$)/;
+
+// Every sidebar rebuild asks this for every session, up to four roots each,
+// so it allocates nothing: no split into segments, no `${root}/` string.
 function isWithinRoot(directory: string, root: string): boolean {
-  return !directory.split('/').some((part) => part === '..' || part === '.')
-    && (directory === root || directory.startsWith(`${root}/`));
+  const inside = directory === root
+    || (directory.length > root.length && directory.charCodeAt(root.length) === 47 && directory.startsWith(root));
+  return inside && !DOT_SEGMENT.test(directory);
 }
 
 function cachedRoots(): ChatRoots | undefined {

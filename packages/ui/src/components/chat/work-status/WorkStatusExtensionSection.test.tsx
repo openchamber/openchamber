@@ -151,7 +151,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     expect(messages.find((message) => message.type === 'ready')).toMatchObject({
       payload: {
         surface: 'status', item: null,
-        features: { deviceStorage: true, statusControls: true, statusSummary: true },
+        features: { deviceStorage: true, statusControls: true, statusSummary: true, tooltips: true },
         theme: { tokens: { syntaxKeyword: theme.colors.syntax.base.keyword, syntaxString: theme.colors.syntax.base.string } },
       },
     });
@@ -341,8 +341,10 @@ test('a status frame keeps subscriptions and storage alive while project changes
 
     await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-1', payload: { height: 96 } }); });
     expect(box.style.height).toBe('96px');
+    await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-mid', payload: { height: 400 } }); });
+    expect(box.style.height).toBe('400px');
     await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-2', payload: { height: 2000 } }); });
-    expect(box.style.height).toBe('320px');
+    expect(box.style.height).toBe('480px');
     expect(messages.some((message) => message.type === 'result' && message.id === 'h-2' && message.ok)).toBe(true);
     // Status-only: the catalog has no panel entry, and that must not tear the section down.
     expect(container.querySelector('iframe')).not.toBeNull();
@@ -357,7 +359,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     expect(shownSummary()).toBeNull();
     // Reopening starts at the height the page last asked for, not the manifest default.
     await act(async () => header.click());
-    expect(container.querySelector('iframe')?.parentElement?.style.height).toBe('320px');
+    expect(container.querySelector('iframe')?.parentElement?.style.height).toBe('480px');
 
     // keepAlive: folding keeps the same frame, hidden and inert, and its summary stays live.
     const keptAlive: InstalledGuest = { ...guest, statusKeepAlive: true };

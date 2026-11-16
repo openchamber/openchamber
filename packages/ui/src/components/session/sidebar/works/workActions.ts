@@ -13,9 +13,16 @@ import { isAgentWorkingInSpace } from '@/lib/spaces/space-apply';
 import { runSpaceAction } from '@/lib/spaces/space-repair';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { isPathWithinProject } from '../utils';
+import { recordSessionActionFailure } from '@/sync/session-action-failures';
+import { mapWithConcurrency } from '@/lib/concurrency';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { canArchiveWorktrees } from '@/lib/gitApi';
+import { isWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { isPathWithinProject, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { SessionNode } from '../types';
+import type { SessionGroup, SessionNode } from '../types';
+import type { SessionRowOrderWork } from '../sessions/sessionRowOrder';
 
 /**
  * Leave a worktree's or a space's work: close its sessions' tabs, and move
@@ -66,6 +73,39 @@ export const trackWork = async (session: Session): Promise<void> => {
   await setSessionWorkState(session.id, resolveGlobalSessionDirectory(session) ?? session.directory, 'open');
 };
 
+const MARK_DONE_CONCURRENCY = 4;
+
+/**
+ * The sidebar's bulk Mark done: each session alone, as the composer's Mark
+ * done takes one, four at a time. Done sessions leave the working set; one
+ * failure never stops the rest. Bound to the server it was clicked on: once
+ * the runtime changes (away and back included), queued sessions are not sent
+ * and the result is null, so nothing reaches the new server's tabs or
+ * selection.
+ */
+export const markSessionsDone = async (
+  sessions: readonly Session[],
+  write: typeof setSessionWorkState = setSessionWorkState,
+): Promise<{ doneIds: string[]; failedIds: string[] } | null> => {
+  const isCurrentRuntime = captureRuntimeInstance();
+  const outcomes = await mapWithConcurrency([...sessions], MARK_DONE_CONCURRENCY, async (session) => {
+    if (!isCurrentRuntime()) return 'stale';
+    try {
+      const updated = await write(session.id, resolveGlobalSessionDirectory(session) ?? session.directory, 'done');
+      return updated ? 'done' : 'stale';
+    } catch (error) {
+      // The bulk bar's failure toast quotes it, as bulk Archive's does.
+      recordSessionActionFailure(session.id, error instanceof Error ? error : new Error(String(error)));
+      return 'failed';
+    }
+  });
+  if (!isCurrentRuntime() || outcomes.includes('stale')) return null;
+  const doneIds = sessions.flatMap((session, index) => (outcomes[index] === 'done' ? [session.id] : []));
+  const failedIds = sessions.flatMap((session, index) => (outcomes[index] === 'failed' ? [session.id] : []));
+  leaveFinishedSessions(doneIds);
+  return { doneIds, failedIds };
+};
+
 export type FinishWorktreeWorkOutcome =
   /** Done; the worktree stays where it is, out of In work. */
   | { kind: 'done' }
@@ -76,6 +116,11 @@ export type FinishWorktreeWorkOutcome =
   /** Done; whether a session still runs there could not be read, so the worktree stays. */
   | { kind: 'unknown' }
   | { kind: 'failed'; error: Error; doneFailed: number };
+
+/** Sessions of a work still to mark done: in work, and not marked already (by bulk Mark done). */
+const sessionsToMarkDone = (sessions: readonly Session[], alreadyDone?: ReadonlySet<string>): Session[] => (
+  sessions.filter((session) => isSessionInWork(session) && !alreadyDone?.has(session.id))
+);
 
 /**
  * Done on a worktree work: its sessions in work are marked done, and with
@@ -93,8 +138,9 @@ export async function finishWorktreeWork(input: {
   project: { id: string; path: string };
   /** The name the row shows, which the archive keeps. */
   title?: string;
+  alreadyDone?: ReadonlySet<string>;
 }): Promise<FinishWorktreeWorkOutcome> {
-  const failed = await markOverviewSessionsDone(input.sessions.filter(isSessionInWork));
+  const failed = await markOverviewSessionsDone(sessionsToMarkDone(input.sessions, input.alreadyDone));
   if (failed.length > 0) {
     return { kind: 'failed', error: new Error(`Could not mark ${failed.length} session(s) done`), doneFailed: failed.length };
   }
@@ -129,8 +175,9 @@ export async function finishSpaceWork(input: {
   spaceId: string;
   directory: string;
   projectId: string;
+  alreadyDone?: ReadonlySet<string>;
 }): Promise<Extract<FinishWorktreeWorkOutcome, { kind: 'done' | 'failed' }>> {
-  const failed = await markOverviewSessionsDone(input.sessions.filter(isSessionInWork));
+  const failed = await markOverviewSessionsDone(sessionsToMarkDone(input.sessions, input.alreadyDone));
   if (failed.length > 0) {
     return { kind: 'failed', error: new Error(`Could not mark ${failed.length} session(s) done`), doneFailed: failed.length };
   }
@@ -142,3 +189,50 @@ export async function finishSpaceWork(input: {
   }
   return { kind: 'done' };
 }
+
+/**
+ * The works a bulk Mark done finished whole: unpinned worktree and space works
+ * whose every session that Mark done takes (a root session in work, not
+ * archived) is in `doneIds`. Each then gets the work's own Done.
+ */
+export const selectFinishedWorks = (works: readonly SessionRowOrderWork[], doneIds: ReadonlySet<string>): SessionRowOrderWork[] => {
+  const seen = new Set<string>();
+  return works.filter((work) => {
+    const directory = normalizePath(work.group.directory ?? null);
+    if (!directory || seen.has(directory) || work.group.worktree?.pinnedAt !== undefined) return false;
+    const marked = collectWorkSessions(work.group.sessions).filter((session) => !session.parentID && !session.time?.archived && isSessionInWork(session));
+    if (marked.length === 0 || !marked.every((session) => doneIds.has(session.id))) return false;
+    seen.add(directory);
+    return true;
+  });
+};
+
+/** A worktree work's name for its archive and toast: its task, else the branch, else the folder. */
+export const bulkDoneWorkLabel = (group: SessionGroup): string => (
+  group.worktree?.title?.trim() || group.branch?.trim() || group.worktree?.branch?.trim() || group.label
+);
+
+/**
+ * Done on a work whose sessions bulk Mark done just marked (`alreadyDone`):
+ * the work's own Done, as its row's Done runs it, with archive on Done for a
+ * worktree and the stop for a space. Null when the project is gone.
+ */
+export const finishBulkDoneWork = (
+  work: SessionRowOrderWork,
+  alreadyDone: ReadonlySet<string>,
+  archiveOnDone: boolean,
+): Promise<FinishWorktreeWorkOutcome> | null => {
+  const project = useProjectsStore.getState().projects.find((entry) => entry.id === work.projectId);
+  if (!project) return null;
+  const { group } = work;
+  const sessions = collectWorkSessions(group.sessions);
+  const worktree = group.worktree;
+  if (worktree) {
+    const title = bulkDoneWorkLabel(group);
+    const archive = archiveOnDone && canArchiveWorktrees() && !isWorktreeRemoving(worktree.path);
+    return finishWorktreeWork({ sessions, worktree, project: { id: project.id, path: project.path }, title, archive, alreadyDone });
+  }
+  const directory = normalizePath(group.directory ?? null);
+  if (group.space && directory) return finishSpaceWork({ sessions, spaceId: group.space.id, directory, projectId: project.id, alreadyDone });
+  return null;
+};

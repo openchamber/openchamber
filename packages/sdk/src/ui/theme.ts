@@ -81,7 +81,7 @@ const SYNTAX_TOKEN_VARS = [
 
 /**
  * Paint the host theme onto the iframe root. Guest chrome reads these
- * variables, and the root itself gets the host font and text colour so plain
+ * variables, and the root itself gets the host font, text size and colour so plain
  * DOM the guest draws outside the kit (a `<pre>`, a `<p>`) inherits them
  * instead of the browser's serif default.
  */
@@ -96,7 +96,10 @@ export const applyHostTheme = (theme: HostTheme, root: ThemeRoot): void => {
     root.style.setProperty(hostName, value);
   }
   root.style.setProperty('font-family', theme.tokens.font);
-  root.style.setProperty('font-size', '0.875rem');
+  // The app's body text becomes the frame's 1rem, so the kit and the guest's
+  // own rem sizes follow the user's interface font size. An older host sends
+  // no size; 0.875rem is its body text at the default size.
+  root.style.setProperty('font-size', theme.tokens.fontSize ?? '0.875rem');
   root.style.setProperty('line-height', '1.45');
   root.style.setProperty('color', theme.tokens.foreground);
 };

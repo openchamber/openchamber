@@ -70,9 +70,13 @@ export const FileTreeRowEnd: React.FC<{ className?: string; children?: React.Rea
   <span className={cn('oc-file-tree-row-end -my-1 gap-1.5', className)}>{children}</span>
 );
 
+/**
+ * A folder's count of changed files under it, by the letters its files carry
+ * (M, A), so a file count never reads like a diff's line count (`+12 −2`).
+ */
 export const FileTreeFolderBadge: React.FC<{ badge: { modified: number; added: number } }> = ({ badge }) => (
   <span className="flex flex-shrink-0 items-center gap-1 typography-micro tabular-nums">
-    {badge.modified > 0 && <span className="text-[var(--status-warning)]">M{badge.modified}</span>}
-    {badge.added > 0 && <span className="text-[var(--status-success)]">+{badge.added}</span>}
+    {badge.modified > 0 && <span style={{ color: GIT_STATUS_LETTERS['git-modified'].color }}>{GIT_STATUS_LETTERS['git-modified'].code}{badge.modified}</span>}
+    {badge.added > 0 && <span style={{ color: GIT_STATUS_LETTERS['git-added'].color }}>{GIT_STATUS_LETTERS['git-added'].code}{badge.added}</span>}
   </span>
 );

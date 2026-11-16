@@ -156,6 +156,7 @@ export const ProjectActionEditorDialog: React.FC<{
               </div>
               <SettingsStackedField label={t('settings.projects.actions.field.command')} controlClassName="max-w-none">
                 <Textarea
+                  dir="ltr"
                   value={draft.command}
                   onChange={(event) => update({ command: event.target.value })}
                   placeholder={t('settings.projects.actions.field.commandPlaceholder')}

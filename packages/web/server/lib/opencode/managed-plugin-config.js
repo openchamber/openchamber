@@ -84,3 +84,63 @@ export const appendManagedPermissions = (rawConfig, rules) => {
   ];
   return JSON.stringify(parsed);
 };
+
+/**
+ * Append skill folders to the `skills` list of an `OPENCODE_CONFIG_CONTENT`
+ * value, the fallback twin of the managed config file's `skills`.
+ *
+ * @param {string | undefined} rawConfig the current `OPENCODE_CONFIG_CONTENT`, JSONC or unset
+ * @param {string[]} directories absolute folders
+ * @returns {string} the merged config as JSON
+ */
+export const appendManagedSkills = (rawConfig, directories) => {
+  const parsed = parseConfigContent(rawConfig, 'managed skills');
+  if (parsed.skills !== undefined && !Array.isArray(parsed.skills)) {
+    throw new Error('OPENCODE_CONFIG_CONTENT skills must be an array before OpenChamber can inject its managed skills');
+  }
+  const configured = Array.isArray(parsed.skills) ? parsed.skills : [];
+  parsed.skills = [...configured.filter((existing) => !directories.includes(existing)), ...directories];
+  return JSON.stringify(parsed);
+};
+
+/**
+ * Add one command to the `commands` map of an `OPENCODE_CONFIG_CONTENT` value,
+ * the fallback twin of the managed config file's `commands`. A command the
+ * user defined under the same name stays theirs.
+ *
+ * @param {string | undefined} rawConfig the current `OPENCODE_CONFIG_CONTENT`, JSONC or unset
+ * @param {string} name
+ * @param {{ description: string, template: string }} command
+ * @returns {string} the merged config as JSON
+ */
+export const appendManagedCommand = (rawConfig, name, command) => {
+  const parsed = parseConfigContent(rawConfig, 'managed commands');
+  if (parsed.commands !== undefined && !isJsonObject(parsed.commands)) {
+    throw new Error('OPENCODE_CONFIG_CONTENT commands must be an object before OpenChamber can inject its managed commands');
+  }
+  parsed.commands = { [name]: command, ...parsed.commands };
+  return JSON.stringify(parsed);
+};
+
+/**
+ * Append OpenChamber's plugin denials to the `policies` list of an
+ * `OPENCODE_CONFIG_CONTENT` value, the fallback twin of the managed config
+ * file's `policies`. The user's statements keep their place, and a statement
+ * already there is not added twice across restarts.
+ *
+ * @param {string | undefined} rawConfig the current `OPENCODE_CONFIG_CONTENT`, JSONC or unset
+ * @param {{ action: string, resource: string, effect: string }[]} policies
+ * @returns {string} the merged config as JSON
+ */
+export const appendManagedPolicies = (rawConfig, policies) => {
+  const parsed = parseConfigContent(rawConfig, 'plugin switches');
+  if (parsed.policies !== undefined && !Array.isArray(parsed.policies)) {
+    throw new Error('OPENCODE_CONFIG_CONTENT policies must be an array before OpenChamber can inject its plugin switches');
+  }
+  const configured = Array.isArray(parsed.policies) ? parsed.policies : [];
+  parsed.policies = [
+    ...configured.filter((existing) => !policies.some((rule) => sameRule(existing, rule))),
+    ...policies,
+  ];
+  return JSON.stringify(parsed);
+};

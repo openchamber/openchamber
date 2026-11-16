@@ -31,6 +31,7 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   const [revision, refresh] = useReducer((value: number) => value + 1, 0);
   // Dismissals live in localStorage; refresh must read them even when sync inputs are unchanged.
   const questions = useMemo(() => {
+    void revision; // A refresh invalidates the localStorage-derived dismissal result.
     if (!sessionId || !lastMessage || !statusReady || (status && status.type !== 'idle')) return [];
     const live = forms.map(projectQuestionForm).filter((form) => form !== null);
     return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptions);

@@ -1,7 +1,8 @@
 /**
  * `/api/routing` — configuration, the Jev key, the classification provider
- * pick (`/api/routing/classifier`) and the custom endpoint
- * (`/api/routing/classifier/custom`). Normal authenticated
+ * pick (`/api/routing/classifier`), the custom endpoint
+ * (`/api/routing/classifier/custom`) and the Gemini key saved for Jev
+ * (`/api/routing/classifier/gemini`). Normal authenticated
  * OpenChamber routes: do not add them to browser URL-token allowlists.
  *
  * The send-path rewrite, registered ahead of the generic OpenCode proxy. In
@@ -14,7 +15,9 @@
  *   a switch would.
  * - `POST /session/:id/{prompt,command}` in a routed session asks Jev on the
  *   request text and switches the session onto the chosen model and agent
- *   before the prompt is forwarded.
+ *   before the prompt is forwarded. A form reply resumes a turn the same way,
+ *   so `POST /session/:id/form/:formId/reply` is routed on the answer, and a
+ *   failure leaves the form pending because the answer was never forwarded.
  *
  * Both parse the JSON body only for JSON requests, so a streamed or non-JSON
  * upload reaches the proxy untouched.
@@ -27,6 +30,7 @@ const MODEL_PATH = '/api/session/:sessionId/model';
 const SEND_PATHS = [
   '/api/session/:sessionId/prompt',
   '/api/session/:sessionId/command',
+  '/api/session/:sessionId/form/:formId/reply',
 ];
 
 const sendError = (res, error) => {
@@ -71,6 +75,22 @@ export function registerRoutingRoutes(app, runtime) {
   app.put('/api/routing/classifier', express.json({ limit: '4kb' }), async (req, res) => {
     try {
       res.json(await runtime.setClassifierSource(req.body?.source));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put('/api/routing/classifier/gemini', express.json({ limit: '16kb' }), async (req, res) => {
+    try {
+      res.json(await runtime.setGeminiKey(req.body?.key));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.delete('/api/routing/classifier/gemini', async (_req, res) => {
+    try {
+      res.json(await runtime.clearGeminiKey());
     } catch (error) {
       sendError(res, error);
     }

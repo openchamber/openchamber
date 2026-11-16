@@ -1,7 +1,7 @@
 import type { Part } from '@/lib/opencode/model';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
-import { getShownPages } from './liveActivity';
+import { getShownPages, isSettledAsk, type ShownPart } from './liveActivity';
 import type { TimelineRow } from './timelineRows';
 import type { ChatMessageEntry } from './types';
 
@@ -123,6 +123,12 @@ const hoistedPages = (row: TurnRowOf<'turn-message' | 'turn-pages'>) => {
     return getShownPages(row.entry.turn.assistantMessages, finalMessage);
 };
 
+// A settled form stays hoisted as one line.
+const hoistedHeight = (pages: ShownPart[], metrics: RowSizeMetrics): number => pages.reduce(
+    (height, page) => height + (page.type === 'tool' && isSettledAsk(page) ? metrics.lineHeight : SHOWN_PAGE_PX),
+    0,
+);
+
 const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetrics): number | undefined => {
     const message = row.entry.turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
     if (!message) return undefined;
@@ -134,7 +140,7 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
     const answerStartsHere = firstText !== undefined
         && message.parts.find((part) => part.type === 'text' && !isEmptyTextPart(part))?.id === firstText.id
         && !(row.slice?.from?.partId === firstText.id && row.slice.from.offset > 0);
-    let height = answerStartsHere ? hoisted.length * SHOWN_PAGE_PX : 0;
+    let height = answerStartsHere ? hoistedHeight(hoisted, metrics) : 0;
     let hasText = false;
     for (const part of parts) {
         if (part.type === 'text') {
@@ -173,7 +179,7 @@ export const estimateTimelineRowSize = (row: TimelineRow, metrics: RowSizeMetric
         case 'ungrouped': return UNGROUPED_PX;
         case 'turn-head': height = promptHeight(row.entry.turn.userMessage, metrics); break;
         case 'turn-fold': height = FOLD_HEADER_PX; break;
-        case 'turn-pages': height = hoistedPages(row).length * SHOWN_PAGE_PX; break;
+        case 'turn-pages': height = hoistedHeight(hoistedPages(row), metrics); break;
         case 'turn-message': {
             const message = messageRowHeight(row, metrics);
             return message === undefined ? undefined : Math.round(message);

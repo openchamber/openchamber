@@ -42,9 +42,13 @@ const commandBodySchema = z.object({ name: z.string().trim().min(1), text: z.str
 // v2 sends one user turn as flat text; the context the composer attached went
 // ahead of it as synthetic messages, which are never the request being routed.
 const promptBodySchema = z.object({ text: z.string().nullish() });
+// A form reply carries the filled-in fields, keyed by ids the agent made up.
+const formReplyBodySchema = z.object({ answer: z.record(z.string(), z.unknown()) });
 
-/** The user's words for this send: the prompt text, or the slash command. */
+/** The user's words for this send: the prompt text, the slash command, or a form's answers. */
 export const requestTextOf = (body) => {
+  const formReply = formReplyBodySchema.safeParse(body);
+  if (formReply.success) return Object.values(formReply.data.answer).flat().join('\n').trim();
   const command = commandBodySchema.safeParse(body);
   if (command.success) {
     const args = command.data.text?.trim();
@@ -118,14 +122,23 @@ const toModelRef = (model, variant) => {
  */
 const apiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
 const envKeySchema = z.string().trim().min(1);
+// Visible ASCII only: a line break or control character in a header value makes
+// fetch fail with the value, key and all, in its error.
+const geminiKeySchema = z.string().trim().regex(/^[\x21-\x7e]{1,4000}$/);
+const usableGeminiKey = (key) => geminiKeySchema.safeParse(key).data ?? null;
 
 /**
- * OpenCode also connects OpenRouter and AI Gateway from these variables, read
- * live and never stored in its database. A managed OpenCode inherits this
- * server's environment, so the same variable is the same key. A saved key
- * wins over the variable; Zen has no variable.
+ * OpenCode also connects OpenRouter, AI Gateway and Google from these
+ * variables, read live and never stored in its database; for Google it takes
+ * the first one set, in this order (models.dev's `env` list). A managed
+ * OpenCode inherits this server's environment, so the same variable is the
+ * same key. A saved key wins over the variable; Zen has no variable.
  */
-const PROVIDER_ENV_KEYS = { openrouter: 'OPENROUTER_API_KEY', vercel: 'AI_GATEWAY_API_KEY' };
+const PROVIDER_ENV_KEYS = {
+  openrouter: ['OPENROUTER_API_KEY'],
+  vercel: ['AI_GATEWAY_API_KEY'],
+  google: ['GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
+};
 
 export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env = process.env } = {}) => {
   let auth = {};
@@ -135,11 +148,14 @@ export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env
     // An unreadable credential store still leaves the environment.
   }
   const saved = (providerId) => apiKeySchema.safeParse(auth[providerId]).data?.key ?? null;
-  const fromEnv = (providerId) => envKeySchema.safeParse(env[PROVIDER_ENV_KEYS[providerId]]).data ?? null;
+  const fromEnv = (providerId, parse = (value) => envKeySchema.safeParse(value).data) => PROVIDER_ENV_KEYS[providerId]
+    .map((name) => parse(env[name]))
+    .find(Boolean) ?? null;
   return {
     zenKey: saved('opencode'),
     openrouterKey: saved('openrouter') ?? fromEnv('openrouter'),
     vercelKey: saved('vercel') ?? fromEnv('vercel'),
+    geminiKey: usableGeminiKey(saved('google')) ?? fromEnv('google', usableGeminiKey),
   };
 };
 
@@ -158,6 +174,7 @@ export function createRoutingRuntime({
   listCatalogModels = null,
   readSessionHistory = null,
   readConfigEntries = null,
+  readSessionAgent = null,
   // Whether OpenChamber keeps this session's cache warm itself (`session-warming`).
   isSessionWarm = () => false,
   now = Date.now,
@@ -171,6 +188,9 @@ export function createRoutingRuntime({
   // the client resend the sentinel with every send.
   const autoSessions = new Map();
   const AUTO_SESSION_LIMIT = 1000;
+  // Per session: the agent routing switched it to and the agent it ran as
+  // before (`agentForSend`). Process memory too, so a restart forgets it.
+  const routedAgents = new Map();
 
   const broadcast = (type, properties) => {
     try {
@@ -184,22 +204,27 @@ export function createRoutingRuntime({
 
   /** Which classification provider answers now, and where its requests go (null endpoint: no Jev). */
   const resolveAccess = async () => {
-    const [typesafeKey, stored, savedEndpoint] = await Promise.all([
+    const [typesafeKey, stored, savedEndpoint, ownGeminiKey] = await Promise.all([
       store.readToken(),
       store.readClassifierSource(),
       store.readCustomEndpoint(),
+      store.readGeminiKey().then(usableGeminiKey),
     ]);
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
+    const providerKeys = await readProviderKeys();
+    // A Gemini key saved for Jev wins over OpenCode's Google key (DOCUMENTATION.md).
+    const keys = { typesafeKey, customEndpoint, ...providerKeys, geminiKey: ownGeminiKey ?? providerKeys.geminiKey ?? null };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.
     const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
     const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
     const endpoint = classifier.effective ? classifierEndpoint(classifier.effective, keys) : null;
-    return { classifier, endpoint, tokenPresent: Boolean(typesafeKey), customEndpoint, pinned: pinned !== null };
+    return {
+      classifier, endpoint, tokenPresent: Boolean(typesafeKey), geminiKeyPresent: Boolean(ownGeminiKey), customEndpoint, pinned: pinned !== null,
+    };
   };
 
   // What Settings shows of the custom endpoint: never the key itself.
@@ -228,6 +253,8 @@ export function createRoutingRuntime({
       autoReady,
       jevAvailable,
       tokenPresent: access.tokenPresent,
+      // Only the Gemini key saved in OpenChamber; OpenCode's shows as the source being usable.
+      geminiKeyPresent: access.geminiKeyPresent,
       customEndpoint: describeCustomEndpoint(access.customEndpoint, access.pinned),
       enterpriseMode: enterpriseMode(),
       jevSource: access.classifier.effective === 'typesafe' ? 'typesafe' : 'zen-free',
@@ -300,16 +327,57 @@ export function createRoutingRuntime({
 
   // A category without a model of its own means "the fallback pair"; a variant
   // only travels with the model it was chosen for.
-  const chooseSelection = (config, choice, composerAgent) => {
+  const chooseSelection = (config, choice) => {
     const own = Boolean(choice?.model);
     const model = own ? choice.model : config.fallback.model;
     const variant = own ? choice.variant : config.fallback.variant;
     return {
       model: toModelRef(model, variant),
-      // A category agent replaces the composer's; an empty one keeps it.
-      agent: choice?.agent || composerAgent || null,
       decision: { providerID: model.providerID, modelID: model.modelID, variant: variant ?? null, agent: choice?.agent ?? null },
     };
+  };
+
+  const readAgent = readSessionAgent ?? (async ({ sessionId, directory }) => (
+    agentBodySchema.safeParse(await openCodeClient(directory).session.get({ sessionID: sessionId })).data?.agent ?? null
+  ));
+
+  /**
+   * The agent a routed send runs as. A category agent replaces the session's
+   * and is remembered with the agent it replaced. A send whose category names
+   * no agent keeps the composer's, except while the session still runs as the
+   * agent routing set: then it goes back to the one before (#6392). In Auto
+   * the composer shows the session's agent, so it cannot ask for that itself.
+   * A session found on any other agent was switched since, so its agent stays.
+   */
+  const agentForSend = async ({ sessionId, directory, categoryAgent, composerAgent }) => {
+    const routed = routedAgents.get(sessionId);
+    if (!sessionId || (!categoryAgent && !routed)) return categoryAgent || composerAgent;
+    let current;
+    try {
+      current = await readAgent({ sessionId, directory });
+    } catch (error) {
+      console.warn('[routing] session agent unavailable, leaving it as it is:', errorMessage(error));
+      return categoryAgent || composerAgent;
+    }
+    const stillRouted = routed?.agent === current;
+    if (categoryAgent) {
+      const previous = stillRouted ? routed.previous : current;
+      routedAgents.delete(sessionId);
+      // A session without an agent of its own has nothing to go back to.
+      if (previous && previous !== categoryAgent) {
+        routedAgents.set(sessionId, { agent: categoryAgent, previous });
+        while (routedAgents.size > AUTO_SESSION_LIMIT) routedAgents.delete(routedAgents.keys().next().value);
+      }
+      return categoryAgent;
+    }
+    // A composer agent other than the routed one is the caller's own choice.
+    if (!stillRouted || (composerAgent && composerAgent !== routed.agent)) {
+      routedAgents.delete(sessionId);
+      return composerAgent;
+    }
+    // Kept until a read finds the session off the routed agent, so a switch
+    // back that fails is tried again on the next send.
+    return routed.previous;
   };
 
   const readCatalog = listCatalogModels
@@ -381,26 +449,33 @@ export function createRoutingRuntime({
         decision.confidence = result.confidence;
         decision.reason = result.reason;
         decision.ms = ms;
-        const held = await cacheHold({ config, chosen: result.category, composerAgent: agent, lastAnswer, sessionId, directory });
+        // A queued send names the session's agent; while routing set it, a
+        // category without an agent runs as the one before (`agentForSend`).
+        const routed = routedAgents.get(sessionId);
+        const composerAgent = routed && agent === routed.agent ? routed.previous : agent;
+        const held = await cacheHold({ config, chosen: result.category, composerAgent, lastAnswer, sessionId, directory });
         if (held) {
           // The send runs as the category the session is already on;
           // `cacheHold.requested` keeps what Jev asked for.
           decision.category = held.id;
           decision.cacheHold = { requested: result.category.id };
         }
-        selection = chooseSelection(config, held ?? result.category, agent);
+        selection = chooseSelection(config, held ?? result.category);
       } catch (error) {
         decision.reason = 'error';
         decision.error = errorMessage(error);
-        selection = chooseSelection(config, null, agent);
+        selection = chooseSelection(config, null);
       }
     } else {
-      selection = chooseSelection(config, null, agent);
+      selection = chooseSelection(config, null);
     }
     selection = await withKnownVariant(selection, directory);
+    const sendAgent = await agentForSend({
+      sessionId, directory, categoryAgent: selection.decision.agent, composerAgent: agent ?? null,
+    });
     Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', decision);
-    return { model: selection.model, agent: selection.agent, decision };
+    return { model: selection.model, agent: sendAgent, decision };
   };
 
   /**
@@ -411,6 +486,9 @@ export function createRoutingRuntime({
     if (!sessionId) return false;
     if (!isAutoModel(model)) {
       autoSessions.delete(sessionId);
+      // Off Auto the composer shows the session's agent again and the user can
+      // keep or change it, so routing has nothing to put back.
+      routedAgents.delete(sessionId);
       return false;
     }
     autoSessions.delete(sessionId);
@@ -522,6 +600,21 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
+  /** Saves the Gemini key for Jev alone and picks it, the way saving a TypeSafe key does. */
+  const setGeminiKey = async (key) => {
+    const parsed = geminiKeySchema.safeParse(key);
+    if (!parsed.success) throw Object.assign(new Error('A Gemini API key is required, without spaces or control characters'), { status: 400 });
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await store.writeGeminiKey(parsed.data);
+    await store.writeClassifierSource('gemini');
+    return publishUpdated();
+  };
+
+  const clearGeminiKey = async () => {
+    await store.clearGeminiKey();
+    return publishUpdated();
+  };
+
   const setClassifierSource = async (source) => {
     const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
@@ -627,6 +720,8 @@ export function createRoutingRuntime({
     updateConfig,
     setToken,
     clearToken,
+    setGeminiKey,
+    clearGeminiKey,
     setClassifierSource,
     setCustomEndpoint,
     clearCustomEndpoint,

@@ -41,10 +41,12 @@ export interface ToolbarAction {
   menu?: React.ReactNode;
   /** Never moves into "More actions". */
   pinned?: boolean;
-  /** Attributes on the button, for code that recognises it (outside-click checks). */
+  /** Attributes on the button and on its "More actions" menu item, for code that recognises either (outside-click checks). */
   buttonAttributes?: Record<`data-${string}`, string>;
   /** The action's keyboard shortcut as the shortcuts dialog writes it (`formatShortcutForDisplay`), shown in its tooltip and menu item. */
   shortcut?: string;
+  /** Deletes or discards: drawn as a destructive item in "More actions". */
+  destructive?: boolean;
 }
 
 /** Actions that belong together, set apart from the next group by space. */
@@ -98,18 +100,35 @@ export function TooltipLabelWithShortcut({ label, shortcut }: { label: React.Rea
   return <span className="inline-flex items-center gap-2">{label}<span className="text-muted-foreground">{shortcut}</span></span>;
 }
 
-/** A `ToolbarButton` with its tooltip, which opens below so it never covers the row. */
-export function ToolbarTooltipButton({ label, shortcut, ...props }: React.ComponentProps<typeof ToolbarButton> & { shortcut?: string }) {
+/**
+ * A tooltip over one button. The span takes the hover a disabled button refuses,
+ * so it also fits a button that can be disabled, and a menu, popover or select
+ * trigger goes inside it. `className` is what the span needs from its row, such
+ * as `shrink-0`. A button repeated on every row of a list uses `row-tooltip.tsx`.
+ */
+export function ButtonTooltip({ label, side, sideOffset = 6, className, children }: {
+  label: React.ReactNode;
+  side?: 'top' | 'bottom';
+  sideOffset?: number;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
-        <span className="inline-flex">
-          <ToolbarButton label={label} {...props} />
-        </span>
+        <span className={cn('inline-flex', className)}>{children}</span>
       </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={label} shortcut={shortcut} /></TooltipContent>
+      <TooltipContent side={side} sideOffset={sideOffset}>{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+/** A `ToolbarButton` with its tooltip, which opens below so it never covers the row. */
+export function ToolbarTooltipButton({ label, shortcut, ...props }: React.ComponentProps<typeof ToolbarButton> & { shortcut?: string }) {
+  return (
+    <ButtonTooltip label={<TooltipLabelWithShortcut label={label} shortcut={shortcut} />} side="bottom">
+      <ToolbarButton label={label} {...props} />
+    </ButtonTooltip>
   );
 }
 
@@ -239,16 +258,11 @@ export function ActionToolbar({
     if (!action.menu) return button;
     return (
       <DropdownMenu onOpenChange={onMenuOpenChange}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <DropdownMenuTrigger asChild>
-                <ToolbarButton label={action.label} icon={action.icon} disabled={action.disabled} {...action.buttonAttributes} />
-              </DropdownMenuTrigger>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={action.label} shortcut={action.shortcut} /></TooltipContent>
-        </Tooltip>
+        <ButtonTooltip label={<TooltipLabelWithShortcut label={action.label} shortcut={action.shortcut} />} side="bottom">
+          <DropdownMenuTrigger asChild>
+            <ToolbarButton label={action.label} icon={action.icon} disabled={action.disabled} {...action.buttonAttributes} />
+          </DropdownMenuTrigger>
+        </ButtonTooltip>
         <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
           {action.menu}
         </DropdownMenuContent>
@@ -274,11 +288,13 @@ export function ActionToolbar({
     <DropdownMenuItem
       key={action.id}
       className="flex items-center gap-2"
+      variant={action.destructive ? 'destructive' : 'default'}
       disabled={action.disabled}
       onClick={action.onMenuSelect ?? action.onSelect}
+      {...action.buttonAttributes}
     >
       <Icon name={action.icon} className={cn('size-4', action.iconClassName)} />
-      <span className="min-w-0 truncate typography-ui-label text-foreground">{action.label}</span>
+      <span className={cn('min-w-0 truncate typography-ui-label', !action.destructive && 'text-foreground')}>{action.label}</span>
       {action.shortcut ? <span className="ms-auto shrink-0 ps-3 typography-meta text-muted-foreground">{action.shortcut}</span> : null}
       {action.pressed ? <Icon name="check" className={cn('size-4 shrink-0 text-foreground', !action.shortcut && 'ms-auto')} /> : null}
     </DropdownMenuItem>
@@ -287,16 +303,11 @@ export function ActionToolbar({
   const more = fold || menuOnlyActions.length > 0 ? (
     <span data-toolbar-more={menuOnlyActions.length > 0 ? 'always' : ''} className="inline-flex data-[folded]:hidden">
       <DropdownMenu onOpenChange={onMenuOpenChange}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <DropdownMenuTrigger asChild>
-                <ToolbarButton label={moreLabel} icon="more" />
-              </DropdownMenuTrigger>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}>{moreLabel}</TooltipContent>
-        </Tooltip>
+        <ButtonTooltip label={moreLabel} side="bottom">
+          <DropdownMenuTrigger asChild>
+            <ToolbarButton label={moreLabel} icon="more" />
+          </DropdownMenuTrigger>
+        </ButtonTooltip>
         <DropdownMenuContent align="end" className="w-max min-w-56 max-w-80">
           {foldedActions.map(renderMenuItem)}
           {foldedActions.length > 0 && menuOnlyActions.length > 0 ? <DropdownMenuSeparator /> : null}

@@ -9,8 +9,8 @@ import { useSessionGrouping } from './useSessionGrouping';
 import { useSessionSidebarSections } from './useSessionSidebarSections';
 import { buildSidebarSessionProjection } from '../list/sessionCollection';
 
-// The sidebar's group headers are memoized on the section's group objects and
-// the shared search-data map. These tests pin which inputs may replace them:
+// The sidebar's group headers are memoized on the section's group objects.
+// These tests pin which inputs may replace them:
 // a real change to one project rebuilds that project only, and an update that
 // changes nothing a project renders keeps every reference.
 
@@ -44,7 +44,7 @@ const b2 = session('b2', '/b/.wt/two');
 const c1 = session('c1', '/c');
 const sessionsByProject = new Map([['a', [a1, a2]], ['b', [b1, b2]], ['c', [c1]]]);
 const EMPTY: Session[] = [];
-const stableMaps = { worktreeMetadata: new Map(), pinnedSessionIds: new Set<string>(), gitBranches: new Map<string, string | null>(), projectRepoStatus: new Map(), projectRootBranches: new Map(), foldersMap: {} };
+const stableMaps = { worktreeMetadata: new Map(), pinnedSessionIds: new Set<string>(), gitBranches: new Map<string, string | null>(), projectRepoStatus: new Map(), projectRootBranches: new Map() };
 
 type Owners = ReadonlyMap<string, { scopeDirectory: string }>;
 type Inputs = { ranks: ReadonlyMap<string, number>; owners: Owners; sessions?: ReadonlyMap<string, Session[]> };
@@ -107,16 +107,9 @@ const Harness = ({ inputs, capture }: { inputs: Inputs; capture: (sections: Sect
     lastRepoStatus: true,
     buildGroupedSessions: grouping.buildGroupedSessions,
     getGroupingSessions: grouping.getGroupingSessions,
-    hasSessionSearchQuery: false,
-    normalizedSessionSearchQuery: '',
-    filterSessionNodesForSearch: grouping.filterSessionNodesForSearch,
-    buildGroupSearchText: grouping.buildGroupSearchText,
-    foldersMap: stableMaps.foldersMap,
-    standaloneGroups: EMPTY_GROUPS,
   }));
   return null;
 };
-const EMPTY_GROUPS: never[] = [];
 
 const worktreeLabels = (sections: Sections, projectId: string): string[] => (
   sections.projectSections.find((section) => section.project.id === projectId)?.groups
@@ -163,7 +156,7 @@ describe('sidebar project sections keep references across unrelated updates', ()
     void dom.happyDOM.close();
   });
 
-  test('a rebuilt ownership map with the same scopes keeps every section and the search map', async () => {
+  test('a rebuilt ownership map with the same scopes keeps every section and its flat copy', async () => {
     await render({ ranks: new Map(), owners: ownersFor(defaultScopes) });
     const before = current();
 
@@ -171,7 +164,8 @@ describe('sidebar project sections keep references across unrelated updates', ()
 
     expect(section('a')).toBe(before.projectSections[0]);
     expect(section('b')).toBe(before.projectSections[1]);
-    expect(current().groupSearchDataByGroup).toBe(before.groupSearchDataByGroup);
+    expect(current().flatSectionsForRender[0]).toBe(before.flatSectionsForRender[0]);
+    expect(current().flatSectionsForRender[1]).toBe(before.flatSectionsForRender[1]);
   });
 
   test('a session that changes scope regroups it', async () => {
@@ -197,7 +191,8 @@ describe('sidebar project sections keep references across unrelated updates', ()
 
     expect(worktreeLabels(current(), 'a')).toEqual(['two', 'one']);
     expect(section('b')).toBe(sectionB);
-    expect(current().groupSearchDataByGroup).toBe(before.groupSearchDataByGroup);
+    expect(current().flatSectionsForRender[0]).not.toBe(before.flatSectionsForRender[0]);
+    expect(current().flatSectionsForRender[1]).toBe(before.flatSectionsForRender[1]);
   });
 
   test('a same-ID descendant update rebuilds its parent project tree', async () => {

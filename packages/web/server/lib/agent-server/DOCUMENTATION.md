@@ -41,9 +41,11 @@ the request has neither a directory nor a cursor.
   from both streams. The notification callback reaches control SSE plus the
   local notification SSE/WS consumers. File/render/secret replies still go to
   the agent-owned request route.
-  Validated goal/review/browser-help/PR announcements also reach owner device
+  Validated goal/review/shared-answer/browser-help/PR announcements also reach owner device
   delivery under owner settings and enterprise content rules. Raw OpenCode
   trigger kinds and the deliberately live-only notify tool are not pushed twice.
+  Shared answers retain their toast-only flag and whether their delivery turn
+  still needs to start, so the owner preserves the same push-clearing behavior.
 - Tracked-item interest and presence POSTs are local in front-door mode. Each
   UI control connection owns its items and visibility until that connection
   closes. `tracked-items.js` sends their union under the front door's upstream
@@ -74,6 +76,12 @@ the request has neither a directory nor a cursor.
   snapshot; serialized PUTs ignore agent responses. Failure preserves the owner
   save. Per-session `permissionAutoAccept` policy stays on the agent;
   `permissionDefaultMode` remains an owner preference.
+- Version 1 includes the boolean `agentUsageToolEnabled`,
+  `agentMemoryDreamingEnabled` and `sessionRetentionIncludeInWork` preferences,
+  plus string `agentMemoryDreamingModel` and `agentMemoryDreamingVariant`.
+  The agent sanitizer owns model validation and trimming. Empty model and variant
+  strings restore dreaming's session defaults. An omitted boolean removes stale
+  agent state; usage and dreaming require literal `true` to run.
 - New registry paths require literal `true` from a trusted ownership predicate
   or successful `shareProject` before saving. Default sharing fails with
   `share_project_unavailable`. Neither request claims nor agent answers establish
@@ -300,6 +308,16 @@ from the current document, including fields whose ordinary sanitizer has no
 clear value. Non-allowlisted agent state remains intact. Supported explicit
 clear values also travel in each snapshot, including first startup; no
 in-memory previous-send baseline is needed to clear stale disk values.
+
+### Why executor preferences are reviewed per consumer
+
+The usage switch controls both managed-plugin materialization and the usage
+action's server-side gate. Dreaming reads its enable flag, model and variant
+from agent settings on each check. The retention preference travels with the
+existing retention fields; its consumer is the shared UI's `inWorkKeepsSessions`
+rule. These scalar preferences carry no credentials. Registry membership alone
+does not authorize mirroring other fields, including browser login sharing,
+front-door authentication, tunnel credentials or Spaces configuration.
 
 ### Why sharing fails closed
 

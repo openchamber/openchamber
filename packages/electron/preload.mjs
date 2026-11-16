@@ -92,7 +92,10 @@ if (readArgValue('--openchamber-explicit-runtime') === '1') {
 if (runtimeHeadersRaw && isLocalPage) {
   try {
     const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
-    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
+    // An exposed global is read-only. A window created before startup resolved
+    // carries no headers, and exposing that empty set would keep the packaged
+    // document from receiving the startup host's headers.
+    if (runtimeHeaders && typeof runtimeHeaders === 'object' && Object.keys(runtimeHeaders).length > 0) {
       contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
     }
   } catch {

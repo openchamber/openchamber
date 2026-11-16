@@ -18,6 +18,10 @@ interface SessionFolderItemProps<TSessionNode> {
    */
   displayName?: string;
   sessions: readonly TSessionNode[];
+  /** Everything filed here, what a section lists elsewhere and whole worktrees included. */
+  memberCount?: number;
+  /** The project's name, where folders of several projects share a list. */
+  projectLabel?: string;
   /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
@@ -54,6 +58,8 @@ interface SessionFolderItemProps<TSessionNode> {
 
 const SessionFolderItemBase = <TSessionNode,>({
   folder,
+  memberCount,
+  projectLabel,
   displayName,
   sessions,
   subFolderItems,
@@ -265,8 +271,9 @@ const SessionFolderItemBase = <TSessionNode,>({
                 </TooltipContent>
               </Tooltip>
               <span className="typography-micro text-muted-foreground flex-shrink-0">
-                • {sessions.length}
+                • {memberCount ?? sessions.length}
               </span>
+              {projectLabel ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{projectLabel}</span> : null}
               {collapsedActivityState ? (
                 <CollapsedActivityIndicator state={collapsedActivityState} />
               ) : null}

@@ -777,6 +777,18 @@ async function deleteGitWorktree(
   return gitHttp.deleteGitWorktree(directory, payload);
 }
 
+async function teardownGitWorktree(
+  directory: string,
+  payload: import('./api/types').TeardownGitWorktreePayload
+): Promise<{ success: boolean }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.teardown) {
+    return runtime.worktree.teardown(directory, payload);
+  }
+  if (runtime) throw new Error('Running teardown commands alone is not available here');
+  return gitHttp.teardownGitWorktree(directory, payload);
+}
+
 /** Renames the task of the worktree at `directory`; the user's name stays over the agent's. */
 export async function setGitWorktreeTitle(
   directory: string,
@@ -849,6 +861,7 @@ export const git = {
     validate: validateGitWorktree,
     create: createGitWorktree,
     remove: deleteGitWorktree,
+    teardown: teardownGitWorktree,
     snapshot: snapshotGitWorktree,
     archive: (directory: string, payload: import('./api/types').ArchiveGitWorktreePayload) => runtimeWorktreeArchives().archive(directory, payload),
     listArchives: (directory: string) => runtimeWorktreeArchives().listArchives(directory),
@@ -930,15 +943,19 @@ export async function getGitCommitDiff(directory: string, options: import('./api
   return gitHttp.getGitCommitDiff(directory, options);
 }
 
+/** Goes straight to the server: only OpenChamber's own git routes hand out both versions of a file. */
+export const getGitRangeFileVersions = gitHttp.getGitRangeFileVersions;
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<import('./api/types').CommitFileDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCommitFileDiff ? runtime.getCommitFileDiff(directory, hash, filePath, isBinary) : unsupportedByRuntime('getCommitFileDiff');
-  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
+  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary, previousPath);
 }
 
 export async function getGitIdentities(): Promise<import('./api/types').GitIdentityProfile[]> {

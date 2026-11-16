@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   ANNOTATION_TEARDOWN_SCRIPT,
   buildAnnotationOverlayScript,
+  type AnnotationAppMessage,
   type BrowserAnnotationOverlayLabels,
   type BrowserAnnotationOverlayTheme,
 } from './annotationOverlay';
@@ -22,6 +23,7 @@ const theme: BrowserAnnotationOverlayTheme = {
   border: 'rgb(40, 40, 40)',
   text: 'rgb(240, 240, 240)',
   mutedText: 'rgb(160, 160, 160)',
+  danger: 'rgb(229, 72, 77)',
 };
 
 const labels: BrowserAnnotationOverlayLabels = {
@@ -46,6 +48,154 @@ const parses = (source: string): boolean => {
     return false;
   }
 };
+
+/** The chrome sits in a closed shadow root; this keeps a handle to it to drive its controls. */
+type ShadowHandle = { root: ReturnType<Window['HTMLElement']['prototype']['attachShadow']> | null };
+
+const captureShadowRoots = (win: Window): ShadowHandle => {
+  const attachShadow = win.HTMLElement.prototype.attachShadow;
+  const shadow: ShadowHandle = { root: null };
+  win.HTMLElement.prototype.attachShadow = function (init) {
+    const created = attachShadow.call(this, init);
+    shadow.root = created;
+    return created;
+  };
+  return shadow;
+};
+
+const startVoiceOverlay = () => {
+  const win = new Window({ url: 'http://annotation.test' });
+  const shadow = captureShadowRoots(win);
+  const timers = new Map<number, () => void>();
+  let nextTimer = 0;
+  let now = 0;
+  let draws = 0;
+  Object.assign(win, { __openchamberAnnotationSend: () => undefined });
+  const script = buildAnnotationOverlayScript(theme, labels, {
+    shortcut: null,
+    labels: { start: 'Dictate', cancel: 'Cancel', insert: 'Insert', listening: 'Listening', processing: 'Transcribing' },
+    icons: { mic: '', close: '', check: '', loader: '' },
+  });
+  const run = new Function('window', 'document', 'requestAnimationFrame', 'setInterval', 'clearInterval', 'Date', `return ${script}`);
+  const completion: Promise<unknown> = run(win, win.document, (callback: FrameRequestCallback) => callback(0),
+    (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; },
+    (id: number) => timers.delete(id), { now: () => now });
+  const root = shadow.root;
+  if (!root) throw new TypeError('Missing annotation shadow root');
+  const wave = root.querySelector('canvas');
+  if (!wave) throw new TypeError('Missing microphone waveform');
+  Object.defineProperty(wave, 'getContext', { value: () => { draws += 1; return null; } });
+  const receiver: unknown = Object.getOwnPropertyDescriptor(win, '__openchamberAnnotationReceive')?.value;
+  if (typeof receiver !== 'function') throw new TypeError('Missing annotation receiver');
+  const target = win.document.createElement('div');
+  target.getBoundingClientRect = () => new win.DOMRect(40, 40, 80, 20);
+  win.document.body.appendChild(target);
+  win.document.elementFromPoint = () => target;
+  return {
+    win, root, timers, completion,
+    receive: (message: AnnotationAppMessage) => receiver(message),
+    toggleTarget: () => win.document.dispatchEvent(new win.PointerEvent('pointerdown', { button: 0, clientX: 50, clientY: 50 })),
+    hidePage: (hidden: boolean) => {
+      Object.defineProperty(win.document, 'hidden', { configurable: true, value: hidden });
+      win.document.dispatchEvent(new win.Event('visibilitychange'));
+    },
+    tick: () => { now += 1000; timers.forEach((callback) => callback()); },
+    get draws() { return draws; },
+    dispose: () => new Function('window', 'document', ANNOTATION_TEARDOWN_SCRIPT)(win, win.document),
+  };
+};
+
+describe('annotation voice indicators', () => {
+  for (const [phase, hidden] of [
+    ['idle', [false, true, true, true, true]],
+    ['recording', [true, false, true, false, false]],
+    ['processing', [true, true, false, false, true]],
+  ] as const) {
+    test(`shows the ${phase} controls when the app changes phase`, async () => {
+      // Given an open annotation editor with dictation available.
+      const overlay = startVoiceOverlay();
+      try {
+        overlay.toggleTarget();
+        // When the app supplies its authoritative phase.
+        overlay.receive({ type: 'voice', phase });
+        // Then the microphone, recording, loading, cancel and finish states remain distinct.
+        const selectors = ['[aria-label="Dictate"]', '.rec', '.spin', '[aria-label="Cancel"]', '[aria-label="Insert"]'];
+        expect(selectors.map((selector) => overlay.root.querySelector(selector)?.hasAttribute('hidden'))).toEqual(hidden);
+      } finally {
+        overlay.dispose();
+        await overlay.completion;
+        await overlay.win.happyDOM.close();
+      }
+    });
+  }
+
+  for (const state of ['editor', 'page', 'note', 'processing', 'idle', 'disposed'] as const) {
+    test(`stops recording work when ${state} hides the live readouts`, async () => {
+      // Given a visible recording with its timer and microphone meter running.
+      const overlay = startVoiceOverlay();
+      try {
+        overlay.toggleTarget();
+        overlay.receive({ type: 'voice', phase: 'recording' });
+        expect(overlay.timers.size).toBe(1);
+        overlay.receive({ type: 'level', level: 0.8 });
+        const draws = overlay.draws;
+        expect(draws).toBeGreaterThan(0);
+
+        // When that recording no longer has a visible live readout.
+        switch (state) {
+          case 'editor': overlay.toggleTarget(); break;
+          case 'page': overlay.hidePage(true); break;
+          case 'note': overlay.receive({ type: 'voice', phase: 'recording', note: 'Downloading' }); break;
+          case 'processing': overlay.receive({ type: 'voice', phase: 'processing' }); break;
+          case 'idle': overlay.receive({ type: 'voice', phase: 'idle' }); break;
+          case 'disposed': overlay.dispose(); await overlay.completion; break;
+          default: {
+            const unhandled: never = state;
+            throw new TypeError(String(unhandled));
+          }
+        }
+
+        // Then no timer or incoming meter sample can keep painting it.
+        overlay.receive({ type: 'level', level: 0.2 });
+        expect(overlay.timers.size).toBe(0);
+        expect(overlay.draws).toBe(draws);
+      } finally {
+        overlay.dispose();
+        await overlay.completion;
+        await overlay.win.happyDOM.close();
+      }
+    });
+  }
+
+  for (const surface of ['editor', 'page'] as const) {
+    test(`resumes the recording readouts when the ${surface} returns`, async () => {
+      // Given a recording whose readouts were hidden for a second.
+      const overlay = startVoiceOverlay();
+      try {
+        overlay.toggleTarget();
+        overlay.receive({ type: 'voice', phase: 'recording' });
+        if (surface === 'editor') overlay.toggleTarget();
+        else overlay.hidePage(true);
+        overlay.tick();
+        const draws = overlay.draws;
+
+        // When the recording becomes visible again.
+        if (surface === 'editor') overlay.toggleTarget();
+        else overlay.hidePage(false);
+
+        // Then elapsed time catches up and live metering resumes on the existing recording.
+        expect(overlay.root.querySelector('.rec span:last-child')?.textContent).toBe('0:01');
+        expect(overlay.timers.size).toBe(1);
+        overlay.receive({ type: 'level', level: 0.6 });
+        expect(overlay.draws).toBe(draws + 1);
+      } finally {
+        overlay.dispose();
+        await overlay.completion;
+        await overlay.win.happyDOM.close();
+      }
+    });
+  }
+});
 
 describe('annotation overlay script', () => {
   const script = buildAnnotationOverlayScript(theme, labels);
@@ -77,7 +227,7 @@ describe('annotation overlay script', () => {
 
     const handler = script.slice(handlerStart, handlerEnd);
     const imeGuard = handler.indexOf('event.isComposing || event.keyCode === 229');
-    const attachCall = handler.indexOf('attach();');
+    const attachCall = handler.indexOf('attach(event);');
     expect(imeGuard).toBeGreaterThan(-1);
     expect(attachCall).toBeGreaterThan(imeGuard);
   });
@@ -133,6 +283,98 @@ describe('annotation overlay script', () => {
     }
   });
 
+  test('draws a long stroke as short paths that join into one line, and reports every point', async () => {
+    const win = new Window({ url: 'http://annotation.test' });
+    const shadow = captureShadowRoots(win);
+    // Attaching reads the page's location, which a test has only on its window.
+    const run = new Function('window', 'document', 'requestAnimationFrame', 'location', `return ${script}`);
+    try {
+      const completion = run(win, win.document, (callback: FrameRequestCallback) => callback(0), win.location);
+      const drawButton = [...shadow.root!.querySelectorAll('button')].find((button) => button.textContent === 'Draw');
+      drawButton!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+
+      const pointer = (type: string, x: number) => win.document.dispatchEvent(
+        new win.PointerEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 50 }),
+      );
+      pointer('pointerdown', 0);
+      for (let x = 1; x <= 200; x += 1) pointer('pointermove', x);
+      pointer('pointerup', 200);
+
+      const paths = [...shadow.root!.querySelectorAll('path')].filter((path) => path.parentElement?.tagName.toLowerCase() === 'g');
+      expect(paths.length).toBe(4);
+      const ends = paths.map((path) => path.getAttribute('d')!.split(' ').slice(-2).join(' '));
+      const starts = paths.map((path) => path.getAttribute('d')!.split(' ').slice(0, 2).join(' '));
+      // Each path starts where the one before it ends.
+      for (let index = 1; index < paths.length; index += 1) {
+        expect(starts[index].replace('M', 'L')).toBe(ends[index - 1]);
+      }
+      expect(ends.at(-1)).toBe('L200 50');
+
+      shadow.root!.querySelector('.editor button')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+      const payload = await completion;
+      expect(payload.strokes).toHaveLength(1);
+      expect(payload.strokes[0].points).toHaveLength(201);
+      expect(payload.strokes[0].bounds).toEqual({ x: 0, y: 50, width: 200, height: 0 });
+    } finally {
+      await win.happyDOM.close();
+    }
+  });
+
+  /** The PDF viewer swallowing input over it was verified in Electron; this pins the overlay's side. */
+  test('on a PDF, lays an input layer over the viewer, offers no element tool, and removes the layer after', async () => {
+    const win = new Window({ url: 'http://annotation.test/doc.pdf' });
+    Object.defineProperty(win.document, 'contentType', { value: 'application/pdf' });
+    const shadow = captureShadowRoots(win);
+    const run = new Function('window', 'document', 'requestAnimationFrame', `return ${script}`);
+    try {
+      const completion = run(win, win.document, (callback: FrameRequestCallback) => callback(0));
+      const layer = win.document.querySelector('[data-openchamber-annotation-input]');
+      expect(layer).not.toBeNull();
+      expect(win.document.activeElement).toBe(layer);
+      const tools = [...shadow.root!.querySelectorAll('.tools button')];
+      expect(tools.map((button) => button.textContent)).toEqual(['Region', 'Draw']);
+      expect(tools[0].getAttribute('aria-pressed')).toBe('true');
+
+      win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      expect(await completion).toBeNull();
+      expect(win.document.querySelector('[data-openchamber-annotation-input]')).toBeNull();
+    } finally {
+      await win.happyDOM.close();
+    }
+  });
+
+  /**
+   * The page shares the overlay's document and can dispatch events at it.
+   * A trusted event, the only kind that may reach the microphone, cannot be
+   * made by a script; the positive path was run in Electron with real input.
+   */
+  test("a page's own key and click events never reach the app's microphone", async () => {
+    const voiceScript = buildAnnotationOverlayScript(theme, labels, {
+      shortcut: { key: 'v', meta: true, ctrl: false, alt: true, shift: false },
+      labels: { start: 'Dictate', cancel: 'Cancel', insert: 'Insert', listening: 'Listening', processing: 'Transcribing' },
+      icons: { mic: '', close: '', check: '', loader: '' },
+    });
+    const win = new Window({ url: 'http://annotation.test' });
+    const shadow = captureShadowRoots(win);
+    const asked: string[] = [];
+    Object.assign(win, { __openchamberAnnotationSend: (message: string) => { asked.push(message); } });
+    const run = new Function('window', 'document', 'requestAnimationFrame', `return ${voiceScript}`);
+    try {
+      const completion = run(win, win.document, (callback: FrameRequestCallback) => callback(0));
+      // The overlay offers a microphone, so the binding was seen.
+      expect(shadow.root!.querySelector('[aria-label="Dictate"]')).not.toBeNull();
+
+      win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'v', code: 'KeyV', metaKey: true, altKey: true, bubbles: true, cancelable: true }));
+      shadow.root!.querySelector('[aria-label="Dictate"]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+      expect(asked).toEqual([]);
+
+      win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      expect(await completion).toBeNull();
+    } finally {
+      await win.happyDOM.close();
+    }
+  });
+
   test('ends the session when the app cancels it, giving the page its clicks back', async () => {
     const win = new Window({ url: 'http://annotation.test' });
     const run = new Function('window', 'document', 'requestAnimationFrame', `return ${script}`);
@@ -172,7 +414,7 @@ describe('annotation overlay script', () => {
     const handler = source.slice(start, end);
     const guard = handler.indexOf("if (isIMECompositionEvent(event) || event.key !== 'Escape') return;");
     expect(guard).toBeGreaterThan(-1);
-    expect(handler.indexOf('cancelAnnotationSession(annotationHost)')).toBeGreaterThan(guard);
+    expect(handler.indexOf('cancelAnnotation()')).toBeGreaterThan(guard);
   });
 
   test('escapes a label that would otherwise close the script', () => {

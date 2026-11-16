@@ -16,12 +16,13 @@ export const WORK_STATUS_SECTION_IDS = [
   'session',
   'repository',
   'usage',
+  'contextSources',
   'telemetry',
   'subagents',
+  'tasks',
   'workflows',
   'mcp',
   'pinned',
-  'contextSources',
 ] as const;
 
 export type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
@@ -32,6 +33,7 @@ export const WORK_STATUS_SECTION_LABEL_KEYS = {
   usage: 'chat.workStatus.section.usage',
   telemetry: 'chat.workStatus.section.telemetry',
   subagents: 'chat.workStatus.section.subagents',
+  tasks: 'chat.workStatus.section.tasks',
   workflows: 'chat.workStatus.section.workflows',
   mcp: 'chat.workStatus.section.mcp',
   pinned: 'chat.workStatus.section.pinned',
@@ -66,8 +68,37 @@ const readStoredSectionId = (value: unknown): WorkStatusPanelSectionId | null =>
   return parsed.success ? parsed.data : null;
 };
 
-/** Preserve chosen positions, discard obsolete ids, and append newly added built-in sections. */
-export const sanitizeWorkStatusSectionOrder = (value: readonly string[] | null | undefined): WorkStatusPanelSectionId[] => {
+// The default before Context sources moved up. Clients saved the default as
+// their order without the user choosing it, and Turn stats, Workflows and Tasks
+// were appended to those saved lists wherever they stood, so those don't count.
+const DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST: readonly WorkStatusPanelSectionId[] = [
+  'session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources',
+];
+
+const isDefaultOrderWithContextSourcesLast = (order: readonly WorkStatusPanelSectionId[]): boolean => {
+  const placed = order.filter((id) => id !== 'telemetry' && id !== 'workflows' && id !== 'tasks');
+  return placed.length === DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST.length
+    && placed.every((id, index) => id === DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST[index]);
+};
+
+/**
+ * A built-in section added after users had saved orders goes beside the one
+ * it follows by default, so it lands where the default puts it rather than
+ * at the bottom of every saved list. Sections added before this rule were
+ * appended and saved there, so they stay out of it.
+ */
+const PLACED_AFTER = new Map<WorkStatusSectionId, WorkStatusSectionId>([['tasks', 'subagents']]);
+
+/**
+ * Preserve chosen positions, discard obsolete ids, and add newly added
+ * built-in sections: after their default neighbour (`PLACED_AFTER`), else at
+ * the end. `arranged` is false for an order the user never set by hand, which
+ * follows the default's move of Context sources.
+ */
+export const sanitizeWorkStatusSectionOrder = (
+  value: readonly string[] | null | undefined,
+  arranged = true,
+): WorkStatusPanelSectionId[] => {
   const ordered = new Set<WorkStatusPanelSectionId>();
   if (Array.isArray(value)) {
     for (const entry of value) {
@@ -75,8 +106,19 @@ export const sanitizeWorkStatusSectionOrder = (value: readonly string[] | null |
       if (id) ordered.add(id);
     }
   }
-  for (const id of WORK_STATUS_SECTION_IDS) ordered.add(id);
-  return [...ordered];
+  const order = [...ordered];
+  for (const id of WORK_STATUS_SECTION_IDS) {
+    if (ordered.has(id)) continue;
+    const after = PLACED_AFTER.get(id);
+    const at = after ? order.indexOf(after) : -1;
+    if (at === -1) order.push(id);
+    else order.splice(at + 1, 0, id);
+    ordered.add(id);
+  }
+  if (arranged || !isDefaultOrderWithContextSourcesLast(order)) return order;
+  const moved: WorkStatusPanelSectionId[] = order.filter((id) => id !== 'contextSources');
+  moved.splice(moved.indexOf('usage') + 1, 0, 'contextSources');
+  return moved;
 };
 
 /**

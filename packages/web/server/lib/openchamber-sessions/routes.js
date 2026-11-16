@@ -25,6 +25,7 @@ import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
+import { worktreeSetupOf } from '../projects/worktree-setup.js';
 import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 import { applyForkInheritance } from './fork-inheritance.js';
@@ -102,6 +103,16 @@ const findCatalogModel = (models, providerID, ref) => {
 };
 
 const hasCatalogModel = (models, providerID, ref) => findCatalogModel(models, providerID, ref) !== null;
+
+// A model a catalog that lists anything does not offer: its provider was
+// removed or switched off. An empty catalog (an unread one, or a location still
+// starting) says nothing, so a configured model stands. Auto is not a catalog
+// model; routing availability decides it. The UI cascade applies the same test.
+const isMissingFromCatalog = (models, model) => {
+  if (models.length === 0 || isAutoModel(model)) return false;
+  const entry = findCatalogModel(models, model.providerID, model.modelID);
+  return !entry || entry.enabled === false;
+};
 
 const resolveVariant = (models, providerID, modelID, variant) => {
   const normalized = asNonEmptyString(variant);
@@ -266,36 +277,38 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   // can carry its variant and is parsed with the canonical parser.
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(settings?.defaultModel);
-  // A saved choice is honoured even when the catalog has not listed it yet: a
-  // discovery gap must not silently move the user onto another model.
-  if (projectDefaultModel) {
+  // Each configured model is skipped when the catalog no longer lists it (its
+  // provider was removed), so the next one down applies.
+  const runnable = (candidate) => candidate && !isMissingFromCatalog(models, candidate);
+  if (runnable(projectDefaultModel)) {
     model = projectDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
   }
-  if (!model && settingsDefaultModel) {
+  if (!model && runnable(settingsDefaultModel)) {
     model = settingsDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
   // An agent's model is a v2 `ModelRef`: `id` is the model id, not a composite.
   const agentModel = resolvedAgent?.model;
-  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)) {
+  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)
+    && runnable({ providerID: agentModel.providerID, modelID: agentModel.id })) {
     model = { providerID: agentModel.providerID, modelID: agentModel.id };
     variant = resolveVariant(models, model.providerID, model.modelID, agentModel.variant);
   }
 
-  if (!model && opencodeDefaultModel) {
+  if (!model && opencodeDefaultModel && runnable(opencodeDefaultModel)) {
     model = { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID };
     variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
-  // The model last picked in a chat composer. Like a saved default it is kept
-  // through catalog gaps; a model hidden since, or Auto on a server without
-  // routing, is skipped.
+  // The model last picked in a chat composer. Like a saved default it is
+  // skipped once the catalog no longer lists it; a model hidden since, or Auto
+  // on a server without routing, is skipped too.
   const hiddenModels = asList(settings?.hiddenModels);
   const lastSelectedModel = splitModel(settings?.lastSelectedModel);
   if (!model
-    && lastSelectedModel
+    && runnable(lastSelectedModel)
     && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID)
     && (autoAvailable || !isAutoModel(lastSelectedModel))) {
     model = lastSelectedModel;
@@ -339,12 +352,15 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
   if (agent) await client.session.switchAgent({ sessionID, agent });
 };
 
-const createSession = async ({ client, directory, title, titleByUser = false }) => {
+const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null }) => {
   const input = { location: { directory } };
+  const openchamberMetadata = {};
   if (title) {
     input.title = title;
-    if (titleByUser) input.metadata = { openchamber: { workTitle: { title, by: 'user' } } };
+    if (titleByUser) openchamberMetadata.workTitle = { title, by: 'user' };
   }
+  if (startedByExtension) openchamberMetadata.startedByExtension = startedByExtension;
+  if (Object.keys(openchamberMetadata).length > 0) input.metadata = { openchamber: openchamberMetadata };
   const session = await client.session.create(input);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');
@@ -499,7 +515,15 @@ export const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskM
 // UnknownError (agent and config files are not there yet), so wait until the
 // bootstrap task completes before creating the session and dispatching. Its
 // completion does not establish OpenCode's directory-scoped selection inputs.
+// The first deadline covers git's part. The project's setup commands run after
+// it (phase `git-ready`) and get their own, longer one: a dependency install
+// often needs more than a minute. Both together stay well under the six
+// minutes or so after which Bun's fetch, and with it the agent tool's request,
+// gives up. Past it the caller gets a not-ready answer and no work starts in the
+// worktree, rather than wait on a command that never exits.
 const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
+const WORKTREE_SETUP_TIMEOUT_MS = 3 * 60_000;
+const NO_WORKTREE_SETUP = Object.freeze({ startCommand: '', createCommand: '', untrustedSkipped: [] });
 
 /**
  * A worktree from a pull or merge request: its number, and the folder and
@@ -548,6 +572,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     broadcastGlobalUiEvent,
+    onSessionArchived = null,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
     worktreeBootstrapStore,
@@ -592,6 +617,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     // Whether routing can run Auto right now (the composer's own test). Null
     // when routing is not wired in.
     isAutoReady = null,
+    // A registered project's merged setup (`projectConfigRuntime.readProjectSetup`).
+    // A new worktree runs its setup commands; without it, none.
+    readProjectSetup = null,
   } = dependencies;
 
   if ((!injectedArchiveStore || !injectedSessionMetadataStore) && !dataDir) {
@@ -619,6 +647,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       type: 'openchamber:session-archived',
       properties: { sessionID, archivedAt },
     });
+    onSessionArchived?.(sessionID, archivedAt);
   };
   const sessionArchive = createSessionArchive({
     store: archiveStore,
@@ -698,17 +727,44 @@ export const createOpenChamberSessionService = (dependencies) => {
     return resolved?.ok ? resolved.projectPath ?? resolved.directory : directory;
   };
 
+  /**
+   * The setup commands a new worktree made from `directory` runs: those of
+   * the registered project `projectPathFor` names, resolved here because no
+   * client is there to ask about untrusted shared ones
+   * (`../projects/worktree-setup.js`). A directory outside every registered
+   * project has no setup, as in the UI.
+   */
+  const worktreeSetupForDirectory = async (directory) => {
+    if (!(readProjectSetup instanceof Function)) return NO_WORKTREE_SETUP;
+    const projectPath = await projectPathFor(directory);
+    const settings = await readSettingsFromDiskMigrated();
+    const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.path === projectPath);
+    if (!project) return NO_WORKTREE_SETUP;
+    return worktreeSetupOf(await readProjectSetup(project.id), project.path);
+  };
+
+  /** Resolves `{ setupStillRunning }`: true when the setup deadline passed with git done. The caller starts no work then. */
   const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }) => {
-    let timeout;
-    try {
-      await Promise.race([
-        waitForActiveWorktreeBootstrap(directory),
-        new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new OpenChamberControlError('Timed out waiting for the worktree bootstrap', 500)), WORKTREE_BOOTSTRAP_TIMEOUT_MS);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timeout);
+    const settled = waitForActiveWorktreeBootstrap(directory).then(() => true);
+    const settledWithin = async (milliseconds) => {
+      let timeout;
+      try {
+        return await Promise.race([settled, new Promise((resolve) => {
+          timeout = setTimeout(() => resolve(false), milliseconds);
+        })]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    if (!(await settledWithin(WORKTREE_BOOTSTRAP_TIMEOUT_MS))) {
+      const running = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
+      if (running?.status === 'pending' && running.phase !== 'git-ready') {
+        throw new OpenChamberControlError('Timed out waiting for the worktree bootstrap', 500);
+      }
+      // OpenCode's checkout gate opens at `git-ready`, so the session can start there.
+      if (running?.status === 'pending' && !(await settledWithin(WORKTREE_SETUP_TIMEOUT_MS))) {
+        return { setupStillRunning: true };
+      }
     }
     const status = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
     if (status?.status === 'failed') {
@@ -717,6 +773,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     if (status?.status !== 'ready') {
       throw new OpenChamberControlError('Worktree bootstrap has not completed', 503);
     }
+    return { setupStillRunning: false };
   };
 
   /**
@@ -1119,7 +1176,8 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
-  const createInDirectory = async (payload, { titleByUser = false, onSessionCreated } = {}, onCreated = () => {}) => {
+  // `options` come from this server, never from a request body.
+  const createInDirectory = async (payload, { titleByUser = false, startedByExtension = null, onSessionCreated } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1166,6 +1224,13 @@ export const createOpenChamberSessionService = (dependencies) => {
       });
     }
 
+    const setup = pullRequestInput || worktreeInput
+      ? await worktreeSetupForDirectory(resolvedDirectory.directory)
+      : NO_WORKTREE_SETUP;
+    const setupInput = {};
+    if (setup.startCommand) setupInput.startCommand = setup.startCommand;
+    if (setup.createCommand) setupInput.createCommand = setup.createCommand;
+
     if (pullRequestInput) {
       // Never a plain branch worktree instead: without the contributor
       // pipeline the request is refused.
@@ -1175,7 +1240,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         throw new OpenChamberControlError('Worktrees from pull requests are not available here', 501);
       }
       try {
-        worktree = await createChangeRequestWorktree({ directory: resolvedDirectory.directory, ...pullRequestInput });
+        worktree = await createChangeRequestWorktree({ directory: resolvedDirectory.directory, ...pullRequestInput, ...setupInput });
       } catch (error) {
         throw asControlError(error, `Failed to create a worktree from pull request ${pullRequestInput.number}`);
       }
@@ -1191,7 +1256,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         parentDirectory: resolvedDirectory.directory,
         parentRemoteName,
       });
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, {
+      worktree = await createWorktree(resolvedDirectory.directory, { ...worktreeInput, ...setupInput }, {
         bootstrapStore: worktreeBootstrapStore,
         hydrateCheckout,
       });
@@ -1203,12 +1268,15 @@ export const createOpenChamberSessionService = (dependencies) => {
     let selection = { model, agent, variant };
     try {
       const checkoutRoot = worktree?.path || (await resolveWorktreeTopLevel(sessionDirectory))?.root || sessionDirectory;
-      await waitForWorktreeBootstrapReady({ directory: checkoutRoot, bootstrapStore: worktreeBootstrapStore });
+      const { setupStillRunning } = await waitForWorktreeBootstrapReady({ directory: checkoutRoot, bootstrapStore: worktreeBootstrapStore });
       if (worktree) {
         ({ directory: sessionDirectory, fallback: startDirectoryFallback } = await resolveStartDirectory({
           projectPath,
           worktreeRoot: worktree.path,
         }));
+      }
+      if (setupStillRunning) {
+        throw new OpenChamberControlError(`The project's setup commands are still running in ${checkoutRoot}, so no session started there. Retry in that folder once they finish`, 503);
       }
       client = clientFor(sessionDirectory);
       if (prompt) {
@@ -1238,6 +1306,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory: sessionDirectory,
       ...(title ? { title } : {}),
       titleByUser,
+      startedByExtension,
     });
     onCreated();
     try {
@@ -1290,6 +1359,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     };
     // Set when the project's folder could not be used and the session started at the worktree root.
     if (startDirectoryFallback) result.startDirectoryFallback = startDirectoryFallback;
+    if (setup.untrustedSkipped.length > 0) result.untrustedSetupCommandsSkipped = setup.untrustedSkipped;
 
     try {
       emitSessionCreatedEvent?.({
@@ -1535,6 +1605,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       worktreeRoot,
     }),
     hydrateCheckout: hydrateWorktreeCheckout,
+    resolveWorktreeSetup: worktreeSetupForDirectory,
     // The move is global in v2: no directory header, the session id names it.
     moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
   });

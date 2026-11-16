@@ -38,6 +38,10 @@ function mutationOperations() {
       perform: (service, _normalized, resolved) => service.ready(call(resolved)),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-ready'),
     },
+    '/pr/draft': {
+      perform: (service, _normalized, resolved) => service.draft(call(resolved)),
+      reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
+    },
     '/pr/review': {
       perform: (service, normalized, resolved) => service.vote(call(resolved, { votes: normalized.votes, body: normalized.body })),
       reconcile: unknownOutcome,
@@ -154,8 +158,8 @@ export function createProvider({
       listReviewerCandidates: ({ session, directory, project, remote }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, revision, linked }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, revision, linked }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, revision, linked }) => serviceFor(session)
-        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, revision, linked }),
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, revision, binary, linked }) => serviceFor(session)
+        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, revision, binary, linked }),
       liveSummaries: ({ session, refs, issueRefs }) => serviceFor(session).liveSummaries({ refs, issueRefs }),
       /** A change's current patchset, for a worktree made from it: the branch is named after the change. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {

@@ -12,6 +12,7 @@ import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-re
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
+import { bunVersionRunsBunPty } from './bun-pty-support.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 const MAX_SESSIONS = 20;
@@ -182,9 +183,7 @@ const appendHistory = (history, text) => {
 };
 
 export async function loadTerminalPtyProvider(bunVersion = globalThis.Bun?.version, importPty = (name) => import(name)) {
-  // bun-pty 0.6 imports on older Bun, including early 1.4.0 canaries, but cannot spawn there.
-  const [bunMajor, bunMinor] = (bunVersion ?? '').split('.').map(Number);
-  if ((bunMajor > 1 || (bunMajor === 1 && bunMinor >= 4)) && !bunVersion.startsWith('1.4.0-')) {
+  if (bunVersionRunsBunPty(bunVersion)) {
     try { const pty = await importPty('bun-pty'); return { spawn: pty.spawn, backend: 'bun-pty' }; } catch { /* fall through */ }
   }
   const pty = await importPty('node-pty');
@@ -286,10 +285,10 @@ export function createTerminalRuntime({
     return termination;
   };
 
-  const send = (socket, message) => {
+  const send = (socket, message, frameOptions) => {
     if (socket?.readyState !== 1) return false;
     try {
-      const frame = createTerminalWsControlFrame(message);
+      const frame = createTerminalWsControlFrame(message, frameOptions);
       if (socket.bufferedAmount + frame.length > MAX_SOCKET_BUFFER_BYTES) {
         socket.terminate();
         return false;
@@ -541,7 +540,9 @@ export function createTerminalRuntime({
         connection.attachments.set(id, attachment);
         flushOutput(session);
         const initial = snapshot(session);
-        send(socket, initial);
+        // `z: 1` is a client that can gunzip: history compresses five to ten
+        // times, and neither this socket nor the relay tunnel compresses frames.
+        send(socket, initial, { gzip: message.z === 1 });
         for (const event of attachment.pending) if (event.q > initial.q) send(socket, event);
         attachment.pending.length = 0; attachment.initializing = false;
         return;

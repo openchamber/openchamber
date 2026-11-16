@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { useUIStore } from '@/stores/useUIStore';
 
 type RequestContext = { directory: string | null; sessionId: string | null };
 type Listener = (event: {
@@ -64,7 +65,7 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 const tab = (
   tabId: string,
   ran: string[],
-  { directory = REPO, ownerSessionId = 'ses_test', partition = 'persist:openchamber-agent-browser' }: {
+  { directory = REPO, ownerSessionId = 'ses_test', partition = 'persist:openchamber-browser-agent' }: {
     directory?: string; ownerSessionId?: string | null; partition?: string;
   } = {},
 ) => registerBrowserController({
@@ -102,7 +103,7 @@ describe('opening a page before any view exists', () => {
           tabId: 'tab-new',
           directory: REPO,
           ownerSessionId: 'ses_test',
-          partition: 'persist:openchamber-agent-browser',
+          partition: 'persist:openchamber-browser-agent',
           describe: () => ({ title: '', url: '' }),
           run: async (action, parameters) => {
             ran.push({ action, parameters });
@@ -188,7 +189,7 @@ describe('opening a page before any view exists', () => {
           tabId: 'tab-new',
           directory: REPO,
           ownerSessionId: 'ses_test',
-          partition: 'persist:openchamber-agent-browser',
+          partition: 'persist:openchamber-browser-agent',
           describe: () => ({ title: '', url: '' }),
           run: async (action) => { ran.push(action); return { title: 'App', settled: true }; },
         }));
@@ -212,7 +213,7 @@ describe('opening a page before any view exists', () => {
       tabId: 'tab-new',
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: '', url: '' }),
       run: async () => { throw new Error('The browser panel is not ready'); },
     }));
@@ -243,6 +244,20 @@ describe('choosing the tab an action runs in', () => {
 
   afterEach(() => {
     while (cleanups.length > 0) cleanups.pop()?.();
+  });
+
+  test('drives an agent-owned shared-profile tab only after the user opts in', async () => {
+    const ran: string[] = [];
+    const previous = useUIStore.getState().agentBrowserSharesLogins;
+    cleanups.push(() => useUIStore.setState({ agentBrowserSharesLogins: previous }));
+    cleanups.push(tab('shared-agent', ran, { partition: 'persist:openchamber-browser' }));
+    useUIStore.setState({ agentBrowserSharesLogins: true });
+
+    emit('browser.snapshot', { tabId: 'shared-agent' });
+    await wait(50);
+
+    expect(ran).toEqual(['shared-agent:browser.snapshot']);
+    expect(posted[0]?.ok).toBe(true);
   });
 
   for (const action of ['browser.click', 'browser.open', 'browser.snapshot']) {
@@ -333,7 +348,7 @@ describe('choosing the tab an action runs in', () => {
       tabId: 'shown',
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: '', url: '' }),
       run: async (action, parameters) => { seen.push({ action, parameters }); return {}; },
     }));
@@ -352,7 +367,7 @@ describe('choosing the tab an action runs in', () => {
       tabId: 'background',
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: '', url: '' }),
       run: async (_action, parameters) => { seen.push(parameters); return {}; },
     }));
@@ -582,7 +597,7 @@ describe('tabs that have not loaded their page yet', () => {
       tabId,
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: '', url: `https://${tabId}.test/` }),
       wake: () => {
         woken.push(tabId);
@@ -601,7 +616,7 @@ describe('tabs that have not loaded their page yet', () => {
       tabId: 'loaded',
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: 'Loaded', url: 'https://loaded.test/' }),
       run: async () => ({ url: 'https://loaded.test/' }),
     }));
@@ -657,7 +672,7 @@ describe('tabs that have not loaded their page yet', () => {
       tabId: 'stuck',
       directory: REPO,
       ownerSessionId: 'ses_test',
-      partition: 'persist:openchamber-agent-browser',
+      partition: 'persist:openchamber-browser-agent',
       describe: () => ({ title: '', url: '' }),
       wake: () => {},
     }));

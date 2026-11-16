@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { getDeferredSafeStorage, getSafeStorage } from '@/stores/utils/safeStorage';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
+import { GitRepositoryUnreadableError } from '@/lib/gitRepositoryUnreadable';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
 // The real transport has no server in tests and fails as a generic error.
@@ -51,6 +52,7 @@ const createStatus = (diffStats?: GitStatus['diffStats'], files: GitStatus['file
 
 const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   isGitRepo: true,
+  repoUnreadable: null,
   status,
   branches: null,
   log: null,
@@ -115,6 +117,51 @@ describe('useGitStore', () => {
     const git: GitAPI = { ...createGitApi(async () => createStatus()), checkIsGitRepository: async () => false };
     expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(false);
     expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+  });
+
+  test("keeps Git's message for a directory Git could not read, and clears it once Git answers", async () => {
+    const message = "fatal: detected dubious ownership in repository at '/repo'";
+    let unreadable = true;
+    const git: GitAPI = {
+      ...createGitApi(async () => createStatus()),
+      checkIsGitRepository: async () => {
+        if (unreadable) throw new GitRepositoryUnreadableError(message);
+        return true;
+      },
+    };
+    await useGitStore.getState().fetchStatus('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: null, repoUnreadable: message, isLoadingStatus: false });
+
+    unreadable = false;
+    expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(true);
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: true, repoUnreadable: null });
+  });
+
+  test('says Git could not read a repository known from a cache that has no status yet', async () => {
+    useGitStore.setState({
+      directories: new Map([['/repo', { ...createDirectoryState(createStatus()), status: null }]]),
+      activeDirectory: '/repo',
+    });
+    const git = createGitApi(async () => {
+      throw new GitRepositoryUnreadableError('fatal: detected dubious ownership');
+    });
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: null, repoUnreadable: 'fatal: detected dubious ownership' });
+  });
+
+  test('keeps a repository on screen through one read Git could not answer', async () => {
+    setDirectoryStatus(createStatus());
+    const git = createGitApi(async () => {
+      throw new GitRepositoryUnreadableError('Git did not answer within 30 seconds.');
+    });
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: true, repoUnreadable: null, status: { current: 'main' } });
+
+    // The next read in a row says what Git said instead of showing stale files.
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({
+      isGitRepo: null, repoUnreadable: 'Git did not answer within 30 seconds.', status: null,
+    });
   });
 
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
@@ -520,6 +567,59 @@ describe('useGitStore', () => {
     await first;
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.current).toBe('new');
+  });
+
+  test('persists local branches per directory and seeds them back after a reload', async () => {
+    const runtime = getRuntimeKey();
+    const storage = getDeferredSafeStorage();
+    storage.setItem('oc.gitBranchCache.v2', JSON.stringify({ version: 2, legacyClaimed: true, runtimes: {} }));
+    const detail = { current: false, name: '', commit: '', label: '' };
+    const answers = new Map([
+      ['/repo', ['main', 'feature', 'remotes/origin/main', 'remotes/origin/feature']],
+      ['/other', ['trunk', 'remotes/origin/trunk']],
+    ]);
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (directory: string) => {
+        const all = answers.get(directory) ?? [];
+        return {
+          all,
+          current: all[0] ?? '',
+          branches: Object.fromEntries(all.map((name) => [name, detail])),
+          defaultBranches: { origin: 'main' },
+        };
+      },
+    };
+
+    await useGitStore.getState().fetchBranches('/repo', git);
+    // The store keeps the live answer, remotes included.
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/main');
+    const repoEntryKey = `oc.gitBranchCache.v3:${JSON.stringify([runtime, '/repo'])}`;
+    const repoEntry = storage.getItem(repoEntryKey);
+
+    // A write for another directory leaves the first directory's entry untouched.
+    await useGitStore.getState().fetchBranches('/other', git);
+    expect(storage.getItem(repoEntryKey)).toBe(repoEntry);
+    expect(storage.getItem('oc.gitBranchCache.v2')).toBeNull();
+
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    const seeded = useGitStore.getState().getDirectoryState('/repo');
+    expect(seeded?.isGitRepo).toBe(true);
+    expect(seeded?.lastBranchesFetch).toBe(0);
+    expect(seeded?.branches?.all).toEqual(['main', 'feature']);
+    expect(Object.keys(seeded?.branches?.branches ?? {})).toEqual(['main', 'feature']);
+    expect(seeded?.branches?.current).toBe('main');
+    expect(seeded?.branches?.defaultBranches).toEqual({ origin: 'main' });
+    expect(useGitStore.getState().getDirectoryState('/other')?.branches?.all).toEqual(['trunk']);
+
+    // An entry whose index write never persisted is removed on the next seed.
+    const orphanKey = `oc.gitBranchCache.v3:${JSON.stringify([runtime, '/orphan'])}`;
+    // Written durably, past the deferred layer, as a flushed entry would be.
+    getSafeStorage().setItem(orphanKey, JSON.stringify({ all: ['main'], current: 'main', branches: {} }));
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(storage.getItem(orphanKey)).toBeNull();
+    expect(useGitStore.getState().getDirectoryState('/orphan')).toBeNull();
+    expect(storage.getItem(repoEntryKey)).toBe(repoEntry);
   });
 
   test('asks the remotes only for an explicit live request, and a later local refresh keeps what they reported', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 
 import {
     assignImageAttachmentFilenames,
@@ -9,7 +9,14 @@ import {
     imageSaveModeForModel,
     isGenericImageFilename,
     nextPastedContextFilename,
+    prepareImageToSave,
 } from '../attachmentCitations';
+
+let decodeHeic = async (): Promise<Blob> => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+
+mock.module('heic2any', () => ({
+    default: async () => decodeHeic(),
+}));
 
 describe('attachment citations', () => {
     test('keeps meaningful image names', () => {
@@ -102,5 +109,23 @@ describe('image save mode', () => {
 
     test('unknown model metadata counts as a model that takes the attachment', () => {
         expect(imageSaveModeForModel(true, undefined)).toBe('alongside');
+    });
+
+    test('saves a HEIC the decoder can read as the JPEG its attachment carries', async () => {
+        const saved = await prepareImageToSave(new File(['heic-data'], 'photo.heic', { type: 'image/heic' }));
+        expect(saved && { ...saved, bytes: new TextDecoder().decode(saved.bytes) })
+            .toEqual({ filename: 'photo.jpg', bytes: 'jpeg-data', linkOnly: false });
+    });
+
+    test('saves a HEIC the decoder cannot read unconverted, for its link only', async () => {
+        const original = decodeHeic;
+        decodeHeic = async () => { throw new Error('ERR_LIBHEIF format not supported'); };
+        try {
+            const saved = await prepareImageToSave(new File(['hdr-heic'], 'IMG_4015.heic', { type: 'image/heic' }));
+            expect(saved && { ...saved, bytes: new TextDecoder().decode(saved.bytes) })
+                .toEqual({ filename: 'IMG_4015.heic', bytes: 'hdr-heic', linkOnly: true });
+        } finally {
+            decodeHeic = original;
+        }
     });
 });

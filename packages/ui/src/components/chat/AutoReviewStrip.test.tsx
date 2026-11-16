@@ -3,7 +3,6 @@ import { afterAll, beforeAll, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { AutoReviewRun } from '@/stores/useAutoReviewStore';
 import type { FixLoop } from '@/lib/prFixLoop';
-import type { ComposerStatusChip, ComposerStatusRowId } from './composer/state/composerStatusChips';
 
 const dom = new Window({ url: 'http://localhost' });
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -13,7 +12,7 @@ beforeAll(async () => {
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true,
@@ -21,7 +20,12 @@ beforeAll(async () => {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
-  globalThis.fetch = async () => Response.json({ revision: 2, run: null });
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+    // Directory bootstrap is unrelated to the review and projection fixtures.
+    if (path === '/api/fs/home') return new Promise<Response>(() => {});
+    return Response.json({ revision: 2, run: null });
+  }, originalFetch);
   const projection = await import('@/stores/usePrFixLoopStore');
   // The control-stream lifecycle is tested with the projection. This suite
   // renders its real store without opening an external event stream.
@@ -55,7 +59,6 @@ async function mount(value: AutoReviewRun | null) {
   const { prFixLoopStore } = await import('@/stores/usePrFixLoopStore');
   const { useAutoReviewStore } = await import('@/stores/useAutoReviewStore');
   const { ChatColumnSessionContext } = await import('./chatColumnSession');
-  const { ComposerStatusChipsContext } = await import('./composer/state/composerStatusChips');
   const { AutoReviewStrip } = await import('./AutoReviewStrip');
   const previousProjection = prFixLoopStore.getState();
   const loop: FixLoop = {
@@ -70,23 +73,18 @@ async function mount(value: AutoReviewRun | null) {
     revision: 1, originalSessionID: value.originalSessionID, directory: value.directory, run: value,
   }, getRuntimeKey());
   prFixLoopStore.setState({ runtimeKey: getRuntimeKey(), loops: [loop], loadState: 'ready', loadError: null, failedLoopIds: [] });
-  const chips = new Map<ComposerStatusRowId, ComposerStatusChip>();
-  const register = (id: ComposerStatusRowId, chip: ComposerStatusChip | null) => {
-    if (chip) chips.set(id, chip);
-    else chips.delete(id);
-  };
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(
     <I18nProvider>
       <ChatColumnSessionContext.Provider value={{ sessionId: 'ses_column', directory: '/repo' }}>
-        <ComposerStatusChipsContext.Provider value={register}><AutoReviewStrip /></ComposerStatusChipsContext.Provider>
+        <AutoReviewStrip />
       </ChatColumnSessionContext.Provider>
     </I18nProvider>,
   ));
   return {
-    container, chips, prFixLoopStore,
+    container, prFixLoopStore,
     close: async () => {
       await act(async () => root.unmount());
       useAutoReviewStore.getState().resetForRuntimeSwitch();
@@ -96,7 +94,7 @@ async function mount(value: AutoReviewRun | null) {
   };
 }
 
-test('a settled review expands its dispute alongside the column PR loop and mobile status chip', async () => {
+test('a settled review expands its dispute alongside the column PR loop', async () => {
   // Given
   const view = await mount(run);
   try {
@@ -109,11 +107,10 @@ test('a settled review expands its dispute alongside the column PR loop and mobi
     expect(content?.textContent).toBe(run.dispute);
     expect(content?.querySelector('script')).toBeNull();
     expect(view.container.textContent).toContain('Column pull request');
-    expect(view.chips.get('autoReview')?.icon).toBe('error-warning');
   } finally { await view.close(); }
 });
 
-test('dismissing the review keeps the PR loop and switches the mobile chip to it', async () => {
+test('dismissing the review keeps the PR loop visible', async () => {
   // Given
   const { dict } = await import('@/lib/i18n/messages/en');
   const view = await mount({ ...run, status: 'clean' });
@@ -126,7 +123,6 @@ test('dismissing the review keeps the PR loop and switches the mobile chip to it
     // Then
     expect(view.container.textContent).not.toContain(dict['chat.autoReview.result.clean']);
     expect(view.container.textContent).toContain('Column pull request');
-    expect(view.chips.get('autoReview')?.icon).toBe('git-pull-request');
   } finally { await view.close(); }
 });
 
@@ -141,6 +137,5 @@ test('a failed projection keeps the PR row visible with unknown CI and a retry a
     expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(dict['prFixLoop.action.retry']);
     expect(view.container.textContent).toContain('Column pull request');
     expect(view.container.textContent).toContain(dict['prFixLoop.ci.unknown']);
-    expect(view.chips.has('autoReview')).toBe(true);
   } finally { await view.close(); }
 });

@@ -18,16 +18,20 @@ import { isRightToLeft } from '@/lib/i18n';
 import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 import type { AutocompleteKind } from '../language/triggers';
 import type { AutocompleteOverlayPosition } from '../ui/ComposerAutocompletePopups';
+import type { ComposerText } from './composerText';
+
+/** The `@` list's width, which also shows file paths; `/` shares it so command descriptions fit. */
+const MENTION_LIST_WIDTH = 560;
 
 /**
  * Widths each picker asks for when placed at the caret; a narrower composer
  * narrows them. One width for every list, so they read as one family; the
- * mention list, which also shows file paths, is wider, and the emoji list,
- * whose rows are a glyph and a short name, narrower.
+ * mention and command lists are wider, and the emoji list, whose rows are a
+ * glyph and a short name, narrower.
  */
 const CARET_PLACED_WIDTH = {
-    mention: 560,
-    command: 420,
+    mention: MENTION_LIST_WIDTH,
+    command: MENTION_LIST_WIDTH,
     snippet: 420,
     skill: 420,
     emoji: 280,
@@ -40,14 +44,14 @@ export interface AutocompletePositionOptions {
     /** The text after the trigger, which places the trigger before the caret. */
     query: string;
     /** Recompute whenever the text changes, since the caret moves with it. */
-    message: string;
+    text: ComposerText;
     editorRef: React.RefObject<ComposerEditorHandle | null>;
     /** The composer box the popup is positioned within. */
     containerRef: React.RefObject<HTMLElement | null>;
 }
 
 export function useAutocompletePosition(options: AutocompletePositionOptions) {
-    const { fullWidth, openAutocomplete, query, message, editorRef, containerRef } = options;
+    const { fullWidth, openAutocomplete, query, text, editorRef, containerRef } = options;
     const [position, setPosition] = React.useState<AutocompleteOverlayPosition | null>(null);
 
     const update = React.useCallback(() => {
@@ -95,7 +99,10 @@ export function useAutocompletePosition(options: AutocompletePositionOptions) {
 
     React.useLayoutEffect(() => {
         update();
-    }, [update, message]);
+        // Closed, there is no list to move.
+        if (openAutocomplete === null) return;
+        return text.subscribe(update);
+    }, [openAutocomplete, text, update]);
 
     React.useEffect(() => {
         if (openAutocomplete === null) return;

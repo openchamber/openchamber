@@ -10,8 +10,15 @@ import { resolveLoopbackTarget } from './loopback-target.js';
 const sortedUnique = (values) => [...new Set(values)].sort();
 
 /**
- * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback' | 'plans' | 'sourceControl' | 'sessionEvents' | 'notifications' | 'tracker'>} guest
- * @param {import('./loopback-target.js').LoopbackTarget | undefined} loopbackTarget
+ * @typedef {{ events: string[], content: boolean }} SessionEventsScope
+ * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} NotificationsScope
+ * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} TrackerInstanceScope
+ * @typedef {{ instances: TrackerInstanceScope, oauth: { authorizeUrl: string, tokenUrl: string } | null, urls: string[] }} TrackerScope
+ * @typedef {{ providers: string[] }} QuotaScope
+ * @typedef {{ action: string, keys: string[], origin: string | null, identifier: string | null, urls: string[] }} LinksScope
+ * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope, tracker?: TrackerScope, quota?: QuotaScope, keepRunning?: true, schedule?: string[], mentions?: true, sessionControl?: { content: boolean } }} ServiceScope
+ * @param {{ filesystem?: string[], integration?: object, skills?: string, mentions?: object, sessionControl?: { content?: true }, service?: { provides?: string[], keepRunning?: true, schedule?: Array<{ id: string, cron: string, timezone?: string }>, permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } }, tracker?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' }, auth: { oauth?: { authorizeUrl: string, tokenUrl: string } }, urls: { item: string[] } }, quota?: { providers: string[] }, links?: { action: string, identifier?: { keys: string[] }, urls?: { origin: string, identifier: string, item: string[] } } }} guest
+ * @returns {{ filesystem?: string[], apiOrigin?: string, service?: ServiceScope, links?: LinksScope }}
  */
 export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolveLoopbackTarget(guest.loopback) : undefined) => {
   const scope = {};
@@ -79,6 +86,37 @@ export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolve
         urls: sortedUnique(guest.tracker.urls.item),
       };
     }
+    // A usage provider receives the credentials OpenCode holds for the providers
+    // it lists; the approval covers that list, empty included. Absent for every other service.
+    if (serviceProvides(guest.service, 'quota') && guest.quota) {
+      scope.service.quota = { providers: sortedUnique(guest.quota.providers) };
+    }
+    // Running with nobody asking is part of what the user approved, and so is
+    // the clock it runs on. Each key is absent for a service without it, which
+    // keeps every stored approval as it is.
+    if (guest.service.keepRunning) scope.service.keepRunning = true;
+    if (guest.service.schedule) {
+      scope.service.schedule = sortedUnique(guest.service.schedule.map((entry) => `${entry.id} ${entry.cron} ${entry.timezone ?? ''}`.trim()));
+    }
+    // What the user types after `@` goes to the service.
+    if (guest.mentions) scope.service.mentions = true;
+    if (guest.sessionControl) scope.service.sessionControl = { content: guest.sessionControl.content === true };
+  }
+  // Which identifiers and links in chats become the extension's, and what a
+  // click hands it; a version that claims others or acts differently asks again.
+  if (guest.links) {
+    scope.links = {
+      action: guest.links.action,
+      keys: sortedUnique(guest.links.identifier?.keys ?? []),
+      origin: guest.links.urls?.origin ?? null,
+      identifier: guest.links.urls?.identifier ?? null,
+      urls: sortedUnique(guest.links.urls?.item ?? []),
+    };
+  }
+  // The waits whose text may wake an agent's session; a package that adds one
+  // has not been approved for it.
+  if (Array.isArray(guest.waits) && guest.waits.length > 0) {
+    scope.wake = sortedUnique(guest.waits.map((wait) => wait.id));
   }
   if (loopbackTarget?.status === 'ready') {
     scope.loopback = loopbackTarget.scope;
@@ -128,6 +166,16 @@ const sameTracker = (a, b) => (
     && sameList(a.urls, b.urls))
 );
 
+/** Both without the quota role, or both with it reading the same providers' credentials. */
+const sameQuota = (a, b) => (
+  (!a && !b) || Boolean(a && b && sameList(a.providers, b.providers))
+);
+
+/** Both without session control, or both with the same answer on reading replies. */
+const sameSessionControl = (a, b) => (
+  (!a && !b) || Boolean(a && b && a.content === b.content)
+);
+
 /**
  * The grants that still hold for the package as it is now. A scoped
  * capability (`filesystem`, `origins`, `network`, `service`, `transcript`, `loopback`, `plans`) only counts when the stored
@@ -141,14 +189,27 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
     // The text of session events rides on the service grant's event scope: it
     // counts only while the approved subscription asked for content and is the
     // one the package declares now.
-    return Boolean(stored?.service?.sessionEvents?.content)
-      && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents);
+    if (!stored?.service?.sessionEvents?.content && !stored?.service?.sessionControl?.content) return false;
+    return sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
+      && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
+  }
+  if (capability === 'sessionControl') {
+    return Boolean(stored?.service?.sessionControl) && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
+  }
+  if (capability === 'links') {
+    const a = stored?.links;
+    const b = current.links;
+    return Boolean(a && b && a.action === b.action && a.origin === b.origin && a.identifier === b.identifier
+      && sameList(a.keys, b.keys) && sameList(a.urls, b.urls));
   }
   if (capability === 'filesystem') {
     return Boolean(stored?.filesystem) && sameList(stored.filesystem, current.filesystem ?? []);
   }
   if (capability === 'origins') {
     return Boolean(stored?.origins) && sameList(stored.origins, current.origins ?? []);
+  }
+  if (capability === 'wake') {
+    return Boolean(stored?.wake) && sameList(stored.wake, current.wake ?? []);
   }
   if (capability === 'network') {
     return Boolean(stored?.apiOrigin)
@@ -162,7 +223,12 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
       && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl)
       && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
       && sameNotifications(stored.service.notifications, current.service?.notifications)
-      && sameTracker(stored.service.tracker, current.service?.tracker);
+      && sameTracker(stored.service.tracker, current.service?.tracker)
+      && sameQuota(stored.service.quota, current.service?.quota)
+      && Boolean(stored.service.keepRunning) === Boolean(current.service?.keepRunning)
+      && sameList(stored.service.schedule ?? [], current.service?.schedule ?? [])
+      && Boolean(stored.service.mentions) === Boolean(current.service?.mentions)
+      && sameSessionControl(stored.service.sessionControl, current.service?.sessionControl);
   }
   if (capability === 'plans') {
     return typeof stored?.plans === 'string' && stored.plans === current.plans;

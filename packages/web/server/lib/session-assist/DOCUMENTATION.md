@@ -112,7 +112,11 @@ model context is small. Page/count bounds are not a network-byte quota.
    servers keep one prompt cache per slot, so a side request evicts the
    session's cache and the next turn reprocesses the whole history (#3871).
    A different model on the same machine, configured or found by the family
-   scan, is still used.
+   scan, is still used. The skip writes one `[session-assist] skipped` line per
+   provider/model pair: a loopback OpenAI-compatible proxy (CLIProxyAPI,
+   LiteLLM, one-api) that forwards to a hosted vendor is indistinguishable from
+   a local inference server by hostname alone, and the log line is the only
+   thing that tells an operator why an enabled toggle produced nothing (#6173).
 5. Recap describes the substantive work and its current result, including the
    work behind a closing commit or acknowledgment. Suggestion is independent:
    only unfinished requested agent work should produce a sendable user message.

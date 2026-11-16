@@ -1,8 +1,9 @@
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { ScrollShadow, ScrollShadowBands } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
@@ -158,6 +159,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     // swallow the very press that opens it.
     if (!overlay || !visible || sectionsDialogOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
+      // A dialog opened by a section owns dismissal, including nested portals.
+      if (document.documentElement.classList.contains('oc-dialog-open')) return;
       const target = event.target instanceof Element ? event.target : null;
       if (overlayRef.current?.contains(target)) return;
       // The header toggle closes it on its own; letting this fire too would
@@ -169,7 +172,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       setOverlayOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOverlayOpen(false);
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.documentElement.classList.contains('oc-dialog-open')) setOverlayOpen(false);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
@@ -209,9 +212,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // so the settings button stays discoverable — going transparent made the
         // only recovery path unreachable.
         'motion-reduce:transition-none',
-        // Beside the chat: the layout panels' ring (`oc-panel-edge`, shared
-        // with the context panel card). Over the chat it is a dropdown and
-        // takes the dropdown's full edge (`data-edge-floating`).
+        // Beside the chat: the layout panels' hairline ring (`oc-panel-edge`,
+        // shared with the context panel card). Over the chat it is a dropdown
+        // and takes the dropdown's full edge (`data-edge-floating`).
         'oc-panel-edge rounded-xl',
         // Takes the docked panels' lifted page colour (design-system.css).
         !overlay && 'bg-background',
@@ -229,6 +232,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // unblurred, for the whole fade and frosted only at the end. The glass
         // layer fades itself; the edge fades with it.
         width: WORK_STATUS_PANEL_WIDTH,
+        // The overlay can sit in a VS Code sidebar narrower than the card.
+        maxWidth: overlay ? 'calc(100% - 1.5rem)' : undefined,
         opacity: overlay || interactive ? 1 : 0,
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         // The overlay sits at the chat's end corner: top right, or top left in RTL.
@@ -246,7 +251,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           the shadow's blur and paints a grey band past the card's edge. */}
       <DockedPanelSurfaceContext.Provider value={!overlay}>
       <div
-        className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
+        className={cn('relative flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
         style={overlay ? {
           opacity: interactive ? 1 : 0,
           transitionProperty: 'opacity',
@@ -256,14 +261,23 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       >
       {/* Overlaid rather than placed in flow: the panel has no header of its
           own, and giving it one would cost a row of height on every session. */}
-      <button
-        type="button"
-        aria-label={t('chat.workStatus.sections.open')}
-        onClick={() => setSectionsDialogOpen(true)}
-        className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Icon name="equalizer-2" className="size-4" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('chat.workStatus.sections.open')}
+            onClick={() => setSectionsDialogOpen(true)}
+            // Centred on the first heading's line (the card's 8px padding plus
+            // half the 24px heading), at the rows' 13px icon size.
+            className="absolute inset-e-2 top-2 z-10 inline-flex h-6 items-center rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {/* Acts on the card itself (which sections show): the glyph of every
+                control that configures what a list shows, as on the rail. */}
+            <Icon name="list-settings" className="size-[13px]" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>
+      </Tooltip>
 
       {contentMounted ? (
       <WorkStatusPresenceProvider onChange={setRenderedSections}>
@@ -271,6 +285,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         ref={restore}
         onScroll={handleScroll}
         size={24}
+        // Docked, the card is the page colour, so the fades are bands in it;
+        // over the chat it is glass and keeps the mask.
+        surface={overlay ? undefined : 'var(--background)'}
         // Sections returning null leave no DOM node, so this reserves room for
         // settings in the first rendered heading, regardless of saved order.
         className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
@@ -283,6 +300,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           visible={visible}
         />
       </ScrollShadow>
+      {overlay ? null : <ScrollShadowBands surface="var(--background)" size={24} />}
       </WorkStatusPresenceProvider>
       ) : null}
 

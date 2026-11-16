@@ -8,6 +8,7 @@ import {
   createDirectoryQueryCanonicalizer,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
+  sanitizeSessionListItem,
 } from './proxy.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
@@ -80,14 +81,39 @@ describe('createDirectoryQueryCanonicalizer', () => {
 });
 
 describe('normalizeForwardedDirectoryHeaders', () => {
-  it('decodes marked directory headers before forwarding to OpenCode', () => {
+  it.each(['/Users/example/project', '/repo/café', '/repo/\u00FF'])('decodes HTTP-safe marked directory headers for %s', (directory) => {
     const headers = normalizeForwardedDirectoryHeaders({
-      'x-opencode-directory': encodeURIComponent('/Users/example/project'),
+      'x-opencode-directory': encodeURIComponent(directory),
       'x-opencode-directory-encoding': 'uri',
     });
 
     expect(headers).toEqual({
-      'x-opencode-directory': '/Users/example/project',
+      'x-opencode-directory': directory,
+    });
+  });
+
+  it.each(['C:/测试项目', '/repo/😀', '/repo/\u0100', '/repo/\r\nvalue', '/repo/\u007F'])('preserves encoded headers that Node cannot forward decoded for %j', (directory) => {
+    const encoded = encodeURIComponent(directory);
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': encoded,
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': encoded,
+      'x-opencode-directory-encoding': 'uri',
+    });
+    expect(() => http.validateHeaderValue('x-opencode-directory', headers['x-opencode-directory'])).not.toThrow();
+  });
+
+  it('preserves malformed directory values and removes their marker for the raw fallback', () => {
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': '/repo/%E6%ZZ',
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': '/repo/%E6%ZZ',
     });
   });
 
@@ -252,3 +278,27 @@ describe('createOpenCodeProxyAgent', () => {
     }
   });
 });
+
+describe('sanitizeSessionListItem', () => {
+  it('drops the retired delivered-knowledge signature and keeps the rest of the metadata', () => {
+    const session = {
+      id: 'ses_1',
+      title: 'Old session',
+      permissions: [{ permission: 'edit' }],
+      metadata: { other: { kept: true }, openchamber: { knowledge_context_delivered: 'mg:a:1|mg:b:2', work: { state: 'done' } } },
+    };
+    expect(sanitizeSessionListItem(session)).toEqual({
+      id: 'ses_1',
+      title: 'Old session',
+      metadata: { other: { kept: true }, openchamber: { work: { state: 'done' } } },
+    });
+    expect(session.metadata.openchamber.knowledge_context_delivered).toBe('mg:a:1|mg:b:2');
+  });
+
+  it('passes metadata without retired keys through by reference', () => {
+    const metadata = { openchamber: { work: { state: 'done' } } };
+    expect(sanitizeSessionListItem({ id: 'ses_2', metadata }).metadata).toBe(metadata);
+    expect(sanitizeSessionListItem({ id: 'ses_3', metadata: { openchamber: 'odd' } }).metadata).toEqual({ openchamber: 'odd' });
+  });
+});
+

@@ -5,6 +5,7 @@ import { locateChatQuote } from '@/lib/chatQuoteAnchor';
 
 import {
     buildHtmlRenderDocument,
+    htmlRenderAnswerStateMessage,
     htmlRenderClearSelectionMessage,
     htmlRenderMarksMessage,
     htmlRenderPointerMessage,
@@ -390,9 +391,38 @@ describe('the page height', () => {
         expect(sizes()).toEqual([90]);
     });
 
+    const barRoundingCases: Array<[number, number[]]> = [[48, [515]], [49, [514, 515]]];
+    for (const [startHeight, expected] of barRoundingCases) {
+        test(`settles on one height when rounding changes the scrollbar's height with the frame (from ${startHeight} px)`, () => {
+            // A 505 px page wider than its frame at 175%: the window's and the
+            // root's heights are rounded, so the 10 px bar reads 9 at odd frame
+            // heights and 10 at even ones.
+            const page = mountPage(undefined, '<div style="width:1100px;height:505px"></div>');
+            const { win } = page;
+            const root = win.document.documentElement;
+            let frameHeight = startHeight;
+            Object.defineProperty(win, 'innerHeight', { get: () => frameHeight, configurable: true });
+            Object.defineProperty(root, 'clientHeight', { get: () => frameHeight - (frameHeight % 2 ? 9 : 10), configurable: true });
+            Object.defineProperty(root, 'scrollHeight', { get: () => Math.max(frameHeight - (frameHeight % 2 ? 9 : 10), 505), configurable: true });
+            root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 505);
+
+            const sizes = () => page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []));
+            for (let round = 0; round < 6; round += 1) {
+                frameHeight = sizes().at(-1) ?? frameHeight;
+                win.dispatchEvent(new win.Event('resize'));
+            }
+
+            expect(sizes()).toEqual(expected);
+        });
+    }
+
     test('sizes again when the scrollbar appears without the root resizing', async () => {
         const page = mountPage(undefined, '<div id="row" style="height:300px"></div>');
         const { win } = page;
+        // Let the page finish loading first, as it does in a browser before its
+        // own script changes anything; its load handler measures too.
+        await settle();
+        page.reports.length = 0;
         const root = win.document.documentElement;
         let bar = 0;
         Object.defineProperty(win, 'innerHeight', { get: () => 300, configurable: true });
@@ -520,5 +550,33 @@ describe('a page that waits for an answer', () => {
         page.send(htmlRenderSubmitReply(1));
         await settle();
         expect(page.sent).toContain(JSON.stringify({ type: 'test:sent', answer: { layout: 'b' } }));
+    });
+
+    test('puts Decline beside its last button, sends it on a click, and drops it once the page stops waiting', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<p>Pick one</p><div><button class="oc-button">A</button><button class="oc-button">B</button></div><p>Why</p>');
+        const decline = page.win.document.querySelector('[data-oc-decline]');
+
+        expect(decline?.textContent).toBe('Decline');
+        expect(decline?.previousElementSibling?.textContent).toBe('B');
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && report.placed)).toBe(true);
+
+        decline?.dispatchEvent(new page.win.MouseEvent('click'));
+        expect(page.reports.at(-1)).toEqual({ kind: 'decline' });
+        expect(decline?.hasAttribute('disabled')).toBe(true);
+
+        page.send(htmlRenderAnswerStateMessage({ waiting: false, answer: null }));
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+    });
+
+    test('turns Decline off while its answer is on its way', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<button class="oc-button">Send</button>');
+        page.run('window.openchamber.submit({},"Send");');
+        expect(page.win.document.querySelector('[data-oc-decline]')?.hasAttribute('disabled')).toBe(true);
+    });
+
+    test('tells the host it found no button, so the host draws Decline under the page', () => {
+        const page = mountPage({ waiting: true, answer: null });
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && !report.placed)).toBe(true);
     });
 });

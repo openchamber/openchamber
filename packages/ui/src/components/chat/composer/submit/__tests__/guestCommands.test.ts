@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { GuestCommandEntry } from '@/lib/guests/commands';
 
-import { routeGuestSlashCommand } from '../guestCommands';
+import { reservedComposerCommandNames, routeGuestSlashCommand } from '../guestCommands';
 
 const entries: GuestCommandEntry[] = [
     { guestId: 'tasks-demo', guestName: 'Tasks Demo', command: { name: 'task', description: 'Attach a task' } },
@@ -25,5 +25,15 @@ describe('routeGuestSlashCommand', () => {
         expect(routeGuestSlashCommand('/task', 'shell', entries)).toBeNull();
         expect(routeGuestSlashCommand('/task', 'normal', [])).toBeNull();
         expect(routeGuestSlashCommand('', 'normal', entries)).toBeNull();
+    });
+});
+
+describe('reservedComposerCommandNames', () => {
+    test('holds the composer commands and the OpenCode commands, lowercased', () => {
+        const names = reservedComposerCommandNames([{ name: 'Deploy' }]);
+        expect(names.has('deploy')).toBe(true);
+        expect(names.has('summary')).toBe(true);
+        expect(names.has('btw')).toBe(true);
+        expect(names.has('task')).toBe(false);
     });
 });

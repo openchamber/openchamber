@@ -91,6 +91,13 @@
   }
 }
 
+/* A detailed sidebar row whose second line opens with text, not an icon:
+   the hover chevron sits over the line's start, and the text's first letters
+   fade away under it. */
+@utility oc-lead-mask {
+  mask-image: linear-gradient(var(--oc-to-inline-end), transparent 0.875rem, #000 1.5rem);
+}
+
 /* File tree rows keep the whole name on one line, and a tree wider than its
    pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
    to the pane's end while long rows scroll under it; a row's hover menu is a
@@ -267,6 +274,32 @@ button,
 .markdown-content details > summary {
   unicode-bidi: plaintext;
   text-align: start;
+}
+
+/* `rehypeTextDirection` gives a block with letters the direction of most of
+   its words. Plaintext would ignore it and go by the first letter again, so
+   these blocks isolate on their own `dir`. `dir="auto"` stays plaintext. */
+.markdown-content :where(p, h1, h2, h3, h4, h5, h6, li, blockquote):where([dir="ltr"], [dir="rtl"]) {
+  unicode-bidi: isolate;
+}
+
+/* A plain-text message line opens with the mark of its majority direction
+   (`plainTextLineDirection.tsx`), so its plaintext container resolves the line
+   by its words. Generated content stays out of copied text. */
+[data-oc-line-dir="rtl"]::before {
+  content: "\200F";
+}
+[data-oc-line-dir="ltr"]::before {
+  content: "\200E";
+}
+
+/* A text field takes the direction of what is typed into it, line by line in a
+   textarea, so Persian in an English interface runs from the right. An empty
+   field keeps the interface's direction: with plaintext on a field showing its
+   placeholder, Gecko draws the placeholder outside the box in a right-to-left
+   interface. A field that sets dir keeps it. */
+:where(input, textarea):not([dir]):not(:placeholder-shown) {
+  unicode-bidi: plaintext;
 }
 
 /* Markdown's explicit column alignment still wins over automatic alignment. */
@@ -594,6 +627,52 @@ div[data-chat-input-footer="true"] {
   --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
+/* The same two bands for any other scroller that sits on an opaque surface
+   (`surface` on ScrollShadow, `scrollShadowSurface` on ScrollableOverlay): a
+   mask costs the GPU a texture the size of the scroller for as long as it is
+   on screen, about 15 MB for the two side panels of a desktop window. A
+   scroller on glass keeps the mask below, since no single colour is behind
+   it. The bands are later siblings of the scroller inside its positioned
+   frame and follow its scroll-shadow attributes, as the chat's do. */
+.scroll-fade-band {
+  display: none;
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* The mask made the scroller a stacking context, which kept its sticky
+   headers (z-index of their own) inside it and so under the fade. */
+[data-scroll-fade-bands] {
+  isolation: isolate;
+}
+
+/* Capped at half the frame, so in a scroller shorter than two fades the bands
+   meet instead of stacking their opacity. */
+.scroll-fade-band--top {
+  top: 0;
+  height: min(var(--scroll-shadow-top-size, var(--scroll-shadow-size)), 50%);
+  background-image: linear-gradient(
+    to bottom,
+    var(--scroll-fade-surface) var(--scroll-shadow-top-clear-size, 0px),
+    transparent 100%
+  );
+}
+
+.scroll-fade-band--end {
+  bottom: 0;
+  height: min(var(--scroll-shadow-size), 50%);
+  background-image: linear-gradient(to bottom, transparent, var(--scroll-fade-surface));
+}
+
+[data-scroll-fade-bands][data-top-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-bottom-scroll="true"] ~ .scroll-fade-band--end,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--end {
+  display: block;
+}
+
 [data-scroll-shadow="true"][data-orientation="vertical"] {
   mask-mode: alpha;
   -webkit-mask-repeat: no-repeat;
@@ -602,7 +681,7 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -621,7 +700,7 @@ div[data-chat-input-footer="true"] {
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -661,7 +740,7 @@ div[data-chat-input-footer="true"] {
   pointer-events: auto;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -1134,21 +1213,23 @@ html:not(.dark) .chat-scroll {
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local
    overrides such as the Files view's editor font size and the mobile code
-   size apply too. */
+   size apply too. Where code follows the Editor font size (the Files view and
+   the diffs on desktop), `useEditorCodeMetrics()` sets `--oc-code-line-height` so
+   the rows match the editor's. */
 diffs-container {
   --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   /* 24px at the default 12px code size. Tool cards and the tool dialog wrap
      lines, so Pierre measures their rows and the height can scale. */
-  --diffs-line-height: calc(var(--text-code) * 2);
+  --diffs-line-height: var(--oc-code-line-height, calc(var(--text-code) * 2));
 }
 
-/* The Changes view and the walkthrough virtualize with fixed 24px rows
-   (`VIRTUAL_METRICS.lineHeight` in PierreDiffViewer.tsx). Without wrapping,
-   Pierre does not measure rows, so a taller row would make long diffs jump
-   while scrolling. */
+/* The Changes view and the walkthrough virtualize with fixed rows
+   (`lineHeight` in the diff's virtual metrics, PierreDiffViewer.tsx), so the
+   CSS row height must equal that number. Without wrapping, Pierre does not
+   measure rows, so a taller row would make long diffs jump while scrolling. */
 .pierre-diff-wrapper diffs-container {
-  --diffs-line-height: 24px;
+  --diffs-line-height: var(--oc-code-line-height, 24px);
 }
 
 /* Pierre diff viewer styling */
@@ -1276,35 +1357,44 @@ diffs-container {
   font-size: inherit !important;
 }
 
-/* Model/agent controls: progressively collapse labels to icon-only as the row narrows.
-   Hide priority (most aggressive first → most resilient last): agent, variant, model. */
-
-/* Desktop (non-VSCode): pick thresholds that fire BEFORE the per-label `max-w-[Xpx]`
-   constraints would truncate text with an ellipsis. */
-@container model-controls (max-width: 22rem) {
-  :root:not(.vscode-runtime) .model-controls__agent-label {
+/* Model/agent controls: as the row narrows, the model's name truncates first
+   (its trigger is the one that shrinks; the agent's does not). Past that the
+   model's name and the agent's label give way, leaving the provider logo with
+   the thinking level as its muted text ("/ default"), the agent's icon, then
+   the mic and Send. The thinking level has no icon of its own in the desktop
+   footer; below the narrowest width it goes too, before any icon. */
+@container model-controls (max-width: 14rem) {
+  :root:not(.vscode-runtime) .model-controls__model-label {
     display: none;
   }
 }
 
-/* The effort trigger is "/ medium" after the model; collapsed, its icon stands in. */
+@container model-controls (max-width: 12rem) {
+  :root:not(.vscode-runtime) .model-controls__agent-label {
+    display: none;
+  }
+
+  /* Collapsed, the groups sit closer: 12px to the agent, 12px (4px here plus
+     the footer's 8px) to the mic. */
+  :root:not(.vscode-runtime) .model-controls__row {
+    column-gap: 12px;
+    padding-inline-end: 4px;
+  }
+}
+
+/* The effort trigger is "/ medium" after the model; only VS Code's narrow
+   panel swaps it for its icon. */
 .model-controls__variant-icon {
   display: none;
 }
 
-@container model-controls (max-width: 14rem) {
-  :root:not(.vscode-runtime) .model-controls__variant-label,
-  :root:not(.vscode-runtime) .model-controls__variant-slash {
-    display: none;
-  }
-
-  :root:not(.vscode-runtime) .model-controls__variant-icon {
-    display: block;
-  }
-}
-
-@container model-controls (max-width: 10rem) {
-  :root:not(.vscode-runtime) .model-controls__model-label {
+/* The variant keeps its own width (it does not wrap or truncate here), so it
+   goes only when the collapsed row cannot hold it: logo 17px + 6px + "/ medium"
+   56px + 12px + the agent's 16px icon + 4px end padding = 111px (measured in
+   the harness). With the footer around it that is a composer narrower than
+   about 287px. */
+@container model-controls (max-width: 110.9px) {
+  :root:not(.vscode-runtime) .model-controls__variant-trigger {
     display: none;
   }
 }
@@ -1409,21 +1499,11 @@ diffs-container {
   padding-inline: 0.375rem;
 }
 
-/* When even the icons do not fit, the view options move from the end into
-   "More actions": side-by-side, whitespace, line wrap, then the tree view;
-   last, if the row still does not fit, the walkthrough. DiffView lists in the
-   menu the ones whose step is set. */
-.diff-toolbar__more,
-[data-diff-toolbar-more-layout] .diff-toolbar__layout-toggle,
-[data-diff-toolbar-more-whitespace] .diff-toolbar__whitespace-toggle,
-[data-diff-toolbar-more-wrap] .diff-toolbar__wrap-toggle,
-[data-diff-toolbar-more-tree] .diff-toolbar__tree-toggle,
+/* When even the icons do not fit, the walkthrough moves into "More actions",
+   where the view options always are; DiffView lists it there while its step
+   is set. */
 [data-diff-toolbar-more-walkthrough] .diff-toolbar__walkthrough-button {
   display: none;
-}
-
-[data-diff-toolbar-more-layout] .diff-toolbar__more {
-  display: inline-flex;
 }
 
 /* Walkthrough header: gives up room in steps while its row does not fit, as
@@ -1600,6 +1680,13 @@ diffs-container {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
   line-height: round(1.625em, 1px);
+}
+
+/* Prose sits one small step under the full text colour, so headings, which
+   take it in full, read darker (lighter in dark themes) than the paragraphs
+   they introduce. Muted grey stays for captions and paths. */
+.markdown-content :is(p, li, td):not(blockquote *) {
+  color: color-mix(in oklab, var(--foreground) 88%, var(--muted-foreground));
 }
 
 .markdown-content p,
@@ -1860,7 +1947,7 @@ diffs-container {
 .markdown-content h5,
 .markdown-content h6 {
   margin: 1.25rem 0 0.5rem;
-  color: color-mix(in srgb, var(--foreground) 95%, transparent);
+  color: var(--foreground);
   font-weight: 600;
   line-height: 1.3;
 }
@@ -1883,6 +1970,34 @@ diffs-container {
   font-size: 0.875rem;
 }
 
+/* The Files preview sizes its body from the editor font, an inline px
+   --text-markdown, while tables and headings above are authored in rem and
+   would keep their size when Cmd +/- changes the editor font. Derive them
+   from the body there; the ratios are the old rem sizes over the 0.875rem
+   body, so the default rendering stays on desktop, and on touch screens,
+   where mobile.css sets a 16px body, tables and headings scale from it. */
+.oc-file-preview .markdown-content table {
+  font-size: 1em;
+}
+
+.oc-file-preview .markdown-content h1 {
+  font-size: 1.4286em;
+}
+
+.oc-file-preview .markdown-content h2 {
+  font-size: 1.2857em;
+}
+
+.oc-file-preview .markdown-content h3 {
+  font-size: 1.1429em;
+}
+
+.oc-file-preview .markdown-content h4,
+.oc-file-preview .markdown-content h5,
+.oc-file-preview .markdown-content h6 {
+  font-size: 1em;
+}
+
 /* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
    heading keeps its size but sits on the chevron's line without margins. */
 .markdown-content details > summary h1,
@@ -1903,27 +2018,56 @@ diffs-container {
   font-size: var(--text-code);
 }
 
-/* Inline code sits inside a sentence: the theme's code colour over its own
-   quiet chip. The colour keeps the theme's value with a touch of transparency,
-   and the chip fades into the background further, so neither shouts like the
-   original full-strength style. Many themes paint the chip almost the canvas
+/* Inline code sits inside a sentence: the sentence's text over its own quiet
+   chip, which fades into the background so it does not shout. Many themes
+   paint the chip almost the canvas
    colour, so a faint wash of the text colour on top keeps it visible as a
    chip in every theme. */
 .markdown-content code[data-streamdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
+  /* The theme's inline code colour at full strength: a wash over it made the
+     chip read dimmer than its prose. The default themes set it to the body
+     text colour, so there the fill alone sets code apart. */
   color: var(--markdown-inline-code, var(--foreground)) !important;
   padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
   word-break: normal;
   overflow-wrap: break-word;
+  /* The monospace font's own leading pushed the line box about 2px taller
+     than a plain line, so paragraph rhythm changed wherever code appeared.
+     A line height of 1 keeps the chip inside the sentence's line box; its
+     background still covers the glyphs and the padding. */
+  line-height: 1;
+  /* A chip that does break keeps its padding and corners on both lines. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* A short chip ("GET /conversations") moves to the next line whole instead
+   of splitting its background across two (MarkdownInlineCode marks it). As
+   an inline block capped at the line's width, one that is wider than its
+   container still wraps inside itself. Its line height stays under the
+   sentence's, so it does not grow the line either. */
+.markdown-content code[data-streamdown="inline-code"][data-short] {
+  display: inline-block;
+  max-width: 100%;
+  line-height: 1.25;
 }
 
 @supports (color: color-mix(in lab, red, red)) {
   .markdown-content code[data-streamdown="inline-code"] {
     background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
     background-image: linear-gradient(color-mix(in srgb, var(--foreground) 4%, transparent), color-mix(in srgb, var(--foreground) 4%, transparent));
-    color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
   }
+}
+
+/* A file reference is a link: its underline and the mono font say so. The
+   chip fill on top was a second emphasis plain identifiers do not have, so
+   the chip stays for identifiers only. */
+.markdown-content code[data-streamdown="inline-code"][data-openchamber-file-link="true"] {
+  background-color: transparent !important;
+  background-image: none;
+  padding-inline: 0;
 }
 
 /* Markdown links - use theme colors */
@@ -1940,6 +2084,13 @@ diffs-container {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* An identifier an extension claims is a word in the sentence: a selection
+   across it keeps it, though its button role is unselectable app-wide. */
+.markdown-content [data-oc-guest-link] {
   user-select: text !important;
   -webkit-user-select: text !important;
 }
@@ -2164,6 +2315,11 @@ diffs-container {
   margin: 0;
 }
 
+/* The run button is a third action in the header. */
+[data-streamdown="code-block"]:has([data-reply-command-run]) [data-streamdown="code-block-header"] {
+  padding-inline-end: 7.25rem;
+}
+
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
 .markdown-content [data-streamdown="code-block"] {
   content-visibility: visible !important;
@@ -2286,35 +2442,11 @@ diffs-container {
   overflow-wrap: normal;
 }
 
-/* First uncached open of a session shows a hydration skeleton; the real
-   timeline replacing it fades in once instead of popping. Cached session
-   switches never carry this class and stay instant. */
-@keyframes oc-chat-hydration-reveal {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.oc-chat-hydration-reveal,
-[data-timeline-reveal='fading'] {
-  animation: oc-chat-hydration-reveal 100ms ease-out both;
-}
-
 /* Timeline root while a freshly opened session is still being put in place
    (see timelineRevealGate.ts): hidden until every hold releases and the list
    heights settle, then revealed as a whole. */
 [data-timeline-reveal='pending'] {
   opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .oc-chat-hydration-reveal,
-  [data-timeline-reveal='fading'] {
-    animation: none;
-  }
 }
 
 /* A block committed mid-stream fades in where it stands. Text never moves on
@@ -2610,6 +2742,17 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   outline: none !important;
 }
 
+/* What the IME is composing, drawn over the cursor. The hidden textarea holds
+   the same text but cannot show it. Font and colors come from the surface. */
+.terminal-viewport-container .oc-terminal-preedit {
+  position: absolute;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  white-space: pre;
+  text-decoration: underline;
+  pointer-events: none;
+}
+
 .terminal-viewport-container .oc-terminal-scrollbar {
   position: absolute;
   top: 4px;
@@ -2691,8 +2834,16 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   white-space: nowrap;
 }
 
+/* Cut short and at rest, the text is inline so its box can end in the
+   container's ellipsis (text-overflow does not reach into an inline-block).
+   Under the pointer it becomes a box again and scrolls. */
+.marquee-text--active {
+  display: inline;
+}
+
 .group:hover .marquee-text--active,
 .marquee-text--active:hover {
+  display: inline-block;
   animation: marquee-scroll 5s linear infinite alternate;
 }
 
@@ -2701,6 +2852,12 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
+  }
+
+  /* Nothing scrolls, so the ellipsis stays under the pointer too. */
+  .group:hover .marquee-text--active,
+  .marquee-text--active:hover {
+    display: inline;
   }
 
   .open-file-name-marquee-track {

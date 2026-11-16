@@ -139,4 +139,13 @@ describe('webview focus guard', () => {
     });
     expect(document.activeElement).toBe(webview);
   });
+
+  test('a field the user picks while an action runs keeps focus when it ends', async () => {
+    const other = document.createElement('input');
+    document.body.appendChild(other);
+    await guardAgentAction(async () => {
+      other.focus();
+    });
+    expect(document.activeElement).toBe(other);
+  });
 });

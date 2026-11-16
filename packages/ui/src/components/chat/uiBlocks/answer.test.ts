@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { describeUiBlockAnswer, describeUiBlockReplyAnswer, pageAnswerSummary, uiBlockKey } from './answer';
+import { describeUiBlockAnswer, describeUiBlockReplyAnswer, pageAnswerNamesButton, pageAnswerSummary, uiBlockKey } from './answer';
 
 describe('describeUiBlockAnswer', () => {
   const fields = [
@@ -13,6 +13,11 @@ describe('describeUiBlockAnswer', () => {
       .toBe('Send\nWhich database do you use? PostgreSQL\nTags: a, b');
   });
 
+  test('the Send button the form adds itself stays out of the summary', () => {
+    expect(describeUiBlockAnswer(fields, { button: 'Send', values: { database: 'PostgreSQL' }, note: 'soon' }, 'Note', false))
+      .toBe('Which database do you use? PostgreSQL\nNote: soon');
+  });
+
   test('a button value names what the pressed button is about', () => {
     expect(describeUiBlockAnswer(fields, { button: 'Take it', value: '#5931', values: {} }, 'Note')).toBe('Take it · #5931');
   });
@@ -24,6 +29,15 @@ describe('describeUiBlockAnswer', () => {
 
   test('a page summary fits the server limit', () => {
     expect(pageAnswerSummary('x'.repeat(800))).toHaveLength(500);
+  });
+});
+
+describe('pageAnswerNamesButton', () => {
+  test('a lone button under fields only sends them; a choice among buttons, or the page\'s only question, is the answer', () => {
+    expect(pageAnswerNamesButton(1, 2)).toBe(false);
+    expect(pageAnswerNamesButton(0, 2)).toBe(false);
+    expect(pageAnswerNamesButton(1, 0)).toBe(true);
+    expect(pageAnswerNamesButton(2, 2)).toBe(true);
   });
 });
 

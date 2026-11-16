@@ -9,7 +9,7 @@ User messages and the text of settled agent replies, for root sessions. Tool
 calls and their output, attached context records and subagent sessions stay
 out (maintainer decision, 2026-10-01).
 
-Agent reasoning is a second opt-in (`messageSearchReasoningEnabled`, off by
+Agent reasoning is opt-in (`messageSearchReasoningEnabled`, off by
 default: models that think at length can make the index several times
 bigger). Reasoning is stored as its own row (`role = 'reasoning'`, row id
 `<messageId>:reasoning`, `message_id` = the message), so it is filtered and
@@ -30,13 +30,31 @@ blocking is bounded per page, not by session count. To bench against a
 throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway> opencode serve --port 4999`
 (Basic auth user `opencode`).
 
-## Opt-in
+## On by default
 
-Search is off until `messageSearchEnabled` (instance scope, `settings.json`)
-is turned on in Settings → Chat (maintainer decision, 2026-10-01: indexing
-must cost nothing on weak hardware unless asked for). Off means no index file
-is opened, no event is looked at, no backfill runs, the route answers 503, and
-the UI shows no message search (no Cmd+P group, Cmd+F left alone).
+Search is on unless `messageSearchEnabled` (instance scope, `settings.json`)
+is `false` (`isMessageSearchEnabled` in `opencode/settings-helpers.js`). A
+settings file that never mentions the key belongs to a user who never chose
+and gets the default; an explicit `false` is a choice and stays. The settings
+response always carries the resolved value, because the client keeps its own
+copy of the switch and has to follow the server's: without that a client that
+remembered the old default would show the switch off while the server indexed.
+The client's own default stays off, so a runtime with no OpenChamber server
+(VS Code) offers no message search. Off means no index file is opened, no
+event is looked at, no backfill runs, the route answers 503, and the UI shows
+no message search (no Cmd+P group, Cmd+F left alone).
+
+### Why on by default and not opt-in
+
+It was opt-in so that indexing cost nothing on weak hardware unless asked for
+(maintainer decision, 2026-10-01). Since conversation search came to the
+sidebar and Archive, message text is half of what a search finds, and a user
+who never opened Settings got the weaker search without knowing why
+(maintainer decision, 2026-11-12). The cost that worried us is bounded: the
+backfill starts from the newest sessions, pauses between pages, and never
+blocks the event loop for long; the index is about 90 KB per conversation and
+its size shows under the switch, with Rebuild beside it. Reasoning stays
+opt-in, since it can make the index several times bigger.
 
 The runtime reads the setting at startup; `persistSettings` calls
 `setEnabled` when the key changes. Switching off stops the indexer (after the
@@ -53,7 +71,11 @@ after another in the order asked.
 - `store.js` owns the file `<dataDir>/message-search.sqlite`: `sessions`,
   `messages`, and an external-content FTS5 index with the trigram tokenizer
   (any 3+ characters inside a word, any script, case-insensitive). The schema
-  version lives in `meta`; a mismatch drops and rebuilds, the file is derived.
+  version lives in `meta`; schema 4 migrates schema 3 in one transaction to
+  preserve indexed rows and cursors. Reopening also completes a schema 3 file
+  that already has either lifecycle column from an interrupted development
+  migration. Unknown older files rebuild because the file is derived. Session
+  rows retain archive state and whether it is known.
   It also builds snippets: FTS5's `snippet()` counts trigrams and cuts a hit to
   a few characters, so the window is taken in JS on the returned hits.
 - `indexer.js` keeps the index in step with OpenCode.
@@ -61,6 +83,7 @@ after another in the order asked.
   while on, answers queries, reports status (state, file size, progress) and
   deletes the file (while on, a fresh index starts at once: "rebuild").
 - `routes.js` serves `GET /api/openchamber/message-search`,
+  `GET /api/openchamber/message-search/sessions`,
   `GET .../message-search/status` and `DELETE .../message-search/index`.
 
 ## Keeping in step
@@ -87,6 +110,28 @@ after another in the order asked.
   longer has are dropped, but only when the whole list arrived; a failed page
   is not an empty list.
 - `session.updated` (rename, move) and `session.deleted` apply directly.
+- A completed session-list walk records archive state for every root session,
+  including rows without indexed messages. A failed page writes no lifecycle
+  state and retains the prior state. Each walk and individual session read
+  captures the lifecycle revision before it starts; archive or restore events
+  received while that asynchronous read runs win when the snapshot commits.
+  The latest committed mutation stays per session so a later full walk cannot
+  reopen a stale, older individual read. Deleted sessions release that entry
+  after every older lifecycle reader finishes.
+- The legacy archive store is folded over OpenCode's records before walks,
+  individual reads, and live lifecycle events record them. A live event keeps
+  the prior effective state visible until that asynchronous overlay succeeds;
+  an overlay read failure publishes nothing. Explicit legacy `null` entries
+  restore a session, while missing entries preserve OpenCode's state.
+- The indexer reads raw `session.archived` events from the hub envelope's
+  `payload` to take OpenCode's own archive time from `created`: the server
+  translator (`event-stream/translate-v2.js`) keeps only the session id and
+  replaces a missing `created` with the time it received the event. Translated
+  `session.unarchived` events are read normally. This is the only exception
+  here to the translated-event boundary. The wire payload has `data.sessionID`
+  and `created` (`node_modules/@opencode/schema/dist/event.js:27-35`); the UI
+  translator confirms the archive pair at
+  `packages/ui/src/lib/opencode/events.ts:367-371`.
 
 ## Queries
 
@@ -96,3 +141,14 @@ be looked up and are left out, and a query made only of them answers
 `query-too-short` rather than everything. Newest first by default; `before`
 pages by creation time with the message id breaking ties, so pages never
 repeat or skip. Snippets mark matches with U+E000 / U+E001 and are plain text.
+The grouped endpoint filters lifecycle, directory and role before grouping. It
+uses the newest matching row per session as its representative and counts
+distinct message ids, so a reply and its reasoning produce one match count.
+Archive state that is still unknown appears only in the `all` lifecycle. Its
+repeatable `exclude` parameter accepts at most 200 session ids. Excluded
+sessions remain hits but leave the first page's totals and directory counts.
+The grouped page walks the chronological message index, chooses each session's
+globally newest filtered match, and applies the cursor to those representatives.
+It stops after `limit + 1` distinct sessions. A second indexed lookup counts
+matching messages only for the selected sessions. Totals inspect at most 20,000
+matching rows and return `null` when they reach that cap.

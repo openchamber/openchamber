@@ -47,14 +47,14 @@ mock.module('@/lib/desktop', () => ({
 type ServerRequest = { method: string; body: unknown };
 const requests: ServerRequest[] = [];
 // What the fake server answers; a function sees the request.
-let respond: (request: ServerRequest) => Response = () => json(diskResponseBody);
+let respond: (request: ServerRequest, signal?: AbortSignal | null) => Response | Promise<Response> = () => json(diskResponseBody);
 const json = (body: ServerAnswer, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: mock(async (_path: string, init?: RequestInit) => {
     const request = { method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null };
     requests.push(request);
-    return respond(request);
+    return respond(request, init?.signal);
   }),
 }));
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
@@ -119,6 +119,19 @@ describe('useSessionFoldersStore folder assignments', () => {
 
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')[0]?.sessionIds).toEqual([]);
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project-worktree')[0]?.sessionIds).toEqual(['ses_1', 'ses_2']);
+  });
+
+  test('a session moved into a worktree leaves the folder of the project it left', () => {
+    const store = useSessionFoldersStore.getState();
+    const tasks = store.createFolder('/workspace/project', 'Tasks');
+    store.addSessionsToFolder('/workspace/project', tasks.id, ['ses_moved', 'ses_stays']);
+    const before = useSessionFoldersStore.getState().foldersMap;
+
+    store.followSessionMove('ses_moved', '/workspace/project/docs', null);
+    expect(useSessionFoldersStore.getState().foldersMap).toBe(before);
+
+    store.followSessionMove('ses_moved', '/workspace/project-worktree', '/workspace/project-worktree');
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')[0]?.sessionIds).toEqual(['ses_stays']);
   });
 
   test('restores independent folder snapshots across runtime switches', async () => {
@@ -218,6 +231,31 @@ describe('useSessionFoldersStore folder assignments', () => {
     expect(storage.has('oc.sessions.folderChanges.v2:runtime-a')).toBe(false);
   }));
 
+  test('a removal queued before the hand-over still applies after its folder joined a server folder', withWindow(async () => {
+    storage.set('oc.sessions.folderChanges.v2:runtime-a', JSON.stringify([
+      { type: 'unassign', scopeKey: '/repo', sessionIds: ['ses_1'], from: { ses_1: 'l' } },
+    ]));
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('s', 'Work', ['ses_1'])] }, updatedAt: 10 });
+
+    await connect({ '/repo': [folder('l', 'Work', ['ses_1'])] }, false);
+    await settle(200);
+
+    const patches = requests.filter((request) => request.method === 'PATCH');
+    expect(patches.at(-1)?.body).toEqual({ changes: [{ type: 'unassign', scopeKey: '/repo', sessionIds: ['ses_1'] }] });
+  }));
+
+  test('does not send a rejected hand-over again until the next start', withWindow(async () => {
+    respond = () => json({ error: 'too large' }, 413);
+    await connect({ '/repo': [folder('l', 'Local')] }, false);
+    requests.length = 0;
+
+    handleSessionFoldersStreamReady();
+    await settle();
+
+    expect(requests).toHaveLength(0);
+    expect(names()).toEqual(['Local']);
+  }));
+
   test('sends a long queue in parts the server accepts', withWindow(async () => {
     respond = (request) => (request.method === 'GET'
       ? json({ exists: true, foldersMap: { '/repo': [folder('a', 'A'), folder('b', 'B')] }, updatedAt: 10 })
@@ -291,6 +329,25 @@ describe('useSessionFoldersStore folder assignments', () => {
     expect(names()).toEqual(['Mine', 'From the phone']);
   }));
 
+  test('a move says where the chat was, so a late copy of it can be told from a newer move', withWindow(async () => {
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('p', 'P', ['ses_1']), folder('x', 'X')] }, updatedAt: 10 });
+    await connect(null, true);
+    requests.length = 0;
+
+    useSessionFoldersStore.getState().addSessionToFolder('/repo', 'x', 'ses_1');
+    useSessionFoldersStore.getState().removeSessionFromFolder('/repo', 'ses_1');
+    useSessionFoldersStore.getState().addSessionsToFolder('/repo', 'p', ['ses_1', 'ses_2']);
+    useSessionFoldersStore.getState().removeSessionsFromFolders('/repo', ['ses_2']);
+    await settle(200);
+
+    expect(requests[0]?.body).toEqual({ changes: [
+      { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['ses_1'], from: { ses_1: 'p' } },
+      { type: 'unassign', scopeKey: '/repo', sessionIds: ['ses_1'], from: { ses_1: 'x' } },
+      { type: 'assign', scopeKey: '/repo', folderId: 'p', sessionIds: ['ses_1', 'ses_2'], from: { ses_1: null, ses_2: null } },
+      { type: 'unassign', scopeKey: '/repo', sessionIds: ['ses_2'], from: { ses_2: 'p' } },
+    ] });
+  }));
+
   test('skips the read for a change it already shows and ignores an older answer', withWindow(async () => {
     respond = () => json({ exists: true, foldersMap: { '/repo': [folder('a', 'A')] }, updatedAt: 10 });
     await connect(null, true);
@@ -316,6 +373,128 @@ describe('useSessionFoldersStore folder assignments', () => {
     await settle();
     await settle();
     expect(names()).toEqual(['A']);
+  }));
+
+  test('reads again after a failed read, with no new announcement', withWindow(async () => {
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('a', 'A')] }, updatedAt: 10 });
+    await connect(null, true);
+
+    respond = () => json({ error: 'down' }, 503);
+    handleSessionFoldersChanged(11);
+    await settle(50);
+    expect(names()).toEqual(['A']);
+
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('b', 'B')] }, updatedAt: 11 });
+    await settle(1_100);
+    expect(names()).toEqual(['B']);
+  }));
+
+  /** Requests that never answer end when their signal does, here after 20 ms. */
+  const neverAnswers = (_request: ServerRequest, signal?: AbortSignal | null) => new Promise<Response>((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason));
+  });
+  const withShortTimeout = (run: () => Promise<void>) => async () => {
+    const original = AbortSignal.timeout;
+    AbortSignal.timeout = () => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), 20);
+      return controller.signal;
+    };
+    try {
+      await run();
+    } finally {
+      AbortSignal.timeout = original;
+    }
+  };
+
+  test('the hand-over and the whole-copy write get longer than other requests', withWindow(async () => {
+    const original = AbortSignal.timeout;
+    const timeouts: Array<{ method: string; ms: number }> = [];
+    let timeoutMs = 0;
+    AbortSignal.timeout = (ms) => {
+      timeoutMs = ms;
+      return original(ms);
+    };
+    try {
+      respond = (request) => {
+        timeouts.push({ method: request.method, ms: timeoutMs });
+        if (request.method === 'PATCH') return json({ error: 'not found' }, 404);
+        if (request.method === 'POST') return json({ success: true });
+        return json({ exists: true, foldersMap: { '/repo': [folder('l', 'Local')] }, updatedAt: 10 });
+      };
+      await connect({ '/repo': [folder('l', 'Local')] }, false);
+      await settle();
+    } finally {
+      AbortSignal.timeout = original;
+    }
+
+    expect(timeouts).toEqual([
+      { method: 'PATCH', ms: 120_000 },
+      { method: 'POST', ms: 120_000 },
+      { method: 'GET', ms: 15_000 },
+    ]);
+  }));
+
+  test('a read that never answers does not stop later reads', withWindow(withShortTimeout(async () => {
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('a', 'A')] }, updatedAt: 10 });
+    await connect(null, true);
+
+    respond = neverAnswers;
+    handleSessionFoldersChanged(11);
+    await settle();
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('b', 'B')] }, updatedAt: 12 });
+    // Waits behind the read that hangs, and gets through when that read times out.
+    handleSessionFoldersChanged(12);
+    await settle(60);
+
+    expect(names()).toEqual(['B']);
+  })));
+
+  test('a write that never answers lets go and shows a newer move from another client', withWindow(withShortTimeout(async () => {
+    const start = { exists: true, foldersMap: { '/repo': [folder('p', 'P', ['ses_1']), folder('x', 'X'), folder('y', 'Y')] }, updatedAt: 10 };
+    respond = () => json(start);
+    await connect(null, true);
+
+    let server = start;
+    const newer = { exists: true, foldersMap: { '/repo': [folder('p', 'P'), folder('x', 'X'), folder('y', 'Y', ['ses_1'])] }, updatedAt: 11 };
+    respond = (request, signal) => (request.method === 'PATCH' ? neverAnswers(request, signal) : json(server));
+    useSessionFoldersStore.getState().addSessionToFolder('/repo', 'x', 'ses_1');
+    await settle(170);
+    server = newer;
+    respond = () => json(server);
+    handleSessionFoldersChanged(11);
+    await settle(1_200);
+
+    const folderOfChat = useSessionFoldersStore.getState().getSessionFolderId('/repo', 'ses_1');
+    expect(folderOfChat).toBe('y');
+    expect(requests.filter((request) => request.method === 'PATCH').at(-1)?.body).toMatchObject({
+      changes: [{ type: 'assign', folderId: 'x', sessionIds: ['ses_1'], from: { ses_1: 'p' } }],
+    });
+    expect(storage.has('oc.sessions.folderChanges.v2:runtime-a')).toBe(false);
+  })));
+
+  test('a move still queued after a reload does not cover a newer move from another client', withWindow(async () => {
+    storage.set('oc.sessions.folderChanges.v2:runtime-a', JSON.stringify([
+      { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['ses_1'], from: { ses_1: 'p' } },
+    ]));
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('p', 'P'), folder('x', 'X'), folder('y', 'Y', ['ses_1'])] }, updatedAt: 11 });
+
+    await connect(null, true);
+
+    expect(useSessionFoldersStore.getState().getSessionFolderId('/repo', 'ses_1')).toBe('y');
+  }));
+
+  test('a move still queued after a reload shows and goes out when nobody moved the chat', withWindow(async () => {
+    storage.set('oc.sessions.folderChanges.v2:runtime-a', JSON.stringify([
+      { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['ses_1'], from: { ses_1: 'p' } },
+    ]));
+    respond = () => json({ exists: true, foldersMap: { '/repo': [folder('p', 'P', ['ses_1']), folder('x', 'X')] }, updatedAt: 10 });
+
+    await connect(null, true);
+
+    expect(useSessionFoldersStore.getState().getSessionFolderId('/repo', 'ses_1')).toBe('x');
+    await settle(200);
+    expect(requests.filter((request) => request.method === 'PATCH')).toHaveLength(1);
   }));
 
   test('writes the whole copy to a server from before shared folders', withWindow(async () => {

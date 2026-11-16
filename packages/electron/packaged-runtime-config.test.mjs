@@ -28,7 +28,12 @@ describe('packaged runtime config injection', () => {
 });
 
 describe('runtime config script', () => {
-  const VALUES = { localOrigin: 'http://127.0.0.1:1', apiBaseUrl: 'http://127.0.0.1:2', clientToken: 'value' };
+  const VALUES = {
+    localOrigin: 'http://127.0.0.1:1',
+    apiBaseUrl: 'http://127.0.0.1:2',
+    clientToken: 'value',
+    requestHeaders: { 'X-Hosting-Token': 'header-value' },
+  };
   const run = (globals) => {
     const window = { ...globals };
     vm.runInNewContext(RUNTIME_CONFIG_SCRIPT, { window });
@@ -40,6 +45,7 @@ describe('runtime config script', () => {
     assert.equal(window.__OPENCHAMBER_LOCAL_ORIGIN__, VALUES.localOrigin);
     assert.equal(window.__OPENCHAMBER_API_BASE_URL__, VALUES.apiBaseUrl);
     assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, VALUES.clientToken);
+    assert.deepEqual(window.__OPENCHAMBER_RUNTIME_HEADERS__, VALUES.requestHeaders);
   });
 
   it('keeps the values the preload exposed for this window', () => {
@@ -47,14 +53,17 @@ describe('runtime config script', () => {
       __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => VALUES,
       __OPENCHAMBER_API_BASE_URL__: 'http://other-host',
       __OPENCHAMBER_CLIENT_TOKEN__: 'other-value',
+      __OPENCHAMBER_RUNTIME_HEADERS__: { 'X-Other': 'other-value' },
     });
     assert.equal(window.__OPENCHAMBER_API_BASE_URL__, 'http://other-host');
     assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, 'other-value');
+    assert.deepEqual(window.__OPENCHAMBER_RUNTIME_HEADERS__, { 'X-Other': 'other-value' });
   });
 
-  it('leaves the token unset when there is none', () => {
-    const window = run({ __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => ({ ...VALUES, clientToken: '' }) });
+  it('leaves the token and headers unset when there are none', () => {
+    const window = run({ __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => ({ ...VALUES, clientToken: '', requestHeaders: {} }) });
     assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, undefined);
+    assert.equal(window.__OPENCHAMBER_RUNTIME_HEADERS__, undefined);
   });
 
   it('sets nothing in a frame without the bridge, or when main refuses', () => {

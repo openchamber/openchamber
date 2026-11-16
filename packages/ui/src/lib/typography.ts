@@ -26,6 +26,22 @@ export function getTypographyVariable(key: SemanticTypographyKey): string {
   return `--text-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
 }
 
+/**
+ * Inline style that scales the semantic text sizes of one area (the chat) by
+ * `percent`, on top of the interface size the rem unit already carries.
+ * Undefined at 100%, so the area inherits the root sizes unchanged.
+ */
+export function getScaledTypographyStyle(
+  percent: number,
+  base: Record<SemanticTypographyKey, string> = SEMANTIC_TYPOGRAPHY,
+): Record<string, string> | undefined {
+  if (percent === 100) return undefined;
+  const scale = percent / 100;
+  // SAFETY: base is typed by SemanticTypographyKey, so its own keys are those keys.
+  const entries = Object.entries(base) as Array<[SemanticTypographyKey, string]>;
+  return Object.fromEntries(entries.map(([key, size]) => [getTypographyVariable(key), `calc(${size} * ${scale})`]));
+}
+
 export const typography = {
 
   semanticMarkdown: {

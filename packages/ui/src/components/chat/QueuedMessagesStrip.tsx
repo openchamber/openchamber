@@ -1,5 +1,4 @@
 import React, { memo } from 'react';
-import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import {
     DndContext,
     MouseSensor,
@@ -103,42 +102,56 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, co
             {/* Server-owned items go out from the server: a client send would turn them into the user's message. */}
             {!message.scheduledTask && message.origin?.kind !== 'pr-fix-loop' ? (
                 <>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onEdit(message)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        className={ROW_ACTION_CLASS}
-                    >
-                        <Icon name="edit" className="size-3.5" aria-hidden="true" />
-                        {t('chat.queuedMessage.edit')}
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onSend(message)}
-                        onMouseDown={(event) => event.preventDefault()}
-                        className={ROW_ACTION_CLASS}
-                    >
-                        <Icon name="send-plane" className="size-3.5" aria-hidden="true" />
-                        {t('chat.queuedMessage.send')}
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onEdit(message)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                className={ROW_ACTION_CLASS}
+                            >
+                                <Icon name="edit" className="size-3.5" aria-hidden="true" />
+                                {t('chat.queuedMessage.edit')}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.queueEdit')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onSend(message)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                className={ROW_ACTION_CLASS}
+                            >
+                                <Icon name="send-plane" className="size-3.5" aria-hidden="true" />
+                                {t('chat.queuedMessage.send')}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.queueSend')}</TooltipContent>
+                    </Tooltip>
                 </>
             ) : null}
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => removeFromQueue(target, message.id)}
-                onMouseDown={(event) => event.preventDefault()}
-                title={t('chat.queuedMessage.removeAria')}
-                aria-label={t('chat.queuedMessage.removeAria')}
-                className={ROW_ACTION_CLASS}
-            >
-                <Icon name="close" className="size-4" aria-hidden="true" />
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFromQueue(target, message.id)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        aria-label={t('chat.queuedMessage.removeAria')}
+                        className={ROW_ACTION_CLASS}
+                    >
+                        <Icon name="close" className="size-4" aria-hidden="true" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.queuedMessage.removeAria')}</TooltipContent>
+            </Tooltip>
         </>
     );
 };
@@ -159,15 +172,20 @@ const SortableQueuedMessageRow = memo((props: Omit<QueuedMessageRowProps, 'lead'
             <QueuedMessageRow
                 {...props}
                 lead={(
-                    <button
-                        type="button"
-                        {...attributes}
-                        {...listeners}
-                        className="flex size-3.5 flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
-                        aria-label={t('chat.queuedMessage.reorderAria')}
-                    >
-                        <Icon name="draggable" className="size-3.5" aria-hidden="true" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                {...attributes}
+                                {...listeners}
+                                className="flex size-3.5 flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                                aria-label={t('chat.queuedMessage.reorderAria')}
+                            >
+                                <Icon name="draggable" className="size-3.5" aria-hidden="true" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.queuedMessage.reorderAria')}</TooltipContent>
+                    </Tooltip>
                 )}
             />
         </div>
@@ -231,10 +249,6 @@ export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMess
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    useComposerStatusChip('queue', target && queuedMessages.length > 0
-        ? { icon: 'time', label: `${t('chat.queuedMessage.title')} ${queuedMessages.length}` }
-        : null);
-
     if (!target || queuedMessages.length === 0) return null;
 
     if (queuedMessages.length === 1) {
@@ -256,22 +270,27 @@ export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMess
     return (
         <div role="group" className="border-b border-edge" aria-label={t('chat.queuedMessage.title')}>
             <div className="flex oc-composer-row items-center ps-3 pe-3">
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setMessageQueueExpanded(!expanded)}
-                    onMouseDown={(event) => event.preventDefault()}
-                    aria-expanded={expanded}
-                    aria-controls={expanded ? listId : undefined}
-                    className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
-                >
-                    <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate text-start">
-                        {t('chat.queuedMessage.title')} {queuedMessages.length}
-                    </span>
-                    <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMessageQueueExpanded(!expanded)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            aria-expanded={expanded}
+                            aria-controls={expanded ? listId : undefined}
+                            className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+                        >
+                            <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
+                            <span className="min-w-0 flex-1 truncate text-start">
+                                {t('chat.queuedMessage.title')} {queuedMessages.length}
+                            </span>
+                            <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t(expanded ? 'contextTooltips.chat.queueHide' : 'contextTooltips.chat.queueShow')}</TooltipContent>
+                </Tooltip>
             </div>
             {expanded ? (
                 <DndContext

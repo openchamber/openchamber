@@ -130,7 +130,7 @@ const rowName = (row: Element) => (row.getAttribute('aria-labelledby') ?? '')
   .filter(Boolean)
   .join(' ');
 
-const highlightedRow = () => document.querySelector('[role="option"].bg-interactive-selection');
+const highlightedRow = () => document.querySelector('[role="option"].oc-selected');
 
 test('the search field is a combobox that points at the highlighted row as arrows move', async () => {
   await renderPicker();

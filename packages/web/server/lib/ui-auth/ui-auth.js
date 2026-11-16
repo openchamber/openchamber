@@ -701,9 +701,13 @@ export const createUiAuth = ({
   }
 
   const salt = parsedPasswordHash ? parsedPasswordHash.salt : crypto.randomBytes(16);
-  const expectedHash = parsedPasswordHash ? parsedPasswordHash.key : deriveUiPasswordKey(normalizedPassword, salt);
-  // Passkeys are bound to the configured credential; in hash mode the hash
-  // string itself is the stable credential material.
+  // Hashed on the first sign-in attempt: at creation it held the embedding
+  // host's main thread for about 35 ms of every start.
+  let expectedHash = parsedPasswordHash?.key ?? null;
+  const readExpectedHash = () => {
+    expectedHash ??= deriveUiPasswordKey(normalizedPassword, salt);
+    return expectedHash;
+  };
   const passwordBindingInput = parsedPasswordHash ? passwordHash.trim() : normalizedPassword;
   let jwtSecret = getOrCreateJwtSecret();
   revokedSessions = createRevokedSessions(REVOKED_SESSIONS_FILE);
@@ -788,8 +792,8 @@ export const createUiAuth = ({
       return false;
     }
     try {
-      const candidateHash = deriveUiPasswordKey(normalizedCandidate, salt);
-      return crypto.timingSafeEqual(candidateHash, expectedHash);
+      const candidateHash = crypto.scryptSync(normalizedCandidate, salt, 64);
+      return crypto.timingSafeEqual(candidateHash, readExpectedHash());
     } catch {
       return false;
     }

@@ -97,6 +97,77 @@ test('a guest prompt to the active session uses the visible composer selection',
   }
 });
 
+test('a guest prompt to an open subagent keeps its own record instead of the parent composer (#6555)', async () => {
+  const sessionId = 'guest-open-child';
+  const state = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  const selection = useSelectionStore.getState();
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue(undefined);
+  spyOn(syncRefs, 'getAllSyncSessions').mockReturnValue([{ ...created, id: sessionId, parentID: 'parent-session',
+    agent: 'plan', model: { providerID: 'child', id: 'model' } }]);
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  useSessionUIStore.setState({ currentSessionId: sessionId });
+  // The app-wide composer still shows the parent's selection.
+  useConfigStore.setState({ currentProviderId: 'parent', currentModelId: 'model', currentAgentName: 'build' });
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['child', 'model', 'plan']);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: state.currentSessionId });
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName });
+  }
+});
+
+test('a guest prompt to an open subagent held only in the global cache keeps its own record (#6555)', async () => {
+  const sessionId = 'guest-open-child-global';
+  const state = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  const selection = useSelectionStore.getState();
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue(undefined);
+  spyOn(syncRefs, 'getAllSyncSessions').mockReturnValue([]);
+  const globalState = useGlobalSessionsStore.getState();
+  spyOn(useGlobalSessionsStore, 'getState').mockReturnValue({ ...globalState, entityById: new Map([[sessionId,
+    { ...created, id: sessionId, parentID: 'parent-session', agent: 'plan', model: { providerID: 'child', id: 'model' } }]]) });
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  useSessionUIStore.setState({ currentSessionId: sessionId });
+  useConfigStore.setState({ currentProviderId: 'parent', currentModelId: 'model', currentAgentName: 'build' });
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['child', 'model', 'plan']);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: state.currentSessionId });
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName });
+  }
+});
+
+test('a guest prompt to an open subagent applies its own unsent picks (#6555)', async () => {
+  const sessionId = 'guest-open-child-picked';
+  const state = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  const selection = useSelectionStore.getState();
+  selection.pickSessionAgent(sessionId, 'review');
+  selection.pickSessionModel(sessionId, 'picked', 'model');
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue(undefined);
+  spyOn(syncRefs, 'getAllSyncSessions').mockReturnValue([{ ...created, id: sessionId, parentID: 'parent-session',
+    agent: 'plan', model: { providerID: 'child', id: 'model' } }]);
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  useSessionUIStore.setState({ currentSessionId: sessionId });
+  useConfigStore.setState({ currentProviderId: 'parent', currentModelId: 'model', currentAgentName: 'build' });
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['picked', 'model', 'review']);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: state.currentSessionId });
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName });
+  }
+});
+
 test('a guest prompt carries an unsent agent pick for the active session', async () => {
   const state = useSessionUIStore.getState();
   const config = useConfigStore.getState();

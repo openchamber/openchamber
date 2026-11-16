@@ -131,6 +131,14 @@ function findForkWebTarball(release, source) {
   return newest;
 }
 
+function pickAndroidApkUrl(release) {
+  const assets = Array.isArray(release?.assets) ? release.assets.filter((asset) => (
+    typeof asset?.name === 'string' && asset.name.toLowerCase().endsWith('.apk')
+    && typeof asset.browser_download_url === 'string'
+  )) : [];
+  return (assets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name)) || assets[0])?.browser_download_url;
+}
+
 async function checkForkRelease(currentVersion, source, { appType, platform } = {}) {
   const release = await fetchForkRelease(source);
   if (!release) return { available: false, currentVersion };
@@ -277,17 +285,7 @@ function normalizeArch(value) {
   return mapArch(process.arch);
 }
 
-function pickAndroidApkUrl(release) {
-  const apkAssets = Array.isArray(release?.assets)
-    ? release.assets.filter((asset) => (
-      typeof asset?.name === 'string'
-      && asset.name.toLowerCase().endsWith('.apk')
-      && typeof asset.browser_download_url === 'string'
-    ))
-    : [];
-  const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
-  return (canonicalAsset || apkAssets[0])?.browser_download_url;
-}
+const CANARY_MIRROR_URL = 'https://downloads.openchamber.dev/desktop/canary/';
 
 // The Android APK the Canary workflow puts in the canary pre-release.
 const CANARY_ANDROID_APK_RE = /^OpenChamber-(\d+\.\d+\.\d+-canary\.\d+\.\d+)-\d+-android\.apk$/;
@@ -314,10 +312,15 @@ async function fetchCanaryAndroidApk() {
       const match = typeof asset?.name === 'string' ? CANARY_ANDROID_APK_RE.exec(asset.name) : null;
       if (!match || typeof asset.browser_download_url !== 'string') continue;
       if (!newest || compareVersions(match[1], newest.version) > 0) {
-        newest = { version: match[1], url: asset.browser_download_url };
+        newest = { version: match[1], name: asset.name, url: asset.browser_download_url };
       }
     }
-    return { newest };
+    if (!newest) return { newest: null };
+    // The R2 mirror (canary.yml) once it has the file: it stays up when
+    // GitHub's release downloads fail, and downloads faster.
+    const mirrorUrl = `${CANARY_MIRROR_URL}${newest.name}`;
+    const mirrored = await fetch(mirrorUrl, { method: 'HEAD', signal: AbortSignal.timeout(3000) }).then((head) => head.ok, () => false);
+    return { newest: { version: newest.version, url: mirrored ? mirrorUrl : newest.url } };
   } catch {
     return null;
   }
@@ -958,6 +961,28 @@ async function fetchDistTags() {
     const data = await response.json();
     return data?.['dist-tags'] ?? {};
   } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * The oldest OpenCode a published release runs against, from `engines.opencode`
+ * (">=2.2.4") in its package.json, or null when the registry could not be read
+ * or the release does not say.
+ */
+export async function fetchRequiredOpenCodeVersion(version) {
+  const target = normalizeTargetVersion(version);
+  if (!target) return null;
+  try {
+    const request = resolveNpmRegistryRequest(PACKAGE_NAME, target);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return /^>=\s*v?(\d+\.\d+\.\d+)$/.exec(String(data?.engines?.opencode ?? '').trim())?.[1] ?? null;
+  } catch {
     return null;
   }
 }

@@ -38,10 +38,12 @@ describe('front door composition contract', () => {
       'sessionInterruption', 'autoResume', 'permissionAutoAccept', 'autoReview', 'messageQueue', 'prStackRestack',
       'dispatchResults', 'prWatch', 'mergeFollow', 'workflow', 'workflowAgentSessions', 'messageSearch',
       'scheduledTasks', 'suggestedTasks', 'browserControlBroker', 'browserControlRouter', 'agentTool', 'limitFailover', 'routing',
+      'sessionTodos', 'extensionWaits', 'laterPages', 'sharePages', 'receivedPages', 'scheduledTaskService',
+      'extensionServiceLifetime', 'memoryDreaming',
     ];
     // When the inventory is matched against each actual constructor assignment.
     for (const name of names) {
-      const variable = ['browserControlBroker', 'browserControlRouter', 'workflowAgentSessions'].includes(name) ? name : `${name}Runtime`;
+      const variable = ['browserControlBroker', 'browserControlRouter', 'workflowAgentSessions', 'extensionServiceLifetime', 'memoryDreaming', 'scheduledTaskService'].includes(name) ? name : `${name}Runtime`;
       // Then removing a construction gate fails this contract, even if forwarding still works.
       expect(source).toMatch(new RegExp(`${variable} = FRONT_DOOR \\? null : create`));
       expect(FRONT_DOOR_DISABLED_RUNTIMES).toContain(name);

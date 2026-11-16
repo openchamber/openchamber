@@ -23,6 +23,7 @@ describe('FilesystemError', () => {
 
   test('normalizes unsupported response reasons to unknown', () => {
     expect(parseFilesystemErrorReason('os-permission')).toBe('os-permission');
+    expect(parseFilesystemErrorReason('outside-workspace')).toBe('outside-workspace');
     expect(parseFilesystemErrorReason('made-up')).toBe('unknown');
     expect(parseFilesystemErrorReason(undefined)).toBe('unknown');
   });

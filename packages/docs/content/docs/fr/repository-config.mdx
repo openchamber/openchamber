@@ -37,6 +37,9 @@ Les éléments du dépôt portent le badge **In repo**. Les actions du dépôt p
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Les éléments du dépôt portent le badge **In repo**. Les actions du dépôt p
 Seul `version` est obligatoire. Toutes les autres clés sont facultatives, et OpenChamber n'écrit que celles qui contiennent quelque chose.
 
 `setupWorktree` est la liste des commandes shell qu'OpenChamber exécute dans un nouveau worktree juste après sa création, dans l'ordre. Utilisez `$ROOT_PROJECT_PATH` pour le chemin du checkout principal. `setupWorktreeWait: true` fait attendre OpenChamber la fin de ces commandes avant de démarrer une session dans le worktree.
+
+`teardownWorktree` est la liste des commandes shell qu'OpenChamber exécute dans un worktree juste avant de le supprimer ou de l'archiver, dans l'ordre, par exemple `docker compose down` pour une stack lancée par le worktree. Si l'une échoue, le worktree reste et OpenChamber affiche l'erreur de la commande. Celles du dépôt s'exécutent d'abord, puis les vôtres, même si vous n'utilisez que vos propres commandes de configuration. Elles passent par la même question de confiance que les commandes de configuration.
 
 `projectActions` est la liste des actions du projet, celles que vous lancez depuis Work Status, la boîte de dialogue des actions du projet et la palette de commandes. `id`, `name` et `command` sont obligatoires. `icon` est facultatif et retombe sur une icône play ; les noms connus d'OpenChamber sont `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` et `file`. `autoOpenUrl: true` ouvre l'adresse affichée par la commande, voir [Aperçu et serveurs de dev](/preview/). `platforms` limite l'action à `macos`, `linux` ou `windows`. `runIn: "parent"` exécute l'action dans le checkout principal plutôt que dans le worktree courant.
 

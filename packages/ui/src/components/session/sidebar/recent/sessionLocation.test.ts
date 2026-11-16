@@ -50,7 +50,7 @@ describe('resolveSidebarSessionLocations', () => {
       });
       const items = deriveTimelineActivityItems({
         sessions: [restored], getSessionLocation: (id) => locations.get(id) ?? null,
-        getSessionNode: (record) => ({ session: record, children: [], worktree: null }), query: '',
+        getSessionNode: (record) => ({ session: record, children: [], worktree: null }),
       });
       expect(items[0]?.node.session).toBe(restored);
       expect(items[0]?.projectId).toBe('repo');

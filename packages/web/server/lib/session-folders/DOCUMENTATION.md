@@ -43,6 +43,10 @@ owns the local cache, the queue of unsent changes and when to read again.
 - A change about a folder that is gone does nothing. A create whose parent is
   gone places the folder at the top level.
 - A chat is in at most one folder of a scope after `assign`.
+- An `assign` or `unassign` with `from` skips each chat that another client moved
+  away from the folder `from` names for it. A chat left in no folder because that
+  folder was deleted was not moved, and the change applies. Without `from`, which
+  older clients and changes they queued send, it applies to every chat.
 - Deleting a folder deletes its sub-folders. Every deleted id (by `delete` or
   `forget-scopes`) is kept as a tombstone for 30 days, so an older client that
   still holds the folder cannot bring it back with its whole copy. A `create`
@@ -71,6 +75,17 @@ missing scope could not be told from a deleted one. A change says what the
 user did ("move these chats into this folder"), so a client that is behind
 cannot undo anything it did not touch, and the server needs no merge rules
 for ordinary edits.
+
+### Why a move carries where the chat was instead of an id the server remembers
+
+A client that timed out cannot tell whether the server stored its move, so it
+sends the move again, and it may do so after a reload, long after another client
+moved the same chat. Ids of applied changes would stop only the re-send of a
+stored move; a move that never arrived would still undo the newer one. Comparing
+the chat's place covers both and keeps the stored file as it is. The cost is
+that of two clients moving one chat from the same place, the first to reach the
+server wins, and a chat moved back to exactly where it started can still be
+moved again by a late re-send.
 
 ### Why the server tells clients to read again instead of sending the folders
 

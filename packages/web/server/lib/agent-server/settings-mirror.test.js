@@ -33,14 +33,27 @@ describe('agent settings mirror', () => {
     expect(AGENT_SETTINGS_MIRROR_KEYS_V1).not.toContain('permissionAutoAccept');
     for (const key of AGENT_SETTINGS_MIRROR_KEYS_V1) expect(registry.fields[key]?.secret).not.toBe(true);
     const picked = pickAgentSettings({
+      ...Object.fromEntries(Object.entries(registry.fields).filter(([, field]) => field.secret).map(([key]) => [key, 'bait'])),
       locale: 'uk', permissionDefaultMode: 'ask', agentWebToolEnabled: false,
       desktopUiPassword: 'bait', managedRemoteTunnelToken: 'bait', managedRemoteTunnelPresetTokens: { a: 'bait' },
       relayPrivateKey: 'bait', uiPassword: 'bait', protectedMcp: { token: 'bait' }, isolatedSpacesEnabled: true,
       notificationTemplates: { completion: { message: 'bait' } }, reportUsage: true, serverUpdateChannel: 'canary',
-      environment: { SECRET: 'bait' }, unknownFutureKey: 'bait', homeDirectory: '/front-door',
+      environment: { SECRET: 'bait' }, unknownFutureKey: 'bait', homeDirectory: '/front-door', agentBrowserSharesLogins: true,
     });
     expect(picked).toEqual({ locale: 'uk', permissionDefaultMode: 'ask', agentWebToolEnabled: false });
     expect(JSON.stringify(picked)).not.toContain('bait');
+  });
+
+  it.each([true, false])('projects the reviewed executor preference shapes including %s switches', (enabled) => {
+    const preferences = {
+      agentUsageToolEnabled: enabled, agentMemoryDreamingEnabled: enabled, sessionRetentionIncludeInWork: enabled,
+      agentMemoryDreamingModel: 'openrouter/team/model', agentMemoryDreamingVariant: 'high',
+    };
+    expect(pickAgentSettings(preferences)).toEqual(preferences);
+    expect(pickAgentSettings({
+      agentUsageToolEnabled: String(enabled), agentMemoryDreamingEnabled: 1, sessionRetentionIncludeInWork: null,
+      agentMemoryDreamingModel: { apiKey: 'bait' }, agentMemoryDreamingVariant: ['bait'],
+    })).toEqual({});
   });
 
   it('reconstructs nested project and runtime settings without copying unknown secret fields', () => {
@@ -156,6 +169,7 @@ describe('agent settings mirror', () => {
     expect(payload).toEqual({
       lastDirectory: '', opencodeBinary: '', defaultGitIdentityId: '', defaultModel: '', defaultVariant: '', defaultAgent: '',
       smallModelOverride: '', smallModelVariant: '', walkthroughModelOverride: '', walkthroughModelVariant: '',
+      agentMemoryDreamingModel: '', agentMemoryDreamingVariant: '',
       fallbackModel: '', fallbackVariant: '', zenModel: '', globalBehaviorPrompt: '', responseStyleCustomInstructions: '',
       accountSwitchProviders: [], terminalLoginShells: [], favoriteAgents: [], recentAgents: [], providerOrder: [], projects: [],
       permissionDefaultMode: 'ask', prFixLoopDefaults: {}, serverBrowserOpenChamberOrigins: [],

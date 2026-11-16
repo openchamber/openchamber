@@ -17,6 +17,7 @@ import { AnimatePresence } from 'motion/react';
 import { EmojiAutocomplete, type EmojiAutocompleteHandle } from '@/components/emoji/EmojiAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '../../CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '../../FileMentionAutocomplete';
+import type { GuestMention } from '@/lib/guests/mentions';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from '../../SkillAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '../../SnippetAutocomplete';
 import type { Session } from '@/lib/opencode/model';
@@ -70,6 +71,7 @@ interface ComposerAutocompletePopupsProps {
     onAgentSelect: (agentName: string) => void;
     /** Mentions another session; absent where the composer cannot attach one. */
     onSessionSelect?: (session: Session) => void;
+    onExtensionMentionSelect?: (mention: GuestMention) => void;
     /** The session this composer writes to, which `@` never offers. */
     currentSessionId: string | null;
     onEmojiSelect: (emoji: string) => void;
@@ -138,6 +140,7 @@ function AutocompletePopup(props: ComposerAutocompletePopupsProps & { open: Auto
                     onFileSelect={props.onFileSelect}
                     onAgentSelect={props.onAgentSelect}
                     onSessionSelect={props.onSessionSelect}
+                    onExtensionMentionSelect={props.onExtensionMentionSelect}
                     currentSessionId={props.currentSessionId}
                     onClose={onClose}
                     style={style}

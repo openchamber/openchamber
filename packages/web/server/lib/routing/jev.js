@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import {
+  JEV_LINGER_MS,
   JEV_TIMEOUT_MS,
   ROUTING_INSTRUCTIONS,
   SAFETY_CRITERIA,
@@ -53,6 +54,30 @@ export const buildProbeRequest = () => ({
   },
 });
 
+/**
+ * A System One request in the shape of Google's Decisions API
+ * (https://aistudio.google.com/docs/decisions-api, "Request and response
+ * reference"). `state` becomes `input` as JSON text, which is how Google says
+ * to pass structured data ("Structured data"): the model still reads the same
+ * fields under the same key paths the instructions name (`request`,
+ * `history`, `answer`). A yes/no question's `true`/`false` criteria become
+ * `true_description`/`false_description`; choice criteria keep their shape.
+ * Instructions given as a list become one string, a line per item, as
+ * `ROUTING_INSTRUCTIONS` already is: Google takes a string or text blocks,
+ * not a list of strings. The answers come back in System One's shape.
+ */
+export const toGeminiDecisionsRequest = ({ state, questions }) => ({
+  input: JSON.stringify(state),
+  questions: Object.fromEntries(Object.entries(questions).map(([id, question]) => {
+    const mapped = { ...question };
+    if (Array.isArray(question.instructions)) mapped.instructions = question.instructions.join('\n');
+    if (question.type === 'noul' && question.criteria) {
+      mapped.criteria = { true_description: question.criteria.true, false_description: question.criteria.false };
+    }
+    return [id, mapped];
+  })),
+});
+
 const choiceAnswerSchema = z.object({ choice: z.string(), confidence: z.number() });
 
 /** True when the probe came back as a choice answer, whichever choice it made. */
@@ -86,103 +111,70 @@ export const decidePermission = (answers, { threshold }) => {
 const responseSchema = z.object({ answers: z.record(z.string(), z.unknown()) });
 const errorBodySchema = z.object({ error: z.object({ type: z.string().min(1) }) });
 
-/** `Retry-After` as seconds or an HTTP date, in milliseconds from `nowMs`; null when absent or unreadable. */
-export const parseRetryAfterMs = (value, nowMs) => {
-  if (!value?.trim()) return null;
-  const seconds = Number(value.trim());
-  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1000 : null;
-  const at = Date.parse(value);
-  return Number.isFinite(at) ? Math.max(0, at - nowMs) : null;
-};
+// Endpoints with a timed-out request still running; shared by every client in
+// the process so routing, session work and goals together keep at most one.
+const lingeringEndpoints = new Set();
 
-const formatWait = (ms) => (ms >= 60_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
-
-const errorTypeOf = (text) => {
-  try {
-    return errorBodySchema.safeParse(JSON.parse(text)).data?.error.type ?? null;
-  } catch {
-    return null;
-  }
-};
-
-/**
- * One client per server: a rate limit an endpoint reports holds for every
- * feature that calls it (Auto, the permission safety net, goal audits, turn
- * ranking), so after a 429 with `Retry-After` no call goes to that endpoint
- * and model until the time passes. Those calls fail at once with
- * `code: 'rate-limited'`, and the pause is logged once when it starts and
- * once when it ends. Logs name only the endpoint's host.
- */
-export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS, now = Date.now, log = console } = {}) => {
-  const pauses = new Map();
-  const pauseKey = (endpoint) => `${endpoint.url}\0${endpoint.model}`;
-  const hostOf = (endpoint) => {
-    try {
-      return new URL(endpoint.url).host;
-    } catch {
-      return 'the classification provider';
-    }
-  };
-
-  /** Until when calls to this endpoint wait out a rate limit, or null. */
-  const pausedUntil = (endpoint) => {
-    const key = pauseKey(endpoint);
-    const until = pauses.get(key);
-    if (until === undefined) return null;
-    if (until > now()) return until;
-    pauses.delete(key);
-    log.warn(`[jev] ${hostOf(endpoint)} rate limit is over; calling it again`);
-    return null;
-  };
-
-  return {
-    pausedUntil,
-    /**
-     * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-     * throws with `status` (and `type`, `retryAfterMs` when the provider says)
-     * on an HTTP error, `code: 'rate-limited'` while a rate limit holds, and
-     * `code: 'timeout'` on abort.
-     */
-    ask: async (request, endpoint) => {
-      const until = pausedUntil(endpoint);
-      if (until !== null) {
-        const retryAfterMs = until - now();
-        throw Object.assign(new Error(`Jev is rate limited, retry in ${formatWait(retryAfterMs)}`), {
-          code: 'rate-limited', status: 429, retryAfterMs,
-        });
-      }
-      const abort = new AbortController();
-      const timer = setTimeout(() => abort.abort(), timeoutMs);
-      const started = Date.now();
+export const createJevClient = ({
+  fetchImpl = fetch,
+  timeoutMs = JEV_TIMEOUT_MS,
+  lingerMs = JEV_LINGER_MS,
+  lingering = lingeringEndpoints,
+} = {}) => ({
+  /**
+   * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
+   * throws with `status` on an HTTP error and `code: 'timeout'` after
+   * `timeoutMs`. The first request to time out on an endpoint is not aborted:
+   * it runs on, up to `lingerMs`, so a local model can finish loading, and its
+   * answer is dropped. Any other timed-out request is aborted.
+   */
+  ask: async (request, endpoint) => {
+    const abort = new AbortController();
+    const started = Date.now();
+    const call = (async () => {
+      let response;
       try {
-        const response = await fetchImpl(endpoint.url, {
+        response = await fetchImpl(endpoint.url, {
           method: 'POST',
           headers: { ...endpoint.headers, 'content-type': 'application/json' },
-          body: JSON.stringify({ ...request, model: endpoint.model }),
+          body: JSON.stringify({ ...(endpoint.format === 'gemini' ? toGeminiDecisionsRequest(request) : request), model: endpoint.model }),
           signal: abort.signal,
         });
-        const text = await response.text();
-        if (!response.ok) {
-          const type = errorTypeOf(text);
-          const retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'), now());
-          const detail = [type, retryAfterMs !== null ? `retry in ${formatWait(retryAfterMs)}` : null].filter(Boolean).join(', ');
-          if (response.status === 429 && retryAfterMs !== null && retryAfterMs > 0) {
-            pauses.set(pauseKey(endpoint), now() + retryAfterMs);
-            log.warn(`[jev] ${hostOf(endpoint)} is rate limiting${type ? ` (${type})` : ''}; no calls until ${new Date(now() + retryAfterMs).toISOString()}`);
-          }
-          throw Object.assign(new Error(`Jev responded ${response.status}${detail ? ` (${detail})` : ''}`), {
-            status: response.status, type, retryAfterMs,
-          });
-        }
-        const body = responseSchema.safeParse(JSON.parse(text));
-        if (!body.success) throw new Error('Jev response has no answers');
-        return { answers: body.data.answers, ms: Date.now() - started };
       } catch (error) {
-        if (error?.name === 'AbortError') throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
+        // Node names a bad header value, the key included, in the error, which
+        // then reaches Settings, broadcasts and logs.
+        if (endpoint.format === 'gemini') throw new Error('Could not reach Google Gemini');
         throw error;
-      } finally {
-        clearTimeout(timer);
       }
-    },
-  };
-};
+      const text = await response.text();
+      if (!response.ok) {
+        throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });
+      }
+      const body = responseSchema.safeParse(JSON.parse(text));
+      if (!body.success) throw new Error('Jev response has no answers');
+      return { answers: body.data.answers, ms: Date.now() - started };
+    })();
+    let timer;
+    const timedOut = new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); });
+    try {
+      const result = await Promise.race([call, timedOut.then(() => null)]);
+      if (result) return result;
+    } finally {
+      clearTimeout(timer);
+    }
+    call.catch(() => {});
+    const key = `${endpoint.url}\n${endpoint.model}`;
+    if (lingering.has(key)) {
+      abort.abort();
+    } else {
+      lingering.add(key);
+      const cap = setTimeout(() => abort.abort(), lingerMs - timeoutMs);
+      cap.unref?.();
+      call.finally(() => {
+        clearTimeout(cap);
+        lingering.delete(key);
+      }).catch(() => {});
+    }
+    throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
+  },
+});

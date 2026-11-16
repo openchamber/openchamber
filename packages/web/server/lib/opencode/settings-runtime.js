@@ -1,6 +1,7 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createProjectRegistry, normalizeRegistryProjectPath, sanitizeRegistryProjects } from '../agent-server/project-registry.js';
 import { isRecord, isString } from '../shared/guards.js';
+import { isMessageSearchEnabled } from './settings-helpers.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -79,8 +80,8 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentRenderToolEnabled',
   'agentImageToolEnabled',
   'agentSecretToolEnabled',
+  'agentUsageToolEnabled',
   'agentWorkflowToolEnabled',
-  'agentToolsCodeMode',
   // The limit failover plugin loads only while one of these is set.
   'fallbackModel',
   'accountSwitchProviders',
@@ -1197,15 +1198,17 @@ export const createSettingsRuntime = (deps) => {
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   });
 
-  const persistSettings = async (changes, { surface = null, replaceKeys = [] } = {}) => {
-    const snapshot = structuredClone(changes);
+  // For a caller whose change depends on the settings on disk: `resolveChanges`
+  // runs inside the queue, so no other save lands between that read and this write.
+  const persistResolvedSettings = async (resolveChanges, { surface = null, replaceKeys = [] } = {}) => {
     let managedPluginSettings = null;
     const result = await withSettingsLock(async () => {
+      const current = await readSettingsFromDisk({ surface, seedPreferences: false });
+      const changes = resolveChanges(current);
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
-      console.log('[persistSettings] Updating fields:', Object.keys(snapshot || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface, seedPreferences: false });
-      const sanitized = sanitizeSettingsUpdate(snapshot);
+      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
+      const sanitized = sanitizeSettingsUpdate(changes);
       for (const key of Object.keys(sanitized)) {
         // Device state belongs to the install in front of the user, never to
         // the instance; a client that still sends it is simply ignored.
@@ -1217,7 +1220,7 @@ export const createSettingsRuntime = (deps) => {
         }
       }
       const base = { ...current };
-      const removedKeys = replaceKeys.filter((key) => !Object.hasOwn(snapshot, key));
+      const removedKeys = replaceKeys.filter((key) => !Object.hasOwn(changes, key));
       for (const key of removedKeys) delete base[key];
       let next = mergePersistedSettings(base, sanitized);
 
@@ -1294,7 +1297,7 @@ export const createSettingsRuntime = (deps) => {
       }
       // The search index starts or stops in the background; the save does not wait for it.
       if (!frontDoor && changedKeys.includes('messageSearchEnabled')) {
-        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+        onMessageSearchEnabledChanged(isMessageSearchEnabled(next));
       }
       if (!frontDoor && changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
@@ -1315,6 +1318,11 @@ export const createSettingsRuntime = (deps) => {
       });
     }
     return result;
+  };
+
+  const persistSettings = (changes, options) => {
+    const snapshot = structuredClone(changes);
+    return persistResolvedSettings(() => snapshot, options);
   };
 
   // A background session may discover a project while another window saves
@@ -1343,6 +1351,7 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    persistResolvedSettings,
     registerSessionProject,
   };
 };

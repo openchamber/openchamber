@@ -2,7 +2,9 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isSearchableQuery, searchMessages, type MessageSearchHit } from '@/lib/messageSearch';
 import { requestMessageFocus } from '@/lib/router/messageFocus';
@@ -38,6 +40,25 @@ const loadAllHits = async (query: string, sessionId: string, includeReasoning: b
   }
   return { status: 'ready', hits };
 };
+
+const SearchAction: React.FC<{
+  label: string;
+  icon: IconName;
+  disabled?: boolean;
+  onClick: () => void;
+}> = ({ label, icon, disabled, onClick }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+      <span className="inline-flex">
+        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={disabled} onClick={onClick} aria-label={label}>
+          <Icon name={icon} className="h-4 w-4" />
+        </Button>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+  </Tooltip>
+);
 
 export const ChatSearchBar: React.FC<{
   sessionId: string;
@@ -179,15 +200,9 @@ export const ChatSearchBar: React.FC<{
         className="h-7 w-48 min-w-0 bg-transparent typography-meta text-foreground outline-none placeholder:text-muted-foreground"
       />
       <span className="min-w-[4.5rem] shrink-0 text-end typography-micro text-muted-foreground" role="status" aria-live="polite">{status}</span>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={hits.length === 0} onClick={() => step(-1)} aria-label={t('chat.search.previous')}>
-        <Icon name="arrow-up-s" className="h-4 w-4" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={hits.length === 0} onClick={() => step(1)} aria-label={t('chat.search.next')}>
-        <Icon name="arrow-down-s" className="h-4 w-4" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label={t('chat.search.close')}>
-        <Icon name="close" className="h-4 w-4" />
-      </Button>
+      <SearchAction label={t('chat.search.previous')} icon="arrow-up-s" disabled={hits.length === 0} onClick={() => step(-1)} />
+      <SearchAction label={t('chat.search.next')} icon="arrow-down-s" disabled={hits.length === 0} onClick={() => step(1)} />
+      <SearchAction label={t('chat.search.close')} icon="close" onClick={onClose} />
     </div>
   );
 };

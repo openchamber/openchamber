@@ -188,7 +188,7 @@ const sendPlainMessage = async (
     directory,
     context,
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: async (messageID, context) => {
+    send: async (messageID, context, commitRevert) => {
       // Only a genuine change travels with the prompt; the review session was
       // created on this selection, so normally nothing is switched.
       const selection = await resolveSendSelection(sessionID, directory, resolved);
@@ -202,6 +202,7 @@ const sendPlainMessage = async (
         text,
         context,
         messageId: messageID,
+        commitRevert,
       }).then(() => undefined);
     },
   });

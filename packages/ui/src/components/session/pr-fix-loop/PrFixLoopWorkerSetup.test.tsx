@@ -13,7 +13,7 @@ test('a prepared-worker read cannot resurrect a selection forgotten while it was
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     PointerEvent: dom.PointerEvent, FocusEvent: dom.FocusEvent,
     ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
@@ -25,9 +25,11 @@ test('a prepared-worker read cannot resurrect a selection forgotten while it was
   const originalFetch = globalThis.fetch;
   let reads = 0;
   let releaseRead: (response: Response) => void = () => { throw new Error('No pending read'); };
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input instanceof Request ? input : new URL(String(input), 'http://localhost'), init);
     const path = new URL(request.url).pathname;
+    // Directory bootstrap is unrelated to the prepared-worker request race.
+    if (path === '/api/fs/home') return new Promise<Response>(() => {});
     if (path === '/api/openchamber/spaces/switch') return Response.json({ enabled: true, spaces: [] });
     if (path === '/api/openchamber/spaces/places') return Response.json({ places: [{ id: 'docker', available: true, hostIsolation: true }] });
     if (path === '/api/openchamber/spaces') return Response.json({ spaces: [{
@@ -44,7 +46,7 @@ test('a prepared-worker read cannot resurrect a selection forgotten while it was
     }
     if (path.endsWith(`/workers/${worker.id}`) && request.method === 'DELETE') return Response.json({ ok: true });
     return Response.json({}, { status: 503 });
-  };
+  }, originalFetch);
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { dict } = await import('@/lib/i18n/messages/en');

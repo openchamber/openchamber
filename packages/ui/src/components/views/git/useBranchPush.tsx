@@ -9,6 +9,7 @@ import { PendingGitOperationError } from '@/lib/source-control/git-operation-rec
 
 import { ContributorDestinationDialog } from './ContributorDestinationDialog';
 import { useContributorDestinationChooser } from './contributorDestination';
+import { gitRequestErrorMessage } from './gitRequestErrorMessage';
 import { PublishDialog } from './PublishDialog';
 import { useGitOperationRecovery } from './useGitOperationRecovery';
 import { useGitPublishChooser } from './useGitPublishChooser';
@@ -52,7 +53,7 @@ export function useBranchPush(directory: string | null, branch: string | undefin
                 toast.error(failed, { description: error.message || undefined });
                 return false;
             }
-            toast.error(failed, { description: error instanceof Error ? error.message : String(error) });
+            toast.error(failed, { description: error instanceof Error ? gitRequestErrorMessage(error, t) : String(error) });
             return false;
         } finally {
             operation.finish();

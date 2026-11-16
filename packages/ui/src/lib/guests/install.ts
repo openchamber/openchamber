@@ -18,6 +18,7 @@ const errorSchema = z.object({
     'id-taken',
     'already-installed',
     'missing-build',
+    'invalid-opencode-plugin',
     'host-too-old',
     'bundled',
     'reserved-id',
@@ -29,6 +30,8 @@ const errorSchema = z.object({
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
+  /** Why the manifest did not parse, in the parser's words. */
+  reason: z.string().trim().min(1).max(1000).optional(),
 });
 
 export type InstallGuestErrorCode =
@@ -39,6 +42,8 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
+  /** `contributes.opencodePlugin` names a folder that is missing or holds no entry file OpenCode finds. */
+  | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'bundled'
   | 'reserved-id'
@@ -53,7 +58,7 @@ export type InstallGuestErrorCode =
 
 type InstallGuestResult =
   | { ok: true; guest: InstalledGuest; replaced?: boolean }
-  | { ok: false; code: InstallGuestErrorCode; required?: string; id?: string; diagnostic?: GuestRequestFailure };
+  | { ok: false; code: InstallGuestErrorCode; required?: string; id?: string; reason?: string; diagnostic?: GuestRequestFailure };
 
 type UninstallGuestResult =
   | { ok: true }
@@ -88,7 +93,7 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
 
 const readInstallError = async (
   response: Response,
-): Promise<{ code: InstallGuestErrorCode; required?: string; id?: string }> => {
+): Promise<{ code: InstallGuestErrorCode; required?: string; id?: string; reason?: string }> => {
   try {
     const parsed = errorSchema.safeParse(JSON.parse(await response.text()));
     if (!parsed.success) {
@@ -102,6 +107,9 @@ const readInstallError = async (
     }
     if (parsed.data.id) {
       return { code: parsed.data.error, id: parsed.data.id };
+    }
+    if (parsed.data.error === 'invalid-manifest' && parsed.data.reason) {
+      return { code: 'invalid-manifest', reason: parsed.data.reason };
     }
     return { code: parsed.data.error };
   } catch {

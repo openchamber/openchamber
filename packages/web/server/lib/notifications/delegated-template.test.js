@@ -4,10 +4,10 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-const setup = (readDisplayMetadata) => {
+const setup = (readDisplayMetadata, sessionResponse = (session) => ({ data: session })) => {
   const fetchImpl = vi.fn(async (url) => Response.json(url.includes('/message')
     ? { data: [{ id: 'msg_1', type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'Answer' }] }] }
-    : { data: { id: 'ses_1', title: 'Agent session', location: { directory: '/agent/worktree' } } }));
+    : sessionResponse({ id: 'ses_1', title: 'Agent session', location: { directory: '/agent/worktree' } })));
   const resolvePrimaryWorktreeRoot = vi.fn(async () => { throw new Error('local worktree discovery is forbidden'); });
   // Local git starts by resolving its binary, so this spy also catches any local git run.
   const resolveGitBinaryForSpawn = vi.fn(() => { throw new Error('local git resolution is forbidden'); });
@@ -22,9 +22,12 @@ const setup = (readDisplayMetadata) => {
 };
 
 describe('notification templates delegated to the agent server', () => {
-  it('uses the injected transport for titles and messages and delegates project metadata', async () => {
+  it.each([
+    ['record', (session) => session],
+    ['envelope', (session) => ({ data: session })],
+  ])('uses the injected transport for a session %s and messages and delegates project metadata', async (_format, sessionResponse) => {
     const readDisplayMetadata = vi.fn(async () => ({ projectName: 'Agent project', branch: 'feature' }));
-    const { runtime, fetchImpl, resolvePrimaryWorktreeRoot, resolveGitBinaryForSpawn } = setup(readDisplayMetadata);
+    const { runtime, fetchImpl, resolvePrimaryWorktreeRoot, resolveGitBinaryForSpawn } = setup(readDisplayMetadata, sessionResponse);
     const variables = await runtime.buildTemplateVariables({}, 'ses_1');
     expect(variables).toMatchObject({ session_name: 'Agent session', project_name: 'Agent project', branch: 'feature', worktree: '/agent/worktree' });
     await expect(runtime.fetchLastAssistantMessageText('ses_1', 'msg_1')).resolves.toBe('Answer');

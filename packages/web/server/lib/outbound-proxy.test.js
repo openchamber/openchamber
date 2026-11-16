@@ -45,9 +45,11 @@ describe('applyOutboundProxyFromEnv', () => {
       await new Promise((resolve) => local.listen(0, '127.0.0.1', resolve));
       const { applyOutboundProxyFromEnv } = await import(${JSON.stringify(moduleUrl)});
       assert.equal(applyOutboundProxyFromEnv({ env: { HTTPS_PROXY: 'http://127.0.0.1:' + proxy.address().port, HTTP_PROXY: 'http://127.0.0.1:' + proxy.address().port } }), true);
-      await fetch('http://upstream.invalid/usage').catch(() => {});
+      // HTTPS tunnels through CONNECT on every Node version; plain HTTP became a
+      // forward-proxy request in Node 26.
+      await fetch('https://upstream.invalid/usage').catch(() => {});
       assert.equal(await (await fetch('http://127.0.0.1:' + local.address().port + '/')).text(), 'ok');
-      assert.deepEqual(seen, ['proxy upstream.invalid:80', 'direct']);
+      assert.deepEqual(seen, ['proxy upstream.invalid:443', 'direct']);
       process.exit(0);
     `], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     expect(result.status, result.stderr).toBe(0);

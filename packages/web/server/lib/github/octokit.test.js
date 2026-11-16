@@ -179,6 +179,8 @@ describe('getOctokitOrNull host trust', () => {
     fs.writeFileSync(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
     const previousConfigDir = process.env.GH_CONFIG_DIR;
     process.env.GH_CONFIG_DIR = ghConfigDir;
+    // The token comes from `gh auth token`: use the fake gh, not one the host has installed.
+    process.env.PATH = `${ghBin}${path.delimiter}${previousPath}`;
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async () => Response.json({ id: 42, login: 'ghe-user' });
     const { setGhCliActiveForHost } = await import('./auth.js');
@@ -197,6 +199,8 @@ describe('getOctokitOrNull host trust', () => {
       globalThis.fetch = previousFetch;
       if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
       else process.env.GH_CONFIG_DIR = previousConfigDir;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       fs.rmSync(ghConfigDir, { recursive: true, force: true });
     }
   });

@@ -4,7 +4,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Icon } from '@/components/icon/Icon';
+import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -17,13 +19,15 @@ type ThinkingPillProps = {
 
 export const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const label = value || t('rightSidebar.contextNotesTodo.sendDialog.variant.default');
 
   const trigger = (
     <div
       className={cn(
-        'flex h-6 w-fit items-center gap-1.5 rounded-lg border border-edge-muted bg-interactive-selection/20 px-2',
-        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-interactive-hover/30',
+        dropdownTriggerVariants({ size: isMobile ? 'mobile' : 'default' }),
+        'w-fit',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
       )}
     >
       <span className="typography-micro whitespace-nowrap font-medium capitalize">{label}</span>

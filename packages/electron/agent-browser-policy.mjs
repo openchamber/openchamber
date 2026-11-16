@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
-export const AGENT_BROWSER_PARTITION = 'persist:openchamber-agent-browser';
+export const AGENT_BROWSER_PARTITION = 'persist:openchamber-browser-agent';
 
 export const isStandaloneBrowserPanelPartition = (partition) => (
   partition === BROWSER_PANEL_PARTITION || partition === AGENT_BROWSER_PARTITION

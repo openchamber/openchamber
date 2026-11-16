@@ -64,7 +64,7 @@ export const OpenCodeStatusDialog: React.FC = () => {
           </Button>
         </div>
 
-        <ScrollableOverlay as="pre" outerClassName="max-h-[60vh] rounded-lg bg-surface-muted" className="p-4 typography-code text-foreground whitespace-pre-wrap" disableHorizontal>
+        <ScrollableOverlay as="pre" dir="ltr" outerClassName="max-h-[60vh] rounded-lg bg-surface-muted" className="p-4 typography-code text-foreground whitespace-pre-wrap" disableHorizontal>
           {openCodeStatusText || t('openCodeStatusDialog.empty.noData')}
         </ScrollableOverlay>
 

@@ -132,12 +132,12 @@ const renderMessage = async (text: string, options: { runtime?: RuntimeAPIs } = 
     const part = (
         <UserTextPart
             part={textPart(text)}
-            messageId="msg_1"
             isMobile={false}
             messageExpanded
             onExpandMessage={() => undefined}
             partIndex={0}
             onTruncationChange={() => undefined}
+            onCollapsedLinesChange={() => undefined}
             attachmentFilenames={FILES.flatMap((file) => (file.filename ? [file.filename] : []))}
             attachmentFiles={FILES}
             onShowPopup={(content) => popups.push(content)}

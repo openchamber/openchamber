@@ -30,7 +30,7 @@ const sessionSchema = z.object({
   parentID: z.string().nullish(),
   title: z.string().nullish(),
   location: z.object({ directory: z.string() }).partial().nullish(),
-  time: z.object({ created: z.number(), updated: z.number() }).partial().nullish(),
+  time: z.object({ created: z.number(), updated: z.number(), archived: z.number().nullish() }).partial().nullish(),
   revert: z.object({ messageID: z.string().nullish() }).nullish(),
 });
 const sessionPageSchema = z.object({
@@ -61,6 +61,11 @@ const eventSchema = z.object({
       time: z.object({ completed: z.number() }).partial(),
     }).partial().nullish(),
   }),
+});
+const archivedEventSchema = z.object({
+  type: z.literal('session.archived'),
+  created: z.number().finite().catch(null),
+  data: z.object({ sessionID: z.string().min(1) }),
 });
 
 // Terminal selections appended by older builds are source material, not what
@@ -108,6 +113,8 @@ export const createMessageSearchIndexer = ({
   backfillPauseMs = BACKFILL_PAUSE_MS,
   // Read per record, so switching it takes effect from the next one.
   includeReasoning = () => false,
+  getArchivedSessions = async () => null,
+  applyOwnedArchiveState = (session) => session,
   logger = console,
 }) => {
   const liveTimers = new Map();
@@ -117,12 +124,103 @@ export const createMessageSearchIndexer = ({
   let backfill = { state: 'idle', total: 0, done: 0 };
   let backfillRun = 0;
   let stopped = false;
+  let lifecycleRevision = 0;
+  const lifecycleMutations = new Map();
+  const pendingLifecycleWork = new Set();
+  const activeLifecycleReaders = new Map();
+  const deletedLifecycleSessions = new Map();
 
-  const syncSession = async (sessionId, directoryHint, { retried = false } = {}) => {
+  const cleanupDeletedLifecycleMutations = () => {
+    for (const [sessionId, deletedAtRevision] of deletedLifecycleSessions) {
+      const hasOlderReader = [...activeLifecycleReaders.keys()].some((revision) => revision < deletedAtRevision);
+      if (hasOlderReader) continue;
+      lifecycleMutations.delete(sessionId);
+      deletedLifecycleSessions.delete(sessionId);
+    }
+  };
+
+  const recordSessionDeletion = (sessionId) => {
+    deletedLifecycleSessions.set(sessionId, ++lifecycleRevision);
+    cleanupDeletedLifecycleMutations();
+  };
+
+  const withLifecycleReader = async (read) => {
+    const startedAtRevision = lifecycleRevision;
+    activeLifecycleReaders.set(startedAtRevision, (activeLifecycleReaders.get(startedAtRevision) ?? 0) + 1);
+    try {
+      return await read(startedAtRevision);
+    } finally {
+      const remaining = (activeLifecycleReaders.get(startedAtRevision) ?? 1) - 1;
+      if (remaining > 0) activeLifecycleReaders.set(startedAtRevision, remaining);
+      else activeLifecycleReaders.delete(startedAtRevision);
+      cleanupDeletedLifecycleMutations();
+    }
+  };
+
+  const withArchiveTime = (session, archivedAt) => {
+    const time = { ...(session.time ?? {}) };
+    if (Number.isFinite(archivedAt)) time.archived = archivedAt;
+    else delete time.archived;
+    return { ...session, time };
+  };
+
+  const applySnapshotLifecycle = (session, archivedById, startedAtRevision) => {
+    const overlaid = sessionSchema.parse(applyOwnedArchiveState(session, archivedById));
+    const mutation = lifecycleMutations.get(overlaid.id);
+    if (!mutation) return overlaid;
+    if (mutation.lifecycleKnown && mutation.revision > startedAtRevision) {
+      return withArchiveTime(overlaid, mutation.archivedAt);
+    }
+    if (mutation.revision <= startedAtRevision) {
+      lifecycleMutations.set(overlaid.id, {
+        revision: mutation.revision,
+        archivedAt: Number.isFinite(overlaid.time?.archived) ? overlaid.time.archived : null,
+        lifecycleKnown: true,
+      });
+    }
+    return overlaid;
+  };
+
+  const processLifecycleEvent = async (sessionId, archivedAt) => {
+    const revision = ++lifecycleRevision;
+    const current = store.readSession(sessionId);
+    const hasEffectiveState = current?.lifecycle_known === 1;
+    lifecycleMutations.set(sessionId, {
+      revision,
+      archivedAt: hasEffectiveState ? current.archived_at : null,
+      lifecycleKnown: hasEffectiveState,
+    });
+    let archivedById;
+    try {
+      archivedById = await getArchivedSessions();
+    } catch (error) {
+      logger.warn?.('[message-search] could not read archive overlay:', error?.message ?? error);
+      return;
+    }
+    const upstream = withArchiveTime({ id: sessionId }, archivedAt);
+    const overlaid = applyOwnedArchiveState(upstream, archivedById);
+    const effectiveArchiveTime = Number.isFinite(overlaid?.time?.archived) ? overlaid.time.archived : null;
+    if (lifecycleMutations.get(sessionId)?.revision !== revision) return;
+    lifecycleMutations.set(sessionId, { revision, archivedAt: effectiveArchiveTime, lifecycleKnown: true });
+    store.setArchiveState(sessionId, effectiveArchiveTime);
+  };
+
+  const trackLifecycleEvent = (sessionId, archivedAt) => {
+    const work = processLifecycleEvent(sessionId, archivedAt).catch((error) => {
+      logger.warn?.('[message-search] could not apply lifecycle event:', error?.message ?? error);
+    });
+    pendingLifecycleWork.add(work);
+    void work.finally(() => pendingLifecycleWork.delete(work));
+    return work;
+  };
+
+  const runSyncSession = async (sessionId, directoryHint, { retried = false } = {}, startedAtRevision) => {
     const client = createClient(directoryHint);
     let session;
     try {
-      session = sessionSchema.parse(await client.session.get({ sessionID: sessionId }));
+      const archived = await getArchivedSessions();
+      const upstream = sessionSchema.parse(await client.session.get({ sessionID: sessionId }));
+      session = applySnapshotLifecycle(upstream, archived, startedAtRevision);
     } catch (error) {
       if (isTag(error, 'SessionNotFoundError')) {
         store.deleteSession(sessionId);
@@ -130,12 +228,13 @@ export const createMessageSearchIndexer = ({
       }
       throw error;
     }
+    if ((deletedLifecycleSessions.get(sessionId) ?? 0) > startedAtRevision) return;
     if (session.parentID) {
       store.deleteSession(sessionId);
       return;
     }
     const directory = session.location?.directory || directoryHint || '';
-    store.upsertSession({ id: sessionId, directory, title: session.title ?? '', createdAt: session.time?.created });
+    store.upsertSession({ id: sessionId, directory, title: session.title ?? '', createdAt: session.time?.created, archivedAt: session.time?.archived, lifecycleKnown: true });
 
     // A revert hides the tail of the conversation, and the next prompt
     // deletes it: what was read past the boundary is no longer the session.
@@ -219,6 +318,10 @@ export const createMessageSearchIndexer = ({
     store.markSynced(sessionId, session.time?.updated ?? null);
   };
 
+  const syncSession = (sessionId, directoryHint, options) => withLifecycleReader(
+    (startedAtRevision) => runSyncSession(sessionId, directoryHint, options, startedAtRevision),
+  );
+
   const takeNext = () => {
     for (const queue of [liveQueue, backfillQueue]) {
       const first = queue.entries().next();
@@ -270,7 +373,7 @@ export const createMessageSearchIndexer = ({
    * dropped, but only after the whole list arrived: a failed page is not an
    * empty list.
    */
-  const startBackfill = async () => {
+  const runBackfill = async (startedAtRevision) => {
     const run = ++backfillRun;
     const client = createClient('');
     const listed = new Map();
@@ -291,20 +394,36 @@ export const createMessageSearchIndexer = ({
       return;
     }
     if (run !== backfillRun || stopped) return;
+    let archived;
+    try {
+      archived = await getArchivedSessions();
+    } catch (error) {
+      logger.warn?.('[message-search] could not read archive overlay:', error?.message ?? error);
+      return;
+    }
+    if (run !== backfillRun || stopped) return;
     for (const id of store.sessionIds()) {
-      if (!listed.has(id)) store.deleteSession(id);
+      if (listed.has(id)) continue;
+      store.deleteSession(id);
+      recordSessionDeletion(id);
     }
     let queued = 0;
-    for (const session of listed.values()) {
+    for (const rawSession of listed.values()) {
+      if ((deletedLifecycleSessions.get(rawSession.id) ?? 0) > startedAtRevision) continue;
+      const session = applySnapshotLifecycle(rawSession, archived, startedAtRevision);
+      store.upsertSession({ id: session.id, directory: session.location?.directory ?? '', title: session.title ?? '', createdAt: session.time?.created, archivedAt: session.time?.archived, lifecycleKnown: true });
       const known = store.readSession(session.id);
       const updatedAt = session.time?.updated ?? null;
       if (known && known.synced_updated_at !== null && updatedAt !== null && known.synced_updated_at >= updatedAt) continue;
       backfillQueue.set(session.id, session.location?.directory ?? '');
       queued += 1;
     }
+    store.markLifecycleComplete();
     backfill = { state: queued > 0 ? 'running' : 'done', total: queued, done: 0 };
     void drain();
   };
+
+  const startBackfill = () => withLifecycleReader(runBackfill);
 
   return {
     /** Translated OpenCode events (event-stream/translate-v2.js vocabulary). */
@@ -325,12 +444,15 @@ export const createMessageSearchIndexer = ({
           if (info?.directory) store.moveSession(sessionId, info.directory);
           return;
         }
+        case 'session.unarchived':
+          return trackLifecycleEvent(sessionId, null);
         case 'session.deleted':
           clearTimeout(liveTimers.get(sessionId));
           liveTimers.delete(sessionId);
           liveQueue.delete(sessionId);
           backfillQueue.delete(sessionId);
           store.deleteSession(sessionId);
+          recordSessionDeletion(sessionId);
           return;
         default:
       }
@@ -342,12 +464,22 @@ export const createMessageSearchIndexer = ({
       void startBackfill();
     },
 
+    processArchiveEvent(payload) {
+      if (stopped) return;
+      const event = archivedEventSchema.safeParse(payload);
+      if (!event.success) return;
+      return trackLifecycleEvent(event.data.data.sessionID, event.data.created);
+    },
+
     status() {
       return { backfill: { ...backfill, queued: backfillQueue.size }, ...store.counts() };
     },
 
-    /** Test seam: wait for the queue to drain. */
-    idle: () => draining ?? Promise.resolve(),
+    /** Test seam and shutdown barrier: wait for indexing and lifecycle overlays. */
+    idle: async () => {
+      await (draining ?? Promise.resolve());
+      while (pendingLifecycleWork.size > 0) await Promise.all(pendingLifecycleWork);
+    },
 
     syncSession,
 

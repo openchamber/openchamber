@@ -5,6 +5,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import {
   buildSessionRetentionCandidates,
+  inWorkKeepsSessions,
   isSessionKeptByUser,
   RETENTION_INTERVAL_MS,
   RETENTION_KEEP_RECENT,
@@ -33,10 +34,16 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
   const isRunning = useSessionRetentionRunStore((state) => state.isRunning);
   // Pin changes must refresh the Settings preview of what cleanup would take.
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
+  const workKeeps = useUIStore(inWorkKeepsSessions);
 
   React.useEffect(() => {
-    if (needsGlobalSessions) void ensureGlobalSessionsLoaded();
-  }, [needsGlobalSessions]);
+    if (!needsGlobalSessions) return;
+    // An automatic run reads the complete list only when one is due: a root
+    // that does not otherwise keep that list (Mini Chat) would read it on
+    // every open. The Settings preview always needs it.
+    if (autoRun && autoDeleteLastRunAt && Date.now() - autoDeleteLastRunAt < RETENTION_INTERVAL_MS) return;
+    void ensureGlobalSessionsLoaded();
+  }, [needsGlobalSessions, autoRun, autoDeleteLastRunAt]);
 
   const candidates = React.useMemo(() => buildSessionRetentionCandidates({
     sessions: [...activeSessions, ...archivedSessions],
@@ -45,8 +52,8 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
     action,
     onlyArchived,
     activeSessionIds,
-    isKept: (session) => isSessionKeptByUser(session, pinnedIds),
-  }), [activeSessions, archivedSessions, currentSessionId, autoDeleteAfterDays, action, onlyArchived, activeSessionIds, pinnedIds]);
+    isKept: (session) => isSessionKeptByUser(session, pinnedIds, workKeeps),
+  }), [activeSessions, archivedSessions, currentSessionId, autoDeleteAfterDays, action, onlyArchived, activeSessionIds, pinnedIds, workKeeps]);
 
   React.useEffect(() => {
     if (!enabled || !autoRun || !autoDeleteEnabled || autoDeleteAfterDays <= 0

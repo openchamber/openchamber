@@ -4,11 +4,27 @@ import type { BtwSelection } from '@/stores/useBtwStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSession } from '@/sync/sync-context';
 
+// OpenCode records a session switched without an effort as variant
+// `"default"` (see `isSameModelRef`); that is no effort, not one named so.
+const isNoEffort = (variant: string) => variant === 'default';
+
+const recordVariant = (record: Pick<Session, 'model'> | undefined): string | undefined => {
+    const variant = record?.model?.variant?.trim();
+    return variant && !isNoEffort(variant) ? variant : undefined;
+};
+
+// Older pickers could save the record's `"default"` as a pick; it is an
+// explicit Default, so it keeps winning over the record as `null` does.
+const savedPick = (variant: string | null): string | null => (
+    variant !== null && isNoEffort(variant.trim()) ? null : variant
+);
+
 /**
  * What a pinned composer sends with: the picks saved for its session first,
  * then the session record, which is what OpenCode 2 runs the next prompt on.
  * An effort saved for the picked agent and model wins over the record's; an
- * effort saved as `null` is an explicit "Default".
+ * effort saved as `null` (or as OpenCode's `"default"`) is an explicit
+ * "Default".
  */
 export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVariant, record }: {
     savedAgent: string | null;
@@ -22,7 +38,7 @@ export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVa
     return {
         agent: savedAgent ?? (record?.agent?.trim() || undefined),
         model: savedModel ?? recordModel,
-        variant: savedVariant !== undefined ? savedVariant : record?.model?.variant?.trim() || undefined,
+        variant: savedVariant !== undefined ? savedPick(savedVariant) : recordVariant(record),
     };
 };
 

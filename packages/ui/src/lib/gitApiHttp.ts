@@ -22,6 +22,7 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  TeardownGitWorktreePayload,
   GitWorktreeSnapshotPayload,
   GitWorktreeSnapshotResult,
   ArchiveGitWorktreePayload,
@@ -72,11 +73,15 @@ import { getRuntimeKey } from './runtime-switch';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
+import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from './gitRepositoryUnreadable';
 
 const API_BASE = '/api/git';
+const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
 const gitRangeDiffSchema = z.object({ diff: z.string() });
-const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), revision: z.string().optional() })) });
+const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), previousPath: z.string().optional(), revision: z.string().optional() })) });
 const gitRangeErrorSchema = z.object({ error: z.string() });
+// `/api/git/status` when Git could not tell whether the directory is a repository.
+const gitRepositoryUnreadableBodySchema = z.object({ error: z.string(), code: z.literal(GIT_REPOSITORY_UNREADABLE) });
 const gitCommitFilesSchema = z.object({ files: z.array(z.object({
   path: z.string(), previousPath: z.string().optional(), changeType: z.string(),
   insertions: z.number(), deletions: z.number(), isBinary: z.boolean(),
@@ -369,6 +374,7 @@ const operationErrorCodeSchema = z.enum([
     'STALE_BINDING',
     'STALE_CONFIG',
     'REMOTE_CHANGED',
+    'REMOTE_URL_USERINFO',
     'AUTHENTICATION_REQUIRED',
     'DESTINATION_SELECTION_REQUIRED',
     'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
@@ -381,6 +387,8 @@ const operationErrorCodeSchema = z.enum([
     'RUNTIME_UNSUPPORTED',
     'GIT_LFS_CLIENT_MISSING',
     'CHECKOUT_TOO_LARGE',
+    'PATH_LENGTH_LIMIT',
+    'BRANCH_NAME_CONFLICT',
     'UNKNOWN',
   ]);
 const operationErrorSchema = <const Code extends readonly [string, ...string[]]>(codes: Code) => z.object({
@@ -824,6 +832,8 @@ type ProjectOverviewResponse = {
   worktrees?: GitWorktreeInfo[] | null;
   errors?: string[];
   error?: string;
+  /** `GIT_REPOSITORY_UNREADABLE` when Git could not answer for the directory. */
+  code?: string;
 };
 
 type ProjectOverviewWaiter = {
@@ -950,7 +960,9 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
       if (!overview) {
         waiter.reject(new Error('Project repository read missing from batch response'));
       } else if (overview.error) {
-        waiter.reject(new Error(overview.error));
+        waiter.reject(overview.code === GIT_REPOSITORY_UNREADABLE
+          ? new GitRepositoryUnreadableError(overview.error)
+          : new Error(overview.error));
       } else if (overview.errors?.includes(batch.field)) {
         waiter.reject(new Error(`Failed to read project ${batch.field}`));
       } else {
@@ -1093,6 +1105,8 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
     // list warms this cache through `prefetchProjectStatuses` instead.
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
+      const unreadable = gitRepositoryUnreadableBodySchema.safeParse(await response.json().catch(() => null));
+      if (unreadable.success) throw new GitRepositoryUnreadableError(unreadable.data.error);
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
     // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
@@ -1178,7 +1192,7 @@ export async function getGitCommitSummaries(
 }
 
 export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse> {
-  const { path, staged, contextLines } = options;
+  const { path, staged, contextLines, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git diff');
   }
@@ -1188,6 +1202,7 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
       path,
       staged: staged ? 'true' : undefined,
       context: contextLines,
+      previousPath: previousPath || undefined,
     })
   );
 
@@ -1226,7 +1241,7 @@ export async function getGitRangeDiff(
   directory: string,
   options: GetGitRangeDiffOptions
 ): Promise<GitDiffResponse> {
-  const { base, head, path, contextLines, includeWorkingTree } = options;
+  const { base, head, path, contextLines, includeWorkingTree, previousPath } = options;
   if (!base || !head) {
     throw new Error('base and head are required to fetch git range diff');
   }
@@ -1238,6 +1253,7 @@ export async function getGitRangeDiff(
       path: path || undefined,
       context: contextLines,
       includeWorkingTree,
+      previousPath: previousPath || undefined,
     })
   );
 
@@ -1299,7 +1315,7 @@ export async function getBranchBase(
 }
 
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {
-  const { path, staged } = options;
+  const { path, staged, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git file diff');
   }
@@ -1308,6 +1324,7 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
     buildUrl(`${API_BASE}/file-diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
+      previousPath: previousPath || undefined,
     })
   );
 
@@ -1681,13 +1698,29 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
     body: JSON.stringify(payload ?? {}),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to delete worktree');
-  }
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to delete worktree');
 
   return response.json();
 }
+
+/** Runs the worktree's teardown commands and keeps it. */
+export async function teardownGitWorktree(directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/teardown`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to tear down worktree');
+  return response.json();
+}
+
+// A failed teardown carries its code, so the delete can offer to go on without it.
+const throwWorktreeTeardownAwareError = async (response: Response, fallback: string): Promise<never> => {
+  const body = z.object({ error: z.string().optional(), code: z.string().optional() }).catch({})
+    .parse(await response.json().catch(() => null));
+  const message = body.error || response.statusText || fallback;
+  throw body.code ? new GitWorktreeRequestError(body.code, message, response.status) : new Error(message);
+};
 
 const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
 
@@ -2190,17 +2223,35 @@ export async function getCommitFiles(
   return gitCommitFilesSchema.parse(await response.json());
 }
 
+export async function getGitRangeFileVersions(
+  directory: string,
+  options: { base: string; head: string; path: string; previousPath?: string; includeWorkingTree?: boolean },
+): Promise<{ original: string; modified: string }> {
+  const { base, head, path, previousPath, includeWorkingTree } = options;
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/range-file-versions`, directory, {
+    base,
+    head,
+    path,
+    previousPath,
+    includeWorkingTree: includeWorkingTree ? 'true' : undefined,
+  }));
+  if (!response.ok) throw await rangeResponseError(response, 'Failed to read file versions');
+  return gitFileVersionsSchema.parse(await response.json());
+}
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<CommitFileDiffResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
       hash,
       path: filePath,
       binary: isBinary ? 'true' : undefined,
+      previousPath,
     })
   );
   if (!response.ok) {

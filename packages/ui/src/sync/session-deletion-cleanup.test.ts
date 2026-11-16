@@ -12,7 +12,7 @@ import { cleanupPersistedSessionState } from './session-deletion-cleanup';
 describe('cleanupPersistedSessionState', () => {
   beforeEach(() => {
     useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {} });
-    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInlineCommentDraftStore.setState({ drafts: {} });
     useSessionFoldersStore.setState({ foldersMap: {}, collapsedFolderIds: new Set() });
     useInputHistoryStore.setState({ globalBuckets: {}, sessionBuckets: {}, scope: 'session' });
     useSessionMultiSelectStore.getState().disable();

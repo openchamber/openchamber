@@ -56,7 +56,7 @@ export const MobileSwipeActionsRow: React.FC<{
   const sign = direction === 'rtl' ? -1 : 1;
   const contentRef = React.useRef<HTMLDivElement>(null);
   const actionsRef = React.useRef<HTMLDivElement>(null);
-  const startRef = React.useRef<{ x: number; y: number } | null>(null);
+  const startRef = React.useRef<{ x: number; y: number; width: number } | null>(null);
   const draggingRef = React.useRef(false);
   const offsetRef = React.useRef(0);
   const revealedRef = React.useRef(revealed);
@@ -67,7 +67,8 @@ export const MobileSwipeActionsRow: React.FC<{
     // A row sliding shut keeps its actions until the slide ends.
     setActionsShown(actionsRef.current, px !== 0 || (animate && px !== offsetRef.current));
     el.style.transition = animate ? `transform ${ROW_SWIPE_SNAP_MS}ms ease-out` : 'none';
-    el.style.transform = px === 0 ? 'none' : `translateX(${px * sign}px)`;
+    // CSS keeps an open strip within the row after a sidebar resize too.
+    el.style.transform = px === 0 ? 'none' : `translateX(${sign === -1 ? 'max' : 'min'}(${px * sign}px, ${100 * sign}%))`;
     offsetRef.current = px;
   }, [sign]);
 
@@ -85,7 +86,7 @@ export const MobileSwipeActionsRow: React.FC<{
   const handleTouchStart = (event: React.TouchEvent) => {
     if (event.touches.length !== 1) return;
     const touch = event.touches[0];
-    startRef.current = { x: touch.clientX, y: touch.clientY };
+    startRef.current = { x: touch.clientX, y: touch.clientY, width: Math.min(actionsWidth, event.currentTarget.clientWidth) };
     draggingRef.current = false;
   };
 
@@ -98,15 +99,17 @@ export const MobileSwipeActionsRow: React.FC<{
       if (Math.abs(dx) < 8 || Math.abs(dx) <= Math.abs(dy)) return;
       draggingRef.current = true;
     }
-    const base = revealedRef.current ? actionsWidth : 0;
-    applyOffset(Math.max(0, Math.min(actionsWidth, base + dx)), false);
+    const width = startRef.current.width;
+    const base = revealedRef.current ? width : 0;
+    applyOffset(Math.max(0, Math.min(width, base + dx)), false);
   };
 
   const handleTouchEnd = () => {
+    const start = startRef.current;
     startRef.current = null;
-    if (!draggingRef.current) return;
+    if (!draggingRef.current || !start) return;
     draggingRef.current = false;
-    const shouldReveal = offsetRef.current > actionsWidth / 2;
+    const shouldReveal = offsetRef.current > start.width / 2;
     applyOffset(shouldReveal ? actionsWidth : 0, true);
     if (shouldReveal !== revealedRef.current) onRevealedChange(shouldReveal);
   };
@@ -124,7 +127,7 @@ export const MobileSwipeActionsRow: React.FC<{
       // Vertical panning stays native; horizontal moves reach the swipe handler.
       style={{ touchAction: 'pan-y' }}
     >
-      <div ref={actionsRef} className="absolute inset-y-0 inset-s-0 flex items-stretch" style={{ width: actionsWidth }} aria-hidden={!revealed}>
+      <div ref={actionsRef} className="absolute inset-y-0 inset-s-0 flex items-stretch" style={{ width: actionsWidth, maxWidth: '100%' }} aria-hidden={!revealed}>
         {actions}
       </div>
       {/* The row keeps its rounded shape while it slides away from its actions. */}

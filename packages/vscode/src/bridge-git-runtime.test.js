@@ -133,6 +133,25 @@ describe('bridge git runtime index mutations', () => {
     expect(gitService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
   });
 
+  it('passes a branch name conflict and its sentence through the status response', async () => {
+    const bootstrapStatus = {
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'Git could not create the worktree branch: its name clashes with an existing branch.',
+      errorCode: 'BRANCH_NAME_CONFLICT',
+      updatedAt: 123,
+    };
+    gitService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'bootstrap-status',
+      type: 'api:git/worktrees/bootstrap-status',
+      payload: { directory: '/repo-worktree' },
+    });
+
+    expect(response?.data).toEqual(bootstrapStatus);
+  });
+
   it('preserves the directory-created phase in fast create responses', async () => {
     const created = {
       head: '',

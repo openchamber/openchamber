@@ -3,7 +3,7 @@ import { cn, formatPathForDisplay } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
 import { useRoutingStore } from '@/stores/useRoutingStore';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,8 @@ import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
 import { permissionFilePreviewsSchema } from './permissionFilePreviews';
-import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
@@ -133,7 +134,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
       return (
         <>
           {description && (
-            <div className="typography-meta text-muted-foreground mb-2">{description}</div>
+            <div dir="auto" className="typography-meta text-muted-foreground mb-2">{description}</div>
           )}
           {workingDir && (
             <div className="typography-meta text-muted-foreground mb-2">
@@ -148,7 +149,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
           {}
           {bashCommand && (
             <div>
-              <WorkerHighlightedCode
+              <HighlightedCode
                 language="bash"
                 code={bashCommand}
                 style={PERMISSION_BASH_CUSTOM_STYLE}
@@ -226,7 +227,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.headers')}</div>
               <ScrollableOverlay outerClassName="max-h-24" className="p-0">
-                <WorkerHighlightedCode
+                <HighlightedCode
                   language="json"
                   code={JSON.stringify(headers, null, 2)}
                   style={PERMISSION_JSON_CUSTOM_STYLE}
@@ -239,7 +240,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
             <div className="mb-2">
               <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.body')}</div>
               <ScrollableOverlay outerClassName="max-h-32" className="p-0">
-                <WorkerHighlightedCode
+                <HighlightedCode
                   language={typeof body === 'object' ? 'json' : 'text'}
                   code={typeof body === 'object' ? JSON.stringify(body, null, 2) : String(body)}
                   style={PERMISSION_JSON_CUSTOM_STYLE}
@@ -265,13 +266,13 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
     return (
       <>
         {description && (
-          <div className="typography-meta text-muted-foreground mb-2">{description}</div>
+          <div dir="auto" className="typography-meta text-muted-foreground mb-2">{description}</div>
         )}
         {genericContent && (
           <div className="mb-2">
             <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.action')}</div>
             <ScrollableOverlay outerClassName="max-h-32" className="p-0">
-              <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
+              <pre dir="ltr" className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
                 {String(genericContent)}
               </pre>
             </ScrollableOverlay>
@@ -285,7 +286,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
               {t('chat.permissionCard.showDetails')}
             </summary>
             <ScrollableOverlay outerClassName="mt-1 max-h-32" className="p-0">
-              <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
+              <pre dir="ltr" className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
                 {JSON.stringify(metadata, null, 2)}
               </pre>
             </ScrollableOverlay>
@@ -310,7 +311,7 @@ export const PermissionRequestContent: React.FC<{ permission: PermissionRequest 
       <div className="px-2 py-2">
         {/* v2 lets the agent explain in its own words why it needs this. */}
         {permission.message ? (
-          <div className="typography-meta text-foreground/80 mb-2 whitespace-pre-wrap break-words">
+          <div dir="auto" className="typography-meta text-foreground/80 mb-2 whitespace-pre-wrap break-words">
             {permission.message}
           </div>
         ) : null}
@@ -370,6 +371,11 @@ export const PermissionActions: React.FC<{
   const always = useAlwaysLabel(permission);
   const hasSave = always.full !== undefined;
   const canSave = canSavePermission(permission.save);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const shortcutHint = (actionId: ShortcutActionId) => {
+    const shortcut = formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides), '');
+    return shortcut ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{shortcut}</kbd> : null;
+  };
 
   if (variant === 'dock') {
     return (
@@ -377,20 +383,20 @@ export const PermissionActions: React.FC<{
         <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => onRespond('reject')} className="text-[var(--status-error)]">
           <Icon name="close" className="size-3.5" />
           {t('chat.permissionCard.deny')}
-          <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+          {shortcutHint('permission_deny')}
         </Button>
         <div className="min-w-0 flex-1" />
         {canSave ? (
           <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full}>
             <Icon name="time" className="size-3.5" />
             <span className="max-w-[180px] truncate">{always.label}</span>
-            {!hasSave ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+            {!hasSave ? shortcutHint('permission_allow_always') : null}
           </Button>
         ) : null}
         <Button size="xs" disabled={isResponding} onClick={() => onRespond('once')}>
           {isResponding ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="check" className="size-3.5" />}
           {t('chat.permissionCard.allowOnce')}
-          <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+          {shortcutHint('permission_allow_once')}
         </Button>
       </div>
     );
@@ -410,7 +416,7 @@ export const PermissionActions: React.FC<{
       >
         <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
         {t('chat.permissionCard.allowOnce')}
-        <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+        {shortcutHint('permission_allow_once')}
       </button>
 
       {canSave ? (
@@ -422,7 +428,7 @@ export const PermissionActions: React.FC<{
         >
           <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
           <span className="truncate max-w-[180px]">{always.label}</span>
-          {!hasSave ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+          {!hasSave ? shortcutHint('permission_allow_always') : null}
         </button>
       ) : null}
 
@@ -433,7 +439,7 @@ export const PermissionActions: React.FC<{
       >
         <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
         {t('chat.permissionCard.deny')}
-        <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+        {shortcutHint('permission_deny')}
       </button>
 
       {isResponding && (
@@ -475,7 +481,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onRe
               </div>
               <div className="flex items-center gap-1.5">
                 {tool.icon}
-                <span className="typography-meta text-muted-foreground font-medium">{tool.name}</span>
+                <span dir="auto" className="typography-meta text-muted-foreground font-medium">{tool.name}</span>
               </div>
             </div>
           </div>

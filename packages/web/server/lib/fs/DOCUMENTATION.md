@@ -24,8 +24,11 @@ The interval reopens the watcher before checking, so Linux/Windows folder deleti
     - `GET /api/fs/stat`
     - `GET /api/fs/directory-stat`
     - `POST /api/fs/directory-stats` — the batched form of `directory-stat`:
-      one request answers `{ results: [{ path, isDirectory, reason? }] }` for
+      one request answers `{ results: [{ path, isDirectory, reason?, realPath? }] }` for
       many paths with the same reason codes, isolating per-path failures.
+      A directory also carries `realPath`, the path with links followed, when
+      `realpath` resolves it: settings store a project under that path, so the
+      Add project dialog uses it to show a link to an added project as added.
     - `POST /api/fs/preview`
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`
@@ -84,6 +87,19 @@ names.
 `dist`, excludes only `.git` and `node_modules`, and removes the icon walk's
 10,000-file ceiling. A 30-second deadline fails the search rather than returning
 an unmarked partial answer. Default icon discovery keeps its existing bounds.
+
+When the client closes the response (a new letter aborted the request) the walk
+stops at its next batch, starts no more Git reads, kills the running one and
+sends nothing. Typing a name otherwise leaves one whole-tree walk per letter
+running at once. VS Code stops its own walk through `api:fs:search:abort`.
+
+### Why a stopped walk kills Git without `taskkill /T`
+
+On Windows the spawned `git.exe` is Git for Windows' launcher, so the kill leaves
+the real `git` to finish that one read, about 250 ms in a 20,000-file checkout.
+`taskkill` would start one more process per stopped read, on a path that exists
+to start fewer. The Git service's untracked listing uses it because that listing
+can walk for a minute.
 
 ### Why workspace search reads ignored paths per repository
 
@@ -186,4 +202,4 @@ The Git service validates a selected commit identity before planning or spawning
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
 - `routes.js` and the sibling modules it imports (`byte-range.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
-- `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.
+- `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. An oversized body is rejected with `413` carrying `reason: 'too-large'` and the effective `maxBytes`, so a client can name the limit it hit. A path that resolves outside the workspace is rejected with `403` carrying `reason: 'outside-workspace'`. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.

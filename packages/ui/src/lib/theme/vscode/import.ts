@@ -6,7 +6,9 @@ import { mixColor, onColor, readableText } from '../color';
 import { MAX_THEME_IMPORT_BYTES, ThemeImportError } from '../importErrors';
 
 const hex = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
-const tokenSettings = z.object({ foreground: hex.optional() });
+// VS Code reads an empty color as unset; published themes (Monokai Pro) ship such keys.
+const unsetColor = z.literal('').transform(() => undefined);
+const tokenSettings = z.object({ foreground: z.union([hex, unsetColor]).optional() });
 const tokenRule = z.object({ scope: z.union([z.string(), z.array(z.string())]).optional(), settings: tokenSettings });
 const sourceSchema = z.object({
   name: z.string().trim().min(1).max(160).optional(),
@@ -14,7 +16,16 @@ const sourceSchema = z.object({
   description: z.string().max(1024).optional(),
   type: z.enum(['light', 'dark', 'hc', 'hc-black', 'hc-light']).optional(),
   include: z.string().optional(),
-  colors: z.record(z.string(), hex.nullable()).default({}),
+  // VS Code ignores a color it cannot read: an empty string, or an array where
+  // GitHub Theme meant one color. Such entries count as unset.
+  colors: z.record(z.string(), z.unknown()).default({}).transform((colors) => {
+    const readable: Record<string, string> = {};
+    for (const [key, value] of Object.entries(colors)) {
+      const color = hex.safeParse(value);
+      if (color.success) readable[key] = color.data;
+    }
+    return readable;
+  }),
   tokenColors: z.union([z.array(tokenRule), z.string()]).optional(),
   semanticHighlighting: z.boolean().optional(),
   semanticTokenColors: z.record(z.string(), z.union([hex, tokenSettings])).optional(),
@@ -76,10 +87,7 @@ export function importVSCodeTheme(text: string, filename: string): ThemeDefiniti
   const rules = z.array(tokenRule).safeParse(source.tokenColors ?? []);
   if (source.include || !rules.success) throw new ThemeImportError('include');
 
-  const colors: Record<string, string> = {};
-  for (const [key, color] of Object.entries(source.colors)) {
-    if (color !== null) colors[key] = color;
-  }
+  const colors = { ...source.colors };
   const authoredBackground = colors['editor.background'];
   if (!authoredBackground) throw new ThemeImportError('background');
   const dark = source.type ? ['dark', 'hc', 'hc-black'].includes(source.type) : onColor(authoredBackground, '#ffffff') === '#ffffff';

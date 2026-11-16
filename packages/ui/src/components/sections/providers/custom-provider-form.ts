@@ -73,16 +73,42 @@ export type HeaderRow = {
   value: string;
 };
 
+/** What Save does with the uploaded logo image. */
+export type CustomProviderLogoPlan =
+  | { kind: 'keep' }
+  | { kind: 'remove' }
+  | { kind: 'upload'; file: File };
+
+/**
+ * The client certificate a gateway with mutual TLS asks for, as the form
+ * shows it: `cert` and `key` are file paths (stored as `{file:path}`), or a
+ * stored value that is not a file reference, shown as written. Empty strings
+ * mean no certificate.
+ */
+export type ClientCertificateFields = {
+  cert: string;
+  key: string;
+  passphrase: string;
+};
+
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
   /** Null keeps the provider's own logo or the generic fallback. */
   icon: CustomProviderIcon | null;
+  /** The logo image: a file picked here, the stored one cleared, or null for whatever is stored. Wins over `icon`. */
+  logo: File | 'removed' | null;
   protocol: CustomProviderProtocol;
   baseURL: string;
   apiKey: string;
   models: ModelRow[];
   headers: HeaderRow[];
+  /**
+   * Null while the stored entry is unknown (its read is pending or failed):
+   * the fields show empty, and a save leaves the stored certificate alone
+   * until the user types into them.
+   */
+  tls: ClientCertificateFields | null;
 };
 
 export type FieldErrors = {
@@ -90,6 +116,8 @@ export type FieldErrors = {
   name?: string;
   baseURL?: string;
   apiKey?: string;
+  tlsCert?: string;
+  tlsKey?: string;
 };
 
 export type ModelFieldErrors = {
@@ -110,10 +138,18 @@ export type CustomProviderConfig = {
   env?: string[];
   settings: {
     baseURL: string;
+    /**
+     * OpenCode 2.3.0+: presented on every model request of the provider. Null
+     * removes a stored certificate; absent keeps it.
+     */
+    tls?: StoredClientCertificate | null;
   };
   headers?: Record<string, string>;
   models: Record<string, CustomProviderModelConfig>;
 };
+
+/** `settings.tls` as OpenCode reads it: PEM text, usually `{file:path}` references. */
+export type StoredClientCertificate = { cert: string; key: string; passphrase?: string };
 
 export type CustomProviderModelConfig = {
   modelID: string;
@@ -128,6 +164,7 @@ export type CustomProviderPersistPlan = {
   providerID: string;
   name: string;
   icon: CustomProviderIcon | null;
+  logo: CustomProviderLogoPlan;
   /** Literal API key stored as an OpenCode credential after the config write; omitted when using {env:VAR} or empty. */
   apiKey?: string;
   /** Edit without a new key or env: the provider keeps the credential OpenCode already holds. */
@@ -302,16 +339,85 @@ export const createHeaderRow = (): HeaderRow => ({
   value: '',
 });
 
+export const EMPTY_CLIENT_CERTIFICATE: ClientCertificateFields = { cert: '', key: '', passphrase: '' };
+
 export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   providerID: '',
   name: '',
   icon: null,
+  logo: null,
   protocol: 'openai-chat',
   baseURL: '',
   apiKey: '',
   models: [createModelRow()],
   headers: [createHeaderRow()],
+  tls: EMPTY_CLIENT_CERTIFICATE,
 });
+
+const FILE_REFERENCE_PATTERN = /^\{file:([^}]+)\}$/;
+
+/** `settings.tls` as a config file may hold it: every field optional, anything else ignored. */
+const storedTlsSchema = z.object({
+  cert: z.string().optional(),
+  key: z.string().optional(),
+  passphrase: z.string().optional(),
+});
+type StoredTlsFields = z.infer<typeof storedTlsSchema>;
+
+/** A stored `cert`/`key` value as the field shows it: the path of a `{file:...}` reference, anything else as written. */
+const clientCertificateFieldOf = (value: string | undefined): string => {
+  if (value === undefined) return '';
+  return value.trim().match(FILE_REFERENCE_PATTERN)?.[1]?.trim() ?? value;
+};
+
+/**
+ * A `cert`/`key` field as stored: a path becomes a `{file:...}` reference,
+ * while a reference (`{env:...}`, `{file:...}`) or inline PEM text stays.
+ */
+const storedClientCertificateValueOf = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('{') || trimmed.includes('-----BEGIN')) return trimmed;
+  return `{file:${trimmed}}`;
+};
+
+/**
+ * A typed path OpenCode would read beside its config file, which model
+ * discovery cannot: only full paths (`/…`, `~/…`, `C:\…`, `\\server\…`) are
+ * taken, so both read the same file.
+ */
+const isRelativeCertificatePath = (value: string): boolean => {
+  const trimmed = value.trim();
+  const path = trimmed.match(FILE_REFERENCE_PATTERN)?.[1]?.trim()
+    ?? (trimmed.startsWith('{') || trimmed.includes('-----BEGIN') ? '' : trimmed);
+  return Boolean(path) && !/^(\/|~\/|[A-Za-z]:[\\/]|\\\\)/.test(path);
+};
+
+const clientCertificateFieldsOf = (stored: StoredTlsFields | undefined): ClientCertificateFields => {
+  if (!stored) return EMPTY_CLIENT_CERTIFICATE;
+  return {
+    cert: clientCertificateFieldOf(stored.cert),
+    key: clientCertificateFieldOf(stored.key),
+    passphrase: stored.passphrase ?? '',
+  };
+};
+
+/**
+ * The certificate the form holds, in the shape OpenCode stores: null when the
+ * fields are empty (no certificate), undefined when the stored one is unknown
+ * and stays as it is. A literal passphrase is kept byte for byte.
+ */
+export const storedClientCertificateOf = (
+  fields: ClientCertificateFields | null,
+): StoredClientCertificate | null | undefined => {
+  if (fields === null) return undefined;
+  const cert = storedClientCertificateValueOf(fields.cert);
+  const key = storedClientCertificateValueOf(fields.key);
+  const passphrase = fields.passphrase.trim() ? fields.passphrase : '';
+  if (!cert && !key && !passphrase) return null;
+  const stored: StoredClientCertificate = { cert, key };
+  if (passphrase) stored.passphrase = passphrase;
+  return stored;
+};
 
 /**
  * The live provider list reports OpenCode's own implementation of an `aisdk:`
@@ -490,11 +596,13 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
     icon: null,
+    logo: null,
     protocol: protocolFromPackage(readPackage(provider) ?? modelPackage),
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
     models,
     headers: headerRows.length > 0 ? headerRows : [createHeaderRow()],
+    tls: clientCertificateFieldsOf(storedTlsSchema.safeParse(settings.tls).data),
   };
 }
 
@@ -554,7 +662,15 @@ export function providerToEditFormState(
     : live.models;
   const liveState = providerToCustomFormState({ ...live, models: liveModels });
   if (!stored) {
-    return { ...liveState, icon, models: liveState.models.map((model) => ({ ...model, savedVariants: undefined })) };
+    // The live provider's certificate is what OpenCode resolved (the PEM
+    // text itself), so the form never starts from it; with the stored entry
+    // unknown, a save keeps whatever certificate it holds.
+    return {
+      ...liveState,
+      icon,
+      models: liveState.models.map((model) => ({ ...model, savedVariants: undefined })),
+      tls: null,
+    };
   }
 
   const storedState = providerToCustomFormState({ ...stored, id: live.id });
@@ -562,6 +678,7 @@ export function providerToEditFormState(
     providerID: live.id,
     name: stored.name?.trim() ? storedState.name : liveState.name,
     icon,
+    logo: null,
     protocol: stored.package ? storedState.protocol : liveState.protocol,
     baseURL: storedState.baseURL || liveState.baseURL,
     // The live `env` and headers may come from a built-in provider this one
@@ -571,6 +688,7 @@ export function providerToEditFormState(
       ? storedState.models
       : liveState.models.map((model) => ({ ...model, savedVariants: undefined })),
     headers: storedState.headers,
+    tls: storedState.tls,
   };
 }
 
@@ -696,14 +814,27 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       .map((header) => [header.key, header.value]),
   );
 
+  // OpenCode presents a certificate only with its key, so both or neither.
+  const tls = storedClientCertificateOf(input.form.tls);
+  const certificatePathError = (field: string): string | undefined => {
+    if (!tls) return undefined;
+    if (!field.trim()) return input.t('settings.providers.page.custom.error.tls.incomplete');
+    return isRelativeCertificatePath(field) ? input.t('settings.providers.page.custom.error.tls.relativePath') : undefined;
+  };
+  const tlsCertError = certificatePathError(input.form.tls?.cert ?? '');
+  const tlsKeyError = certificatePathError(input.form.tls?.key ?? '');
+
   const err: FieldErrors = {
     providerID: idError ?? existsError,
     name: nameError,
     baseURL: urlError,
     apiKey: apiKeyError,
+    tlsCert: tlsCertError,
+    tlsKey: tlsKeyError,
   };
 
-  const ok = !idError && !existsError && !nameError && !urlError && !apiKeyError && modelsValid && headersValid;
+  const ok = !idError && !existsError && !nameError && !urlError && !apiKeyError && !tlsCertError && !tlsKeyError
+    && modelsValid && headersValid;
   if (!ok) {
     return { err, models: modelErrors, headers: headerErrors };
   }
@@ -716,6 +847,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       providerID,
       name,
       icon: input.form.icon,
+      logo: logoPlanOf(input.form.logo),
       apiKey: key,
       ...(!env && !key ? { keepsStoredCredential: true } : {}),
       config: buildCustomProviderConfig({
@@ -723,11 +855,20 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
         name,
         env,
         baseURL,
+        tls,
         headers: headerConfig,
         models: modelConfig,
       }),
     },
   };
+}
+
+// Only what the user did in the field changes the stored image; an untouched
+// field keeps whatever is stored, including a logo another client just uploaded.
+function logoPlanOf(logo: CustomProviderFormState['logo']): CustomProviderLogoPlan {
+  if (logo === null) return { kind: 'keep' };
+  if (logo === 'removed') return { kind: 'remove' };
+  return { kind: 'upload', file: logo };
 }
 
 function parsePositiveInteger(value: string): number | undefined {
@@ -742,6 +883,7 @@ function buildCustomProviderConfig(input: {
   name: string;
   env?: string;
   baseURL: string;
+  tls?: StoredClientCertificate | null;
   headers: Record<string, string>;
   models: Record<string, CustomProviderModelConfig>;
 }): CustomProviderConfig {
@@ -751,6 +893,7 @@ function buildCustomProviderConfig(input: {
     settings: { baseURL: input.baseURL },
     models: input.models,
   };
+  if (input.tls !== undefined) config.settings.tls = input.tls;
   if (input.env) config.env = [input.env];
   if (Object.keys(input.headers).length > 0) config.headers = input.headers;
   return config;

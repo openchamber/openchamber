@@ -11,6 +11,7 @@ const GENERIC_NOTIFICATION_TITLES = {
   'browser-help': 'Agent needs you in the browser',
   review: 'Review finished',
   'pull-request': 'Pull request update',
+  'share-answer': 'A shared page was answered',
 };
 
 export const genericNotificationTitle = (kind) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';

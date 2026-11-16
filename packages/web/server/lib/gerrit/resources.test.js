@@ -353,6 +353,26 @@ describe('Gerrit mutations', () => {
     await expect(service.reconcileStateMutation(providerTarget, 'open')).resolves.toMatchObject({ state: 'failed' });
   });
 
+  it('marks a change work-in-progress, and reconciles it by the flag', async () => {
+    let workInProgress = false;
+    const { service, calls } = setup({
+      [`GET ${CHANGE}`]: () => ({ ...fixtures.change, work_in_progress: workInProgress }),
+      [`POST ${CHANGE}/wip`]: () => {
+        workInProgress = true;
+        return new Response('', { status: 200 });
+      },
+    });
+
+    await expect(service.draft({ providerTarget })).resolves.toEqual({ draft: true });
+    expect(calls.some((call) => call.method === 'POST' && call.url.pathname.endsWith('/wip'))).toBe(true);
+    await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toEqual({ state: 'succeeded', result: { draft: true } });
+
+    workInProgress = false;
+    await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toMatchObject({ state: 'failed' });
+  });
+
   it('reconciles submit by MERGED and ready by the work-in-progress flag', async () => {
     let raw = { ...fixtures.change, status: 'MERGED' };
     const { service } = setup({ [`GET ${CHANGE}`]: () => raw });

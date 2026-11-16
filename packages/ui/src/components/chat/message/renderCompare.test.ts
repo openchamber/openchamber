@@ -59,6 +59,17 @@ describe('completed-turn changed files', () => {
 });
 
 describe('running compaction', () => {
+  test('re-renders when compaction model attribution arrives or changes', () => {
+    const before = { ...running, status: 'completed' as const };
+    const after = { ...before, model: { providerID: 'p', id: 'm' } };
+    const changed = { ...after, model: { providerID: 'other', id: 'm' } };
+    const changedID = { ...after, model: { providerID: 'p', id: 'other' } };
+    expect(areRenderRelevantMessagesEqual({ info: before, parts: [] }, { info: after, parts: [] })).toBe(false);
+    expect(areRenderRelevantMessagesEqual({ info: after, parts: [] }, { info: changed, parts: [] })).toBe(false);
+    expect(areRenderRelevantMessagesEqual({ info: after, parts: [] }, { info: changedID, parts: [] })).toBe(false);
+    expect(areRenderRelevantMessagesEqual({ info: after, parts: [] }, { info: { ...after, model: { ...after.model } }, parts: [] })).toBe(true);
+  });
+
   const running: CompactionMessage = {
     id: 'msg_compact', sessionID: 'ses_1', role: 'compaction', time: { created: 1 }, status: 'running', reason: 'auto', summary: '',
   };

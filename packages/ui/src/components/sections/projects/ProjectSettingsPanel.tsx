@@ -10,7 +10,8 @@ import { ProjectGeneralTab } from '@/components/sections/projects/ProjectGeneral
 import { ProjectSettingsHeader } from '@/components/sections/projects/ProjectSettingsHeader';
 import { ProjectWorktreesTab } from '@/components/sections/projects/ProjectWorktreesTab';
 import { ProjectSuggestedTasksTab } from '@/components/sections/projects/ProjectSuggestedTasksTab';
-import type { ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { projectSettingsTabAnchors, type ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { SettingsNewBadge } from '@/components/sections/shared/SettingsSection';
 import { useProjectSetup } from '@/components/sections/projects/useProjectSetup';
 import {
   useProjectIdentityForm,
@@ -63,15 +64,14 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   const hasServer = !isVSCodeRuntime();
   const activeTab = (tab === 'environment' || tab === 'suggested') && !hasServer ? 'general' : tab;
 
-  const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
-    { id: 'general', label: t('settings.projects.tab.general') },
-    { id: 'actions', label: t('settings.projects.tab.actions') },
-    { id: 'worktrees', label: t('settings.projects.tab.worktrees') },
-    ...(hasServer ? [
-      { id: 'environment', label: t('settings.projects.tab.environment') },
-      { id: 'suggested', label: t('suggestedTasks.settings.tab') },
-    ] : []),
-  ], [hasServer, t]);
+  const tabs = React.useMemo<SortableTabsStripItem[]>(() => {
+    const ids: ProjectSettingsTab[] = ['general', 'actions', 'worktrees', ...(hasServer ? ['environment' as const, 'suggested' as const] : [])];
+    return ids.map((id) => ({
+      id,
+      label: t(id === 'suggested' ? 'suggestedTasks.settings.tab' : `settings.projects.tab.${id}`),
+      accessory: <SettingsNewBadge items={projectSettingsTabAnchors(id)} />,
+    }));
+  }, [hasServer, t]);
 
   const header = <ProjectSettingsHeader form={form} />;
   const tabStrip = (

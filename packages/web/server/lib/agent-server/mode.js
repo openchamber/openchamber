@@ -23,9 +23,10 @@ export const FRONT_DOOR_DISABLED_RUNTIMES = Object.freeze([
   'sessionKnowledge', 'sessionWork', 'sessionInterruption', 'autoResume', 'automationAdmission',
   'permissionAutoAccept', 'autoReview', 'messageQueue', 'prStackRestack',
   'dispatchResults', 'prWatch', 'mergeFollow', 'workflow', 'workflowAgentSessions',
-  'messageSearch', 'scheduledTasks', 'scheduledTaskService', 'suggestedTasks',
+  'messageSearch', 'scheduledTasks', 'scheduledTaskService', 'suggestedTasks', 'sessionTodos',
+  'extensionWaits', 'laterPages', 'sharePages', 'receivedPages',
   'browserControlBroker', 'browserControlRouter', 'agentTool', 'limitFailover', 'routing',
-  'managedConfig', 'guestServices', 'guestSurface', 'extensionSessionEvents',
+  'managedConfig', 'guestServices', 'guestSurface', 'extensionSessionEvents', 'extensionServiceLifetime', 'memoryDreaming',
   'extensionNotificationChannels', 'trackerSessionStatus', 'turnDurationRecorder',
   'projectContext', 'agentMemory', 'projectConfig', 'environment', 'terminal', 'devTunnel',
 ]);

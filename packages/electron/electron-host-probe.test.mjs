@@ -31,14 +31,16 @@ const baseProbe = (overrides = {}) => probeElectronHostWithDeadline({
 test('uses the Chromium transport as the authoritative ready-state transport', async () => {
   const calls = [];
   const result = await baseProbe({
-    chromiumFetch: async (url) => {
-      calls.push(url);
+    chromiumFetch: async (url, options) => {
+      calls.push({ url, cache: options.cache });
       return url.endsWith('/api/version') ? response(200, compatibleVersion) : response(200, {});
     },
   });
 
   assert.equal(result.status, 'ok');
-  assert.deepEqual(calls.map((url) => new URL(url).pathname), ['/api/version', '/auth/session']);
+  assert.deepEqual(calls.map(({ url }) => new URL(url).pathname), ['/api/version', '/auth/session']);
+  // Each answer comes from the server, never from Chromium's HTTP cache.
+  assert.deepEqual(calls.map(({ cache }) => cache), ['no-store', 'no-store']);
 });
 
 test('shares one absolute deadline across version and session requests', async () => {
@@ -69,6 +71,22 @@ test('shares one absolute deadline across version and session requests', async (
   assert.equal(scheduled, 1);
   assert.equal(new Set(signals).size, 1);
   assert.deepEqual(result, { status: 'unreachable', latencyMs: 2_000 });
+});
+
+test('reports one round trip, the last request, as the latency', async () => {
+  let clock = 0;
+  const result = await baseProbe({
+    expectedServerId: 'server-a',
+    now: () => clock,
+    chromiumFetch: async (url) => {
+      // Health and version take 300ms between them; the session request 40ms.
+      if (url.endsWith('/health')) { clock += 200; return response(200, { serverId: 'server-a' }); }
+      if (url.endsWith('/api/version')) { clock += 100; return response(200, compatibleVersion); }
+      clock += 40;
+      return response(200, {});
+    },
+  });
+  assert.deepEqual(result, { status: 'ok', latencyMs: 40 });
 });
 
 test('checks unauthenticated identity before sending sanitized bearer headers', async () => {

@@ -22,6 +22,9 @@ let effectiveDirectory: string | undefined = '/repo';
 type ZoneSizes = { right?: number };
 let zoneSizes: ZoneSizes = {};
 const TREE_WIDTH = 240;
+let sidebarOpen = true;
+/** The session sidebar as the document has it: drawn width and the width it was set to. */
+let sidebar: { drawn: number; set: number } | null = null;
 
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
@@ -29,6 +32,7 @@ mock.module('@/stores/useUIStore', () => ({
       contextPanelByDirectory: panelByDirectory,
       contextSurfaceZones: surfaceZones,
       workStatusPanelEnabled: panelEnabled,
+      isSidebarOpen: sidebarOpen,
       contextZoneSizes: zoneSizes,
       contextEditorVisible: true,
       contextEditorTreeVisible: true,
@@ -76,6 +80,9 @@ const installMinimalDom = () => {
     activeElement: null,
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
+    querySelector: () => (sidebar
+      ? { getBoundingClientRect: () => ({ width: sidebar?.drawn ?? 0 }), style: { width: `${sidebar.set}px` } }
+      : null),
   };
   const container = {
     nodeType: 1,
@@ -158,6 +165,8 @@ beforeEach(() => {
   panelEnabled = true;
   effectiveDirectory = '/repo';
   zoneSizes = {};
+  sidebarOpen = true;
+  sidebar = null;
   observed = [];
   notify = null;
 });
@@ -341,6 +350,33 @@ describe('useWorkStatusVisibility', () => {
     teardown();
   });
 
+  test('decides from the width the area settles at while the sidebar unfolds', () => {
+    panelByDirectory['/repo'] = { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' };
+    // Folded, the sidebar leaves the area room for the card beside the panel.
+    sidebarOpen = false;
+    sidebar = { drawn: 0, set: 0 };
+    const besidePanel = REQUIRED + CONTEXT_ZONE_DEFAULT_WIDTH;
+    const { result, rerender, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, besidePanel + 100);
+    expect(result.roomyBesidePanel).toBe(true);
+
+    // Told to unfold to 280 and not moved yet: the area will lose that room.
+    sidebarOpen = true;
+    sidebar = { drawn: 0, set: 280 };
+    rerender();
+    expect(result.roomyBesidePanel).toBe(false);
+    expect(result.roomy).toBe(true);
+
+    // Halfway there, and arrived: the same answer on every frame.
+    sidebar = { drawn: 140, set: 280 };
+    act(() => { notify?.([{ contentRect: { width: besidePanel - 40 } }]); });
+    expect(result.roomyBesidePanel).toBe(false);
+    sidebar = { drawn: 280, set: 280 };
+    act(() => { notify?.([{ contentRect: { width: besidePanel - 180 } }]); });
+    expect(result.roomyBesidePanel).toBe(false);
+
+    teardown();
+  });
+
   test('does not re-render while the width moves on one side of the threshold', () => {
     // A sidebar animation changes the chat area's width on every frame; only
     // crossing the threshold may re-render the chat that owns this hook.
@@ -442,20 +478,26 @@ describe('useWorkStatusVisibility', () => {
     teardown();
   });
 
-  test('stays hidden on mobile and in VS Code regardless of width', () => {
+  test('stays hidden on mobile regardless of width', () => {
     const mobile = renderVisibility(
       { isMobile: true, isVSCode: false },
       REQUIRED * 2,
     );
     expect(mobile.result.visible).toBe(false);
     mobile.teardown();
+  });
+
+  test('in VS Code fits on width alone, past a context panel it never mounts', () => {
+    // A skill citation opens the right zone in the store even there.
+    panelByDirectory['/repo'] = { isOpen: true, tabs: [{ id: 'tab-1', mode: 'file', targetPath: '/repo/a.md' }], activeTabId: 'tab-1' };
+    const wide = renderVisibility({ isMobile: false, isVSCode: true }, REQUIRED);
+    expect(wide.result.fits).toBe(true);
+    expect(wide.result.visible).toBe(true);
+    wide.teardown();
 
     observed = [];
-    const vscode = renderVisibility(
-      { isMobile: false, isVSCode: true },
-      REQUIRED * 2,
-    );
-    expect(vscode.result.visible).toBe(false);
-    vscode.teardown();
+    const narrow = renderVisibility({ isMobile: false, isVSCode: true }, REQUIRED - 1);
+    expect(narrow.result.fits).toBe(false);
+    narrow.teardown();
   });
 });

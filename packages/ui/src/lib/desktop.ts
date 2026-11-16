@@ -27,8 +27,12 @@ export type UpdateInfo = {
    * this copy, so the new version is installed the way this one was.
    * `desktop-host`: a desktop installed from a Linux package asks for the
    * administrator password on its own screen, so it updates only there.
+   * `opencode-version`: the new version needs OpenCode
+   * `requiredOpenCodeVersion`, newer than the server's `openCodeVersion`.
    */
-  installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host';
+  installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host' | 'opencode-version';
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
 };
 
 export type UpdateProgress = {
@@ -618,6 +622,17 @@ type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; 
  * host (`?host=<id>`) carries that host's runtime key. Taking them removes
  * them; outside the desktop local page there are none.
  */
+/** Install links that launched the app, before any window could listen. */
+export const takePendingDesktopExtensionInstalls = async (): Promise<string[]> => {
+  if (!isDesktopShell()) return [];
+  try {
+    const parsed = z.array(z.string()).safeParse(await invokeDesktop('desktop_take_pending_extension_installs'));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+};
+
 export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSessionLink[]> => {
   if (!isDesktopShell() || !isDesktopLocalOriginActive()) return [];
   try {

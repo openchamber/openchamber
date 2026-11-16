@@ -3,7 +3,9 @@
  * selection's "Comment" hands its quote to this controller and the chat
  * column's composer swaps its input for a comment shell
  * (`MobileCommentComposer.tsx`); attaching writes a `chat-quote` draft into
- * the inline comment draft store, joining the next message as context.
+ * the inline comment draft store, joining the next message as context. The
+ * pencil on an attached comment opens the same shell on that draft
+ * (`openEdit`), and attaching then updates the draft's text in place.
  *
  * Invariants (the risky part; unit-tested here):
  * - The (runtime, directory, session) scope captured at `open` is the only
@@ -45,12 +47,16 @@ export type MobileCommentDraft =
         quote: MobileCommentQuote;
         text: string;
         generation: number;
+        /** Set when the shell edits this attached draft instead of adding one. */
+        draftId?: string;
     };
 
 /** What attach produced: everything needed to write one chat-quote draft. */
 export interface MobileCommentAttachPlan {
     scope: MobileCommentScope;
     target: InlineCommentDraftTarget;
+    /** Edit: update this draft's text; the other draft fields are not written. */
+    draftId?: string;
     draft: {
         source: 'chat-quote';
         fileLabel: string;
@@ -81,6 +87,11 @@ export interface MobileCommentDraftController {
     getScope(): MobileCommentScope | null;
     /** Capture the composer's target and open a comment for the selection. */
     open(quote: MobileCommentQuote): boolean;
+    /**
+     * Open the shell on an attached draft of the published scope, with its
+     * comment text; attach then updates that draft instead of adding one.
+     */
+    openEdit(edit: { target: InlineCommentDraftTarget; draftId: string; quote: MobileCommentQuote; text: string }): boolean;
     /**
      * Discard the comment. The only exit that writes nothing. With a
      * generation, only that open is cancelled; returns whether a comment
@@ -119,6 +130,7 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
     const planOf = (open: Extract<MobileCommentDraft, { status: 'open' }>): MobileCommentAttachPlan => ({
         scope: open.scope,
         target: { directory: open.scope.directory, sessionKey: open.scope.sessionKey },
+        draftId: open.draftId,
         draft: {
             source: 'chat-quote',
             fileLabel: open.quote.messageId ?? '',
@@ -132,6 +144,9 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
         },
     });
 
+    const canOpen = (current: MobileCommentScope | null): current is MobileCommentScope =>
+        Boolean(current && current.runtimeKey === getRuntimeKey() && current.directory && current.sessionKey);
+
     const attach = (atGeneration: number, text?: string): MobileCommentAttachPlan | null => {
         if (state.status !== 'open' || state.generation !== atGeneration) return null;
         if (!scope || scope.runtimeKey !== getRuntimeKey() || !isSameMobileCommentScope(scope, state.scope)) {
@@ -140,6 +155,11 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
         }
         const pending = text === undefined ? state : { ...state, text: appendInlineText(state.text, text) };
         const plan = planOf(pending);
+        // The edited comment was removed meanwhile: nothing left to save to.
+        if (plan.draftId && !useInlineCommentDraftStore.getState().getDrafts(plan.target).some((draft) => draft.id === plan.draftId)) {
+            update(CLOSED_MOBILE_COMMENT_DRAFT);
+            return null;
+        }
         if (!applyMobileCommentAttach(plan)) {
             update(pending);
             return null;
@@ -164,10 +184,17 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
         },
         getScope: () => scope,
         open(quote) {
-            if (!scope || scope.runtimeKey !== getRuntimeKey() || !scope.directory || !scope.sessionKey) return false;
+            if (!canOpen(scope)) return false;
             if (!quote.markdownText.trim()) return false;
             generation += 1;
             update({ status: 'open', scope, quote, text: '', generation });
+            return true;
+        },
+        openEdit({ target, draftId, quote, text }) {
+            if (!canOpen(scope)) return false;
+            if (target.directory !== scope.directory || target.sessionKey !== scope.sessionKey) return false;
+            generation += 1;
+            update({ status: 'open', scope, quote, text, generation, draftId });
             return true;
         },
         cancel(atGeneration) {
@@ -196,12 +223,14 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
 
 /**
  * Write an attach plan into the inline comment draft store. The runtime is
- * verified against the scope captured at open: `addDraft` keys by the CURRENT
+ * verified against the scope captured at open: the store keys by the CURRENT
  * runtime, so a plan from before a runtime switch must be dropped, not filed
  * under the new runtime's namespace. Directory and session are written exactly
- * as captured from the visible composer.
+ * as captured from the visible composer. An edit plan updates only the text.
  */
 export function applyMobileCommentAttach(plan: MobileCommentAttachPlan): boolean {
     if (plan.scope.runtimeKey !== getRuntimeKey()) return false;
-    return useInlineCommentDraftStore.getState().addDraft(plan.target, plan.draft) !== null;
+    const store = useInlineCommentDraftStore.getState();
+    if (plan.draftId) return store.updateDraft(plan.target, plan.draftId, { text: plan.draft.text });
+    return store.addDraft(plan.target, plan.draft) !== null;
 }

@@ -23,6 +23,7 @@
  */
 
 import {
+  BROWSER_CONTROL_ACTIONS,
   BROWSER_PROVIDER_ACTION_TIMEOUT_MS,
   BROWSER_PROVIDER_IDLE_MS,
   BROWSER_PROVIDER_OPEN_TIMEOUT_MS,
@@ -262,6 +263,15 @@ export const createBrowserControlRouter = ({
       }
       if (action === 'browser.requestHelp' && guest.service?.surface !== true) {
         throw new BrowserControlError(BROWSER_REQUEST_HELP_NO_SURFACE_ERROR, 400);
+      }
+      // The provider contract names its actions; the in-app browser has more
+      // (refs, hover, drag, keys, uploads, dialogs, waits), which a provider
+      // was never asked to understand.
+      if (!BROWSER_CONTROL_ACTIONS.includes(action)) {
+        throw new BrowserControlError(
+          `The browser provider "${guest.name}" does not offer ${action}; it answers ${BROWSER_CONTROL_ACTIONS.join(', ')}. Nothing was changed.`,
+          400,
+        );
       }
       return requestFromProvider(guest, action, parameters, options);
     },

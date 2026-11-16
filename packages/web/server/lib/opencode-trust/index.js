@@ -76,11 +76,10 @@ const directoriesNamedBy = (url, headers) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode rejects a malformed value; nothing to check.
-        directory = '';
+        // OpenCode falls back to the raw header if decoding fails.
       }
     }
-    if (directory) directories.push(directory);
+    directories.push(directory);
   }
   return directories;
 };

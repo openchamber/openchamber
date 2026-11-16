@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient, type SessionPage } from '@/lib/opencode/client';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
-import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { refreshGlobalSessionsWhenShown, useGlobalSessionsStore } from './useGlobalSessionsStore';
 
 const session = (id: string, updated = 1, archived?: number): Session => {
   const time: Session['time'] = { created: 1, updated };
@@ -44,6 +44,29 @@ describe('global session head checks', () => {
     state.applySnapshot(state.activeSessions, state.archivedSessions);
     expect(useGlobalSessionsStore.getState().authoritativeSessions).not.toBe(authoritative);
     expect(useGlobalSessionsStore.getState().authoritativeSessions?.some((item) => item.id === 'new')).toBe(true);
+  });
+
+  test('a list read when shown checks the head while its complete snapshot is young, and reads it all otherwise', async () => {
+    const reads: string[] = [];
+    const original = useGlobalSessionsStore.getState();
+    useGlobalSessionsStore.setState({
+      loadSessions: async () => { reads.push('complete'); return { activeSessions: [], archivedSessions: [] }; },
+      refreshSessionHead: async () => { reads.push('head'); return true; },
+    });
+    try {
+      // No complete snapshot on this runtime yet.
+      await refreshGlobalSessionsWhenShown(60_000);
+      useGlobalSessionsStore.getState().applySnapshot([session('known')], []);
+      await refreshGlobalSessionsWhenShown(60_000);
+      // The same snapshot, older than the caller allows.
+      await refreshGlobalSessionsWhenShown(0);
+      // A failed load leaves nothing to trust.
+      useGlobalSessionsStore.setState({ status: 'error' });
+      await refreshGlobalSessionsWhenShown(60_000);
+      expect(reads).toEqual(['complete', 'head', 'complete', 'complete']);
+    } finally {
+      useGlobalSessionsStore.setState({ loadSessions: original.loadSessions, refreshSessionHead: original.refreshSessionHead });
+    }
   });
 
   test('continues through wholly new or changed pages and stops at a known unchanged record', async () => {

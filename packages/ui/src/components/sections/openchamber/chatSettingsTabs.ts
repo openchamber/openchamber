@@ -23,11 +23,12 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.changed-files', 'messages'],
   ['chat.streaming-auto-follow', 'messages'],
   ['chat.message-appearance', 'messages'],
-  ['chat.wide-layout', 'messages'],
+  ['chat.width', 'messages'],
   ['chat.prompt-navigator', 'messages'],
   ['chat.collapsible-user-messages', 'messages'],
   ['chat.sticky-user-header', 'messages'],
   ['chat.inline-assistant-actions', 'messages'],
+  ['chat.selection-approval-text', 'messages'],
   ['chat.user-message-rendering', 'messages'],
   ['chat.mermaid-rendering', 'messages'],
   ['chat.diff-layout', 'messages'],
@@ -41,6 +42,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.enter-to-send', 'composer'],
   ['chat.mobile-return-key-sends', 'composer'],
   ['chat.follow-up-behavior', 'composer'],
+  ['chat.questions-placement', 'composer'],
   ['chat.large-text-paste', 'composer'],
   ['chat.subagent-read-only-banner', 'composer'],
   ['chat.save-pasted-images', 'composer'],
@@ -59,3 +61,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
 ]);
 
 export const chatSettingsTabForSearchTarget = (id: string): ChatSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;
+
+/** The search targets one tab holds, for the tab's "new" badge. */
+export const chatSettingsTabAnchors = (tab: ChatSettingsTab): string[] =>
+  [...SEARCH_TARGET_TABS].filter(([, owner]) => owner === tab).map(([id]) => id);

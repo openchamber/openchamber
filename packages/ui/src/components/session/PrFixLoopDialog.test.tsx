@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { DEFAULT_PR_FIX_LOOP_CONFIG, type FixLoop } from '@/lib/prFixLoop';
 
@@ -19,11 +19,14 @@ const originals = new Map<string, PropertyDescriptor | undefined>();
 const originalFetch = globalThis.fetch;
 const patches: string[] = [];
 
+// Dismissal belongs to the panel; repository readouts are unrelated to this flow.
+mock.module('@/components/chat/work-status/WorkStatusSectionList', () => ({ WorkStatusSectionList: () => <section>Session</section> }));
+
 beforeAll(() => {
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent, FormData: dom.FormData,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent, FormData: dom.FormData,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true,
@@ -31,15 +34,17 @@ beforeAll(() => {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input instanceof Request ? input : new URL(String(input), 'http://localhost'), init);
+    // Directory bootstrap must not write settings during configuration tests.
+    if (new URL(request.url).pathname === '/api/fs/home') return new Promise<Response>(() => {});
     if (request.method === 'PATCH') {
       patches.push(await request.text());
       return Response.json({ loop: { ...loop, updatedAt: 2 } });
     }
     if (new URL(request.url).pathname === '/api/openchamber/spaces/switch') return Response.json({ enabled: false });
     return Response.json({}, { status: 503 });
-  };
+  }, originalFetch);
 });
 beforeEach(() => { patches.length = 0; });
 afterAll(async () => {
@@ -135,4 +140,51 @@ describe('review configuration lock', () => {
       expect(patches).toEqual([]);
     } finally { await view.close(); }
   });
+});
+
+test('the Work status overlay survives configuration and nested portal interactions', async () => {
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { WorkStatusPanel } = await import('@/components/chat/work-status/WorkStatusPanel');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const apis = createWebAPIs();
+  const portal = document.createElement('button');
+  document.body.append(portal);
+  try {
+    useUIStore.setState({ workStatusOverlayOpen: true });
+    await act(async () => root.render(<RuntimeAPIContext.Provider value={apis}><I18nProvider>
+      <WorkStatusPanel sessionId={null} directory={null} visible overlay />
+    </I18nProvider></RuntimeAPIContext.Provider>));
+    // An ordinary outside press dismisses the overlay before a dialog opens.
+    await act(async () => portal.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(useUIStore.getState().workStatusOverlayOpen).toBe(false);
+    useUIStore.setState({ workStatusOverlayOpen: true });
+    const dialog = await mount();
+    try {
+      expect(document.documentElement.classList.contains('oc-dialog-open')).toBe(true);
+      await act(async () => dialog.form.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+      expect(useUIStore.getState().workStatusOverlayOpen).toBe(true);
+      // A nested picker portal is outside both the panel and configuration DOM.
+      await act(async () => portal.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+      expect(useUIStore.getState().workStatusOverlayOpen).toBe(true);
+      await act(async () => portal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+      expect(useUIStore.getState().workStatusOverlayOpen).toBe(true);
+    } finally { await dialog.close(); }
+    expect(document.documentElement.classList.contains('oc-dialog-open')).toBe(false);
+    const consumedEscape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    consumedEscape.preventDefault();
+    await act(async () => portal.dispatchEvent(consumedEscape));
+    expect(useUIStore.getState().workStatusOverlayOpen).toBe(true);
+    await act(async () => portal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(useUIStore.getState().workStatusOverlayOpen).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    portal.remove();
+  }
 });

@@ -1,0 +1,34 @@
+{
+  "name": "@openchamber/example-quota-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.6.0"
+    },
+    "contributes": {
+      "panel": {
+        "id": "quota-provider",
+        "name": "Teapot Usage",
+        "icon": "cup"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": [
+          "quota"
+        ]
+      },
+      "quota": {
+        "providers": [
+          "teapot"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

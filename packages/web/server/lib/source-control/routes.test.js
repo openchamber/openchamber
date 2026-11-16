@@ -6,6 +6,9 @@ import { createBindingService } from './binding-service.js';
 import { configureWebAuxiliaryBinding, configureWebTransportBinding, createWebSourceControlAPI } from '../../../src/api/source-control';
 import { createHttpsCredentialReference } from '../git/credential-resolver.js';
 
+// Gitea lists the instances gt has a login for; this machine's gt stays out of the listings.
+const missingGt = async () => { throw Object.assign(new Error('spawn gt ENOENT'), { code: 'ENOENT' }); };
+
 it('configures managed HTTPS through the web Git adapter, HTTP route and binding service without leaking secrets', async () => {
   const endpoint = { rawUrl: 'https://github.com/team/repo.git', displayUrl: 'https://github.com/team/repo.git', fingerprint: 'fingerprint' };
   const auxiliaryEndpoint = { displayUrl: 'https://modules.example/module.git', fingerprint: 'auxiliary-fingerprint' };
@@ -217,7 +220,7 @@ describe('source-control provider registry', () => {
       delete: vi.fn(),
       use: vi.fn(),
     };
-    registerSourceControlRoutes(app, { gitlab: { store: {
+    registerSourceControlRoutes(app, { gitea: { execFile: missingGt }, gitlab: { store: {
       listInstances: async () => ['https://gitlab.com', 'https://gitlab.example.com'],
       readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
     } } });
@@ -249,7 +252,7 @@ describe('source-control provider registry', () => {
         }),
         post: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn(),
       };
-      registerSourceControlRoutes(app, { gitlab: { store: {
+      registerSourceControlRoutes(app, { gitea: { execFile: missingGt }, gitlab: { store: {
         listInstances: async () => { throw new Error('store unreadable'); },
         readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
       } } });

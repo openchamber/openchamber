@@ -27,6 +27,8 @@ function contextPreview(payload: ContextPartPayload): string {
             return payload.title;
         case 'session-message':
             return payload.excerpt;
+        case 'shared-page':
+            return payload.title || payload.host;
     }
 }
 

@@ -18,6 +18,7 @@ import {
   GUEST_FILE_PATH_MAX,
   GUEST_PLAN_CONTENT_MAX,
   guestFramePolicy,
+  guestToolLinkSettingIds,
   isGuestRequestPath,
   requestedGuestCapabilities,
   resolveIntegrationAuth,
@@ -35,6 +36,7 @@ import {
   resolveGuestServedFile,
   toPublicGuest,
 } from './catalog.js';
+import { guestMarks, mayGuestShowMarks } from './marks.js';
 import { createGuestPackageWatch } from './package-watch.js';
 import { runGuestFileOperation } from './files.js';
 import { authorizeGuestPlanProvider, listGuestPlans, readGuestPlan, writeGuestPlan } from './plans.js';
@@ -43,11 +45,14 @@ import { createGuestFrameGrants } from './frame-grants.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
+import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { themedLogoSvg } from '../opencode/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
 import { guestGrantScope, sameCredentialTarget } from './grant-scope.js';
-import { dropGuestTokens, forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
+import { dropGuestTokens, forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth, readGuestAuthStore } from './auth-store.js';
 import {
   disconnectHostGuest,
   startHostGuestAuthorization,
@@ -63,11 +68,14 @@ import {
   startGuestAuthorization,
   takeUsableGuestAuth,
   toPublicGuestAuth,
+  toolLinkSettingsOf,
 } from './oauth.js';
+import { isMentionGuest, resolveGuestMention, searchGuestMentions } from './mentions.js';
 import { proxyGuestRequest } from './request.js';
 import { registerLoopbackRoutes } from './loopback-routes.js';
 import {
   GuestServiceError,
+  getServiceFailure,
   getServiceStatus,
   proxyGuestServiceRequest,
   setServiceSocketOverride,
@@ -176,6 +184,9 @@ const sendInstallResult = (res, result) => {
     if (conflict && result.id) {
       body.id = result.id;
     }
+    if (result.code === 'invalid-manifest' && result.reason) {
+      body.reason = result.reason.slice(0, 1000);
+    }
     return res.status(conflict ? 409 : 400).json(body);
   }
   res.status(result.replaced ? 200 : 201).json({ guest: result.guest });
@@ -200,6 +211,9 @@ export const settleGuestDeactivationListeners = (listeners) => async (event) => 
   });
 };
 
+/** A stopped service starts again on the next request, so ten quiet minutes cost nothing but that. */
+const PANEL_SERVICE_IDLE_MS = 10 * 60_000;
+
 export const registerGuestRoutes = (app, {
   openchamberDataDir,
   openchamberVersion,
@@ -223,6 +237,15 @@ export const registerGuestRoutes = (app, {
   isPlanDirectoryAllowed = async () => false,
   // The tracker registry: a host-auth guest borrows its tracker's sign-in.
   trackers = null,
+  // How an extension's OpenCode plugin reaches OpenCode, and the user's global
+  // OpenCode config the card's button writes (`opencode-plugin.js`).
+  opencodePlugins = {
+    delivery: () => 'file',
+    readGlobalEntries: () => ({ path: '', targets: [] }),
+    addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
+  },
+  // What running services put on sidebar rows (`marks.js`).
+  marks = guestMarks,
 }) => {
   const fileWatches = createGuestFileWatchRegistry({ emit: emitGuestFilesChanged });
   const persistPath = extensionsPersistPath(openchamberDataDir);
@@ -305,15 +328,164 @@ export const registerGuestRoutes = (app, {
     return findInstalledGuest(id, persistPath);
   };
 
-  app.get('/api/guests', async (_req, res) => {
+  // Before the `:id` routes, because `mentions` is a valid panel id shape.
+  app.post('/api/guests/mentions/search', json16, async (req, res) => {
+    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 200) : '';
+    const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      // The next keystroke aborts this one: a slow service stops working on it too.
+      const abort = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      const groups = await searchGuestMentions({ guests, query, directory, persistPath, signal: abort.signal });
+      if (!abort.signal.aborted) res.json({ groups });
+    } catch (error) {
+      console.error('Failed to search extension mentions:', error);
+      res.status(500).json({ error: 'Failed to search extension mentions' });
+    }
+  });
+
+  // Before the `:id` routes as well. Marks travel apart from the catalog: a
+  // service changes them far more often than anything a catalog reload is for.
+  // The path is matched whole: with a trailing slash it is a file path of an
+  // extension named `marks`, where that extension's frame token is accepted.
+  app.get(/^\/api\/guests\/marks$/, async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
       res.json({
-        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))),
+        marks: guests.filter(mayGuestShowMarks).flatMap((guest) => marks.list(guest.id).map(({ target, mark }) => ({ guestId: guest.id, target, mark }))),
+      });
+    } catch (error) {
+      console.error('Failed to list extension marks:', error);
+      res.status(500).json({ error: 'Failed to list extension marks' });
+    }
+  });
+
+  app.post('/api/guests/:id/mentions/resolve', json16, async (req, res) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!id) return res.status(400).json({ error: 'BAD_REQUEST' });
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.mentions || !isMentionGuest(guest)) return res.status(404).json({ error: 'NOT_FOUND' });
+      res.json({ text: await resolveGuestMention({ guest, id, persistPath }) });
+    } catch (error) {
+      console.warn(`[mentions] ${req.params.id}: reading a picked row failed (${error?.code ?? 'error'})`);
+      res.status(502).json({ error: 'MENTION_FAILED' });
+    }
+  });
+
+  /**
+   * What the extension cards say about OpenCode plugins: how the managed
+   * config reaches OpenCode right now, and which extensions' plugin folders the
+   * user's global config already lists. Both come from server state that
+   * exists without OpenCode running; the global config is read only while a
+   * package ships a plugin.
+   */
+  const describeOpenCodePlugins = async (guests) => {
+    const delivery = opencodePlugins.delivery();
+    const withPlugin = guests.filter((guest) => guest.opencodePlugin);
+    if (withPlugin.length === 0) return { delivery, globalConfigPath: null, inGlobalConfig: [] };
+    let globalEntries;
+    try {
+      globalEntries = opencodePlugins.readGlobalEntries();
+    } catch (error) {
+      // The user's global OpenCode config could not be read: the cards keep
+      // their rows and the button stays; pressing it answers the reason.
+      console.warn('Could not read the global OpenCode config for the extension list:', error?.message ?? error);
+      return { delivery, globalConfigPath: null, inGlobalConfig: [] };
+    }
+    const { path: globalConfigPath, targets } = globalEntries;
+    const inGlobalConfig = [];
+    for (const guest of withPlugin) {
+      const directory = await resolveOpenCodePluginFolder(fs, guest.packageRoot, guest.opencodePlugin);
+      if (directory && targets.includes(directory)) inGlobalConfig.push(guest.id);
+    }
+    return { delivery, globalConfigPath, inGlobalConfig };
+  };
+
+  // The settings a card link reads travel on the catalog, so the auth store is
+  // read here only when some extension's link names one. A store that cannot
+  // be read costs those links and nothing else of the catalog.
+  const storedLinkSettings = async (guests) => {
+    if (!guests.some((guest) => guestToolLinkSettingIds(guest.tools).length > 0)) return {};
+    try {
+      return (await readGuestAuthStore(authPath)).guests;
+    } catch (error) {
+      console.warn('Failed to read extension settings for card links:', error?.message ?? error);
+      return {};
+    }
+  };
+
+  app.get('/api/guests', async (_req, res) => {
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      const stored = await storedLinkSettings(guests);
+      res.json({
+        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath), toolLinkSettingsOf(stored[guest.id], guest))),
+        opencodePlugins: await describeOpenCodePlugins(guests),
       });
     } catch (error) {
       console.error('Failed to list guests:', error);
       res.status(500).json({ error: 'Failed to list guests' });
+    }
+  });
+
+  // "Add to global config" on the card: the plugin folder goes into the user's
+  // global OpenCode config, the file every OpenCode on this machine reads. Only
+  // where the managed config does not reach OpenCode, and only for a plugin the
+  // user approved and left on; the entry is theirs from then on.
+  /** Why the plugin of `guest` is not loaded on purpose right now, or null while it is meant to be. */
+  const pluginRefusal = (guest) => {
+    if (!guest) return { status: 404, body: { error: 'not-found' } };
+    if (!guest.opencodePlugin) return { status: 404, body: { error: 'no-plugin' } };
+    if (guest.enterpriseBlocked?.includes('opencodePlugin')) return { status: 403, body: { error: 'enterprise-mode' } };
+    const approved = requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability));
+    if (guest.enabled === false || !approved || !guest.capabilityGrants.includes('opencodePlugin')) {
+      return { status: 409, body: { error: 'inactive' } };
+    }
+    return null;
+  };
+
+  app.post('/api/guests/:id/opencode-plugin/global-config', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      const refused = pluginRefusal(guest);
+      if (refused) {
+        return res.status(refused.status).json(refused.body);
+      }
+      const delivery = opencodePlugins.delivery();
+      if (delivery !== 'restart' && delivery !== 'none') {
+        return res.status(409).json({ error: 'not-needed', delivery });
+      }
+      const directory = await resolveOpenCodePluginFolder(fs, guest.packageRoot, guest.opencodePlugin);
+      if (!directory) {
+        return res.status(409).json({ error: 'plugin-missing' });
+      }
+      // The row and the policy are read again right before the write: a Pause,
+      // a withdrawn approval or a policy change meanwhile must not reach the
+      // user's file, which outlives the extension.
+      const current = await loadGuest(guest.id);
+      const refusedNow = pluginRefusal(current);
+      if (refusedNow) {
+        return res.status(refusedNow.status).json(refusedNow.body);
+      }
+      if (enterpriseBlockedCapabilities(current, { source: current.source, gitUrl: current.gitOrigin?.url }).includes('opencodePlugin')) {
+        return res.status(403).json({ error: 'enterprise-mode' });
+      }
+      let written;
+      try {
+        written = opencodePlugins.addGlobalEntry(directory);
+      } catch (error) {
+        if (error?.code === 'CONFIG_INVALID') {
+          return res.status(409).json({ error: 'config-invalid', message: error.message });
+        }
+        throw error;
+      }
+      if (written.added) announce();
+      res.json({ path: written.path });
+    } catch (error) {
+      console.error('Failed to add an extension plugin to the global OpenCode config:', error);
+      res.status(500).json({ error: 'write-failed', message: error?.message ?? 'Failed to write the OpenCode config.' });
     }
   });
 
@@ -515,9 +687,26 @@ export const registerGuestRoutes = (app, {
         if (!allowed.has(key) || typeof value !== 'string') {
           continue;
         }
-        settings[key] = value.trim().slice(0, 2000);
+        const trimmed = value.trim().slice(0, 2000);
+        // The card never holds a stored secret, so an empty field leaves it as it is.
+        if (allowed.get(key).secret && !trimmed) continue;
+        settings[key] = trimmed;
       }
-      const stored = await patchGuestAuth(guest.id, { settings }, authPath);
+      // The card holds no secret, so what it saves never names one to keep:
+      // those stay as stored, read under the store lock.
+      let linkSettingsBefore = {};
+      const stored = await patchGuestAuth(guest.id, (current) => {
+        linkSettingsBefore = toolLinkSettingsOf(current, guest);
+        return {
+          settings: {
+            ...Object.fromEntries(Object.entries(current?.settings ?? {}).filter(([key]) => allowed.get(key)?.secret)),
+            ...settings,
+          },
+        };
+      }, authPath);
+      // Open chats draw card links from the catalog, so a value a link reads
+      // is a catalog change; any other field is not.
+      if (JSON.stringify(linkSettingsBefore) !== JSON.stringify(toolLinkSettingsOf(stored, guest))) announce();
       res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to save guest settings:', error);
@@ -658,6 +847,8 @@ export const registerGuestRoutes = (app, {
         service: guest.service,
         granted: guest.capabilityGrants,
         persistPath,
+        // One process per extension a panel ever touched otherwise stays for good.
+        idleStopMs: guest.service.keepRunning ? undefined : PANEL_SERVICE_IDLE_MS,
         method: parsed.data.method,
         path: parsed.data.path,
         query: parsed.data.query,
@@ -905,6 +1096,19 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  app.get('/api/guests/:id/service/failure', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.service) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ failure: getServiceFailure(guest.id) });
+    } catch (error) {
+      console.error('Failed to read guest service failure:', error);
+      res.status(500).json({ error: 'Failed to read guest service failure' });
+    }
+  });
+
   app.put('/api/guests/:id/capabilities', json16, async (req, res) => {
     try {
       const guest = await loadGuest(req.params.id);
@@ -1023,8 +1227,9 @@ export const registerGuestRoutes = (app, {
   const loopbackRuntime = registerLoopbackRoutes(app, { persistPath, isRequestOriginAllowed });
   // One extension file, as a frame loads it. `token` is the legacy query
   // credential copied onto the page's relative URLs; `connectSource` is the
-  // one path the page may fetch from.
-  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource }) => {
+  // one path the page may fetch from; `theme` colours an SVG drawn as a
+  // provider logo, which an <img> cannot do from outside.
+  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource, theme }) => {
     let relativePath;
     try {
       relativePath = decodeURIComponent(Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || ''));
@@ -1044,9 +1249,10 @@ export const registerGuestRoutes = (app, {
     } catch {
       return res.status(404).end();
     }
+    const themedSvg = contentType === 'image/svg+xml' ? themedLogoSvg(raw, theme) : null;
     const body = contentType.startsWith('text/html')
       ? injectGuestDocumentStyles(injectGuestAssetTokens(raw.toString('utf8'), token))
-      : raw;
+      : themedSvg ?? raw;
     res.setHeader('Content-Type', contentType);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -1128,6 +1334,7 @@ export const registerGuestRoutes = (app, {
       return await sendGuestFile(res, guest, req.params.filePath, {
         token: parseGuestUrlToken(req.query.oc_url_token),
         connectSource: connectSourceFor(req, `/api/guests/${guest.id}/`),
+        theme: req.query.theme,
       });
     } catch (error) {
       console.error('Failed to serve guest asset:', error);

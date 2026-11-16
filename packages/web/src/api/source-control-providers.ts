@@ -39,7 +39,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     icon: { sprite: 'github', filledSprite: 'github-fill' },
     repository: { nestedNamespaces: false },
     instances: {
-      format: 'host', defaultInstance: 'github.com', multiple: true, allowLoopbackHttp: false, allowPort: false,
+      format: 'host', defaultInstance: 'github.com', defaultInstances: ['github.com'], multiple: true, allowLoopbackHttp: false, allowPort: false,
       reserved: ['github.com'], placeholder: 'https://github.example.com',
       legacyFlow: { instance: 'github.com', kind: 'github-com-device' },
     },
@@ -74,7 +74,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     icon: { sprite: 'gitlab' },
     repository: { nestedNamespaces: true },
     instances: {
-      format: 'origin', defaultInstance: 'https://gitlab.com', multiple: true, allowLoopbackHttp: true, allowPort: true,
+      format: 'origin', defaultInstance: 'https://gitlab.com', defaultInstances: ['https://gitlab.com'], multiple: true, allowLoopbackHttp: true, allowPort: true,
       reserved: [], placeholder: 'https://gitlab.example.com',
     },
     auth: {

@@ -30,8 +30,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { GuestApprovalDialog } from './GuestApprovalDialog';
+import { OpenCodePluginBanner } from './OpenCodePluginBanner';
 import { toast } from '@/components/ui';
-import { setGuestServiceSocketPath } from '@/lib/guests/service';
+import { loadGuestServiceFailure, setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -41,9 +42,11 @@ import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest
 import { errorToastKey, updateErrorToastKey } from './extensionToasts';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { openCodePluginNotice } from '@/lib/guests/opencode-plugin';
+import { useGuestInstallRequestStore } from '@/lib/guests/install-request';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
 import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
@@ -52,6 +55,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey, type Locale } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
@@ -344,8 +348,29 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   const state = extensionState(guest);
   const iconSrc = useGuestIconSrc(guest);
   const permissions = servicePermissionList(guest);
+  const [serviceFailure, setServiceFailure] = React.useState<{ at: number; output: string } | null>(null);
+  const watchesService = Boolean(guest.service) && guest.enabled !== false;
+  React.useEffect(() => {
+    if (!watchesService) return;
+    let current = true;
+    void loadGuestServiceFailure(guest.id).then((failure) => {
+      if (current) setServiceFailure(failure);
+    });
+    return () => { current = false; };
+  }, [guest.id, guest.revision, watchesService]);
   const location = guest.path || guest.id;
   const hasPermissions = Boolean(permissions) || Boolean(guest.service);
+  const opencodePlugins = useGuestsStore((store) => store.opencodePlugins);
+  // The file the button wrote, shown on this screen until the user leaves it.
+  const [pluginAdded, setPluginAdded] = React.useState<string | null>(null);
+  React.useEffect(() => { setPluginAdded(null); }, [guest.id]);
+  const pluginNotice = openCodePluginNotice({
+    guest,
+    plugins: opencodePlugins,
+    active: state.enabled && !state.needsApproval && !state.enterpriseBlocked,
+    added: pluginAdded,
+  });
+  const hasNotices = state.enterpriseBlocked || state.needsApproval || Boolean(state.update) || pluginNotice !== null;
 
   return (
     <SettingsPageLayout
@@ -390,8 +415,8 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
         </div>
       )}
     >
-      {state.enterpriseBlocked || state.needsApproval || state.update ? (
-        <SettingsSection divider={false} contentClassName="space-y-2">
+      {hasNotices ? (
+        <SettingsSection contentClassName="space-y-2">
           {state.enterpriseBlocked ? (
             <div className="rounded-lg bg-[var(--status-warning)]/10 p-3 typography-meta text-[var(--status-warning)]">
               {t('settings.extensions.enterpriseBlocked')}
@@ -427,12 +452,14 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               </Button>
             </div>
           ) : null}
+          {pluginNotice ? (
+            <OpenCodePluginBanner guest={guest} notice={pluginNotice} busy={busy} onAdded={setPluginAdded} />
+          ) : null}
         </SettingsSection>
       ) : null}
 
       <SettingsSection
         title={t('settings.extensions.detail.section.details')}
-        divider={state.enterpriseBlocked || state.needsApproval || Boolean(state.update)}
         contentClassName="space-y-3"
       >
         <div>
@@ -451,10 +478,21 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             </SettingsFieldRow>
           ) : null}
           <SettingsFieldRow label={t('settings.extensions.detail.field.location')} alignEnd={false} controlClassName="min-w-0 @xl:flex-1">
-            <span className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
+            <span dir="ltr" className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
+        {serviceFailure ? (
+          <div className="flex flex-col gap-1">
+            <p className="typography-meta text-[var(--status-error)]">{t('settings.extensions.service.failed')}</p>
+            {serviceFailure.output ? (
+              <pre dir="ltr" className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-muted p-2 typography-micro text-muted-foreground">{serviceFailure.output}</pre>
+            ) : null}
+          </div>
+        ) : null}
+        {guest.needsConfiguration ? (
+          <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.needsConfiguration', { message: guest.needsConfiguration })}</p>
+        ) : null}
       </SettingsSection>
 
       {hasPermissions ? (
@@ -469,11 +507,36 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               })}
             </p>
           ) : null}
+          {guest.service?.keepRunning || guest.service?.schedule ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.runsAlone', {
+                list: [
+                  ...(guest.service.keepRunning ? [t('settings.extensions.capability.service.keepRunning')] : []),
+                  ...(guest.service.schedule ?? []).map((entry) => entry.cron),
+                ].join(', '),
+              })}
+            </p>
+          ) : null}
+          {guest.waits?.length ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.waits', { list: guest.waits.map((wait) => wait.title).join(', ') })}
+            </p>
+          ) : null}
           {guest.notifications ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
           ) : null}
           {guest.tracker ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
+          ) : null}
+          {guest.quota ? (
+            <p className="typography-meta text-foreground">
+              {guest.quota.providers.length > 0
+                ? t('settings.extensions.service.providesQuota', { list: guest.quota.providers.join(', ') })
+                : t('settings.extensions.service.providesQuota.none')}
+            </p>
+          ) : null}
+          {guest.capabilities.requested.includes('opencode') ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.capability.opencode.detail')}</p>
           ) : null}
           {guest.service ? (
             // A security warning: stays visible.
@@ -539,6 +602,7 @@ const UnreadableExtensionCard: React.FC<{
 export const ExtensionsPage: React.FC = () => {
   const { t, locale } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
+  const updatable = React.useMemo(() => guests.filter((guest) => guest.source === 'git' && guest.update), [guests]);
   const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
   const catalogFailure = useGuestsStore((state) => state.failure);
@@ -554,10 +618,15 @@ export const ExtensionsPage: React.FC = () => {
   const [installValue, setInstallValue] = React.useState('');
   const enterpriseMode = useEnterpriseMode();
   const [busy, setBusy] = React.useState(false);
+  // Declining a new package removes it; one already here can wait.
+  const [newlyAddedId, setNewlyAddedId] = React.useState<string | null>(null);
   const [checking, setChecking] = React.useState(false);
   const checkedOnOpen = React.useRef(false);
   const [reinstall, setReinstall] = React.useState<{ source: InstallSource; name: string } | null>(null);
   const [approval, setApproval] = React.useState<InstalledGuest | null>(null);
+  React.useEffect(() => {
+    if (!approval) setNewlyAddedId(null);
+  }, [approval]);
   const [dropActive, setDropActive] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   // The shown extension is page-local: every visit starts at the grid.
@@ -627,16 +696,20 @@ export const ExtensionsPage: React.FC = () => {
     }
   };
 
+  const updateErrorToast = (result: Extract<Awaited<ReturnType<typeof updateGuest>>, { ok: false }>) => {
+    toast.error(
+      result.code === 'host-too-old' && result.required
+        ? t('settings.extensions.toast.hostTooOld', { version: result.required })
+        : t(updateErrorToastKey(result.code)),
+    );
+  };
+
   const update = async (guest: InstalledGuest) => {
     setBusy(true);
     const result = await updateGuest(guest.id);
     setBusy(false);
     if (!result.ok) {
-      toast.error(
-        result.code === 'host-too-old' && result.required
-          ? t('settings.extensions.toast.hostTooOld', { version: result.required })
-          : t(updateErrorToastKey(result.code)),
-      );
+      updateErrorToast(result);
       return;
     }
     // Open panels reload with the new bundle: the update moves the catalog row's revision.
@@ -650,6 +723,35 @@ export const ExtensionsPage: React.FC = () => {
     if (guestNeedsApproval(result.guest)) {
       setApproval(result.guest);
     }
+  };
+
+  // One at a time, so one failure leaves the others updated. The first version
+  // that asks for more opens the review; the rest wait on their cards.
+  const updateAll = async () => {
+    const targets = updatable;
+    // A switch to another server ends the batch: the same ids may live there.
+    const isCurrent = captureRuntimeInstance();
+    setBusy(true);
+    let updated = 0;
+    let needsApproval: InstalledGuest | null = null;
+    for (const guest of targets) {
+      const result = await updateGuest(guest.id);
+      if (!isCurrent()) return;
+      if (!result.ok) {
+        updateErrorToast(result);
+        continue;
+      }
+      updated += 1;
+      if (!needsApproval && guestNeedsApproval(result.guest)) needsApproval = result.guest;
+    }
+    setBusy(false);
+    if (updated > 0) {
+      toast.success(updated === targets.length
+        ? t('settings.extensions.toast.updatedAll', { count: updated })
+        : t('settings.extensions.toast.updatedSome', { count: updated, total: targets.length }));
+    }
+    await loadGuestCatalog();
+    if (needsApproval) setApproval(needsApproval);
   };
 
   const finishInstall = async (
@@ -687,8 +789,9 @@ export const ExtensionsPage: React.FC = () => {
           { description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined },
         );
       } else {
+        // A manifest that did not parse says which field and rule, which is what the author needs.
         toast.error(t(errorToastKey(result.code)), {
-          description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined,
+          description: result.reason ?? (result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined),
         });
       }
       return false;
@@ -703,6 +806,7 @@ export const ExtensionsPage: React.FC = () => {
     );
     await loadGuestCatalog();
     if (guestNeedsApproval(result.guest)) {
+      setNewlyAddedId(result.guest.id);
       setApproval(result.guest);
     }
     return true;
@@ -721,6 +825,22 @@ export const ExtensionsPage: React.FC = () => {
     if (getRuntimeKey() !== requestRuntimeKey) return;
     await finishInstall(result, source, { allowConflictDialog: !options.replace });
   };
+
+  // A link asked for this package: a chat link goes straight on, an outside one stops at the add dialog.
+  const installRequest = useGuestInstallRequestStore((state) => state.request);
+  const runInstallRef = React.useRef(runInstall);
+  runInstallRef.current = runInstall;
+  React.useEffect(() => {
+    if (!installRequest || status !== 'ready' || busy) return;
+    const request = useGuestInstallRequestStore.getState().take();
+    if (!request) return;
+    if (request.confirmed) {
+      void runInstallRef.current({ kind: 'input', input: request.source });
+      return;
+    }
+    setInstallValue(request.source);
+    setAddOpen(true);
+  }, [busy, installRequest, status]);
 
   const add = async () => {
     const trimmed = installValue.trim();
@@ -883,6 +1003,7 @@ export const ExtensionsPage: React.FC = () => {
     onUpdate: update,
   };
   const selectedGuest = selectedId ? guests.find((guest) => guest.id === selectedId) ?? null : null;
+  const phone = isMobileSurfaceRuntime();
 
   const dialogs = (
     <>
@@ -899,12 +1020,15 @@ export const ExtensionsPage: React.FC = () => {
               ) : t('settings.extensions.add.info')}
             </DialogDescription>
           </DialogHeader>
+          {/* A dashed edge says "drop here"; a phone has nothing to drop, so it
+              shows the fields plain. */}
           <div
             className={cn(
-              'relative space-y-2 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
+              'relative space-y-2',
+              !phone && 'rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
               dropActive && 'border-primary bg-primary/5',
             )}
-            {...dropHandlers}
+            {...(phone ? {} : dropHandlers)}
           >
             {dropActive ? (
               <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/80 typography-ui-label text-primary">
@@ -975,9 +1099,12 @@ export const ExtensionsPage: React.FC = () => {
                 />
               </div>
             </div>
-            <p className="typography-micro text-muted-foreground">
-              {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
-            </p>
+            {/* A phone has nothing to drop; the archive button picks a ZIP there. */}
+            {isMobileSurfaceRuntime() ? null : (
+              <p className="typography-micro text-muted-foreground">
+                {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
+              </p>
+            )}
             {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
           </div>
           <DialogFooter>
@@ -997,6 +1124,7 @@ export const ExtensionsPage: React.FC = () => {
         busy={busy}
         onApprove={(guest) => void approve(guest)}
         onDecline={(guest) => void decline(guest)}
+        onLater={approval && approval.id !== newlyAddedId ? () => setApproval(null) : undefined}
         onDismiss={() => setApproval(null)}
       />
 
@@ -1055,7 +1183,7 @@ export const ExtensionsPage: React.FC = () => {
     <>
       <SettingsPageLayout
         title={t('settings.page.extensions.title')}
-        description={t('settings.page.extensions.description')}
+        namedBySidebar
         headerEnd={unsupported ? null : (
           <div className="flex items-center gap-2">
             {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}
@@ -1074,6 +1202,18 @@ export const ExtensionsPage: React.FC = () => {
                 <Icon name="external-link" className="size-3.5 text-muted-foreground" />
               </Button>
             )}
+            {updatable.length > 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0"
+                disabled={busy || checking}
+                onClick={() => void updateAll()}
+              >
+                {t('settings.extensions.updates.all')}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

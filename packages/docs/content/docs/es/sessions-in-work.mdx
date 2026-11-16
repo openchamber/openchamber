@@ -51,12 +51,12 @@ Los chats no tienen el ojo: son conversaciones sin más.
 
 ### «Este trabajo parece terminado.»
 
-Con un [proveedor de clasificación](/es/classification-providers/) configurado, Jev revisa cada turno de una sesión en curso. Cuando un turno parece el final del trabajo (diste las gracias, pediste un commit, confirmaste que funciona), Jev no cierra nada y deja una pista:
+Con un [proveedor de clasificación](/es/classification-providers/) configurado, Jev revisa cada turno de una sesión en curso. Cuando un turno parece el final del trabajo (el agente informa del trabajo terminado, no sigue por su cuenta, no espera tu respuesta y no ofrece nada más), Jev no cierra nada y deja una pista:
 
 - una marca gris en la fila de la sesión en la barra lateral
 - una franja encima del campo de mensaje: **Este trabajo parece terminado.** con un botón **Marcar como hecho**
 
-Pulsa **Marcar como hecho** si Jev tiene razón. Si no, sigue sin más: la pista desaparece con tu próximo mensaje. Sin proveedor de clasificación no hay pista, y marcas las sesiones como hechas tú.
+La pista aparece cuando llevas 10 minutos sin escribir después del turno, para que no estorbe mientras pasas de un paso al siguiente. Pulsa **Marcar como hecho** si Jev tiene razón. Si no, sigue sin más: la pista desaparece con tu próximo mensaje. Sin proveedor de clasificación no hay pista, y marcas las sesiones como hechas tú.
 
 ## Resumen y sugerencia del próximo mensaje
 
@@ -71,9 +71,11 @@ Actívalos o desactívalos en **Configuración → Chat → Asistencia de sesió
 
 ## Configuración
 
-Abre **Configuración → Sesiones → Sesiones en curso**. Hay un solo ajuste, **Mostrar sesiones en curso**, activado por defecto. Si lo desactivas, se apaga toda la función: no hay bloque y enviar un mensaje ya no pasa la sesión a en curso.
+Abre **Configuración → Sesiones → Sesiones en curso**. **Mostrar sesiones en curso** está activado por defecto. Si lo desactivas, se apaga toda la función: no hay bloque y enviar un mensaje ya no pasa la sesión a en curso.
 
 Para ocultar solo el bloque, usa **Mostrar en curso** en el menú de visualización de la barra lateral.
+
+La limpieza de sesiones conserva las sesiones del bloque En curso. Para que caduquen como cualquier otra sesión, activa **Incluir sesiones «En curso»** en **Configuración → Sesiones → Retención de sesiones**. Está desactivado por defecto, y las sesiones ancladas se quedan en cualquier caso.
 
 ## Dónde funciona
 

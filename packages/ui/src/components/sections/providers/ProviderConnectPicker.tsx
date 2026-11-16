@@ -87,7 +87,7 @@ export const ProviderConnectPicker: React.FC<ProviderConnectPickerProps> = ({ pr
   return (
     <>
       {search}
-      <SettingsSection title={t('settings.providers.connect.popular')} divider={false} settingsItem="providers.connect">
+      <SettingsSection title={t('settings.providers.connect.popular')} settingsItem="providers.connect">
         <div className={SETTINGS_CARD_GRID_CLASS}>
           {popular.map((provider) => (
             <SettingsCard

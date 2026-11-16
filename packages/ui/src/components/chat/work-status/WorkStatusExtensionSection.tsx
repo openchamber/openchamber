@@ -107,12 +107,10 @@ export const WorkStatusExtensionSection: React.FC<{
 
   const body = (
     <div
-      data-guest-status-frame={guest.id}
-      // Folded and kept alive: still laid out at the section's width, so the
-      // page measures the same and unfolds at its real height, but takes no room.
+      data-guest-status-frame
       className={expanded ? undefined : 'h-0 overflow-hidden'}
-      aria-hidden={expanded ? undefined : true}
-      inert={expanded ? undefined : true}
+      inert={!expanded || undefined}
+      aria-hidden={!expanded || undefined}
     >
       {guest.statusSource ? (
         // Drawn by the app from the service's answers: no frame, and the
@@ -153,7 +151,7 @@ export const WorkStatusExtensionSection: React.FC<{
     <WorkStatusCollapsibleSection
       id={sectionId}
       title={guest.statusTitle ?? guest.name}
-      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-3.5 shrink-0 text-muted-foreground" />}
+      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-[13px] shrink-0 text-muted-foreground" />}
       defaultExpanded={guest.statusDefaultExpanded ?? true}
       summary={summary.length > 0 ? <StatusSummary items={summary} /> : undefined}
       actionLayout={actionLayout}

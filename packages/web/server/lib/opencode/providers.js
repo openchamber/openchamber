@@ -167,12 +167,16 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     }
   }
 
+  const tls = validateClientCertificate(settingsBlock.tls);
+  if (!tls.ok) return tls;
+
   const normalized = {
     package: toProviderPackage(npm),
     name,
     settings: { baseURL },
     models: normalizedModels,
   };
+  if (tls.value !== undefined) normalized.settings.tls = tls.value;
 
   let env = [];
   if (Array.isArray(config.env)) {
@@ -212,11 +216,36 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   return { ok: true, value: { providerId, config: normalized } };
 }
 
+/**
+ * `settings.tls`, the client certificate a gateway with mutual TLS asks for
+ * (OpenCode 2.3.0+). The values are what OpenCode reads, usually
+ * `{file:/path}` references; the files are not read here. Both the
+ * certificate and the key, or neither. Null removes the stored certificate;
+ * absent (a form that never read the stored one) keeps it. A literal
+ * passphrase is kept byte for byte.
+ */
+const CLIENT_CERTIFICATE_SCHEMA = z.object({
+  cert: z.string().trim().min(1),
+  key: z.string().trim().min(1),
+  passphrase: z.string().optional(),
+});
+
+function validateClientCertificate(value) {
+  if (value === undefined || value === null) return { ok: true, value };
+  const parsed = CLIENT_CERTIFICATE_SCHEMA.safeParse(value);
+  if (!parsed.success) return { ok: false, error: 'A client certificate needs both the certificate and the key' };
+  const certificate = { cert: parsed.data.cert, key: parsed.data.key };
+  if (parsed.data.passphrase?.trim()) certificate.passphrase = parsed.data.passphrase;
+  return { ok: true, value: certificate };
+}
+
 function mergeCustomProviderConfig(existingValue, normalizedConfig) {
   // Read the existing entry through the v2 projection so a legacy
   // `npm`/`api`/`options` block is carried forward in native shape.
   const existing = toProviderEntity(existingValue);
   const mergedSettings = { ...(existing.settings ?? {}), ...(normalizedConfig.settings ?? {}) };
+  // Null clears the client certificate; a payload without one keeps it.
+  if (mergedSettings.tls === null) delete mergedSettings.tls;
 
   const existingModels = isPlainObject(existing.models) ? existing.models : {};
   const normalizedModels = isPlainObject(normalizedConfig.models) ? normalizedConfig.models : {};

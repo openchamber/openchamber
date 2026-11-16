@@ -29,13 +29,14 @@ import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
+import { getWorktreeCreateCommand } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveBranchOnTopSource, resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
+import { useGitBranches, useGitBranchesFetchedAt, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, trackerReferenceSource, type ReferencePickerSelection, type ReferencePickerSource } from '@/components/references/referencePickerItems';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -165,6 +166,20 @@ export function NewWorktreeDialog({
     [projectDirectory, projectId],
   );
 
+  // A project's own create command can take a while; the footer says what runs.
+  const [usesCreateCommand, setUsesCreateCommand] = React.useState(false);
+  React.useEffect(() => {
+    setUsesCreateCommand(false);
+    if (!open || !projectRef) return;
+    let cancelled = false;
+    void getWorktreeCreateCommand(projectRef).then((command) => {
+      if (!cancelled) setUsesCreateCommand(Boolean(command));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectRef]);
+
   // Each tab keeps its own fields while the user switches between them.
   const [mode, setMode] = React.useState<Mode>('new-branch');
   const [newBranch, setNewBranch] = React.useState<BranchDraft>(EMPTY_DRAFT);
@@ -217,11 +232,17 @@ export function NewWorktreeDialog({
     void fetchBranches(projectDirectory, git, { remote: 'live' });
   }, [projectDirectory, git, fetchBranches]);
 
+  // A list seeded from the persisted cache holds local branches only
+  // (`lastBranchesFetch` 0), so it is refreshed, and the source branch is
+  // chosen from a fetched list: from a seed it could pick local `main` where
+  // the fetched list prefers `origin/main`.
+  const branchesFetchedAt = useGitBranchesFetchedAt(projectDirectory);
+  const fetchedBranchList = branchesFetchedAt > 0 ? branches?.all : undefined;
   React.useEffect(() => {
     if (!open || !projectDirectory || !git) return;
-    if (branches?.all) return;
+    if (fetchedBranchList) return;
     void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
+  }, [open, projectDirectory, git, fetchedBranchList, fetchBranches]);
 
   const [validation, setValidation] = React.useState<ValidationState>({
     isValidating: false,
@@ -267,26 +288,26 @@ export function NewWorktreeDialog({
   // server fetches before creating; it never falls back to the root's branch.
   const onTopRemote = repositoryContext && repositoryContext !== 'missing' ? repositoryContext.primaryRemote : 'origin';
   React.useEffect(() => {
-    if (!open || !initialSourceBranch || !branches?.all || sourceBranch) return;
-    setSourceBranch(resolveBranchOnTopSource(branches.all, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
-  }, [open, initialSourceBranch, branches?.all, sourceBranch, onTopRemote]);
+    if (!open || !initialSourceBranch || !fetchedBranchList || sourceBranch) return;
+    setSourceBranch(resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
+  }, [open, initialSourceBranch, fetchedBranchList, sourceBranch, onTopRemote]);
 
   // Start from the bound remote's default branch as it is on the remote, else
   // the branch the project root is on, once branches are known.
   React.useEffect(() => {
-    if (!open || initialSourceBranch || !branches?.all || !projectDirectory || sourceBranch) return;
+    if (!open || initialSourceBranch || !fetchedBranchList || !projectDirectory || sourceBranch) return;
     let cancelled = false;
     void getRootBranch(projectDirectory).catch(() => null).then((rootBranch) => {
       if (cancelled) return;
-      const defaultBranches = branches.defaultBranches ?? {};
+      const defaultBranches = branches?.defaultBranches ?? {};
       const defaultBranch = defaultBranches[onTopRemote] ?? null;
-      const preferred = resolveDefaultSourceBranch({ branches: branches.all, rootBranch, defaultBranch, remote: onTopRemote });
+      const preferred = resolveDefaultSourceBranch({ branches: fetchedBranchList, rootBranch, defaultBranch, remote: onTopRemote });
       if (preferred) setSourceBranch((current) => current || preferred);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, initialSourceBranch, branches?.all, branches?.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
+  }, [open, initialSourceBranch, fetchedBranchList, branches?.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
 
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
@@ -887,15 +908,20 @@ export function NewWorktreeDialog({
   );
 
   const validationText = validation.touched ? (validation.branchError || validation.worktreeError) : null;
+  const creatingText = !validationText && isCreating && usesCreateCommand ? t('session.newWorktree.creatingWithCommand') : null;
   const footer = (
     <div className={cn('flex w-full gap-2', isMobile ? 'flex-col' : 'flex-row items-center')}>
       {/* One line that never grows the dialog; the full message is its tooltip. */}
       <p
-        className={cn('flex min-h-4 min-w-0 items-center gap-1.5 typography-micro text-destructive', isMobile ? 'order-first w-full' : 'flex-1')}
-        title={validationText ?? undefined}
+        className={cn(
+          'flex min-h-4 min-w-0 items-center gap-1.5 typography-micro',
+          creatingText ? 'text-muted-foreground' : 'text-destructive',
+          isMobile ? 'order-first w-full' : 'flex-1',
+        )}
+        title={validationText ?? creatingText ?? undefined}
       >
         {validationText ? <Icon name="error-warning" className="h-3.5 w-3.5 shrink-0" /> : null}
-        <span className="truncate">{validationText}</span>
+        <span className="truncate">{validationText ?? creatingText}</span>
       </p>
       <div className={cn('flex shrink-0 gap-2', isMobile && 'w-full')}>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isCreating} className={cn(isMobile && 'flex-1')}>

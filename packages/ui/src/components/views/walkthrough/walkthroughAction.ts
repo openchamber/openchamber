@@ -1,19 +1,15 @@
 import { openExternalUrl } from '@/lib/url';
 
-/**
- * Shared chrome for every "open / generate the AI walkthrough" action.
- *
- * The walkthrough is informational rather than a primary or destructive act, so
- * it carries the info status tint instead of competing with the primary button
- * next to it (Review in the diff toolbar, Merge in the pull request header).
- * Keeping it in one constant is what stops the three entry points from drifting
- * apart.
+/*
+ * Every "open / generate the AI walkthrough" action (the diff toolbar, the
+ * pull request header, Generate in the walkthrough) is the plain outline
+ * button. Colour is kept for state: a tint said "info" or "working" on a
+ * button that is neither, and it competed with the one primary action beside
+ * it (AI Review, Merge).
  *
  * No sparkle iconography: "this is AI" is not what the button does, and the
  * cliché tells the user nothing about the outcome.
  */
-export const WALKTHROUGH_ACTION_CLASS =
-  'border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]';
 
 // What a walkthrough is — and what it deliberately is not — cannot be read off
 // the panel: the first question users asked about it was whether its marks were

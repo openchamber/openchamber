@@ -5,11 +5,14 @@ import { Window } from 'happy-dom';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { I18nProvider } from '@/lib/i18n';
 import { BUILTIN_BROWSER_PROVIDER } from '@/lib/guests/browser-providers';
+import { AGENT_BROWSER_PARTITION } from '@/lib/browser/contract';
 import { useUIStore } from '@/stores/useUIStore';
 import { BrowserPane } from './BrowserPane';
 
-for (const ownerSessionId of [null, 'session-fixture']) {
-  test(`uses an isolated partition for ${ownerSessionId === null ? 'user' : 'agent'} browser tabs`, async () => {
+for (const [ownerSessionId, agentBrowserSharesLogins] of [
+  [null, false], [null, true], ['session-fixture', false], ['session-fixture', true],
+] as const) {
+  test(`keeps ${ownerSessionId === null ? 'user' : 'agent'} tab ownership with login sharing ${agentBrowserSharesLogins ? 'on' : 'off'}`, async () => {
     const dom = new Window({ url: 'http://localhost/' });
     const globals = {
       window: Object.assign(dom, { __OPENCHAMBER_ELECTRON__: { runtime: 'desktop' } }),
@@ -28,11 +31,13 @@ for (const ownerSessionId of [null, 'session-fixture']) {
     const browserProvider = useUIStore.getState().browserProvider;
     const contextPanelByDirectory = useUIStore.getState().contextPanelByDirectory;
     const contextRailOrder = useUIStore.getState().contextRailOrder;
-    useUIStore.setState({ browserProvider: BUILTIN_BROWSER_PROVIDER, contextPanelByDirectory: {} });
+    const previousSharesLogins = useUIStore.getState().agentBrowserSharesLogins;
+    useUIStore.setState({ browserProvider: BUILTIN_BROWSER_PROVIDER, contextPanelByDirectory: {}, agentBrowserSharesLogins });
     const tabID = ownerSessionId
       ? useUIStore.getState().openAgentBrowserTab('/fixture', 'about:blank', ownerSessionId)
       : 'popup-test';
     const openedTab = useUIStore.getState().contextPanelByDirectory['/fixture']?.tabs.find((tab) => tab.id === tabID);
+    if (ownerSessionId !== null) expect(openedTab).toMatchObject({ id: tabID, ownerSessionId });
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -54,15 +59,15 @@ for (const ownerSessionId of [null, 'session-fixture']) {
       const webview = dom.document.querySelector('webview');
       expect(webview).not.toBeNull();
       expect(webview?.hasAttribute('allowpopups')).toBe(true);
-      expect(webview?.getAttribute('partition')).toBe(ownerSessionId === null
-        ? 'persist:openchamber-browser'
-        : 'persist:openchamber-agent-browser');
+      expect(webview?.getAttribute('partition')).toBe(ownerSessionId !== null && !agentBrowserSharesLogins
+        ? AGENT_BROWSER_PARTITION
+        : 'persist:openchamber-browser');
       expect(webview?.getAttribute('webpreferences')).toBe(
         ownerSessionId === null ? null : 'backgroundThrottling=no',
       );
     } finally {
       await act(async () => root.unmount());
-      useUIStore.setState({ browserProvider, contextPanelByDirectory, contextRailOrder });
+      useUIStore.setState({ browserProvider, contextPanelByDirectory, contextRailOrder, agentBrowserSharesLogins: previousSharesLogins });
       await dom.happyDOM.close();
       for (const key of Object.keys(globals)) {
         const descriptor = descriptors[key];

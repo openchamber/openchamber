@@ -38,6 +38,10 @@ const SYNC_SDK = OpenCode.make({
   fetch: async () => new Response('[]', { headers: { 'content-type': 'application/json' } }),
 });
 
+// Git's patch for a rename with unchanged content: headers, no hunks.
+const pureRenamePatch = (from: string, to: string) =>
+  `diff --git a/${from} b/${to}\nsimilarity index 100%\nrename from ${from}\nrename to ${to}\n`;
+
 test('mobile comparisons drill into files, retry, resume, change source, and yield to external working diffs', async () => {
   const dom = new Window({ url: 'http://localhost' });
   dom.happyDOM.setWindowSize({ width: 390, height: 844 });
@@ -82,18 +86,27 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
           remotes: [], auxiliary: [] },
       });
       case '/api/git/branch-base': return Response.json({ base: null });
-      case '/api/git/range-files': return Response.json({ files: [{ path: url.searchParams.get('base') === 'refs/heads/parent' ? 'parent.png' : 'branch.png', status: 'M' }] });
+      case '/api/git/range-files': return Response.json({ files: url.searchParams.get('base') === 'refs/heads/parent'
+        ? [{ path: 'parent.png', status: 'M' }, { path: 'docs/moved.md', previousPath: 'docs/orig.md', status: 'R' }]
+        : [{ path: 'branch.png', status: 'M' }] });
       case '/api/git/range-diff':
+        if (url.searchParams.get('path') === 'docs/moved.md') return Response.json({ diff: pureRenamePatch('docs/orig.md', 'docs/moved.md') });
         return failBranchDiff
           ? Response.json({ error: 'Branch diff failed' }, { status: 500 })
           : Response.json({ diff: 'Binary files a/branch.png and b/branch.png differ' });
       case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
-      case '/api/git/commit-files': return Response.json({ files: [{ path: `commit-${url.searchParams.get('hash')?.[0]}.png`, previousPath: 'old.png', changeType: 'R', insertions: 0, deletions: 0, isBinary: true }] });
-      case '/api/git/commit-diff': return Response.json({ diff: 'Binary files a/old.png and b/commit.png differ' });
+      case '/api/git/commit-files': return Response.json({ files: url.searchParams.get('hash')?.[0] === 'a'
+        ? [{ path: 'commit-a.png', previousPath: 'old.png', changeType: 'R', insertions: 0, deletions: 0, isBinary: true }]
+        : [{ path: 'commit-b.md', previousPath: 'old.md', changeType: 'R', insertions: 0, deletions: 0, isBinary: false }] });
+      case '/api/git/commit-diff': return Response.json({ diff: url.searchParams.get('path') === 'commit-b.md'
+        ? pureRenamePatch('old.md', 'commit-b.md')
+        : 'Binary files a/old.png and b/commit.png differ' });
       case '/api/git/file-diff':
         if (url.searchParams.get('path') === 'nested/' && nestedIsRepository) {
           return Response.json({ error: 'Path is a separate Git repository: nested/', code: 'nested_repository' }, { status: 422 });
         }
+        // A staged pure rename: the file-version read answers equal versions and no patch.
+        if (url.searchParams.get('path') === 'docs/moved.md') return Response.json({ path: 'docs/moved.md', original: 'same\n', modified: 'same\n', isBinary: false });
         return Response.json({ path: url.searchParams.get('path'), original: '', modified: '', isBinary: true });
       // The bound status contract echoes the branch it answered for.
       case '/api/source-control/github/pr/status': return Response.json({ identity: GITHUB, project: UPSTREAM,
@@ -146,7 +159,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   const render = () => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={directory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={directory}
-        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
         visible={visible} initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -162,7 +175,13 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     await act(async () => { option.click(); });
   };
   const openFile = async (path: string) => {
-    const button = container.querySelector(`[title="${path}"]`)?.closest('button');
+    // A renamed row names both sides (`old → new`), so match on the destination.
+    const button = [...container.querySelectorAll('[title]')]
+      .find((node) => {
+        const title = node.getAttribute('title') ?? '';
+        return title === path || title.endsWith(` \u2192 ${path}`);
+      })
+      ?.closest('button');
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
@@ -214,19 +233,29 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     await click('[data-value="refs/heads/parent"]');
     expect(container.querySelector('[title="branch.png"]')).toBeNull();
     expect(container.querySelector('[title="parent.png"]')).not.toBeNull();
+    // A pure rename names its source and says the content is unchanged, instead of an empty body.
+    await openFile('docs/moved.md');
+    expect(container.querySelector('h2')?.textContent).toBe('moved.md');
+    expect(container.textContent).toContain('docs/orig.md → docs');
+    expect(container.textContent).toContain('Renamed from docs/orig.md — content unchanged');
+    const renameRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/range-diff');
+    expect(renameRequest?.searchParams.get('previousPath')).toBe('docs/orig.md');
+    await click('[aria-label="Back"]');
 
     await chooseMode('Commit');
     expect(container.querySelector('[aria-label="Sync Changes"]')).toBeNull();
     expect(checkoutControl()).toBeUndefined();
-    expect(container.querySelector('[title="commit-a.png"]')).not.toBeNull();
+    // A renamed entry names both sides: the row reads `old → new`.
+    expect(container.querySelector('[title="old.png \u2192 commit-a.png"]')).not.toBeNull();
     await click('[aria-label="Select commit"]');
     await click(`[data-value="${'b'.repeat(40)}"]`);
     expect(container.querySelector('[title="commit-a.png"]')).toBeNull();
-    await openFile('commit-b.png');
+    await openFile('commit-b.md');
     expect(container.textContent).toContain('Commit · bbbbbbbb');
+    expect(container.textContent).toContain('Renamed from old.md — content unchanged');
     const commitRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/commit-diff');
     expect(commitRequest?.searchParams.get('hash')).toBe('b'.repeat(40));
-    expect(commitRequest?.searchParams.get('previousPath')).toBe('old.png');
+    expect(commitRequest?.searchParams.get('previousPath')).toBe('old.md');
     expect(requests.filter((url) => url.pathname === '/api/git/range-diff').every((url) => url.searchParams.get('includeWorkingTree') === 'true')).toBe(true);
 
     await click('[aria-label="Back"]');
@@ -253,6 +282,15 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     expect(container.querySelector('[aria-label="Publish"]')).not.toBeNull();
     expect(checkoutControl()).toBeDefined();
 
+    // A working-tree pure rename reads as one too, from its equal file versions.
+    await act(async () => { seed('/repo', { ...status, isClean: false, files: [{ path: 'docs/moved.md', previousPath: 'docs/orig.md', index: 'R', working_dir: ' ' }] }); });
+    initialDiff = { path: 'docs/moved.md', staged: true };
+    await render();
+    expect(container.textContent).toContain('Renamed from docs/orig.md — content unchanged');
+    const workingRenameRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/file-diff');
+    expect(workingRenameRequest?.searchParams.get('previousPath')).toBe('docs/orig.md');
+    await click('[aria-label="Back"]');
+
     // A nested-repository answer must not outlive the read that produced it.
     await act(async () => { seed('/repo', { ...status, isClean: false, files: [{ path: 'nested/', index: '?', working_dir: '?' }] }); });
     initialDiff = { path: 'nested/', staged: false };
@@ -262,7 +300,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     nestedIsRepository = false;
     initialDiff = { path: 'nested/', staged: false };
     await render();
-    expect(container.querySelector('h2')?.textContent).toBe('nested/');
+    expect(container.querySelector('h2')?.textContent).toBe('nested');
     expect(container.textContent).not.toContain('Separate Git repository');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -382,7 +420,7 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -435,7 +473,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   const originalFetch = globalThis.fetch;
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [{ path: 'src/working.png', index: ' ', working_dir: 'M' }], isClean: false, diffStats: { staged: {}, working: {} } };
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
     if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
@@ -476,7 +514,12 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
   const servedGitHub = githubLikeDescriptor();
   useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
-  const apis = createWebAPIs();
+  const webApis = createWebAPIs();
+  // The chip's way to Changes reads status and the file through these, not through this test's fetch.
+  const apis = { ...webApis, git: { ...webApis.git,
+    getGitStatus: async () => status,
+    getGitFileDiff: async (_directory: string, { path }: { path: string }) => ({ path, original: '', modified: '', isBinary: true, submodule: null }),
+  } };
   useGitStore.getState().setActiveDirectory('/repo');
   const previous = useGitStore.getState().getDirectoryState('/repo');
   if (!previous) throw new Error('Missing repository state');
@@ -504,18 +547,25 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await act(async () => { option.click(); });
   };
   const openFile = async (path: string) => {
-    const button = container.querySelector(`[title="${path}"]`)?.closest('button');
+    // A renamed row names both sides (`old → new`), so match on the destination.
+    const button = [...container.querySelectorAll('[title]')]
+      .find((node) => {
+        const title = node.getAttribute('title') ?? '';
+        return title === path || title.endsWith(` \u2192 ${path}`);
+      })
+      ?.closest('button');
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
+  const renderPane = (initialDiff: { path: string; staged: boolean; scope?: 'turn' } | null) => act(async () => {
+    root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+      <MobileChangesPane rootDirectory="/repo"
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
+        visible initialDiff={initialDiff} />
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+  });
   try {
-    await act(async () => {
-      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-        <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
-          visible />
-      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
-    });
+    await renderPane(null);
     await act(async () => { useSessionUIStore.setState({ currentSessionId: 'ses_turn' }); });
     // The selector offers Last turn and choosing it asks the client for the turn.
     await chooseMode('Last turn');
@@ -526,11 +576,11 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     const added = container.querySelector('[title="src/added.ts"]')?.closest('button');
     const modified = container.querySelector('[title="src/modified.ts"]')?.closest('button');
     expect(added?.textContent).toContain('A');
-    expect(added?.textContent).toContain('+1 -0');
+    expect(added?.textContent).toContain('+1');
     expect(modified?.textContent).toContain('M');
-    expect(modified?.textContent).toContain('+1 -1');
+    expect(modified?.textContent).toContain('+1 −1');
     await openFile('src/added.ts');
-    expect(container.querySelector('h2')?.textContent).toBe('src/added.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('added.ts');
     expect(container.textContent).toContain('Last turn');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -547,12 +597,26 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(container.textContent).toContain('snapshot unavailable');
     expect(container.textContent).not.toContain('No last turn changes to display');
     turnDiffs.mockResolvedValue([
-      { file: 'src/retried.ts', status: 'modified', additions: 2, deletions: 0, patch: '' },
+      { file: 'src/retried.ts', status: 'modified', additions: 2, deletions: 0,
+        patch: 'diff --git a/src/retried.ts b/src/retried.ts\nindex 5555555..6666666 100644\nBinary files a/src/retried.ts and b/src/retried.ts differ\n' },
     ]);
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry');
     if (!retry) throw new Error('Missing Retry');
     await act(async () => { retry.click(); });
     expect(container.querySelector('[title="src/retried.ts"]')).not.toBeNull();
+    // A chip's file opens from Last turn when the turn has it.
+    await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
+    expect(container.querySelector('h2')?.textContent).toBe('retried.ts');
+    expect(container.textContent).toContain('Last turn');
+    // Without it the same request lands on Changes, on that file.
+    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
+    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'working.png'; tick += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+    expect(container.querySelector('h2')?.textContent).toBe('working.png');
+    expect(container.textContent).not.toContain('Last turn');
+    await click('[aria-label="Back"]');
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
   } finally {
     await act(async () => root.unmount());
     turnDiffs.mockRestore();
@@ -646,7 +710,7 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -757,32 +821,32 @@ test('keeps the nested repository picker reachable once the working list resolve
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     }
   };
-  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null }) => act(async () => {
+  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null; repositoriesKnown: boolean; unreadable?: null }) => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={rootDirectory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-      <MobileChangesPane rootDirectory={rootDirectory} repository={repository} visible />
+      <MobileChangesPane rootDirectory={rootDirectory} repository={{ unreadable: null, ...repository }} visible />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   try {
-    await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'] });
+    await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')));
     let picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker) throw new Error('Missing nested repository picker in the working list header');
     if (!picker.textContent?.includes('one')) throw new Error('Picker does not show the resolved repository');
 
     // A root that is a repository offers itself first, then what is nested.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'] });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('repo')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('repo')) throw new Error('Picker does not show the root repository');
 
     // Picking the nested repository (a submodule) switches the surface to it.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'] });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('sub')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
 
     // A root repository with nothing nested keeps the picker hidden.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null });
     await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
     if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
   } finally {

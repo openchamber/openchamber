@@ -161,7 +161,11 @@ file directly while iterating (`bun test <file>`).
 
 UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
 it removed: test each malicious payload in its own call, or a combined payload
-passes or fails for the wrong reason. The UI's `bun:test` type shim is trimmed
+passes or fails for the wrong reason. happy-dom refuses an event built by another
+realm, so a test that installs a `Window` as `window` also installs that window's
+`Event` and `CustomEvent`: app code dispatches `new CustomEvent(...)` on `window`
+when stores load. `src/test/preload.ts` turns off Base UI's animation waits,
+since nothing animates in happy-dom. The UI's `bun:test` type shim is trimmed
 (no `test.each`, no `toMatch`): use loops and `regex.test()` with `toBe`.
 
 For docs-only changes, validation may be enough:
@@ -192,7 +196,9 @@ Before opening a pull request:
    *Before you start*).
 2. Read [`AGENTS.md`](./AGENTS.md), every project skill matching the character
    of the change, and the nearest package README and module `DOCUMENTATION.md`.
-3. Keep the change focused. Separate unrelated cleanup or refactors.
+3. Keep the change focused. Separate unrelated cleanup or refactors. A feature
+   made of several parts that work on their own is one pull request per part
+   or small group, so each can be reviewed and tested whole.
 4. Run the validation required by the applicable project guidance, not only
    the broad commands above.
 5. Complete the pull request template with concrete, current evidence.
@@ -226,6 +232,14 @@ Every pull request must explain:
   types, and green CI are not a live run. If you genuinely cannot run it, say
   so and explain why; an honest gap is reviewable, a claim we later find hollow
   is not.
+- **Everything you claim, run for real:** every runtime, platform, and
+  external service the pull request says it supports is exercised live before
+  the pull request opens, not only the one you happen to use. Tests, mocks, and
+  fixtures repeat your own idea of how the other side behaves, so they pass
+  exactly where that idea is wrong. Most of it is cheap to set up: a free
+  account, a Docker container, a simulator, and an agent that drives the app.
+  Say per target what you did, what you saw, and how you checked the result
+  outside the app, including the refusals and error cases.
 - **Risks:** meaningful failure, rollback, cleanup, compatibility, security,
   performance, or cross-runtime considerations.
 

@@ -12,7 +12,7 @@ import type { ContributorDestinationCandidate } from './contributorDestination';
 import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
-const obviousPublishTargets = (context: GitPublishContext): GitPublishTargets | null => {
+export const obviousPublishTargets = (context: GitPublishContext): GitPublishTargets | null => {
   const remotes = effectiveRepositoryBinding(context.bindingRead).remotes
     .filter((remote) => remote.readiness === 'ready' && remote.mode !== 'anonymous');
   const branch = context.status.current;
@@ -24,7 +24,9 @@ const obviousPublishTargets = (context: GitPublishContext): GitPublishTargets | 
       ? { push: { remoteName: tracked.name, ref }, fetch: { remoteName: tracked.name, ref } }
       : { push: { remoteName: tracked.name, ref } };
   }
-  if (context.action !== 'push') return null;
+  // The upstream is on a remote this list leaves out, such as a path on disk:
+  // pushing to another one would publish what was kept there, so ask.
+  if (context.action !== 'push' || tracking) return null;
   // A new branch goes where the repository's identity points: the remote its
   // account answers for, or the one remote it holds a grant of its own for.
   // Remotes reached through that identity are fetchable forks, not where a

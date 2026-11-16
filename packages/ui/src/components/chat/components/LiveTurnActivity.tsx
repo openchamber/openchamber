@@ -17,6 +17,9 @@ import { ShownPartCard } from '../message/parts/ShownToolCard';
 import { useActivityRowGlide, useLiveRowsFloor } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
+import { renderedPage } from '@/lib/opencode/tools';
+import type { ShownPart } from '../lib/turns/liveActivity';
+import { DiffCount } from '@/components/ui/diff-count';
 
 const NO_MESSAGES: ChatMessageEntry[] = [];
 
@@ -96,11 +99,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                 <span className="flex min-w-0 items-center gap-1 typography-meta @min-[560px]:shrink-0">
                     <span className="truncate">{fileLabel}</span>
                     {summary?.hasCompleteDiff && (summary.additions > 0 || summary.deletions > 0) ? (
-                        <span className="shrink-0 tabular-nums">
-                            <span className="text-[var(--status-success)]">+{summary.additions}</span>
-                            <span aria-hidden="true">/</span>
-                            <span className="text-[var(--status-error)]">-{summary.deletions}</span>
-                        </span>
+                        <DiffCount added={summary.additions} removed={summary.deletions} />
                     ) : null}
                 </span>
             ) : null}
@@ -160,7 +159,17 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
 function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
     return (
         <div className="chat-message-column">
-            {pages.map((part) => <ShownPartCard key={part.id} part={part} />)}
+            {pages.map((part) => <TurnPage key={part.id} part={part} />)}
+        </div>
+    );
+}
+
+function TurnPage({ part }: { part: ShownPart }) {
+    const page = part.type === 'tool' ? renderedPage(part.tool, part.state) : null;
+    if (!page?.ui || page.ask.kind !== 'show') return <ShownPartCard part={part} />;
+    return (
+        <div data-ui-render-hoisted="true">
+            <ShownPartCard part={part} />
         </div>
     );
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -89,6 +90,8 @@ interface ModelMultiSelectProps {
   portal?: boolean;
   /** Accessible name when the trigger shows only an icon. */
   addButtonAriaLabel?: string;
+  /** Tooltip on the trigger. */
+  addButtonTooltip?: string;
 }
 
 /**
@@ -110,6 +113,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   triggerIcon,
   portal = false,
   addButtonAriaLabel,
+  addButtonTooltip,
 }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
@@ -259,29 +263,33 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     costPerMillion: t('chat.modelControls.costPerMillion'),
   }), [t]);
 
+  const trigger = (
+    <button
+      ref={triggerRef}
+      type="button"
+      data-popup-open={isOpen ? '' : undefined}
+      className={cn(
+        dropdownTriggerVariants({ size: 'default' }),
+        'w-fit',
+        addButtonClassName,
+      )}
+      disabled={!canAddModel}
+      aria-label={addButtonAriaLabel}
+      onClick={() => {
+        setIsOpen(!isOpen);
+      }}
+    >
+      {triggerIcon ?? <Icon name="add" className="h-3.5 w-3.5 me-1" />}
+      {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
+    </button>
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5 items-center">
         {/* Add model button (dropdown trigger) */}
         <div className={cn('relative', containerClassName)} ref={dropdownRef}>
-          <button
-            ref={triggerRef}
-            type="button"
-            data-popup-open={isOpen ? '' : undefined}
-            className={cn(
-              dropdownTriggerVariants({ size: 'default' }),
-              'w-fit',
-              addButtonClassName,
-            )}
-            disabled={!canAddModel}
-            aria-label={addButtonAriaLabel}
-            onClick={() => {
-              setIsOpen(!isOpen);
-            }}
-          >
-            {triggerIcon ?? <Icon name="add" className="h-3.5 w-3.5 me-1" />}
-            {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
-          </button>
+          {addButtonTooltip ? <HoverTooltip label={addButtonTooltip}>{trigger}</HoverTooltip> : trigger}
 
           {isOpen && (!portal || portalStyle) ? mountPopup(
             <div

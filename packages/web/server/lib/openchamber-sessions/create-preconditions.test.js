@@ -139,7 +139,7 @@ describe('session creation preconditions', () => {
     const f = fixture({
       resolveWorktreeTopLevel: async () => ({ root: directory, prefix: 'ai' }),
       getWorktreeBootstrapStatus,
-      worktreeBootstrapStore: { read, write: async () => {} },
+      worktreeBootstrapStore: { read, write: async () => {}, remove: async () => false },
     });
     await expect(f.service.create({ directory: subdirectory, prompt: request.prompt })).rejects.toMatchObject({
       statusCode: 500, message: 'Worktree bootstrap failed: Setup failed',

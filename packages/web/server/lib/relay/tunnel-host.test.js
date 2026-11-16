@@ -2,8 +2,18 @@ import { describe, test, expect } from 'bun:test';
 import http from 'node:http';
 import { gunzipSync } from 'node:zlib';
 
+import { createFrameDecryptor, createFrameEncryptor } from './e2ee.js';
 import { createTunnelHost, isAllowedRelayWebSocketPath } from './tunnel-host.js';
-import { decodeTunnelFrame, encodeTunnelFrame, encodeJsonPayload, TunnelFrameType } from './tunnel-codec.js';
+import {
+  chunkPayload,
+  createOutboundFrameBatcher,
+  decodeFrameBatch,
+  decodeTunnelFrame,
+  encodeTunnelFrame,
+  encodeJsonPayload,
+  MAX_TUNNEL_PAYLOAD_BYTES,
+  TunnelFrameType,
+} from './tunnel-codec.js';
 
 const startLoopback = () =>
   new Promise((resolve) => {
@@ -143,6 +153,47 @@ describe('tunnel-host HTTP body forwarding', () => {
     const received = await waitFor(() => loopback.requests.length === 1);
     expect(received).toBe(true);
     expect(loopback.requests[0].method).toBe('GET');
+    await loopback.stop();
+  });
+
+  test('a relay that drops one encrypted body message fails the channel instead of shortening the body', async () => {
+    const { host, loopback } = await createHarness();
+    const keyBytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const key = await globalThis.crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const encryptor = createFrameEncryptor(key);
+    const decryptor = createFrameDecryptor(key);
+
+    // Default batcher: a full-size body chunk travels alone, so the client
+    // sends [head] [A] [B] [CCCC + StreamEnd] as four encrypted messages.
+    const plaintexts = [];
+    const batcher = createOutboundFrameBatcher({ sendBatch: (p) => plaintexts.push(p) });
+    batcher.enqueue(httpHead({ hasBody: true }));
+    const body = Buffer.concat([
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'A'),
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'B'),
+      Buffer.from('CCCC'),
+    ]);
+    for (const piece of chunkPayload(new Uint8Array(body))) {
+      batcher.enqueue(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, piece));
+    }
+    batcher.enqueue(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
+    batcher.dispose();
+    expect(plaintexts.length).toBe(4);
+    const wire = [];
+    for (const plaintext of plaintexts) wire.push(await encryptor.encrypt(plaintext));
+
+    // The relay drops the "B" message; the host decrypts and dispatches the rest
+    // as host-client.js does, and tears the tunnel down on the decrypt error.
+    const deliver = async (message) => {
+      for (const frame of decodeFrameBatch(await decryptor.decrypt(message))) await host.handleFrame(frame);
+    };
+    await deliver(wire[0]);
+    await deliver(wire[1]);
+    await expect(deliver(wire[3])).rejects.toThrow('frame counter gap');
+    host.close();
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(loopback.requests.length).toBe(0);
     await loopback.stop();
   });
 });

@@ -149,17 +149,21 @@ export const observeSuggestedTasks = (): (() => void) => {
   };
 };
 
-/**
- * Open suggestions across every project, for the sidebar's entry point. VS
- * Code runs no OpenChamber server, so there it is always 0 and asks nothing.
- */
-export const useOpenSuggestionCount = (): number => {
-  const summary = useSuggestedTasksStore((state) => state.summary);
+/** Open suggestions across projects, observed only while a supported readout is visible. */
+export const useOpenSuggestionCount = (enabled: boolean): number => {
+  const active = enabled && !isVSCodeRuntime();
+  const subscribe = React.useCallback((notify: () => void) => (
+    active ? useSuggestedTasksStore.subscribe(notify) : () => undefined
+  ), [active]);
+  const snapshot = React.useCallback(() => (
+    active ? useSuggestedTasksStore.getState().summary?.reduce((sum, project) => sum + (project.open ?? 0), 0) ?? 0 : 0
+  ), [active]);
+  const count = React.useSyncExternalStore(subscribe, snapshot, snapshot);
   React.useEffect(() => {
-    if (isVSCodeRuntime()) return undefined;
+    if (!active) return;
     const release = observeSuggestedTasks();
     void useSuggestedTasksStore.getState().loadSummary();
     return release;
-  }, []);
-  return summary ? summary.reduce((sum, project) => sum + (project.open ?? 0), 0) : 0;
+  }, [active]);
+  return count;
 };

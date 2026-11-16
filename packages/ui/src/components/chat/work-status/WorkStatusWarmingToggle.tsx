@@ -64,7 +64,7 @@ export const WorkStatusWarmingToggle: React.FC<{ sessionId: string | null; direc
             warmed ? 'text-[var(--primary-text)]' : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Icon name={warmed ? 'fire-fill' : 'fire'} className="size-3.5" />
+          <Icon name={warmed ? 'fire-fill' : 'fire'} className="size-[13px]" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4} className="max-w-[min(280px,calc(100vw-24px))] whitespace-normal break-words text-start">

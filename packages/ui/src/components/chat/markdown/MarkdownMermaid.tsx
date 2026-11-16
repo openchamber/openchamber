@@ -1,6 +1,5 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { CustomRendererProps } from 'streamdown';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useI18n } from '@/lib/i18n';
@@ -8,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { createMermaidViewerController, MERMAID_BLOCK_SELECTOR } from './mermaidViewer';
+import { loadedMermaidRenderers, loadMermaidRenderers, type MermaidRenderers } from './mermaidRenderers';
 
 type MermaidResult = { svg?: string; ascii?: string };
 const renderCache = new Map<string, MermaidResult>();
@@ -23,7 +23,8 @@ const screenColors = {
 
 // Keep the original 100-entry LRU across row remounts and fullscreen previews.
 // CSS variable colors let one geometry result serve every screen theme.
-function renderDiagram(source: string, mode: 'svg' | 'ascii'): MermaidResult {
+function renderDiagram(renderers: MermaidRenderers, source: string, mode: 'svg' | 'ascii'): MermaidResult {
+  const { renderMermaidASCII, renderMermaidSVG } = renderers;
   const key = `${mode}:${source}`;
   const cached = renderCache.get(key);
   if (cached) {
@@ -69,9 +70,17 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
   const [copied, setCopied] = React.useState(false);
   const copyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const source = code.trimEnd();
+  const [renderers, setRenderers] = React.useState(loadedMermaidRenderers);
+  React.useEffect(() => {
+    if (renderers || isIncomplete) return;
+    let cancelled = false;
+    // A failed load keeps the source on screen, like a diagram that does not parse.
+    loadMermaidRenderers().then((loaded) => { if (!cancelled) setRenderers(() => loaded); }, () => {});
+    return () => { cancelled = true; };
+  }, [renderers, isIncomplete]);
   const result = React.useMemo(
-    () => isIncomplete ? null : renderDiagram(source, mode),
-    [source, isIncomplete, mode],
+    () => isIncomplete || !renderers ? null : renderDiagram(renderers, source, mode),
+    [renderers, source, isIncomplete, mode],
   );
   const svg = result?.svg;
   const text = result?.ascii || source;

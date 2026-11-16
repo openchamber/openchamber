@@ -1287,22 +1287,16 @@ export function createNetworkOperations({
         lfsBinaryAvailable: Boolean(binaryResult.trim()),
       });
       if (discovery.needed) {
-        if (discovery.endpoint.status !== 'resolved') {
-          if (discovery.client.status !== 'missing') {
-            throw operationError('INVALID_REQUEST', 'Git LFS endpoint could not be resolved safely', 400);
-          }
-        } else {
-          requirements.push({
-            kind: 'lfs',
-            path: '.',
-            rawEndpoint: discovery.endpoint.candidate.endpoint,
-            transferReady: discovery.client.status !== 'missing',
-            endpoint: {
-              displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
-              fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
-            },
-          });
-        }
+        requirements.push({
+          kind: 'lfs',
+          path: '.',
+          rawEndpoint: discovery.endpoint.candidate.endpoint,
+          transferReady: discovery.client.status !== 'missing',
+          endpoint: {
+            displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
+            fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
+          },
+        });
       }
     }
     const currentHead = (await localGit(directory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
@@ -1523,10 +1517,6 @@ export function createNetworkOperations({
       else if (discovery.client.status === 'missing') lfs.push({
         path: lfsPath, status: 'client-missing',
         error: publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry'),
-      });
-      else if (discovery.endpoint.status !== 'resolved') lfs.push({
-        path: lfsPath, status: 'authorization-required',
-        error: publicError('AUTHENTICATION_REQUIRED', 'The Git LFS endpoint requires an explicit HTTPS grant'),
       });
       else {
         const rawEndpoint = discovery.endpoint.candidate.endpoint;

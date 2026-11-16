@@ -14,6 +14,9 @@ itself; it can only ask and wait.
   result, a timeout, or an abort signal. It knows nothing about transports.
 - `routes.js` is the result callback (`POST /api/browser-control/result`). It
   validates the envelope and hands the outcome to the broker.
+- `uploads.js` decides which files `browser.upload` may send and holds them
+  under a short-lived token for the client that attaches them
+  (`GET /api/browser-control/uploads/:token/:index`).
 - `../../index.js` supplies `emitRequest`, which writes the request to the
   OpenChamber SSE clients and returns how many were reached. The event carries
   the same `context` (`directory`, `sessionId`, each `null` when unknown) the
@@ -137,7 +140,11 @@ itself; it can only ask and wait.
   the agent to time out.
   `ContextPanel` keeps agent tabs of every project mounted (or registered as
   sleeping), so a session keeps working its page while the user looks at
-  another project. The user's own tabs, across every project together, keep
+  another project. An agent tab with no agent action and not on screen for
+  30 minutes (`AGENT_TAB_IDLE_MS`) sleeps: agent tabs run unthrottled, and a
+  finished session would otherwise hold a busy Chromium process until the tab
+  closes. Its next action wakes it at the last address, so page state that
+  lives only in memory (a half-filled form) is gone by then. The user's own tabs, across every project together, keep
   their page while among the `liveBrowserTabLimit` most recently used (a
   General setting, 5 by default, `lib/browser/liveTabs.ts`); the rest sleep.
   The user's tabs are never offered to agents. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
@@ -192,17 +199,87 @@ itself; it can only ask and wait.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
-  goes straight back to where it was. Before `browser.click` and
-  `browser.type` the pane asks the desktop shell
-  (`desktop_browser_keep_page_focused`) to emulate focus for that page: the
-  page then behaves as focused, so pickers stay open and its clipboard calls
-  work, while keyboard focus never leaves the user. The emulation stays for
-  the page's lifetime. When it is unavailable, because DevTools holds the
-  page's debugger, the action gives the page real focus for the script alone
-  (`holdPageFocus`) and returns it before waiting out any load the action
-  started. `browser.click` replays a mouse click at the element's center
-  (pointer and mouse down, focus, up, click), since many widgets open on
-  mousedown or focus and ignore the click event alone.
+  goes straight back to where it was. A press inside the page moves focus to
+  the view with no `focusin` in the app, only a window `blur`, so the guard
+  checks after that blur too; and when an action ends, focus it moved anywhere
+  (a Tab out of the page's last field lands in the app, as in a browser) goes
+  back to the element the user had. Before every input action the pane asks
+  the desktop shell (`desktop_browser_keep_page_focused`) to emulate focus for
+  that page: the page then behaves as focused, so pickers stay open and its
+  clipboard calls work. The emulation stays for the page's lifetime. When it
+  is unavailable (the debugger could not attach; an open DevTools does not
+  stop it), the action gives the page real focus (`holdPageFocus`) and
+  returns it before waiting out any load the action started.
+  A tab an agent opened browses in a profile of its own,
+  `persist:openchamber-browser-agent`, without the user's logins: a page can
+  steer the agent, and with the user's sessions it would act as the user on
+  every site. What is signed in to there stays for later agent tabs. The
+  setting `agentBrowserSharesLogins` (Settings, OpenChamber Web) puts agent
+  tabs in the user's profile instead; an open agent tab remounts at its
+  current address when it changes, since a view keeps the partition it was
+  created with. A link an agent's page opens in a new tab becomes another tab
+  of the same agent. The user's own tabs stay in the user's profile while the
+  agent drives them. The shell hardens, keeps and flushes both profiles alike.
+  A guest view is transparent, so a page with no background of its own used
+  to show the app behind it and capture as black. Every panel page gets a
+  white base background through its debugger session before its first paint
+  (`Emulation.setDefaultBackgroundColorOverride`), as a browser draws it; a
+  page that asks for `color-scheme: dark` still gets Chromium's dark canvas.
+  A CSS background on the view was rejected: it painted those dark pages white
+  too, and a capture copies only the guest, so it stayed black.
+  Page actions run through the desktop driver
+  (`packages/electron/browser-panel-driver.mjs`, composed in
+  `packages/ui/src/lib/browser/pageDriver.ts`). Scripts run in an isolated
+  world of every frame, cross-origin frames included, so `browser.snapshot`
+  lists the controls of iframes and open shadow roots, and file inputs even
+  when hidden. Each entry gets a ref (`e1`, `e2`, ...) that names it until the
+  next snapshot of the tab; a ref whose element or frame left the page asks
+  for a new snapshot. A ref also carries the document it came from: a frame
+  keeps its id across a navigation while its new document numbers its
+  elements from 1 again, so a number alone would reach an unrelated element. A selector names an element of the top document only, so
+  entries in frames and shadow roots carry no selector, and frame entries
+  carry `frame` (its address) and bounds on the page. Clicks, hovers, keys,
+  typing and pointer drags are real input over the page's debugger session, so
+  the page gets trusted events, CSS `:hover`, its own hit testing and focus
+  rules. A press goes to the session that holds the element's frame, at that
+  frame's coordinates: sent to the top page instead, a press meant for a
+  cross-origin frame landed on the page around it whenever the panel was
+  hidden, because the view of a hidden tab has `pointer-events: none` above
+  it. Real input reaches only a page Chromium draws: a hidden tab takes none
+  and the call hangs, so for each input action the stage is drawn at zero
+  opacity inside the window, under the app's content (`revealStage` in
+  `BrowserPane`), and an action that gets no answer in 12 s fails. An element
+  with something drawn over its centre is refused with what covers it, since a
+  real click would land on the cover. `browser.type` selects the field's
+  content and inserts the text, so it replaces what was there, then reads the
+  value back. An HTML drag (the source or an ancestor `draggable`, as links and
+  images are by default) runs as the page's own drag events with one
+  `DataTransfer`: a real one starts the system's drag session in the app's
+  window, which Electron does not let a guest's debugger intercept, and the
+  process hung in testing. Any other drag is a real press, move and release.
+  A JavaScript dialog holds the page until it is answered, scripts and input
+  included, and Electron shows it as a sheet on the app's window while it is
+  open. A tab an agent opened answers its own dialogs: the driver answers
+  each as it opens, no unless the running action passed `dialog: "accept"`,
+  and the action's result lists them (`dialogs`, with a note when one was
+  answered no). The sheet then only flashes; otherwise it held the user's
+  whole window until the agent's next step, seconds later. Hiding the sheet
+  and keeping the dialog for the agent is not possible: Electron's only switch
+  (`disableDialogs`) answers no at once, before the debugger can answer. In
+  the user's own tabs the driver tracks the open dialog instead; an action
+  that opens one answers with it at once, a snapshot reports it instead of
+  reading the page, and every other action refuses until `browser.dialog`
+  answers it. `browser.wait` checks every quarter second for text in any
+  frame or an element, or with `gone` for its absence, at most 15 s.
+  `browser.upload` takes paths the server checks (`uploads.js`): real paths in
+  the session's folder or OpenCode's temp folder (`$TMPDIR/opencode`) only,
+  at most 10 files and 25 MB. The server reads the files when it checks the
+  paths and holds those bytes under a token for two minutes, so a file
+  swapped or grown afterwards changes nothing; the client may be on another machine, so it fetches them from
+  `/api/browser-control/uploads/:token/:index`, the shell writes each to a folder of its own in its
+  temp folder (kept a day; two files may share a name) and attaches only files it wrote there. Actions
+  beyond `BROWSER_CONTROL_ACTIONS` of `@openchamber/sdk` are refused when an
+  extension provider answers browser actions: its contract does not have them.
   `browser.select` changes a native single-value HTML select by exact label or
   value, dispatches `input` and `change`, and verifies the selected option
   before returning.
@@ -217,10 +294,50 @@ itself; it can only ask and wait.
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
+## Annotation overlay
+
+The user's annotation (`annotationOverlay.ts`, driven by `annotationSession.ts`
+and `BrowserPane`) runs through the same desktop driver, in an isolated world
+of its own per session (`annotate` in `browser-panel-driver.mjs`). Its comment
+box takes dictation: the overlay asks the app for the microphone through a
+`Runtime.addBinding` function scoped to that world's name, and the app answers
+through `annotationSend`; `annotationMessage` is the app's long poll for the
+overlay's requests. A desktop app without the driver, or a page the debugger
+cannot attach to, runs the overlay in the page's own world, without a
+microphone. Annotation of a page shown in a frame (`useFrameAnnotation`) has
+no isolated world and no microphone either.
+
+### Why an isolated world and not `webview.executeJavaScript`
+
+In the page's own world every script of the page can call whatever the overlay
+calls, so a page could start the app's microphone and read the transcript
+from the comment box. A binding exposed to an isolated world is a function the
+page has no reference to and no way to call. `Runtime` is enabled only while a
+session runs, since it streams every console call of the page, and each
+session's world has a new name so a binding removed at the end cannot linger
+in a world the next session reuses.
+
+### Why a PDF gets an input layer
+
+Chromium draws a PDF in a viewer frame of its own: pointer and key input over
+it never reaches the document the overlay lives in, so marks could not be
+drawn. A transparent layer over the viewer takes the input for the session.
+The wheel still scrolls the PDF: Chromium routes it to the viewer past the
+layer. A PDF has no elements to pick, so the overlay offers Region and Draw
+only.
+
+### Why a stroke is drawn as short paths
+
+Rewriting one path's `d` on every pointer move costs time with the stroke's
+length, and a long stroke stalled the pointer. The stroke is a group of paths
+of at most 64 points, each starting where the last ended, so a move rewrites
+only the last one.
+
 ## Running the panel's code
 
 The agent tool reaches the panel of the app the agent works from, so a change
-to `BrowserPane`, `controlClient` or `pageActions` shows there only after that
+to `BrowserPane`, `controlClient`, `pageActions`, `pageDriver` or the desktop
+driver shows there only after that
 app is rebuilt. Run it in `electron:dev` instead and send the actions to that
   instance's API port, the one its log prints after `OpenChamber server
   listening on`. Supply the calling session; a sessionless request is refused:

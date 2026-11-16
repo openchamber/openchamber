@@ -53,7 +53,7 @@ export function PrFixLoopControl({ pull, sessionId, context, compact = false }: 
             <Icon name="more-2" className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent data-work-status-popup align="end">
           <DropdownMenuItem disabled={busy || (!loop && Boolean(reason))} onSelect={action}>
             <span className="flex flex-col gap-1">
               <span>{label}</span>

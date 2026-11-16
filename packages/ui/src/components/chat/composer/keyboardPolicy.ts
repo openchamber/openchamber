@@ -31,6 +31,16 @@ export interface EnterModifierState {
     altKey?: boolean;
 }
 
+/**
+ * On mobile a deferred Enter keeps Shift only from a hardware keyboard, in both
+ * Return modes: iOS autocapitalization arms a phantom Shift at sentence starts
+ * on the soft keyboard, which must neither block Send nor continue a list.
+ */
+export const shouldPreserveDeferredEnterShift = (input: {
+    isMobile: boolean;
+    hasHardwareKeyboard: boolean;
+}): boolean => !input.isMobile || input.hasHardwareKeyboard;
+
 export const restoreDeferredEnterModifiers = (
     event: EnterModifierState,
     modifiers: EnterModifierState,

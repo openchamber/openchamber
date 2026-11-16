@@ -62,9 +62,30 @@ describe("applySessionStatusSnapshot", () => {
       applySessionStatusSnapshot(store, { ses_a: { type: "retry", attempt: 2, message: "x", next: 30 } }, ["ses_a"], "monotonic")
       expect(store.getState().session_status.ses_a).toEqual(retry)
     })
+
+    test("keeps a retry status that the snapshot reports as busy until the attempt is due", () => {
+      const retry: SessionStatus = { type: "retry", attempt: 2, message: "x", next: Date.now() + 20_000 }
+      const store = createDirectoryStore({ session_status: { ses_a: retry } })
+      const changed = applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "monotonic")
+      expect(changed).toBe(false)
+      expect(store.getState().session_status.ses_a).toEqual(retry)
+    })
+
+    test("takes the snapshot's busy over a retry whose attempt is past due", () => {
+      const store = createDirectoryStore({ session_status: { ses_a: { type: "retry", attempt: 2, message: "x", next: Date.now() - 1_000 } } })
+      applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "monotonic")
+      expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    })
   })
 
   describe("authoritative mode (reconnect / escalated resync)", () => {
+    test("keeps a retry status that the snapshot reports as busy", () => {
+      const retry: SessionStatus = { type: "retry", attempt: 2, message: "x", next: Date.now() + 20_000 }
+      const store = createDirectoryStore({ session_status: { ses_a: retry } })
+      applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "authoritative")
+      expect(store.getState().session_status.ses_a).toEqual(retry)
+    })
+
     test("a successful empty snapshot clears an archived session's invalidation and confirms idle", () => {
       const store = createDirectoryStore({
         session_status: {},

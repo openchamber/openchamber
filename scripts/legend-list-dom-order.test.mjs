@@ -9,62 +9,6 @@ const requireUI = createRequire(new URL('../packages/ui/package.json', import.me
 const packageDirectory = dirname(requireUI.resolve('@legendapp/list/react'));
 const bundles = ['react.js', 'react.mjs', 'react-native.web.js', 'react-native.web.mjs'];
 
-// Runs the installed dependency's own DOM-order hook (the Bun patch lives in
-// it) with a fake clock, timers and list context. The hook moves rows so the
-// DOM order matches the item order, and moving a row restyles its subtree.
-function domOrderHook(bundle) {
-    const source = readFileSync(join(packageDirectory, bundle), 'utf8');
-    const start = source.indexOf('function useDOMOrder(ref) {');
-    const end = source.indexOf('function useFreshDataTransitionVisibility', start);
-    assert.ok(start >= 0 && end > start, "Find the pinned package version's useDOMOrder implementation");
-
-    let now = 10_000;
-    const timers = [];
-    const listeners = new Map();
-    const sorts = [];
-    const ctx = { state: { scrollTime: 0 }, viewRefs: new Map() };
-    const container = { isConnected: true, moveBefore() {}, children: [] };
-    const effects = [];
-    const hooks = { useEffect: (effect) => effects.push(effect) };
-    const useDOMOrder = runInNewContext(`(${source.slice(start, end).trim()})`, {
-        React3: hooks,
-        React3__namespace: hooks,
-        useEffect: hooks.useEffect,
-        useStateContext: () => ctx,
-        listen$: (_ctx, key, callback) => {
-            listeners.set(key, callback);
-            return () => listeners.delete(key);
-        },
-        peek$: () => undefined,
-        sortDOMElements: () => sorts.push(now),
-        Date: { now: () => now },
-        setTimeout: (callback, delay) => {
-            timers.push({ at: now + delay, callback });
-            return timers.length;
-        },
-        clearTimeout: (id) => {
-            if (id !== undefined) timers[id - 1] = null;
-        },
-    });
-    useDOMOrder({ current: container });
-    for (const effect of effects) effect();
-    return {
-        sorts,
-        positionsChanged() {
-            listeners.get('lastPositionUpdate')();
-        },
-        advance(ms) {
-            now += ms;
-            for (const timer of timers) {
-                if (timer && timer.at <= now) {
-                    timers[timers.indexOf(timer)] = null;
-                    timer.callback();
-                }
-            }
-        },
-    };
-}
-
 // Runs the installed dependency's own container allocation for the first
 // rows of a freshly opened list, with the direction argument its
 // calculateItemsInView passes while the initial scroll is active and aligned
@@ -96,6 +40,7 @@ function initialAllocation(bundle) {
     const numContainers = 6;
     const values = new Map([['numContainers', numContainers]]);
     const ctx = {
+        viewRefs: new Map(),
         state: {
             containerItemMetadata: new Map(),
             stickyContainerPool: new Set(),
@@ -118,24 +63,6 @@ for (const bundle of bundles) {
             const allocations = initialAllocation(bundle);
             const byContainer = [...allocations].sort((left, right) => left.containerIndex - right.containerIndex);
             assert.deepEqual(byContainer.map(({ itemIndex }) => itemIndex), [6, 7, 8, 9]);
-        });
-
-        it('waits for a freshly mounted list to settle before moving rows', () => {
-            const list = domOrderHook(bundle);
-            list.advance(200);
-            list.positionsChanged();
-            list.advance(100);
-            assert.deepEqual(list.sorts, []);
-            list.advance(400);
-            assert.equal(list.sorts.length, 1);
-        });
-
-        it('still orders a list that has been quiet for a second at once', () => {
-            const list = domOrderHook(bundle);
-            list.advance(1_500);
-            list.positionsChanged();
-            list.advance(0);
-            assert.equal(list.sorts.length, 1);
         });
     });
 }

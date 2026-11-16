@@ -10,7 +10,7 @@ import {
 const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLanguageContext => ({
     inputMode: 'normal',
     knownAgentNames: new Set(['build', 'plan']),
-    confirmedMentions: new Set(['NOTES']),
+    confirmedMentions: new Set(['NOTES', 'src/app.ts', 'src/a.ts', 'a/b.ts']),
     knownSlashNames: new Set(['review', 'explore']),
     knownSnippetTriggers: new Set(['sig']),
     attachmentFilenames: [],
@@ -33,6 +33,10 @@ describe('tokenizeComposer — reference constructs', () => {
 
     test('a path mention is styled as a file', () => {
         expect(styled('see @src/app.ts')).toEqual([['@src/app.ts', 'mentionFile']]);
+    });
+
+    test('a path nothing confirmed yet stays plain', () => {
+        expect(styled('see @src/other.ts')).toEqual([]);
     });
 
     test('an unknown bare mention is not tokenized', () => {
@@ -78,8 +82,8 @@ describe('tokenizeComposer — a path is highlighted but never attached', () => 
     });
 
     test('it needs no registry and no confirmation, unlike @', () => {
-        // The same path behind `@` only resolves because it looks like a path;
-        // behind `~` it is inert either way.
+        // The same path behind `@` needs confirming; behind `~` it is inert
+        // either way.
         const empty = context({ knownAgentNames: new Set(), confirmedMentions: new Set() });
         expect(styled('~docs/NOTES', empty)).toEqual([['~docs/NOTES', 'path']]);
     });
@@ -170,7 +174,7 @@ describe('tokenizeMentions', () => {
     test('classifies agents and files, skipping unknown words', () => {
         expect(tokenizeMentions('@build @src/a.ts @nobody', {
             knownAgentNames: new Set(['build']),
-            confirmedMentions: new Set(),
+            confirmedMentions: new Set(['src/a.ts']),
         })).toEqual([
             { start: 0, end: 6, kind: 'agent' },
             { start: 7, end: 16, kind: 'file' },

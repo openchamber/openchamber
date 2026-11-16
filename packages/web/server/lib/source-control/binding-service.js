@@ -1,6 +1,6 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
-import { isProviderId, isProviderUsername } from './provider-id.js';
+import { isExtensionProviderId, isProviderId, isProviderUsername } from './provider-id.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
@@ -28,6 +28,13 @@ const hasExactKeys = (value, required, optional = []) => {
 const requiredString = (value, name, makeError = bindingInputError) => {
   if (!isString(value) || !value.trim()) throw makeError(`${name} is required`);
   return value.trim();
+};
+
+// Extension IDs are opaque strings; whitespace can be part of the verified identity.
+const requiredIdentityString = (value, name, provider, makeError = bindingInputError) => {
+  if (!isExtensionProviderId(provider)) return requiredString(value, name, makeError);
+  if (!isString(value) || !value.length) throw makeError(`${name} is required`);
+  return value;
 };
 
 const providerOrigin = (provider, instance) => {
@@ -107,7 +114,7 @@ const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshH
     const result = {
       provider: name,
       instance,
-      accountId: requiredString(provider.accountId, 'accountId'),
+      accountId: requiredIdentityString(provider.accountId, 'accountId', name),
       primaryRemote,
       readiness: 'ready',
       endpoint: { displayUrl: endpoint.displayUrl, fingerprint: endpoint.fingerprint },
@@ -202,6 +209,17 @@ const parseAuxiliary = (value) => {
 };
 
 /**
+ * A managed credential can serve only the protocol it was issued for.
+ */
+const credentialServesEndpoint = (credentialId, rawEndpoint) => {
+  try {
+    return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * The grant a submodule or LFS endpoint inherits when none names it.
  *
  * A checkout's submodules and LFS objects are fetched the way the checkout
@@ -225,9 +243,15 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
     return null;
   }
   if (!endpointHost || endpointHost !== parentHost) return null;
-  return parent.mode === 'managed'
-    ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
-    : { mode: parent.mode, readiness: 'ready' };
+  if (parent.mode === 'managed') {
+    // An SSH key cannot authenticate an HTTPS LFS or submodule endpoint, and
+    // an HTTPS credential cannot authenticate an SSH one. The endpoint needs
+    // its own grant when the parent's transport cannot serve it.
+    return parent.credentialId && credentialServesEndpoint(parent.credentialId, rawEndpoint)
+      ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
+      : null;
+  }
+  return { mode: parent.mode, readiness: 'ready' };
 };
 
 /**
@@ -484,8 +508,11 @@ export function createBindingService({
       if (account?.credentialId !== reference.credentialId
         || account.credentialRevision !== reference.credentialRevision
         || account.providerUserId !== reference.providerUserId
+        || !safePresentationText(account.providerUserId)
         || account.status !== 'valid' || !['oauth', 'pat', 'cli'].includes(account.source)
-        || !Number.isInteger(account.user?.id) || account.user.id < 0
+        || !(isExtensionProviderId(reference.provider) && isString(account.user?.id)
+          ? account.user.id.length > 0 && account.user.id.length <= 256
+          : Number.isInteger(account.user?.id) && account.user.id >= 0)
         || !isProviderUsername(account.user.login)
         || account.providerUserId !== `${instance}#${account.user.id}`) return unavailablePresentation();
       return {
@@ -535,7 +562,7 @@ export function createBindingService({
     if (!isProviderId(provider)) throw makeContextError('Source control provider is invalid');
     if (!sourceControlProviderDescriptors.has(provider)) throw unavailableProviderError();
     const instance = normalizeProviderInstance(provider, input.instance, makeRequiredFieldError);
-    const accountId = requiredString(input.accountId, 'accountId', makeRequiredFieldError);
+    const accountId = requiredIdentityString(input.accountId, 'accountId', provider, makeRequiredFieldError);
     const primaryRemote = requiredString(input.primaryRemote, 'primaryRemote', makeRequiredFieldError);
     const bindingRevision = input.bindingRevision;
     if (!Number.isInteger(bindingRevision) || bindingRevision < 0) throw makeContextError('bindingRevision is required');
@@ -598,7 +625,7 @@ export function createBindingService({
     return {
       provider,
       instance: providerInstanceKey(provider, target.instance),
-      accountId: requiredString(target.accountId, 'accountId'),
+      accountId: requiredIdentityString(target.accountId, 'accountId', provider),
       primaryRemote: requiredString(target.primaryRemote, 'primaryRemote'),
     };
   };
@@ -1206,9 +1233,9 @@ export function createBindingService({
       return store.adoptAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),
-        accountId: requiredString(identity.accountId, 'accountId'),
+        accountId: requiredIdentityString(identity.accountId, 'accountId', provider),
         credentialRevision: identity.credentialRevision,
-        providerUserId: requiredString(identity.providerUserId, 'providerUserId'),
+        providerUserId: requiredIdentityString(identity.providerUserId, 'providerUserId', provider),
       });
     },
     accountUnavailable: async (identity) => {
@@ -1219,7 +1246,7 @@ export function createBindingService({
       return store.reconcileAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),
-        accountId: requiredString(identity.accountId, 'accountId'),
+        accountId: requiredIdentityString(identity.accountId, 'accountId', provider),
       });
     },
   };

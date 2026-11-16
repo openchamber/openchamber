@@ -1,0 +1,4 @@
+# Runs from the repository root load the UI test preload too, as
+# packages/ui/bunfig.toml does for runs from the package.
+[test]
+preload = ["./packages/ui/src/test/preload.ts"]

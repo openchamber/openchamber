@@ -13,14 +13,20 @@ import { Button } from '@/components/ui/button';
 import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
-import { useMarkdownPresentation } from './MarkdownPresentationContext';
+import { MarkdownSvgFailureContext, useMarkdownPresentation, type MarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
+import { stripAnsi } from './highlightsEngine';
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
 import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
+import { useChatSurfaceMode } from '../useChatSurfaceMode';
+import { isRunnableLanguage } from '@/lib/opencode/reply-command';
+import { onDemand } from '../uiBlocks/useUiBlockComponent';
+import type { RenderedCommand } from './ReplyCommand';
 
-// Complete prefix rows keep their identity in the worker client, so appending
+// Complete prefix rows keep their identity in the highlighter, so appending
 // code only renders changed rows. React owns every node; no HTML patching.
 const CodeLine = React.memo(function CodeLine({ tokens }: { tokens: HighlightToken[] }) {
   const empty = tokens.length === 0 || (tokens.length === 1 && tokens[0].content === '');
@@ -45,8 +51,7 @@ const MarkdownCodeBody = React.memo(function MarkdownCodeBody({ source, language
   plugin: MarkdownCodePlugin;
 }) {
   const input = React.useMemo(() => ({
-    code: source,
-    language,
+    ...shownCode(source, language),
     isIncomplete: incomplete,
     themes: plugin.getThemes(),
   }), [source, language, incomplete, plugin]);
@@ -110,28 +115,83 @@ const MarkdownCodeBody = React.memo(function MarkdownCodeBody({ source, language
   );
 });
 
-export function MarkdownCode({ children, className, node, ...props }: React.ComponentProps<'code'> & ExtraProps) {
+// What a fence shows: terminal output tagged `ansi` is plain text without its
+// escape sequences. Copy still takes the fence's own source.
+const shownCode = (source: string, language: string): { code: string; language: string } => (
+  language.toLowerCase() === 'ansi' ? { code: stripAnsi(source), language: 'text' } : { code: source, language }
+);
+
+// An svg fence with a script or an event handler stays an ordinary code block, so the reader sees what it carries.
+const activeSvg = /<script|\son[a-z]+\s*=/i;
+
+type CodeProps = React.ComponentProps<'code'> & ExtraProps;
+
+const languageOf = (className: string | undefined): string => /language-([^\s]+)/.exec(className ?? '')?.[1] ?? '';
+const sourceOf = (node: CodeProps['node']): string => (
+  node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? ''
+).replace(/\n$/, '');
+
+// Loaded with the first command block; it keeps the session sync out of the Markdown renderer.
+const useReplyCommandCode = onDemand(() => import('./ReplyCommand').then((module) => module.ReplyCommandCode));
+
+function RunnableCode({ reply, ...props }: CodeProps & { reply: NonNullable<MarkdownPresentation['settledReply']> }) {
+  const { directory } = useMarkdownPresentation();
+  const ReplyCommandCode = useReplyCommandCode();
+  if (!ReplyCommandCode) return <MarkdownCodeBlock {...props} command={null} />;
+  return (
+    <ReplyCommandCode reply={reply} directory={directory} source={sourceOf(props.node)}>
+      {(command) => <MarkdownCodeBlock {...props} command={command} />}
+    </ReplyCommandCode>
+  );
+}
+
+export function MarkdownCode(props: CodeProps) {
+  const { settledReply } = useMarkdownPresentation();
+  const surface = useChatSurfaceMode();
+  // Only a finished reply on a surface with controls: a command still arriving
+  // could run cut short.
+  const runnable = settledReply !== null && surface !== 'peek'
+    && isRunnableLanguage(languageOf(props.className)) && sourceOf(props.node).trim().length > 0;
+  return runnable ? <RunnableCode {...props} reply={settledReply} /> : <MarkdownCodeBlock {...props} command={null} />;
+}
+
+function MarkdownCodeBlock({ children, className, node, command, ...props }: CodeProps & { command: RenderedCommand | null }) {
   const presentation = useMarkdownPresentation();
   const { t } = useI18n();
   const wrap = useUIStore((state) => state.codeBlockLineWrap);
   const incomplete = useIsCodeFenceIncomplete();
   const openFile = useOpenMarkdownFile();
   const [copied, setCopied] = React.useState(false);
+  // The svg source the browser could not draw; a changed source is drawn again.
+  const [failedSvg, setFailedSvg] = React.useState<string | null>(null);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
   }, []);
 
   const suggestionBase = React.useContext(MarkdownSuggestionContext);
-  const language = /language-([^\s]+)/.exec(className ?? '')?.[1] ?? '';
+  const language = languageOf(className);
   const suggestion = suggestionBase !== null && isSuggestionLanguage(language);
   const proposal = language.toLowerCase() === 'diff' || suggestion;
   const code = node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
-  const copySource = code.replace(/\n$/, '');
+  const copySource = sourceOf(node);
   const { purpose, onExportCode } = presentation;
   React.useLayoutEffect(() => {
-    if (purpose && language !== 'mermaid') onExportCode?.(code, language);
+    if (purpose && language !== 'mermaid') {
+      const shown = shownCode(code, language);
+      onExportCode?.(shown.code, shown.language);
+    }
   }, [purpose, onExportCode, code, language]);
+
+  if (language === 'svg' && presentation.svgFences && !activeSvg.test(code) && failedSvg !== code) {
+    return (
+      <MarkdownSvgFailureContext.Provider value={() => setFailedSvg(code)}>
+        <defaultComponents.code {...props} node={node} className={className}>
+          {children}
+        </defaultComponents.code>
+      </MarkdownSvgFailureContext.Provider>
+    );
+  }
 
   if (language === 'mermaid' || (language === 'openui-lang' && presentation.uiBlocks)) {
     return (
@@ -173,26 +233,31 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
               data-streamdown="code-block-actions"
               className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-md border border-sidebar bg-sidebar/80 px-1.5 py-1 supports-[backdrop-filter]:bg-sidebar/70 supports-[backdrop-filter]:backdrop-blur"
             >
-              {!proposal && <Button
-                variant="ghost"
-                size="xs"
-                data-export-ignore
-                className={wrap ? PRESSED_CLASS : undefined}
-                title={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}
-                aria-pressed={wrap}
-                onClick={() => useUIStore.getState().setCodeBlockLineWrap(!wrap)}
-              >
-                <Icon name="text-wrap" className="size-3.5" />
-              </Button>}
-              <Button
-                variant="ghost"
-                size="xs"
-                data-export-ignore
-                title={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}
-                onClick={copy}
-              >
-                <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
-              </Button>
+              {command?.button}
+              {!proposal && <HoverTooltip label={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  data-export-ignore
+                  className={wrap ? PRESSED_CLASS : undefined}
+                  aria-label={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}
+                  aria-pressed={wrap}
+                  onClick={() => useUIStore.getState().setCodeBlockLineWrap(!wrap)}
+                >
+                  <Icon name="text-wrap" className="size-3.5" />
+                </Button>
+              </HoverTooltip>}
+              <HoverTooltip label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  data-export-ignore
+                  aria-label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}
+                  onClick={copy}
+                >
+                  <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
+                </Button>
+              </HoverTooltip>
             </div>
           </div>
         )}
@@ -204,6 +269,7 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
           incomplete={incomplete}
           plugin={presentation.code}
         />}
+        {command?.output}
       </CodeBlockContainer>
     </div>
   );

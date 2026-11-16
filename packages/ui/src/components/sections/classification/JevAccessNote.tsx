@@ -5,12 +5,19 @@ import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { openClassificationProviders, useClassifierSourceName } from './classifierSources';
 
+/**
+ * Every link in Settings: the text colour with an underline, no accent
+ * (maintainer, 2026-11-12). The underline says it is a link; the accent is for
+ * primary actions. Hover and focus bring the underline to full strength.
+ */
+export const SETTINGS_LINK_CLASS = 'cursor-pointer text-foreground underline decoration-[var(--muted-foreground)] underline-offset-4 hover:decoration-foreground focus-visible:decoration-foreground focus-visible:outline-none';
+
 /** An inline link inside helper text or a tooltip. */
 export const SettingsInlineLink: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
   <button
     type="button"
     onClick={onClick}
-    className="cursor-pointer text-[var(--primary-text)] underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+    className={SETTINGS_LINK_CLASS}
   >
     {children}
   </button>

@@ -32,7 +32,7 @@ Then count requests by path:
 grep -aoE '(GET|POST|PUT|PATCH|DELETE) /[^ ]+ HTTP' /tmp/oc-lo0.txt | sed -E 's/ HTTP$//; s/(directory|cursor)=[^&]*/\1=X/g' | sort | uniq -c | sort -rn
 ```
 
-The `user-agent` header says who asked: the Electron one is the renderer, `node` is the server. On one keep-alive connection, the difference between the `ack` numbers of two consecutive requests is the size of the response in between.
+The `user-agent` header says who asked: the Chrome one is the renderer, `node` is the server. On one keep-alive connection, the difference between the `ack` numbers of two consecutive requests is the size of the response in between.
 
 ## Sizing a response
 
@@ -44,3 +44,20 @@ curl -s -u "opencode:$PW" -o /dev/null -w "%{size_download}\n" "http://127.0.0.1
 ```
 
 Use it to compare a request against a narrower one the API offers before changing the caller.
+
+## Which code wakes an OpenCode location
+
+To find which OpenChamber code sends directory-scoped requests (a location booting again and again, MCP servers reconnecting), run a web server from source with a Bun preload that wraps `globalThis.fetch` and `node:http.request` and logs method, path, directory (query `directory` or `location[directory]`, or header `x-opencode-directory`) and the caller's stack. No repository change is needed:
+
+```sh
+cd packages/web && OPENCHAMBER_UI_PASSWORD=<scratch> OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode bun --preload <trace.js> server/index.js --port 3901
+```
+
+Start it with a clean env and a scratch data dir (`scripts/perf/DOCUMENTATION.md`, *Running An Isolated Copy*).
+
+OpenCode's side, through the same basic auth:
+
+- `GET /api/debug/location` lists loaded locations without booting any; `DELETE /api/debug/location?location[directory]=<dir>` evicts one. Routes read `location[directory]`; a plain `directory` is ignored.
+- Eviction emits `location.shutdown`, then `mcp.status` and resource-change events; `curl` `/api/event` to watch them. The UI revalidates the directory on `location.shutdown`, so an evicted location the UI has selected boots again at once.
+
+For an OpenCode of your own, point `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` at scratch directories and unset every inherited `OPENCODE_*` first: inside an OpenCode session `OPENCODE_PASSWORD` overrides `OPENCODE_SERVER_PASSWORD`, so auth fails, and `OPENCODE_CONFIG` pulls in the user's real MCP servers.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@/lib/opencode/model"
-import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from "./form-recovery"
+import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry, resolveRecoveryDirectory } from "./form-recovery"
 
 const message = (role: "user" | "assistant", parts: Part[] = []) => ({
   info: { id: `${role}-${parts.length}`, sessionID: "ses_1", role } as Message,
@@ -70,5 +70,13 @@ describe("recoverPendingFormWithRetry", () => {
 
     expect(recovered).toBe(false)
     expect(attempts).toBe(0)
+  })
+})
+
+describe("resolveRecoveryDirectory", () => {
+  test("prefers the session's own directory and keeps the fallback when the read fails", () => {
+    expect(resolveRecoveryDirectory({ directory: "/real" }, "/stale")).toBe("/real")
+    expect(resolveRecoveryDirectory(null, "/stale")).toBe("/stale")
+    expect(resolveRecoveryDirectory(null, null)).toBeNull()
   })
 })

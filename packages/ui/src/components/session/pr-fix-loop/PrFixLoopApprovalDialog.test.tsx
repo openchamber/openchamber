@@ -38,7 +38,7 @@ beforeAll(() => {
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, IS_REACT_ACT_ENVIRONMENT: true,
@@ -46,10 +46,12 @@ beforeAll(() => {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input instanceof Request ? input : new URL(String(input), 'http://localhost'), init);
     const path = new URL(request.url).pathname;
     calls.push({ path, method: request.method });
+    // Directory bootstrap is unrelated to receipt inspection and publication.
+    if (path === '/api/fs/home') return new Promise<Response>(() => {});
     if (path === '/api/openchamber/spaces/switch') return Response.json({ enabled: false });
     if (path.endsWith('/approve')) {
       posts.push({ path, body: await request.text() });
@@ -57,7 +59,7 @@ beforeAll(() => {
         : Response.json({ loop: { ...loop, pendingApproval: null, status: 'watching', updatedAt: 2 } });
     }
     return Response.json({}, { status: 503 });
-  };
+  }, originalFetch);
 });
 
 beforeEach(() => { posts.length = 0; calls.length = 0; refuse = false; });

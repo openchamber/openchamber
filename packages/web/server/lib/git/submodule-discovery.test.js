@@ -140,9 +140,21 @@ describe('submodule discovery', () => {
     ['https://user:secret@example.com/child.git', 'https://example.com/root.git'],
     ['../child.git', 'file:///tmp/root.git'],
     ['../../child.git', 'git@example.com:root.git'],
+    ['https://user@example.com/child.git', 'https://example.com/root.git'],
+    ['../child.git', 'https://org:secret@example.com/root.git'],
   ])('rejects unsafe relative resolution for %s against %s', (child, parent) => {
     expect(() => resolveGitRelativeEndpoint(child, parent)).toThrow(expect.objectContaining({
       code: 'INVALID_GIT_DISCOVERY_ENDPOINT',
     }));
+  });
+
+  it('drops the user name of an HTTPS parent from what it resolves', () => {
+    const parent = 'https://myorg@dev.azure.com/myorg/app/_git/app';
+    expect(resolveGitRelativeEndpoint('../sub', parent)).toMatchObject({
+      endpoint: 'https://dev.azure.com/myorg/app/_git/sub',
+      relationship: { sameHost: true, samePort: true, path: 'sibling' },
+    });
+    expect(resolveGitRelativeEndpoint('https://example.com/other.git', parent).endpoint).toBe('https://example.com/other.git');
+    expect(resolveGitRelativeEndpoint('../sub.git', 'ssh://git@example.com/team/app.git').endpoint).toBe('ssh://git@example.com/team/sub.git');
   });
 });

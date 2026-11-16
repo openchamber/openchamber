@@ -30,9 +30,11 @@ const getBootedDevice = () => {
   return null;
 };
 
-const bootDevice = (name = DEFAULT_DEVICE) => {
+// A booted simulator is reused unless another one was named.
+const bootDevice = (requested) => {
   const booted = getBootedDevice();
-  if (booted) return booted.udid;
+  if (booted && (!requested || booted.name === requested)) return booted.udid;
+  const name = requested || DEFAULT_DEVICE;
 
   const json = run('xcrun', ['simctl', 'list', 'devices', 'available', '--json'], { capture: true });
   const data = JSON.parse(json);
@@ -66,25 +68,26 @@ const getBuiltAppPath = () => {
 };
 
 const command = process.argv[2];
+const deviceName = process.argv.slice(3).join(' ');
 
 switch (command) {
   case 'boot': {
-    const udid = bootDevice(process.argv.slice(3).join(' ') || DEFAULT_DEVICE);
+    const udid = bootDevice(deviceName);
     console.log(udid);
     break;
   }
   case 'install': {
-    const udid = bootDevice();
+    const udid = bootDevice(deviceName);
     run('xcrun', ['simctl', 'install', udid, getBuiltAppPath()]);
     break;
   }
   case 'launch': {
-    const udid = bootDevice();
+    const udid = bootDevice(deviceName);
     run('xcrun', ['simctl', 'launch', udid, BUNDLE_ID]);
     break;
   }
   case 'run': {
-    const udid = bootDevice();
+    const udid = bootDevice(deviceName);
     run('xcrun', ['simctl', 'install', udid, getBuiltAppPath()]);
     run('xcrun', ['simctl', 'launch', udid, BUNDLE_ID]);
     break;

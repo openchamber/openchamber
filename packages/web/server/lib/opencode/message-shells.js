@@ -11,6 +11,14 @@
 // Only the message list is shelled. `GET /api/session/:id/message/:messageID`
 // always returns whole messages, so a shelled call can be completed from it.
 // A client that does not send the header gets OpenCode's response unchanged.
+//
+// A result that was one of OpenChamber's own tools' envelopes leaves its
+// action and outcome in the marker: a collapsed row names what the call did
+// ("Remembered") from them, and the action alone would claim success for a
+// call that failed.
+
+import { z } from 'zod';
+import { readToolEnvelope } from '../openchamber-control/tool-envelope.js';
 
 /**
  * Request header: `v1`, then the names of tools whose results stay whole
@@ -46,6 +54,31 @@ const textLength = (content) => {
   return chars;
 };
 
+// Tools whose result can be one of OpenChamber's own tools' envelopes: the
+// tools themselves, and Code Mode's `execute`, whose result is what its script
+// returned.
+const isEnvelopeTool = (name) => name === 'execute' || String(name).startsWith('openchamber');
+const MAX_ENVELOPE_CHARS = 256 * 1024;
+
+// A result of one text item small enough to read: an envelope is a few
+// kilobytes, and a large result is something else.
+const singleTextSchema = z.tuple([z.object({ type: z.literal('text'), text: z.string().max(MAX_ENVELOPE_CHARS) })]);
+
+/**
+ * Which action an OpenChamber envelope answers and whether it succeeded: what
+ * a collapsed row says about the call ("Remembered"). Anything else is
+ * `undefined`, and only text that opens like an envelope is parsed.
+ */
+const envelopeSummary = (content) => {
+  const single = singleTextSchema.safeParse(content);
+  if (!single.success) return undefined;
+  const { text } = single.data[0];
+  const head = text.trimStart();
+  if ((head[0] !== '{' && head[0] !== '"') || !head.slice(0, 48).includes('schemaVersion')) return undefined;
+  const envelope = readToolEnvelope(text);
+  return envelope ? { ok: envelope.ok, action: envelope.action } : undefined;
+};
+
 const shellTool = (part, keepWhole) => {
   const { native: _native, ...tool } = part;
   const state = tool.state;
@@ -56,13 +89,15 @@ const shellTool = (part, keepWhole) => {
   // `metadata.output` repeats a shell's output for the running view.
   const { output: _output, ...keptMetadata } = metadata;
   if (content.length === 0 && _output === undefined) return tool;
+  const envelope = isEnvelopeTool(tool.name) ? envelopeSummary(content) : undefined;
+  const marker = envelope ? { chars: textLength(content), envelope } : { chars: textLength(content) };
   return {
     ...tool,
     state: {
       ...state,
       // OpenCode's contract has at least one content item on a finished call.
       content: [{ type: 'text', text: '' }],
-      metadata: { ...keptMetadata, [CONTENT_SHELL_METADATA_KEY]: { chars: textLength(content) } },
+      metadata: { ...keptMetadata, [CONTENT_SHELL_METADATA_KEY]: marker },
     },
   };
 };

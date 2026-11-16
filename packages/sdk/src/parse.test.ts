@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { GUEST_PROVIDER_LOGOS_MAX, GUEST_TONES, GUEST_TOOL_CARD_FIELDS_MAX, GUEST_TOOL_CARD_TONES_MAX, GUEST_TOOL_CARD_TONE_KEY_MAX, GUEST_TOOL_TEMPLATE_MAX, guestToolLinkSettingIds, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolvePageMobile, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import type { JsonValue } from './contract.ts';
+import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
+import { WAIT_CHECK_INTERVAL_DEFAULT, toPublicWaits } from './waits.ts';
 
 const validBlock = {
   apiVersion: OPENCHAMBER_SDK_API_VERSION,
@@ -781,7 +784,40 @@ describe('parseManifest', () => {
   });
 });
 
+describe('an extension without a panel', () => {
+  const block = { apiVersion: 1, id: 'desk', name: 'Desk', icon: 'robot-2', contributes: { tools: [{ match: 'desk_*' }] } };
+
+  test('names itself beside contributes, in both document forms', () => {
+    const bare = parseManifestJson(JSON.stringify(block));
+    const wrapped = parseManifestJson(JSON.stringify({ name: 'pkg', version: '1.0.0', openchamber: block }));
+    for (const parsed of [bare, wrapped]) {
+      expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', name: 'Desk', icon: 'robot-2' } } } });
+    }
+  });
+
+  test('keeps a rail page declared in panel', () => {
+    const parsed = parseManifestJson(JSON.stringify({ ...block, contributes: { panel: { entry: 'index.html' } } }));
+    expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', entry: 'index.html' } } } });
+  });
+
+  test('an older package with everything in panel reads the same', () => {
+    const { id, name, icon, contributes } = block;
+    const parsed = parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: { ...contributes, panel: { id, name, icon } } }));
+    expect(parsed).toEqual(parseManifestJson(JSON.stringify(block)));
+  });
+
+  test('a package with no name for itself fails', () => {
+    expect(parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: {} }))).toMatchObject({ ok: false, code: 'missing-panel' });
+  });
+});
+
 describe('contributes.actions and contributes.commands', () => {
+  test('display belongs to a selection action', () => {
+    const contributes = (action: JsonValue) => parseManifestJson(JSON.stringify({ name: 'x', version: '1.0.0', openchamber: { apiVersion: 1, contributes: { panel: { id: 'x', name: 'X', icon: 'window', entry: 'index.html' }, actions: [action] } } }));
+    expect(contributes({ id: 'a', label: 'A', where: 'selection', display: 'icon' }).ok).toBe(true);
+    expect(contributes({ id: 'a', label: 'A', where: 'file', display: 'icon' }).ok).toBe(false);
+  });
+
   const withContributes = (extra: Record<string, unknown>) => parseManifest({
     apiVersion: 1,
     contributes: { panel: validBlock.contributes.panel, ...extra },
@@ -909,57 +945,193 @@ describe('contributes.tools', () => {
   });
 });
 
-describe('contributes.messages', () => {
-  const withMessages = (messages: unknown) => parseManifest({
+describe('contributes.tools card', () => {
+  const integration = {
+    name: 'Tracker',
+    description: 'Issues from a tracker',
+    token: { scheme: 'bearer' as const, apiOrigin: 'https://api.tracker.example' },
+    settings: [{ id: 'site', label: 'Site' }, { id: 'api-key', label: 'API key', secret: true as const }],
+  };
+  const withCard = (card: JsonValue, extra: { [key: string]: JsonValue } = {}) => parseManifest({
     apiVersion: 1,
-    contributes: { panel: { id: 'msgs', name: 'Msgs', icon: 'robot-2' }, messages },
+    contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'tracker_issue', output: 'card', card }], ...extra },
+  });
+  const message = (result: ReturnType<typeof parseManifest>): string => (result.ok ? 'ok' : `${result.code}: ${result.message}`);
+
+  test('reads a card with every part, at each bound', () => {
+    const card = {
+      label: '{output.key} · {output.fields.issuetype.name}',
+      title: `{output.fields.summary}${'t'.repeat(GUEST_TOOL_TEMPLATE_MAX - '{output.fields.summary}'.length)}`,
+      status: {
+        value: '{output.fields.status.name}',
+        tones: Object.fromEntries(new Array(GUEST_TOOL_CARD_TONES_MAX).fill(null).map((_, index) => [
+          index === 0 ? 's'.repeat(GUEST_TOOL_CARD_TONE_KEY_MAX) : `Status ${index}`, GUEST_TONES[index % GUEST_TONES.length],
+        ])),
+      },
+      fields: new Array(GUEST_TOOL_CARD_FIELDS_MAX).fill(null).map((_, index) => ({ label: `Field ${index}`, value: `{output.fields.${index}}` })),
+      link: { label: 'Open in tracker', url: '{output.url}' },
+    };
+    const result = withCard(card);
+    expect(message(result)).toBe('ok');
+    if (result.ok) expect(result.manifest.contributes.tools?.[0]?.card).toEqual(card);
   });
 
-  test('reads message presentations as declared, on a package without a panel page', () => {
-    const messages = [
-      { match: '^\\[BACKGROUND TASK (?<status>[A-Z ]+)\\]', name: 'Background task', icon: 'robot-2', title: 'Task {match.status}', subtitle: '{match.1}', tone: 'success', body: 'markdown' },
-      { match: '<!-- PLUGIN -->', name: 'Plugin notice', body: 'none' },
-    ];
-    const result = withMessages(messages);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.contributes.messages).toEqual(messages);
+  test('one part is a card, and a link alone is not', () => {
+    for (const card of [{ label: '{output.key}' }, { title: '{output}' }, { status: { value: '{output.state}' } }, { fields: [{ label: 'Owner', value: '{output.owner}' }] }]) {
+      expect(message(withCard(card))).toBe('ok');
+    }
+    expect(withCard({ link: { label: 'Open', url: '{output.url}' } })).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card: needs label, title, status or fields; a link alone is not a card.',
+    });
+    expect(withCard({})).toMatchObject({ ok: false, code: 'invalid-tools' });
   });
 
-  test('rejects malformed messages as invalid-messages', () => {
+  test('card and output "card" come together', () => {
+    const withTool = (tool: { [key: string]: JsonValue }) => parseManifest({ apiVersion: 1, contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'x', ...tool }] } });
+    for (const tool of [{ output: 'card' }, { card: { title: '{output.title}' } }, { output: 'table', columns: ['id'], card: { title: '{output.title}' } }]) {
+      expect(withTool(tool)).toMatchObject({
+        ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card: card and output "card" come together: declare both or neither.',
+      });
+    }
+  });
+
+  test('rejects a card outside its shape', () => {
     const cases: unknown[] = [
-      [],
-      [{ match: 'x' }],
-      [{ match: '', name: 'n' }],
-      [{ match: '([unclosed', name: 'n' }],
-      [{ match: 'x'.repeat(301), name: 'n' }],
-      [{ match: 'x', name: 'n'.repeat(41) }],
-      [{ match: 'x', name: 'n', tone: 'loud' }],
-      [{ match: 'x', name: 'n', body: 'html' }],
-      [{ match: 'x', name: 'n', icon: '../icon.svg' }],
-      new Array(33).fill(null).map(() => ({ match: 'x', name: 'n' })),
+      null,
+      'card',
+      { title: '{output.title}', footer: '{output.footer}' },
+      { title: '' },
+      { title: `{output.t}${'t'.repeat(GUEST_TOOL_TEMPLATE_MAX)}` },
+      { title: 7 },
+      { status: '{output.state}' },
+      { status: { tones: { Done: 'success' } } },
+      { status: { value: '{output.state}', tone: 'info' } },
+      { status: { value: '{output.state}', tones: { Done: 'green' } } },
+      { status: { value: '{output.state}', tones: { Done: 'accent' } } },
+      { status: { value: '{output.state}', tones: { ['s'.repeat(GUEST_TOOL_CARD_TONE_KEY_MAX + 1)]: 'info' } } },
+      { status: { value: '{output.state}', tones: { '': 'info' } } },
+      { status: { value: '{output.state}', tones: Object.fromEntries(new Array(GUEST_TOOL_CARD_TONES_MAX + 1).fill(null).map((_, index) => [`s${index}`, 'info'])) } },
+      { status: { value: '{output.state}', tones: ['info'] } },
+      { fields: [] },
+      { fields: new Array(GUEST_TOOL_CARD_FIELDS_MAX + 1).fill({ label: 'Owner', value: '{output.owner}' }) },
+      { fields: [{ value: '{output.owner}' }] },
+      { fields: [{ label: 'Owner' }] },
+      { fields: [{ label: 'l'.repeat(41), value: '{output.owner}' }] },
+      { fields: [{ label: 'Owner', value: '{output.owner}', tone: 'info' }] },
+      { title: '{output.title}', link: '{output.url}' },
+      { title: '{output.title}', link: { url: '{output.url}' } },
+      { title: '{output.title}', link: { label: 'Open', url: '{output.url}', target: '_self' } },
+      { title: '{output.title}', link: { label: 'l'.repeat(41), url: '{output.url}' } },
     ];
-    for (const messages of cases) {
-      expect(withMessages(messages)).toMatchObject({ ok: false, code: 'invalid-messages' });
+    for (const card of cases) {
+      expect(withCard(card)).toMatchObject({ ok: false, code: 'invalid-tools' });
     }
   });
-});
 
-describe('contributes.goal', () => {
-  const withGoal = (goal: unknown) => parseManifest({
-    apiVersion: 1,
-    contributes: { panel: { id: 'drv', name: 'Driver', icon: 'robot-2' }, goal },
-  });
-
-  test('reads a goal driver, also on a package without a panel page', () => {
-    const result = withGoal({ driver: 'omo' });
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.contributes.goal).toEqual({ driver: 'omo' });
-  });
-
-  test('rejects a malformed goal driver as invalid-goal', () => {
-    for (const goal of [{}, { driver: '' }, { driver: 'OMO' }, { driver: 'a'.repeat(33) }, { driver: 'omo', extra: 1 }]) {
-      expect(withGoal(goal)).toMatchObject({ ok: false, code: 'invalid-goal' });
+  test('a card template reads the output and nothing else', () => {
+    expect(withCard({ title: 'Issue' })).toMatchObject({
+      ok: false, message: 'contributes.tools[0].card.title: needs at least one {output.path} placeholder.',
+    });
+    expect(withCard({ title: '{output.key} for {input.project}' })).toMatchObject({
+      ok: false, message: "contributes.tools[0].card.title: a card reads the tool's output only: write {output.path} where it says {input.project}.",
+    });
+    for (const card of [
+      { label: '{metadata.key}' },
+      { status: { value: '{output.state} {settings.site}' } },
+      { fields: [{ label: 'Owner', value: '{input.owner}' }] },
+      // Not placeholders, so nothing reads the output.
+      { title: '{output.}' },
+      { title: '{ output.title }' },
+      { title: '{output.a b}' },
+      { title: '{outputs.title}' },
+    ]) {
+      expect(withCard(card)).toMatchObject({ ok: false, code: 'invalid-tools' });
     }
+  });
+
+  test('a link is one placeholder or an https address written around placeholders', () => {
+    const link = (url: JsonValue, extra?: { [key: string]: JsonValue }) => withCard({ title: '{output.title}', link: { label: 'Open', url } }, extra);
+    for (const url of [
+      '{output.url}',
+      '{output.links.0.href}',
+      'https://tracker.example/browse/{output.key}',
+      'https://tracker.example/{output.project}/issues/{output.number}?from=chat#activity',
+      'https://{output.site}/browse/{output.key}',
+      'https://{output.team}.tracker.example/browse/{output.key}',
+      'https://tracker.{output.region}.example/{output.key}',
+      'https://tracker.example?issue={output.key}',
+    ]) {
+      expect(message(link(url))).toBe('ok');
+    }
+    for (const url of [
+      'https://tracker.example/browse',
+      'https://tracker.example/browse/{input.key}',
+      'https://tracker.example/browse/{metadata.key}',
+      'http://tracker.example/browse/{output.key}',
+      '{output.origin}/browse/{output.key}',
+      '{output.url}?from=chat',
+      ' {output.scheme}://tracker.example/{output.key}',
+      '//tracker.example/browse/{output.key}',
+      '/browse/{output.key}',
+      'javascript:open({output.key})',
+      'https://user:{output.token}@tracker.example/{output.key}',
+      'https://{output.user}@tracker.example/{output.key}',
+      'https://tracker.example:{output.port}/browse/{output.key}',
+      `https://tracker.example/{output.key}/${'p'.repeat(GUEST_TOOL_TEMPLATE_MAX)}`,
+      7,
+    ]) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    expect(link('ftp://tracker.example/{output.key}')).toMatchObject({
+      message: 'contributes.tools[0].card.link.url: an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.',
+    });
+    // A value keeps its dots when it is encoded, so a placeholder joined to the host's text could carry the host on.
+    for (const url of [
+      'https://tracker.example{output.path}',
+      'https://tracker.example{output.path}/browse/{output.key}',
+      'https://{output.team}tracker.example/{output.key}',
+      'https://tracker-{output.region}.example/{output.key}',
+      'https://{output.a}{output.b}.example/{output.key}',
+    ]) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    expect(link('https://tracker.example{output.path}')).toMatchObject({
+      message: 'contributes.tools[0].card.link.url: in the host {output.path} stands between dots or at either end, like https://{settings.site}/… or https://{output.team}.tracker.example/…; start the path with / before a placeholder.',
+    });
+  });
+
+  test('a link reads a declared setting that is not a secret', () => {
+    const link = (url: string, extra: { [key: string]: JsonValue } = { integration }) => withCard({ title: '{output.title}', link: { label: 'Open', url } }, extra);
+
+    expect(message(link('https://{settings.site}/browse/{output.key}'))).toBe('ok');
+    expect(link('https://{settings.host}/browse/{output.key}')).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.host} names no contributes.integration.settings field.',
+    });
+    expect(link('https://{settings.api-key}/browse/{output.key}')).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.api-key} names a secret field, and a link reads only a field without "secret".',
+    });
+    // Without an integration there is no field to name.
+    expect(link('https://{settings.site}/browse/{output.key}', {})).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.site} names no contributes.integration.settings field.',
+    });
+    for (const url of ['https://{settings.site}/browse', 'https://{settings}/{output.key}', 'https://{settings.site.host}/{output.key}', 'https://{settings.Site}/{output.key}', '{settings.site}']) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    // A title is not a link: there the text stays as written and names nothing.
+    expect(message(parseManifest({
+      apiVersion: 1,
+      contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'x', title: '{settings.site} {input.key}' }] },
+    }))).toBe('ok');
+  });
+
+  test('names the settings the card links read, each once', () => {
+    expect(guestToolLinkSettingIds([
+      { match: 'a', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: 'https://{settings.site}/{settings.space}/{output.key}' } } },
+      { match: 'b', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: 'https://{settings.site}/{output.key}' } } },
+      { match: 'c', title: '{settings.other}', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: '{output.url}' } } },
+      { match: 'd' },
+    ])).toEqual(['site', 'space']);
+    expect(guestToolLinkSettingIds(undefined)).toEqual([]);
   });
 });
 
@@ -968,6 +1140,38 @@ describe('page-less extensions', () => {
   const withContributes = (extra: Partial<Omit<OpenChamberContributes, 'panel'>>) => parseManifest({
     apiVersion: 1,
     contributes: { panel: pageless, ...extra },
+  });
+
+  test('provider logos need no page and no capability', () => {
+    const result = withContributes({ providerLogos: { acme: 'assets/acme.svg', 'wafer.ai': 'assets/wafer.PNG' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.providerLogos).toEqual({ acme: 'assets/acme.svg', 'wafer.ai': 'assets/wafer.PNG' });
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual([]);
+  });
+
+  test('provider logos hold an icon pack, with an alias as another key for the same file', () => {
+    const pack = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX).fill(null).map((_, index) => [`p${index}`, index % 2 === 0 ? 'a.svg' : 'b.png']));
+    const result = withContributes({ providerLogos: pack });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(Object.keys(result.manifest.contributes.providerLogos ?? {})).toHaveLength(GUEST_PROVIDER_LOGOS_MAX);
+  });
+
+  test('rejects malformed provider logos as invalid-provider-logos', () => {
+    const tooMany = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX + 1).fill(null).map((_, index) => [`p${index}`, 'logo.svg']));
+    const cases: Record<string, string>[] = [
+      {},
+      tooMany,
+      { acme: 'acme.gif' },
+      { acme: '../acme.svg' },
+      { acme: '/acme.svg' },
+      { acme: 'https://example.com/acme.svg' },
+      { 'Not An Id': 'acme.svg' },
+    ];
+    for (const providerLogos of cases) {
+      expect(withContributes({ providerLogos })).toMatchObject({ ok: false, code: 'invalid-provider-logos' });
+    }
   });
 
   test('background entry enables actions, commands and granted APIs without a visible panel', () => {
@@ -989,12 +1193,27 @@ describe('page-less extensions', () => {
 
   test('background-only packages reject visible surfaces and actions that would open a panel', () => {
     const visible: Partial<Omit<OpenChamberContributes, 'panel'>>[] = [
-      { page: true }, { page: { entry: 'page.html' } }, { attach: true }, { attach: 'dialog' },
+      { page: true }, { attach: true }, { attach: 'dialog' },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'message' }] },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'session', mode: 'open' }] },
     ];
     for (const extra of visible) {
       expect(withContributes({ ...extra, background: { entry: 'background/index.html' } })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    }
+  });
+
+  test('a full-screen page with its own entry needs no panel page', () => {
+    const result = withContributes({ page: { entry: 'page/index.html', title: 'Kitchen' }, capabilities: ['sessions'] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+    expect(resolvePageEntry(result.manifest.contributes)).toBe('page/index.html');
+    expect(withContributes({ page: { entry: 'page/index.html' }, background: { entry: 'background/index.html' } })).toMatchObject({ ok: true });
+    // `true` reuses panel.entry, so without one there is nothing to load.
+    expect(withContributes({ page: true })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    // The page only hosts itself: what the host opens or invokes elsewhere still needs a panel or background entry.
+    for (const extra of [{ attach: true }, { commands: [{ name: 'task' }] }, { actions: [{ id: 'inspect', label: 'Inspect', where: 'message' as const }] }]) {
+      expect(withContributes({ page: { entry: 'page/index.html' }, ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });
     }
   });
 
@@ -1151,7 +1370,7 @@ describe('contributes.statusSection', () => {
 
   test('a status-only package cannot declare things that open or invoke another frame', () => {
     for (const extra of [
-      { page: { entry: 'page.html' } }, { attach: 'dialog' }, { commands: [{ name: 'graph' }] },
+      { page: true }, { attach: 'dialog' }, { commands: [{ name: 'graph' }] },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'message', mode: 'background' }] },
     ]) {
       expect(parse({ panel: pageless, statusSection: { entry: 'status/index.html' }, ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });
@@ -1164,7 +1383,7 @@ describe('contributes.statusSection', () => {
 
   test('refuses entries outside the package, non-HTML entries, and out-of-range sizes', () => {
     for (const statusSection of [false, {}, { entry: '../status.html' }, { entry: 'status/main.js' }, { entry: 'https://example.com/a.html' },
-      { entry: 'status/index.html', height: 10 }, { entry: 'status/index.html', height: 400 }, { entry: 'status/index.html', height: 100.5 },
+      { entry: 'status/index.html', height: 10 }, { entry: 'status/index.html', height: 481 }, { entry: 'status/index.html', height: 100.5 },
       { entry: 'status/index.html', title: '' }, { entry: 'status/index.html', title: 'x'.repeat(61) }]) {
       expect(parse({ panel: pageless, statusSection })).toMatchObject({ ok: false, code: 'invalid-status-section' });
     }
@@ -1209,9 +1428,11 @@ describe('contributes.statusSection', () => {
   });
 
   test('clamps heights to the host range', () => {
+    expect(parse({ panel: pageless, statusSection: { entry: 'status/index.html', height: 480 } })).toMatchObject({ ok: true });
     expect(clampStatusSectionHeight(5)).toBe(24);
     expect(clampStatusSectionHeight(200.4)).toBe(200);
-    expect(clampStatusSectionHeight(5000)).toBe(320);
+    expect(clampStatusSectionHeight(400)).toBe(400);
+    expect(clampStatusSectionHeight(5000)).toBe(480);
     expect(clampStatusSectionHeight(Number.NaN)).toBe(120);
   });
 });
@@ -1255,6 +1476,21 @@ describe('contributes.sourceControl', () => {
     },
   }));
   const withSourceControl = <T,>(patch: T) => manifest({ sourceControl: { ...sourceControl, ...patch } });
+
+  test('accepts service login alone or beside a token, and requires at least one', () => {
+    const login = { kind: 'service', hint: 'Run teahouse auth login on the OpenChamber server' };
+    const result = withSourceControl({ token: undefined, login });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { login } } } });
+    if (result.ok) expect(result.manifest.contributes.sourceControl).not.toHaveProperty('token');
+    expect(withSourceControl({ login }).ok).toBe(true);
+    expect(withSourceControl({ login: { ...login, hint: `  ${login.hint}  ` } }))
+      .toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { login } } } });
+    expect(withSourceControl({ login: { ...login, hint: '   ' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { ...login, future: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ token: undefined })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { kind: 'service', hint: '' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { kind: 'cli', hint: 'Sign in' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
 
   test('a source-control service needs no panel entry, and capabilities left out are off', () => {
     const result = manifest({});
@@ -1450,6 +1686,44 @@ describe('contributes.sessionEvents', () => {
   });
 });
 
+describe('contributes.waits', () => {
+  const pageless = { id: 'wait-kit', name: 'Wait Kit', icon: 'timer' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const timer = { id: 'timer', title: 'Timer', description: 'Wakes the session after some seconds', params: { seconds: { type: 'number', required: true } }, interval: 10_000 };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('a service-only package may declare waits and asks for wake', () => {
+    const result = parse({ panel: pageless, service, waits: [timer, { id: 'url-ready', title: 'URL ready', description: 'Wakes when a URL answers' }] });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service', 'wake']);
+    expect(toPublicWaits(result.manifest.contributes.waits!)).toEqual([
+      { id: 'timer', title: 'Timer', description: 'Wakes the session after some seconds', params: { seconds: { type: 'number', required: true } }, interval: 10_000 },
+      { id: 'url-ready', title: 'URL ready', description: 'Wakes when a URL answers', params: {}, interval: WAIT_CHECK_INTERVAL_DEFAULT },
+    ]);
+  });
+
+  test('needs contributes.service, and its fields are checked', () => {
+    expect(parse({ panel: pageless, waits: [timer] })).toMatchObject({
+      ok: false, code: 'invalid-waits', message: expect.stringContaining('declare contributes.service'),
+    });
+    const invalid = [
+      [],
+      [timer, timer],
+      [{ ...timer, id: 'Timer' }],
+      [{ ...timer, title: '' }],
+      [{ ...timer, interval: 1_000 }],
+      [{ ...timer, params: { seconds: { type: 'date' } } }],
+      [{ ...timer, params: { seconds: { type: 'number', required: false } } }],
+      [{ ...timer, params: { 'two words': { type: 'string' } } }],
+      [{ ...timer, params: Object.fromEntries(Array.from({ length: 9 }, (_, index) => [`p${index}`, { type: 'string' }])) }],
+      [{ ...timer, schedule: 'daily' }],
+    ];
+    for (const waits of invalid) {
+      expect(parse({ panel: pageless, service, waits })).toMatchObject({ ok: false, code: 'invalid-waits' });
+    }
+  });
+});
+
 describe('contributes.notifications', () => {
   const pageless = { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' };
   const role = { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] };
@@ -1583,5 +1857,229 @@ describe('contributes.tracker', () => {
     expect(withTracker({ capabilities: { hostAccess: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+});
+
+describe('contributes.quota', () => {
+  const pageless = { id: 'teapot-usage', name: 'Teapot Usage', icon: 'cup' };
+  const role = { entry: 'service/main.js', runtime: 'host', provides: ['quota'] };
+  const quota = { providers: ['openrouter', 'deepinfra'] };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('the role and the contribution come together and name the providers whose credentials the service receives', () => {
+    const result = parse({ panel: pageless, service: role, quota });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(result.manifest.contributes.quota).toEqual({ providers: ['openrouter', 'deepinfra'] });
+    expect(toPublicQuota(result.manifest.contributes.quota!)).toEqual({ providers: ['openrouter', 'deepinfra'] });
+    // An extension whose provider OpenCode holds no key for lists nothing and receives nothing.
+    expect(parse({ panel: pageless, service: role, quota: { providers: [] } })).toMatchObject({ ok: true, manifest: { contributes: { quota: { providers: [] } } } });
+
+    expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
+    expect(parse({ panel: pageless, service: { ...role, provides: undefined }, quota })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, quota })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('provider ids are OpenCode ids by shape, unique and bounded, and the failing one is named', () => {
+    for (const id of ['openrouter', 'zai-coding-plan', 'google.oauth', 'kimi_code', '0ai']) expect([id, isOpenCodeProviderId(id)]).toEqual([id, true]);
+    for (const id of ['OpenRouter', '__proto__', '-dash', 'with space', 'a'.repeat(65), '']) expect([id, isOpenCodeProviderId(id)]).toEqual([id, false]);
+    const withProviders = (providers: string[] | string) => parse({ panel: pageless, service: role, quota: { providers } });
+    expect(withProviders(['OpenRouter'])).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.quota.providers[0]') });
+    expect(withProviders(['openrouter', 'openrouter'])).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('unique') });
+    expect(withProviders(Array.from({ length: 17 }, (_, index) => `provider-${index}`))).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withProviders('openrouter')).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: pageless, service: role, quota: { ...quota, extra: 1 } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+});
+
+describe('services that act on their own', () => {
+  const pageless = { id: 'desk', name: 'Desk', icon: 'robot-2' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const parse = (contributes: JsonValue) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('keepRunning and a schedule need no frame', () => {
+    expect(parse({ panel: pageless, service: { ...service, keepRunning: true } }).ok).toBe(true);
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'tick', cron: '*/5 * * * *', timezone: 'Europe/Kyiv' }] } }).ok).toBe(true);
+  });
+
+  test('a schedule refuses what is not five cron fields, and a repeated id', () => {
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'tick', cron: 'every minute' }] } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'a', cron: '* * * * *' }, { id: 'a', cron: '0 * * * *' }] } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('session control, instructions and mentions need a service', () => {
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, sessionControl: {} })).toMatchObject({ ok: false, code: 'invalid-session-control' });
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, instructions: true })).toMatchObject({ ok: false, code: 'invalid-instructions' });
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, mentions: { label: 'Notes' } })).toMatchObject({ ok: false, code: 'invalid-mentions' });
+  });
+
+  test('each one asks for its own capability, and content asks for transcript', () => {
+    const declared: OpenChamberContributes['service'] = { entry: 'service/main.js', runtime: 'host' };
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: {} })).toEqual(['service', 'sessionControl']);
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: { content: true }, instructions: true, skills: 'skills' }))
+      .toEqual(['service', 'transcript', 'sessionControl', 'instructions', 'skills']);
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: { answers: true } })).toEqual(['service', 'sessionControl', 'sessionAnswers']);
+  });
+
+  test('session control takes answers: true and nothing else', () => {
+    const running = { ...service, keepRunning: true };
+    expect(parse({ panel: pageless, service: running, sessionControl: { answers: true } }).ok).toBe(true);
+    expect(parse({ panel: pageless, service: running, sessionControl: { answers: false } })).toMatchObject({ ok: false, code: 'invalid-session-control' });
+  });
+
+  test('skills stay inside the package', () => {
+    expect(parse({ panel: pageless, skills: 'skills' }).ok).toBe(true);
+    expect(parse({ panel: pageless, skills: '../skills' })).toMatchObject({ ok: false, code: 'invalid-skills' });
+  });
+
+  test('an OpenCode plugin is a folder inside the package and asks for its own capability', () => {
+    const accepted = parse({ panel: pageless, opencodePlugin: 'plugin' });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) expect(accepted.manifest.contributes.opencodePlugin).toBe('plugin');
+    expect(parse({ panel: pageless, opencodePlugin: 'plugins/teapot' }).ok).toBe(true);
+    expect(requestedGuestCapabilities({ opencodePlugin: 'plugin' })).toEqual(['opencodePlugin']);
+    expect(requestedGuestCapabilities({ skills: 'skills', opencodePlugin: 'plugin' })).toEqual(['skills', 'opencodePlugin']);
+    // The value becomes a path OpenCode executes code from: nothing that leaves the package, no URL, no NUL, no empty value.
+    for (const hostile of ['../x', '/etc', 'file:///x', 'https://example.test/plugin', 'plugin\0', '', ' ', 'a//b', './plugin', 'plugin\\win']) {
+      expect(parse({ panel: pageless, opencodePlugin: hostile }), hostile).toMatchObject({ ok: false, code: 'invalid-opencode-plugin' });
+    }
+    expect(requestedGuestCapabilities({ skills: 'skills' })).toEqual(['skills']);
+  });
+
+  test('mentions need no frame', () => {
+    expect(parse({ panel: pageless, service, mentions: { label: 'Notes' } }).ok).toBe(true);
+  });
+
+  test('marks are true, need a service and no frame, and ask for their own capability', () => {
+    const running = { ...service, keepRunning: true };
+    const accepted = parse({ panel: pageless, service: running, marks: true });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) {
+      expect(accepted.manifest.contributes.marks).toBe(true);
+      expect(requestedGuestCapabilities(accepted.manifest.contributes)).toEqual(['service', 'marks']);
+    }
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, marks: true })).toMatchObject({
+      ok: false, code: 'invalid-marks', message: "contributes.marks is served by the extension's service; declare contributes.service.",
+    });
+    const refused: JsonValue[] = [false, 'true', 1, {}, { icon: 'alert' }, [], null];
+    for (const hostile of refused) {
+      expect(parse({ panel: pageless, service: running, marks: hostile }), JSON.stringify(hostile)).toMatchObject({ ok: false, code: 'invalid-marks', message: 'contributes.marks is true.' });
+    }
+    expect(requestedGuestCapabilities({ service: { entry: 'service/main.js', runtime: 'host' } })).toEqual(['service']);
+  });
+});
+
+describe('contributes.blocks', () => {
+  const block = { name: 'JiraIssue', description: 'A Jira ticket', args: ['key'], entry: 'blocks/issue.html' };
+  const parse = (blocks: JsonValue[]) => parseManifestJson(JSON.stringify({
+    apiVersion: OPENCHAMBER_SDK_API_VERSION,
+    contributes: { panel: { id: 'desk', name: 'Desk', icon: 'robot-2' }, blocks },
+  }));
+
+  test('a block is a frame of its own, so a package needs no panel for it', () => {
+    expect(parse([block]).ok).toBe(true);
+  });
+
+  test('refuses a name an agent could not write, and repeated names or arguments', () => {
+    expect(parse([{ ...block, name: 'jira-issue' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([block, block])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([{ ...block, args: ['key', 'key'] }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+
+  test('refuses more than four: each signature is text every session pays for', () => {
+    expect(parse(['A', 'B', 'C', 'D', 'E'].map((letter) => ({ ...block, name: `Block${letter}` })))).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+
+  test('an entry stays inside the package and is html', () => {
+    expect(parse([{ ...block, entry: '../issue.html' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([{ ...block, entry: 'blocks/issue.js' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+});
+
+describe('contributes.links', () => {
+  const panel = { id: 'tasks', name: 'Tasks', icon: 'task', entry: 'panel/index.html' };
+  const urls: NonNullable<LinksContribution['urls']> = { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] };
+  const parse = (links: JsonValue, withPanel: JsonValue = panel) => parseManifestJson(JSON.stringify({
+    apiVersion: OPENCHAMBER_SDK_API_VERSION,
+    contributes: { panel: withPanel, links },
+  }));
+
+  test('accepts literal keys, link templates under one origin, and asks for its own capability', () => {
+    const accepted = parse({ action: 'open', identifier: { keys: ['DEMO', 'OPS_2'] }, urls });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) expect(accepted.manifest.contributes.links?.identifier?.keys).toEqual(['DEMO', 'OPS_2']);
+    expect(parse({ action: 'attach', urls }).ok).toBe(true);
+    expect(parse({ action: 'open', urls: { ...urls, identifier: 'number', item: ['/{segments+}/c/{id}', '/browse?selectedIssue={id}'] } }).ok).toBe(true);
+    expect(requestedGuestCapabilities({ links: { action: 'open', urls } })).toEqual(['links']);
+  });
+
+  test('refuses keys that are not literal upper-case words', () => {
+    for (const key of ['P.*', '(A|B)', 'proj', 'Proj', '1PROJ', 'PROJ-1', '', 'A'.repeat(33)]) {
+      expect(parse({ action: 'open', identifier: { keys: [key] } }), key).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+    expect(parse({ action: 'open', identifier: { keys: Array.from({ length: 9 }, (_, index) => `K${index}`) } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', identifier: { keys: ['DEMO', 'DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+  });
+
+  test('refuses an origin that is not a public https origin', () => {
+    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]', 'https://*.example.com']) {
+      expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('refuses templates outside the tracker grammar', () => {
+    for (const template of ['/tasks/(.*)', 'tasks/{id}', '/tasks', '/{segments+}/{segments+}/{id}', '/../{id}', '/tasks/{id}/{id}']) {
+      expect(parse({ action: 'open', urls: { ...urls, item: [template] } }), template).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('a chip names its link, an open needs a page, and something has to be declared', () => {
+    expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } }).ok).toBe(true);
+    expect(parse({ action: 'attach', urls: { ...urls, item: ['/{segment}/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' }).ok).toBe(true);
+    expect(parse({ action: 'open' })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'jump', urls })).toMatchObject({ ok: false, code: 'invalid-links' });
+  });
+});
+
+describe('phone opt-in', () => {
+  const onPhone = (contributes: Partial<OpenChamberContributes>) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: { id: 'kit', name: 'Kit', icon: 'box' }, ...contributes },
+  });
+
+  test('the panel and the page opt in to the phone; a page of true follows the panel', () => {
+    const panelOnPhone = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: true }, page: true });
+    if (!panelOnPhone.ok) throw new Error(panelOnPhone.message);
+    expect(panelOnPhone.manifest.contributes.panel.mobile).toBe(true);
+    expect(resolvePageMobile(panelOnPhone.manifest.contributes)).toBe(true);
+
+    const pageOnly = onPhone({ page: { entry: 'page/index.html', mobile: true } });
+    if (!pageOnly.ok) throw new Error(pageOnly.message);
+    expect(pageOnly.manifest.contributes.panel.mobile).toBeUndefined();
+    expect(resolvePageMobile(pageOnly.manifest.contributes)).toBe(true);
+
+    // Absent stays desktop-only, and a page object does not inherit the panel's opt-in.
+    const absent = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html' }, page: true });
+    if (!absent.ok) throw new Error(absent.message);
+    expect(resolvePageMobile(absent.manifest.contributes)).toBe(false);
+    const ownPage = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: true }, page: { entry: 'page/index.html' } });
+    if (!ownPage.ok) throw new Error(ownPage.message);
+    expect(resolvePageMobile(ownPage.manifest.contributes)).toBe(false);
+
+    expect(onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', mobile: 'yes' } })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    expect(onPhone({ page: { entry: 'page/index.html', mobile: false } })).toMatchObject({ ok: false, code: 'invalid-page' });
+  });
+
+  test('a host without the phone opt-in drops it and keeps the manifest', () => {
+    // Older hosts parse with a schema that has no `mobile`; the non-strict panel and page objects strip unknown keys.
+    const result = onPhone({ panel: { id: 'kit', name: 'Kit', icon: 'box', entry: 'index.html', futureKey: true }, page: { entry: 'page/index.html', futureKey: true } });
+    if (!result.ok) throw new Error(result.message);
+    expect('futureKey' in result.manifest.contributes.panel).toBe(false);
+    expect(result.manifest.contributes.page).toEqual({ entry: 'page/index.html' });
   });
 });

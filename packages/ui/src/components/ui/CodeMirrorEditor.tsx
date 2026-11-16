@@ -2,16 +2,17 @@ import React from 'react';
 
 import type { Extension } from '@codemirror/state';
 import { Compartment, EditorState, RangeSetBuilder, StateField, type StateEffect } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { forceParsing, indentUnit } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
+import { search, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
 import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { searchPanelSpace } from '@/lib/codemirror/searchPanelSpace';
 import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
 import { cn } from '@/lib/utils';
+import { searchKeymapWithFindShortcut } from '@/lib/codemirror/findShortcut';
 
 /** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
 const buttonTooltips: Record<string, string> = {
@@ -158,15 +159,22 @@ type CodeMirrorEditorProps = {
 const gutterWidthMeasureKey = {};
 const lineNumbersCompartment = new Compartment();
 const editableCompartment = new Compartment();
+/**
+ * Read-only both ways: not editable by the pointer and keyboard input, and a
+ * read-only state, so commands such as undo or indent cannot change it either.
+ * `editable` alone left those keybindings working.
+ */
+const readOnlyExtensions = (readOnly: boolean | undefined) => [
+  EditorView.editable.of(!readOnly),
+  EditorState.readOnly.of(Boolean(readOnly)),
+];
 const externalExtensionsCompartment = new Compartment();
 const highlightLinesCompartment = new Compartment();
 const blockWidgetsCompartment = new Compartment();
 const searchCompartment = new Compartment();
 const vimCompartment = new Compartment();
 
-const toViewKeyBindings = (bindings: readonly unknown[]): readonly KeyBinding[] => {
-  return bindings as readonly KeyBinding[];
-};
+const createSearchExtensions = () => [search({ top: true }), searchPanelSpace(), searchKeymapWithFindShortcut()];
 
 const forceParsingCompat = forceParsing as unknown as (view: EditorView, upto?: number, timeout?: number) => boolean;
 const openSearchPanelCompat = openSearchPanel as unknown as (view: EditorView) => void;
@@ -453,11 +461,11 @@ export function CodeMirrorEditor({
           onChangeRef.current(next);
           syncPortalWidgets(blockWidgetsRef.current);
         }),
-        editableCompartment.of(EditorView.editable.of(!readOnly)),
+        editableCompartment.of(readOnlyExtensions(readOnly)),
         externalExtensionsCompartment.of(extensions ?? []),
         highlightLinesCompartment.of(createHighlightLinesExtension(highlightLines)),
         blockWidgetsCompartment.of(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
-        searchCompartment.of(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []),
+        searchCompartment.of(enableSearch ? createSearchExtensions() : []),
       ],
     });
 
@@ -513,7 +521,7 @@ export function CodeMirrorEditor({
       effects.push(lineNumbersCompartment.reconfigure(lineNumbers(lineNumbersConfig)));
     }
     if (applied.readOnly !== readOnly) {
-      effects.push(editableCompartment.reconfigure(EditorView.editable.of(!readOnly)));
+      effects.push(editableCompartment.reconfigure(readOnlyExtensions(readOnly)));
     }
     if (applied.extensions !== extensions) {
       effects.push(externalExtensionsCompartment.reconfigure(extensions ?? []));
@@ -525,7 +533,7 @@ export function CodeMirrorEditor({
       effects.push(blockWidgetsCompartment.reconfigure(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)));
     }
     if (applied.enableSearch !== enableSearch) {
-      effects.push(searchCompartment.reconfigure(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []));
+      effects.push(searchCompartment.reconfigure(enableSearch ? createSearchExtensions() : []));
     }
     if (effects.length === 0) {
       return;

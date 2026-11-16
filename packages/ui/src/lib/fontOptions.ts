@@ -209,11 +209,18 @@ export const isMonoFontOption = (value: unknown): value is MonoFontOption =>
     value === CUSTOM_FONT_ID || (typeof value === 'string' && value in CODE_FONT_OPTION_MAP);
 
 /**
- * A stack that tries the named font first, then `fallback` (the system font),
- * so a name that is not installed still renders. Quotes and characters that
- * could end the CSS value are dropped from the name.
+ * A stack that tries each family named in `list`, then `fallback` (the system
+ * font), so a name that is not installed still renders and a mixed-script list
+ * (a Latin primary with a CJK fallback) works. `list` is comma-separated;
+ * empty entries are dropped and quotes or characters that could end the CSS
+ * value are stripped from each family.
  */
-export const customFontStack = (name: string, fallback: string): string => {
-    const family = name.replace(/["'\\;{}<>]/g, '').trim();
-    return family ? `"${family}", ${fallback}` : fallback;
+export const customFontStack = (list: string, fallback: string): string => {
+    const families = list
+        .split(',')
+        .map((part) => part.replace(/["'\\;{}<>]/g, '').trim())
+        .filter((part) => part.length > 0);
+    return families.length > 0
+        ? `${families.map((family) => `"${family}"`).join(', ')}, ${fallback}`
+        : fallback;
 };

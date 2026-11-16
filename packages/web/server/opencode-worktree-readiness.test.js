@@ -22,7 +22,7 @@ afterEach(async () => {
 const worktree = '/repo/worktree with spaces';
 const projectConfig = { mcp: { projectOnly: { type: 'local', command: ['test-mcp'], enabled: false } } };
 
-async function createFixture({ timeoutMs = 1000 } = {}) {
+async function createFixture({ timeoutMs = 1000, directory = worktree } = {}) {
   let bootstrap = { status: 'pending', phase: 'directory-created', error: null };
   let instance;
   const forwarded = [];
@@ -32,7 +32,7 @@ async function createFixture({ timeoutMs = 1000 } = {}) {
   upstream.use((req, res) => {
     forwarded.push(req.path);
     if (req.path === '/api/session/ses_1' && req.method === 'GET') {
-      return res.json({ data: { id: 'ses_1', location: { directory: worktree } } });
+      return res.json({ data: { id: 'ses_1', location: { directory } } });
     }
     // Model OpenCode's instance cache: even a GET can permanently capture the
     // empty directory, and a later session inherits that project's identity.
@@ -57,9 +57,9 @@ async function createFixture({ timeoutMs = 1000 } = {}) {
     getOpenCodeAuthHeaders: () => ({}),
     buildOpenCodeUrl: (requestPath) => `${upstreamUrl}${requestPath}`,
     ensureOpenCodeApiPrefix: () => {},
-    readWorktreeBootstrapStatus: async (directory) => {
-      probed.push(directory);
-      return directory === worktree ? bootstrap : { status: 'ready', phase: 'setup-ready' };
+    readWorktreeBootstrapStatus: async (candidate) => {
+      probed.push(candidate);
+      return candidate === directory ? bootstrap : { status: 'ready', phase: 'setup-ready' };
     },
   });
   return {
@@ -85,13 +85,13 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     });
   });
 
-  it('gates encoded directory headers and the separately forwarded session list', async () => {
-    const fixture = await createFixture();
+  it.each([worktree, '/repo/测试工作树'])('gates encoded directory headers and the separately forwarded session list for %s', async (directory) => {
+    const fixture = await createFixture({ directory });
     const response = fetch(`${fixture.url}/api/session`, { headers: {
-      'x-opencode-directory': encodeURIComponent(worktree), 'x-opencode-directory-encoding': 'uri',
+      'x-opencode-directory': encodeURIComponent(directory), 'x-opencode-directory-encoding': 'uri',
     } });
     await expect.poll(() => fixture.probed.length).toBeGreaterThan(0);
-    expect(fixture.probed[0]).toBe(worktree);
+    expect(fixture.probed[0]).toBe(directory);
     expect(fixture.forwarded).toEqual([]);
     fixture.setBootstrap({ status: 'ready', phase: 'setup-ready', error: null });
     expect((await response).status).toBe(200);
@@ -132,10 +132,10 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     expect(fixture.forwarded).toEqual([]);
   });
 
-  it('keeps a failed checkout closed to OpenCode but lists its sessions (#5811)', async () => {
-    const fixture = await createFixture();
+  it.each([worktree, '/repo/测试工作树'])('keeps a failed checkout closed to OpenCode but lists its sessions for %s', async (directory) => {
+    const fixture = await createFixture({ directory });
     fixture.setBootstrap({ status: 'failed', phase: 'directory-created', error: 'checkout failed' });
-    const headers = { 'x-opencode-directory': encodeURIComponent(worktree), 'x-opencode-directory-encoding': 'uri' };
+    const headers = { 'x-opencode-directory': encodeURIComponent(directory), 'x-opencode-directory-encoding': 'uri' };
 
     const sessions = await fetch(`${fixture.url}/api/session?limit=50`, { headers });
     const config = await fetch(`${fixture.url}/api/config`, { headers });

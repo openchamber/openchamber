@@ -1,12 +1,12 @@
 import React, { memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { selectAutoReviewRun, useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
@@ -57,16 +57,21 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
   };
 
   const openButton = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={handleOpenReviewSession}
-      onMouseDown={(event) => event.preventDefault()}
-      className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-    >
-      {t('chat.autoReview.actions.open')}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleOpenReviewSession}
+          onMouseDown={(event) => event.preventDefault()}
+          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+        >
+          {t('chat.autoReview.actions.open')}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.reviewOpen')}</TooltipContent>
+    </Tooltip>
   );
 
   if (run.status === 'running') {
@@ -81,23 +86,28 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
           <span className="text-muted-foreground"> · {statusLabel}</span>
         </span>
         {openButton}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleRemove}
-          onMouseDown={(event) => event.preventDefault()}
-          className="shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error"
-        >
-          {t('chat.autoReview.actions.stop')}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleRemove}
+              onMouseDown={(event) => event.preventDefault()}
+              className="shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error"
+            >
+              {t('chat.autoReview.actions.stop')}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.reviewStop')}</TooltipContent>
+        </Tooltip>
       </div>
     );
   }
 
   const result = RESULT[run.status];
   const label = (
-    <span className="min-w-0 flex-1 truncate text-start text-sm text-foreground">
+    <span className="min-w-0 flex-1 truncate text-start text-sm text-foreground" title={run.error}>
       {t(result.labelKey)}
       {run.error ? <span className="text-muted-foreground"> · {run.error}</span> : null}
     </span>
@@ -107,35 +117,45 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
   const runId = `${run.originalSessionID}:${run.startedAt}`;
   const unfolded = Boolean(run.dispute) && unfoldedRun === runId;
   return (
-    <div role="status" className="border-b border-edge" title={run.error}>
+    <div role="status" className="border-b border-edge">
       <div className="flex oc-composer-row min-w-0 items-center gap-2 ps-3 pe-1.5">
         <Icon name={result.icon} className={`size-3.5 flex-shrink-0 ${result.className}`} aria-hidden="true" />
         {run.dispute ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setUnfoldedRun(unfolded ? null : runId)}
-            onMouseDown={(event) => event.preventDefault()}
-            aria-expanded={unfolded}
-            aria-controls={unfolded ? disputeId : undefined}
-            className="min-w-0 flex-1 shrink justify-start gap-2 px-0 font-normal normal-case hover:!bg-transparent has-[>svg]:px-0"
-          >
-            {label}
-            <Icon name={unfolded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setUnfoldedRun(unfolded ? null : runId)}
+                onMouseDown={(event) => event.preventDefault()}
+                aria-expanded={unfolded}
+                aria-controls={unfolded ? disputeId : undefined}
+                className="min-w-0 flex-1 shrink justify-start gap-2 px-0 font-normal normal-case hover:!bg-transparent has-[>svg]:px-0"
+              >
+                {label}
+                <Icon name={unfolded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t(unfolded ? 'contextTooltips.chat.disputeHide' : 'contextTooltips.chat.disputeShow')}</TooltipContent>
+          </Tooltip>
         ) : label}
         {openButton}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleRemove}
-          onMouseDown={(event) => event.preventDefault()}
-          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        >
-          {t('chat.autoReview.actions.dismiss')}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleRemove}
+              onMouseDown={(event) => event.preventDefault()}
+              className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+            >
+              {t('chat.autoReview.actions.dismiss')}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.reviewDismiss')}</TooltipContent>
+        </Tooltip>
       </div>
       {unfolded ? (
         <ScrollableOverlay id={disputeId} outerClassName="max-h-48" className="whitespace-pre-wrap break-words ps-8 pe-3 pb-2 text-sm text-muted-foreground" disableHorizontal>
@@ -146,7 +166,7 @@ const AutoReviewRunRow = memo(({ run }: { readonly run: AutoReviewRun }) => {
   );
 });
 
-/** Review results and server-owned PR fix loops share the mobile status slot. */
+/** Review results and server-owned PR fix loops for the composer's session. */
 export const AutoReviewStrip = memo(() => {
   const { t } = useI18n();
   const { sessionId: currentSessionId, directory: currentDirectory } = useChatSessionSelection();
@@ -159,17 +179,7 @@ export const AutoReviewStrip = memo(() => {
   const loops = usePrFixLoopStore(useShallow((state) => supported && state.runtimeKey === getRuntimeKey()
     ? state.loops.filter((loop) => loop.sessionId === currentSessionId) : []));
   const projectionFailed = usePrFixLoopStore((state) => supported && state.loadError !== null);
-  const reviewing = run?.status === 'running';
-  const result = run && run.status !== 'running' ? RESULT[run.status] : null;
   const visible = Boolean(currentSessionId && (run || loops.length || projectionFailed));
-
-  useComposerStatusChip('autoReview', visible
-    ? {
-      icon: reviewing ? 'loader-4' : result?.icon ?? 'git-pull-request',
-      label: t(reviewing ? 'chat.autoReview.title' : result?.labelKey ?? 'prFixLoop.title'),
-      spin: reviewing,
-    }
-    : null);
 
   if (!visible) return null;
 

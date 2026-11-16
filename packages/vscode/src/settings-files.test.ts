@@ -167,6 +167,18 @@ describe('per-surface keys', () => {
     assert.equal(flattenPreferences(parsed.fields, 'mobile')[perSurfaceKey], undefined);
   });
 
+  test('a write whose view never held a per-surface key keeps the other surfaces\' values', () => {
+    assert.ok(perSurfaceKey && plainProfileKey);
+    const previous = { [perSurfaceKey]: { updatedAt: 0, surfaces: { desktop: { value: 'mine', updatedAt: 2 } } } };
+    const fromVscode = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9, { surface: 'vscode', changedKeys: [plainProfileKey] });
+    assert.deepEqual(fromVscode[perSurfaceKey], previous[perSurfaceKey]);
+    const fromBase = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9);
+    assert.deepEqual(fromBase[perSurfaceKey], previous[perSurfaceKey]);
+    // The writer saw its own value and left it out: that clears it.
+    const cleared = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9, { surface: 'desktop', changedKeys: [plainProfileKey] });
+    assert.equal(cleared[perSurfaceKey], undefined);
+  });
+
   test('rejects an unknown surface in the file', () => {
     const result = parsePreferencesDocument(JSON.stringify({ version: 1, fields: { x: { surfaces: { toaster: { value: 1 } } } } }));
     assert.equal(result.ok, false);

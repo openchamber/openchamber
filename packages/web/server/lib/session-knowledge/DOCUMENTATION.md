@@ -73,6 +73,7 @@ other sources still sync.
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.pull-stacks` | complete snapshots for followed pull request stacks |
 | `openchamber.response-style` | the user's current response style |
+| `openchamber.extensions` | what active extensions add: their UI block components and their instructions (`../guests/agent-context.js`) |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions
@@ -111,10 +112,18 @@ some context; a failed send costs the user their message. `sync` never throws:
 it resolves `false` and the message goes out. One entry that fails to write does
 not hold back the others.
 
-While memory is on, every session is told when to save, even with an empty
+While memory is on, every session with the tool is told when to save, even with an empty
 store. The tool description alone is read only when the agent already means to
 call it, so agents told nothing here saved only when the user said "remember".
 The session hears "nothing is stored yet" only when both scopes loaded.
+
+Memory holds what is personal to the user. Project knowledge (decisions,
+rules, recipes, gotchas) goes to the project's own agent docs when it has them
+(`AGENTS.md`, skills, module docs), and to memory only when it has none or the
+fact must stay out of the repository. Told only to skip what the docs already
+held, agents saved every new project rule to memory, the one-call path: a store
+grew to hundreds of entries, many copying module docs, and the rules never
+reached a teammate's agents. Unfinished work goes to project todos and plans.
 
 The save rule also says to save before the final reply. The chat shows only the
 last step's text as the answer, so an agent that answered, then saved, then
@@ -147,6 +156,15 @@ it with `session.link` (`SESSION_LINK_GUIDANCE`), and only here: the tool's
 description does not repeat it. Stated only in the action's description it went unread: an
 agent handed an issue to investigate saw no reason to open a session-control
 tool, so it never linked anything. It goes into `openchamber.guidance`.
+
+The same sessions are told how to hand work to another session
+(`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
+`openchamber` tool writes the call path out as `tools.openchamber` inside
+`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+of that name, found `openchamber_secret` and `openchamber_render`, and called
+those again and again (#6608). The guidance also sends part of the
+agent's own task to its subagent tool, so a dispatch stays something the user
+asked for.
 
 ## Which branch the session works on
 
@@ -211,23 +229,22 @@ lines of code per package, an agent answered with a list and drew the chart
 only when asked again. The guidance holds the cases and the limits (no block
 for a few numbers, at most one page per answer), the mockup exception, and
 asking with a page (`awaitAnswer`) when the user has to choose between visual
-options; the tool description repeats none of it. Data and structure go to
+options, and `answerLater` when the rest of the task does not wait on the
+choice; the tool description repeats none of it. Data and structure go to
 blocks because they look the same whatever model writes them, while a page's
 look depends on the model writing good HTML. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.
 
-## Tables described for speech
+## Commands the user runs
 
-While the user has read aloud on (`showMessageTTSButtons`, a profile setting
-the server reads through `isReadAloudEnabled`), the guidance asks the agent to
-put one line above every table: `[oc-tts]: # "<spoken sentence>"`
-(`TABLE_SPEECH_GUIDANCE`). The speech player
-(`packages/ui/src/lib/voice/speechTables.ts`) speaks that sentence in place of
-the table and asks the small model only when the line is missing. A markdown
-link definition is the hidden form because assistant markdown shows raw HTML,
-comments included, as visible text. It must follow a blank line, since after a
-paragraph line marked draws it as text. Copying a reply as markdown keeps the
-line.
+A session with `openchamber_render` is told to give a command the user should
+run themselves in a `bash` fence and end the turn (`REPLY_COMMAND_GUIDANCE`):
+that fence gets a Run button,
+and the agent continues from the output by itself
+(`packages/ui/src/components/chat/markdown/DOCUMENTATION.md`). The render tool
+is the sign of a session a person reads; the text has no tool of its own to
+hang on. Without it an agent used a plain fence, which has no button. The text
+rules out prompts because OpenCode runs the command with stdin closed.
 
 ## When to ask for a secret
 
@@ -249,14 +266,14 @@ it says so and offers one. Small tasks never get one.
 
 ## Where the tools are called
 
-While the managed tools are direct tools (the default; `agentToolsCodeMode`
-puts them in Code Mode's catalog), a session that has any of them is told
-they are called directly, never from inside a Code Mode `execute` script
-(`DIRECT_TOOLS_GUIDANCE`). OpenCode's Code Mode teaches the model that tools
-live in `execute`'s catalog: a model that called `tools.openchamber(...)` from
-a script was answered "Unknown tool", concluded the tool did not exist, and
-never named its task. With Code Mode on for our tools the sentence would be
-wrong, so it is left out.
+The tools whose call the chat draws (`openchamber_render`,
+`openchamber_secret`, `openchamber_workflow`) are direct tools; the rest sit
+behind Code Mode (`../agent-tool/DOCUMENTATION.md`). A session that has any of
+the direct ones is told, by name, that they are called directly and never from
+inside a Code Mode `execute` script (`directToolsGuidance`). OpenCode's Code
+Mode teaches the model that tools live in `execute`'s catalog: a model that
+called one of our direct tools from a script was answered "Unknown tool" and
+concluded the tool did not exist.
 
 ## Entries that read as instructions
 
@@ -280,6 +297,12 @@ cases only, which is the honest expectation.
 there is no tool, the routes answer "disabled", sessions get no index, and the
 panel has no tab. It defaults to off, so nobody gets a store written about them
 without turning it on.
+
+Sessions get the index only while their agent has the tool
+(`isMemoryToolAvailable`): the switch is on and OpenChamber launched OpenCode.
+An OpenCode selected with `OPENCODE_HOST` or skip-start never gets the plugin,
+so its sessions are told nothing about memory. The panel and the routes still
+follow the switch alone, since the store is there either way.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.

@@ -64,6 +64,52 @@ installs there once `package.json` says 2.5.1 or newer.
 The service runs `git remote get-url` in the project to find the repository,
 which is why the manifest lists `git` under `permissions.exec`.
 
+## Adapting to a CLI-owned login
+
+Teahouse itself uses Gitea tokens. A CLI-backed variant replaces `token` with
+the following contribution and implements `auth.status`. It can also keep
+`token` to offer both methods.
+
+```json
+"login": {
+  "kind": "service",
+  "hint": "Run forge auth login on the OpenChamber server"
+}
+```
+
+`login` needs OpenChamber 2.7.1 or newer, so declare
+`engines.openchamber: ">=2.7.1"`. The token-only example keeps its existing
+floor.
+
+`auth.status` receives `session.instance`, an empty `input` and no candidate
+token. Return `{ user: null }` for an origin the CLI is not signed in to;
+failures to execute or read the CLI are errors. Otherwise return the existing
+user DTO with an `id` that is a positive safe integer or a non-empty string
+of at most 256 characters. Keep string IDs unchanged, including numeric-looking
+ones beyond JavaScript's safe integer range.
+
+Resource handlers read through the CLI instead of `createSourceControlForge`.
+Compare `String(current.id)` with `String(session.user.id)` before the read and again
+before returning data. Discard data on a mismatch and return the following
+answer. This protects logout/login and identity changes outside OpenChamber
+without requiring a CLI switch command.
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "ACCOUNT_CHANGED",
+    "status": 409,
+    "message": "The CLI account changed"
+  }
+}
+```
+
+The host uses its non-persisted `#cli:<id>` account. Its handles cannot call
+the forge proxy. Clone, fetch and push use system Git, `mode: 'system'`;
+do not extract or pass a CLI credential to OpenChamber. The full contract is
+in [GUEST_SERVICES.md](../../GUEST_SERVICES.md#service-owned-sign-in).
+
 ## Change-based hosts
 
 Teahouse is a pull-request host and declares none of the fields below. A host

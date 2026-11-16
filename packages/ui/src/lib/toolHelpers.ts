@@ -1,4 +1,4 @@
-import { normalizeToolName } from '@/lib/opencode/tools';
+import { normalizeToolName, opencodeNamespaceTool } from '@/lib/opencode/tools';
 import {
   isEditTool,
   isPatchTool,
@@ -161,34 +161,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        { key: 'id', label: 'Skill', type: 'text' }
      ]
    },
-   // The `opencode` namespace: OpenCode managing itself.
-   session_rename: {
-     displayName: 'Rename Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'title', label: 'Title', type: 'text' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   session_move: {
-     displayName: 'Move Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'directory', label: 'Directory', type: 'file' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   models: {
-     displayName: 'Search Models',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'search', label: 'Search', type: 'text' },
-       { key: 'provider', label: 'Provider', type: 'text' }
-     ]
-   },
     question: {
        displayName: 'Question',
        category: 'ai',
@@ -197,6 +169,14 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
          { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
        ]
      },
+
+    // The chat row takes the Work Status section's localized name (`ToolPart`).
+    todowrite: {
+      displayName: 'Tasks',
+      category: 'ai',
+      outputLanguage: 'text',
+      inputFields: []
+    },
 
     openchamber: {
       displayName: 'OpenChamber',
@@ -240,6 +220,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_usage: {
+      displayName: 'OpenChamber Usage',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     openchamber_render: {
       displayName: 'OpenChamber Render',
       category: 'system',
@@ -256,6 +243,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
 
     openchamber_secret: {
       displayName: 'OpenChamber Secret',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_workflow: {
+      displayName: 'OpenChamber Workflow',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
@@ -298,7 +292,18 @@ function formatUnknownToolDisplayName(toolName: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+// OpenCode's `opencode` namespace goes by one name, as OpenChamber's tools do;
+// what each call did is the row's description.
+const OPENCODE_NAMESPACE_METADATA: ToolMetadata = {
+  displayName: 'OpenCode',
+  category: 'system',
+  outputLanguage: 'json',
+  inputFields: []
+};
+
 export function getToolMetadata(toolName: string): ToolMetadata {
+  // The namespace itself names a script whose calls all went to it.
+  if (toolName === 'opencode' || opencodeNamespaceTool(toolName)) return OPENCODE_NAMESPACE_METADATA;
   // Namespaced tools (`opencode.session_rename`) are keyed by their last segment.
   return TOOL_METADATA[toolName] || TOOL_METADATA[normalizeToolName(toolName)] || {
     displayName: formatUnknownToolDisplayName(toolName),
@@ -829,6 +834,32 @@ export function isFontFile(filePath: string): boolean {
 export function isDelimitedTableFile(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === 'csv' || ext === 'tsv';
+}
+
+/** Office documents the viewer can draw. The older doc, xls and ppt formats stay downloads. */
+const OFFICE_PREVIEW_EXTENSIONS = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']);
+
+export function isOfficePreviewFile(filePath: string): boolean {
+  return OFFICE_PREVIEW_EXTENSIONS.has(getFileExtension(filePath));
+}
+
+export function isNotebookFile(filePath: string): boolean {
+  return getFileExtension(filePath) === 'ipynb';
+}
+
+/** Zip archives under the names they go by. */
+export function isArchiveFile(filePath: string): boolean {
+  return ['zip', 'jar', 'war'].includes(getFileExtension(filePath));
+}
+
+/** Tables kept in a binary file, read in the viewer. */
+export function isDataFile(filePath: string): boolean {
+  return ['sqlite', 'sqlite3', 'db', 'parquet'].includes(getFileExtension(filePath));
+}
+
+/** Files whose diff is the two versions themselves, not a text patch. */
+export function hasFileVersionsDiff(filePath: string): boolean {
+  return isImageFile(filePath) || isOfficePreviewFile(filePath);
 }
 
 export function isMermaidFile(filePath: string): boolean {

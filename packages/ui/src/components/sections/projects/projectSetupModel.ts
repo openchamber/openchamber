@@ -63,6 +63,8 @@ export type ProjectSetupWriters = {
   hiddenSharedActionIds: (ids: string[]) => Promise<boolean>;
   personalCommands: (commands: string[]) => Promise<boolean>;
   sharedCommands: (commands: string[]) => Promise<boolean>;
+  personalTeardownCommands: (commands: string[]) => Promise<boolean>;
+  sharedTeardownCommands: (commands: string[]) => Promise<boolean>;
 };
 
 const withoutSource = (action: OpenChamberProjectAction): OpenChamberProjectAction => {
@@ -129,31 +131,42 @@ export const setSharedActionHidden = (
   return write.hiddenSharedActionIds(hidden ? [...rest, id] : rest);
 };
 
+/** Setup commands run after a worktree is created, teardown commands before it is removed. */
+export type WorktreeCommandKind = 'setup' | 'teardown';
+
 type SetupCommandEntry = {
   command: string;
   source: ProjectSetupSource;
+  kind: WorktreeCommandKind;
   /** Position in its own file's list. */
   index: number;
   /** A team command the user's "only my commands" mode leaves out. */
   skipped: boolean;
 };
 
-/** The commands in the order a new worktree runs them: the team's, then the user's. */
-export const listSetupCommands = (setup: ProjectSetup): SetupCommandEntry[] => {
-  const skipped = setup.personal.setupWorktreeMode === 'replace';
-  return [
-    ...setup.shared.setupWorktree.map((command, index) => ({ command, source: 'shared' as const, index, skipped })),
-    ...setup.personal.setupWorktree.map((command, index) => ({ command, source: 'personal' as const, index, skipped: false })),
-  ];
+const commandsOf = (setup: ProjectSetup, source: ProjectSetupSource, kind: WorktreeCommandKind): string[] => {
+  const file = source === 'shared' ? setup.shared : setup.personal;
+  return kind === 'setup' ? file.setupWorktree : file.teardownWorktree;
 };
 
-const commandsOf = (setup: ProjectSetup, source: ProjectSetupSource): string[] => (
-  source === 'shared' ? setup.shared.setupWorktree : setup.personal.setupWorktree
+const COMMAND_WRITERS = {
+  setup: { shared: 'sharedCommands', personal: 'personalCommands' },
+  teardown: { shared: 'sharedTeardownCommands', personal: 'personalTeardownCommands' },
+} as const satisfies Record<WorktreeCommandKind, Record<ProjectSetupSource, keyof ProjectSetupWriters>>;
+
+const writeCommands = (write: ProjectSetupWriters, source: ProjectSetupSource, kind: WorktreeCommandKind, commands: string[]): Promise<boolean> => (
+  write[COMMAND_WRITERS[kind][source]](commands)
 );
 
-const writeCommands = (write: ProjectSetupWriters, source: ProjectSetupSource, commands: string[]): Promise<boolean> => (
-  source === 'shared' ? write.sharedCommands(commands) : write.personalCommands(commands)
-);
+/** The commands in the order a worktree runs them: the team's, then the user's. */
+export const listSetupCommands = (setup: ProjectSetup, kind: WorktreeCommandKind): SetupCommandEntry[] => {
+  // "Only my setup commands" leaves the team's teardown commands in.
+  const skipped = kind === 'setup' && setup.personal.setupWorktreeMode === 'replace';
+  return [
+    ...commandsOf(setup, 'shared', kind).map((command, index) => ({ command, source: 'shared' as const, kind, index, skipped })),
+    ...commandsOf(setup, 'personal', kind).map((command, index) => ({ command, source: 'personal' as const, kind, index, skipped: false })),
+  ];
+};
 
 /** Replace a command's text; empty text removes it. */
 export const editSetupCommand = (
@@ -163,16 +176,17 @@ export const editSetupCommand = (
   text: string,
 ): Promise<boolean> => {
   const next = text.trim();
-  const commands = commandsOf(setup, entry.source);
+  const commands = commandsOf(setup, entry.source, entry.kind);
   return writeCommands(
     write,
     entry.source,
+    entry.kind,
     next ? commands.map((command, index) => (index === entry.index ? next : command)) : commands.filter((_command, index) => index !== entry.index),
   );
 };
 
-export const addSetupCommand = (setup: ProjectSetup, write: ProjectSetupWriters, text: string): Promise<boolean> => (
-  write.personalCommands([...setup.personal.setupWorktree, text.trim()])
+export const addSetupCommand = (setup: ProjectSetup, write: ProjectSetupWriters, kind: WorktreeCommandKind, text: string): Promise<boolean> => (
+  writeCommands(write, 'personal', kind, [...commandsOf(setup, 'personal', kind), text.trim()])
 );
 
 export const removeSetupCommand = (setup: ProjectSetup, write: ProjectSetupWriters, entry: SetupCommandEntry): Promise<boolean> => (
@@ -186,6 +200,6 @@ export const moveSetupCommand = async (
   entry: SetupCommandEntry,
 ): Promise<boolean> => {
   const to: ProjectSetupSource = entry.source === 'shared' ? 'personal' : 'shared';
-  if (!(await writeCommands(write, to, [...commandsOf(setup, to), entry.command]))) return false;
+  if (!(await writeCommands(write, to, entry.kind, [...commandsOf(setup, to, entry.kind), entry.command]))) return false;
   return removeSetupCommand(setup, write, entry);
 };

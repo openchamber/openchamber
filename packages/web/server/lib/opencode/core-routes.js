@@ -687,7 +687,15 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
   );
 
-  // The broker's single-use OAuth state is the capability for this callback.
+  // An MCP server's OAuth callback lands on the OpenChamber origin because a
+  // browser on another machine cannot reach OpenCode's loopback listener. The
+  // route forwards it there only for a state bound to a live sign-in.
+  const isMcpOauthCallback = (req) => (
+    req.method === 'GET'
+    && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
+  );
+
+  // The protected broker's single-use OAuth state authorizes this callback.
   const isProtectedMcpOauthCallback = (req) => req.method === 'GET' && req.path === '/protected-mcp/oauth/callback';
 
   // An HTML preview runs in an opaque-origin sandbox and carries no session.
@@ -707,7 +715,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const requireApiAuth = async (req, res, next) => {
     const pathname = (req.originalUrl || '').split('?')[0];
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
-    if (isGuestOauthCallback(req) || isProtectedMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
+    if (isGuestOauthCallback(req) || isMcpOauthCallback(req) || isProtectedMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);

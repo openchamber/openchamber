@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPrivateRepositoryIdentityResolver, resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from './repository-identity.js';
+import { createPrivateRepositoryIdentityResolver, createRepositoryIdResolver, resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from './repository-identity.js';
 import { createBindingService } from './binding-service.js';
 import { parseBindingStore } from './binding-contract.js';
-import { fingerprintRemoteUrl, redactRemoteUrl, redactSensitiveText } from './url-redaction.js';
+import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl, redactSensitiveText } from './url-redaction.js';
 
 const directories = [];
 const makeDirectory = () => {
@@ -209,6 +209,120 @@ describe('source-control repository identity', () => {
     expect(rewritten.remotes[0].fetch.displayUrl).toBe('https://example.org/team/repository.git');
   });
 
+  describe('a remote that is a path on disk', () => {
+    const repositoryWithOrigin = () => {
+      const repository = makeDirectory();
+      git(repository, ['init', '-b', 'main']);
+      git(repository, ['remote', 'add', 'origin', 'https://example.com/team/repository.git']);
+      return repository;
+    };
+    const unboundService = () => createBindingService({
+      resolveRepository: resolveRepositoryIdentity,
+      store: { read: async () => ({ revision: 0, binding: null }) },
+    });
+
+    it.each([
+      ['an absolute path', '/srv/git/project.git'],
+      ['a relative path', '../project.git'],
+      ['a relative path with no slash', 'project.git'],
+      ['a home path', '~/project.git'],
+      ['a path with a colon after a slash', './a:b/project.git'],
+      ['a file URL', 'file:///srv/git/project.git'],
+      ['a file URL in capitals', 'FILE:///srv/git/project.git'],
+      ['a Windows drive with backslashes', 'C:\\repos\\project.git'],
+      ['a UNC path', '\\\\server\\share\\project.git'],
+      ['a path with a space', '/srv/My Drive/project.git'],
+    ])('leaves out %s and keeps the rest of the repository readable', async (_form, url) => {
+      const repository = repositoryWithOrigin();
+      const before = await resolveRepositoryIdentity(repository);
+      git(repository, ['remote', 'add', 'local', url]);
+
+      const read = await unboundService().get(repository);
+
+      expect(read.repository.remotes.map((remote) => remote.name)).toEqual(['origin']);
+      expect(read.repository.configRevision).toBe(before.configRevision);
+      expect((await resolvePrivateRepositoryIdentity(repository)).remotes.map((remote) => remote.name)).toEqual(['origin']);
+    });
+
+    it('reads a forward-slash drive as a path on Windows and as a host elsewhere', () => {
+      expect(isDiskPathRemoteUrl('C:/repos/project.git', 'win32')).toBe(true);
+      expect(isDiskPathRemoteUrl('g:/team/project.git', 'linux')).toBe(false);
+      expect(isDiskPathRemoteUrl('C:\\repos\\project.git', 'linux')).toBe(true);
+      expect(isDiskPathRemoteUrl('file:team/project.git', 'linux')).toBe(false);
+    });
+
+    it('leaves out a remote that only pushes to a path', async () => {
+      const repository = repositoryWithOrigin();
+      git(repository, ['remote', 'add', 'mirror', 'https://example.com/team/mirror.git']);
+      git(repository, ['remote', 'set-url', '--push', 'mirror', '/srv/git/mirror.git']);
+
+      expect((await unboundService().get(repository)).repository.remotes.map((remote) => remote.name)).toEqual(['origin']);
+    });
+
+    it.each([
+      ['an SCP address', 'git@example.com:team/repository.git'],
+      ['an SCP address with no user', 'example.com:team/repository.git'],
+      ['an SSH URL', 'ssh://git@example.com/team/repository.git'],
+    ])('keeps %s', async (_form, url) => {
+      const repository = repositoryWithOrigin();
+      git(repository, ['remote', 'add', 'other', url]);
+
+      expect((await resolveRepositoryIdentity(repository)).remotes.map((remote) => remote.name)).toEqual(['origin', 'other']);
+    });
+
+    it('refuses a transfer through the left-out remote and allows one through its neighbor', async () => {
+      const repository = repositoryWithOrigin();
+      git(repository, ['remote', 'add', 'local', '/srv/git/project.git']);
+      const service = unboundService();
+      const context = await resolvePrivateRepositoryIdentity(repository);
+      const authority = {
+        directory: repository, repositoryId: context.repositoryId, bindingRevision: 0,
+        configRevision: context.configRevision, remote: 'origin', endpointKind: 'push',
+      };
+
+      await expect(service.validateGitTransportContext(authority)).resolves.toMatchObject({ remote: 'origin', transportMode: 'system' });
+      await expect(service.validateGitTransportContext({ ...authority, remote: 'local' }))
+        .rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_STALE' });
+    });
+
+    it('marks a grant config-changed when its remote moves to a path', async () => {
+      const repository = repositoryWithOrigin();
+      git(repository, ['remote', 'add', 'upstream', 'https://example.com/team/upstream.git']);
+      const context = await resolveRepositoryIdentity(repository);
+      const grant = (remote) => ({ name: remote.name, fetch: remote.fetch, push: remote.push, mode: 'system', readiness: 'ready' });
+      const binding = {
+        repositoryId: context.repositoryId, revision: 1, state: 'bound', configRevision: context.configRevision,
+        providers: [], auxiliary: [], remotes: context.remotes.map(grant),
+      };
+      const service = createBindingService({
+        resolveRepository: resolveRepositoryIdentity,
+        store: { read: async () => ({ revision: 1, binding }) },
+      });
+
+      git(repository, ['remote', 'set-url', 'upstream', '/srv/git/upstream.git']);
+      const read = await service.get(repository);
+
+      expect(read.repository.remotes.map((remote) => remote.name)).toEqual(['origin']);
+      expect(Object.fromEntries(read.binding.remotes.map((remote) => [remote.name, remote.readiness])))
+        .toEqual({ origin: 'ready', upstream: 'config-changed' });
+    });
+
+    it('still fails a read when a remote address could not be read', async () => {
+      const resolver = createPrivateRepositoryIdentityResolver({
+        getRepositoryRemotes: async () => [{ name: 'origin', fetchUrl: '', pushUrl: '' }],
+        getTransportRevision: async () => 'transport',
+      });
+      const repository = makeDirectory();
+      git(repository, ['init', '-b', 'main']);
+      const service = createBindingService({
+        resolveRepository: resolver,
+        store: { read: async () => ({ revision: 0, binding: null }) },
+      });
+
+      await expect(service.get(repository)).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDING' });
+    });
+  });
+
   it('changes the revision for push-only changes and remote renames', async () => {
     const repository = makeDirectory();
     git(repository, ['init', '-b', 'main']);
@@ -285,6 +399,25 @@ describe('source-control repository identity', () => {
     const publicContext = await resolveRepositoryIdentity(repository);
     expect(publicContext.configRevision).toBe(second.configRevision);
     expect(publicContext).not.toHaveProperty('transportRevision');
+  });
+
+  it('resolves the record ID the full identity uses from the git paths alone', async () => {
+    const repository = makeDirectory();
+    git(repository, ['init', '-b', 'main']);
+    git(repository, ['remote', 'add', 'origin', 'https://example.com/team/repository.git']);
+
+    const full = await resolveRepositoryIdentity(repository);
+    const id = await createRepositoryIdResolver()(repository);
+
+    expect(id).toEqual({
+      supported: true,
+      bare: false,
+      repositoryId: full.repositoryId,
+      gitDirectory: fs.realpathSync(path.join(repository, '.git')),
+    });
+    await expect(createRepositoryIdResolver({
+      resolveGitPaths: async () => ({ supported: false, reason: 'not-a-git-repository' }),
+    })(repository)).resolves.toEqual({ supported: false, reason: 'not-a-git-repository' });
   });
 
   it('fails closed when private transport configuration cannot be read', async () => {

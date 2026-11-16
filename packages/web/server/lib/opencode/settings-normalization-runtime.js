@@ -60,7 +60,11 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return value.startsWith('/') ? 1 : 0;
   };
 
-  const canonicalizePathCase = (value) => {
+  // `listings` (directory -> entries, or null when unreadable) lets one pass over
+  // many paths read each shared ancestor once: projects mostly sit under the
+  // same few folders, and reading each of them again per project was 71 × 6
+  // synchronous readdirs per settings read on a 71-project workspace (#6084).
+  const canonicalizePathCase = (value, listings) => {
     if (!readdirSync || typeof value !== 'string' || !value) return value;
     if (!CASE_INSENSITIVE_PLATFORMS.has(processLike?.platform)) return value;
 
@@ -75,12 +79,16 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const segments = value.slice(rootLength).split(separator).filter(Boolean);
       let current = root;
       for (const segment of segments) {
-        let entries;
-        try {
-          entries = readdirSync(current);
-        } catch {
-          return value; // cannot read this level (missing/permission) — keep original
+        let entries = listings?.get(current);
+        if (entries === undefined) {
+          try {
+            entries = readdirSync(current);
+          } catch {
+            entries = null;
+          }
+          listings?.set(current, entries);
         }
+        if (!entries) return value; // cannot read this level (missing/permission) — keep original
         let next = segment;
         if (!entries.includes(segment)) {
           next = entries.find((entry) => entry.toLowerCase() === segment.toLowerCase());
@@ -99,12 +107,12 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
   // (missing, no permission) is kept exactly as stored: recovering its case
   // could land on a different, existing sibling such as /volume/Foo for a
   // missing /volume/foo.
-  const safeRealpathSync = (value) => {
+  const safeRealpathSync = (value, listings) => {
     if (typeof value !== 'string' || !value) {
       return value;
     }
     if (!realpathSync) {
-      return canonicalizePathCase(value);
+      return canonicalizePathCase(value, listings);
     }
     let resolved;
     try {
@@ -112,7 +120,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     } catch {
       return value;
     }
-    return canonicalizePathCase(resolved);
+    return canonicalizePathCase(resolved, listings);
   };
 
   const normalizePathForPersistence = (value, options = {}) => {
@@ -200,6 +208,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     const result = [];
     const seenIds = new Set();
     const seenPaths = new Set();
+    const listings = new Map();
 
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
@@ -207,7 +216,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const candidate = entry;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
+      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath)), listings) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const labelSource = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'

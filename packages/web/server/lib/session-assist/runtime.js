@@ -180,6 +180,20 @@ export const createSessionAssistRuntime = ({
       .catch(() => console.warn('[session-assist] failed to retire a stale assist'));
   };
 
+  // A loopback host does not prove that no model runs here: CLIProxyAPI,
+  // LiteLLM and one-api all listen on 127.0.0.1 and forward to a hosted
+  // vendor, where a side request evicts nothing. The skip stays on the safe
+  // side of that ambiguity, but it used to return without a word, which made
+  // an enabled toggle look broken (#6173). One line per model pair keeps a
+  // genuine local server from repeating it every turn.
+  const localSkipNotices = new Set();
+  const reportLocalSkip = (providerID, modelID) => {
+    const key = `${providerID}/${modelID}`;
+    if (localSkipNotices.has(key)) return;
+    localSkipNotices.add(key);
+    console.log(`[session-assist] skipped: ${key} is served from a local endpoint and is the session's own model, so a side request would evict its prompt cache. Set a different Small Model to get a recap or a suggestion`);
+  };
+
   const generateAssist = async (sessionId, directory, signal, allowed) => {
     const enabledTargets = getTargets();
     const targets = {
@@ -231,7 +245,10 @@ export const createSessionAssistRuntime = ({
     // session's model was picked (fallback or an explicit Small Model).
     if (described.localEndpoint
       && described.providerID === preferredProviderID
-      && described.modelID === preferredModelID) return;
+      && described.modelID === preferredModelID) {
+      reportLocalSkip(preferredProviderID, preferredModelID);
+      return;
+    }
     const system = buildAssistSystemPrompt(targets);
     const prompt = buildAssistPrompt(turns, targets, described.inputCharBudget - system.length - 512);
     if (!prompt) return;

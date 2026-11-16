@@ -1,7 +1,9 @@
 import { isGuestCommitSha, type HostRequestErrorCode } from '@openchamber/sdk';
 
 import type { GitAPI } from '@/lib/api/types';
+import { openMobileWorkspace } from '@/lib/mobileWorkspaceTabs';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { commitSelectionKey, useCommitSelectionStore } from '@/stores/useCommitSelectionStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -17,7 +19,7 @@ type OpenGuestCommitOptions = {
   git: Pick<GitAPI, 'getGitLog'> | null;
   /** The directory's current branch, which keys the Diff view's commit selection. */
   currentBranch: (directory: string) => Promise<string | null>;
-  /** VS Code and mobile have no Diff view commit scope for guests. */
+  /** VS Code has no Diff view commit scope for guests. */
   supported: boolean;
 };
 
@@ -46,6 +48,14 @@ export const openGuestCommit = async ({ sha, directory, git, currentBranch, supp
   const branch = await currentBranch(directory);
   if (getRuntimeKey() !== runtimeKey) return { ok: false, code: 'HOST_UNAVAILABLE', message: 'The connection changed.' };
   useCommitSelectionStore.getState().select(commitSelectionKey(directory, branch, useGitStore.getState().runtimeKey), entry);
+  // The phone's Changes tab reads the same selection in its commit scope, once
+  // it shows this repository: the request names it, as the desktop opens the
+  // Diff tab under this directory.
+  if (isMobileSurfaceRuntime()) {
+    return openMobileWorkspace({ tab: 'changes', commit: { directory } })
+      ? { ok: true }
+      : { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no Diff view.' };
+  }
   useUIStore.getState().openContextPanelTab(directory, { mode: 'diff', diffScope: 'commit' });
   return { ok: true };
 };

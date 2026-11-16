@@ -16,8 +16,11 @@ Ces trois fichiers forment une extension fonctionnelle. Elle connecte un token G
   "private": true,
   "openchamber": {
     "apiVersion": 1,
+    "id": "my-repos",
+    "name": "Repos",
+    "icon": "github",
     "contributes": {
-      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "panel": { "entry": "panel/index.html" },
       "attach": "panel",
       "integration": {
         "name": "GitHub (token)",

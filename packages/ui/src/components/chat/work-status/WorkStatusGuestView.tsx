@@ -36,6 +36,7 @@ import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { WorkStatusPill } from './WorkStatusPrimitives';
+import { TOUCH_CONTROL_CLASS, WorkStatusTouchContext } from './touchContext';
 
 /**
  * Colours of a source section come from the theme only. `default` inherits
@@ -224,21 +225,26 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
   }
   const url = chip.url;
   return (
-    <button
-      type="button"
-      title={url}
-      onClick={() => openUrl(url)}
-      dir="auto"
-      className={cn(className, 'transition-opacity hover:opacity-80', fallback && 'bg-[var(--interactive-hover)] text-muted-foreground hover:text-foreground')}
-      style={pillStyle(chip.tone)}
-    >
-      {chip.label}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => openUrl(url)}
+          dir="auto"
+          className={cn(className, 'transition-opacity hover:opacity-80', fallback && 'bg-[var(--interactive-hover)] text-muted-foreground hover:text-foreground')}
+          style={pillStyle(chip.tone)}
+        >
+          {chip.label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6} dir="ltr">{url}</TooltipContent>
+    </Tooltip>
   );
 };
 
 const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = ({ id, label, value, options, disabled }) => {
   const { busy, chosen, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const current = chosen.get(id) ?? value;
   return (
     <div role="group" aria-label={label} className="flex min-w-0 flex-1 items-center gap-1">
@@ -250,6 +256,8 @@ const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = 
           aria-pressed={option.value === current}
           disabled={disabled || busy.has(id)}
           onClick={() => { if (option.value !== current) act({ id, value: option.value }); }}
+          className={touch ? TOUCH_CONTROL_CLASS : undefined}
+          dir="auto"
         >
           {option.label}
         </Button>
@@ -279,6 +287,7 @@ const CONFIRM_MS = 4_000;
 
 const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = ({ id, label, variant, confirm, disabled }) => {
   const { busy, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const [armed, setArmed] = React.useState(false);
   React.useEffect(() => {
     if (!armed) return;
@@ -286,23 +295,30 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
     return () => window.clearTimeout(timer);
   }, [armed]);
   return (
-    <Button
-      variant={variant === 'outline' ? 'outline' : variant === 'destructive' ? 'destructive' : 'ghost'}
-      size="xs"
-      disabled={disabled || busy.has(id)}
-      aria-busy={busy.has(id) || undefined}
-      onClick={() => {
-        if (confirm && !armed) {
-          setArmed(true);
-          return;
-        }
-        setArmed(false);
-        act({ id });
-      }}
-      className="max-w-[8rem]"
-    >
-      <span className="truncate">{armed && confirm ? confirm : label}</span>
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Button
+            variant={variant === 'outline' ? 'outline' : variant === 'destructive' ? 'destructive' : 'ghost'}
+            size="xs"
+            disabled={disabled || busy.has(id)}
+            aria-busy={busy.has(id) || undefined}
+            onClick={() => {
+              if (confirm && !armed) {
+                setArmed(true);
+                return;
+              }
+              setArmed(false);
+              act({ id });
+            }}
+            className={cn('max-w-[8rem]', touch && TOUCH_CONTROL_CLASS)}
+          >
+            <span dir="auto" className="truncate">{armed && confirm ? confirm : label}</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6} dir="auto">{armed && confirm ? confirm : label}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -311,33 +327,48 @@ const ActionSwitch: React.FC<Extract<GuestStatusAction, { kind: 'switch' }>> = (
   const choice = chosen.get(id);
   const current = choice === undefined ? checked : choice === 'on';
   return (
-    <Switch
-      aria-label={label}
-      checked={current}
-      disabled={disabled || busy.has(id)}
-      loading={busy.has(id)}
-      onCheckedChange={(next) => act({ id, value: next ? 'on' : 'off' })}
-    />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Switch
+            aria-label={label}
+            checked={current}
+            disabled={disabled || busy.has(id)}
+            loading={busy.has(id)}
+            onCheckedChange={(next) => act({ id, value: next ? 'on' : 'off' })}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
   );
 };
 
 const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = ({ id, label, value, options, disabled }) => {
   const { busy, chosen, act } = useActions();
+  const touch = React.useContext(WorkStatusTouchContext);
   const current = chosen.get(id) ?? value;
   const selected = options.find((option) => option.value === current);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
-          <span className="min-w-0 truncate">{selected?.label ?? current}</span>
-          <Icon name="arrow-down-s" className="size-3 shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className={cn('max-w-[8rem] gap-1', touch && TOUCH_CONTROL_CLASS)}>
+                <span dir="auto" className="min-w-0 truncate">{selected?.label ?? current}</span>
+                <Icon name="arrow-down-s" className="size-3 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent data-work-status-popup align="end" className="min-w-32">
         <DropdownMenuRadioGroup value={current} onValueChange={(next) => { if (next !== current) act({ id, value: next }); }}>
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
-              <span className="truncate">{option.label}</span>
+              <span dir="auto" className="truncate">{option.label}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -376,13 +407,15 @@ const RowTooltip: React.FC<{ text: string; children: React.ReactElement }> = ({ 
   // Above the row, as on every dense row, so it never covers the rows under it.
   <Tooltip delayDuration={300}>
     <TooltipTrigger asChild>{children}</TooltipTrigger>
-    <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
+    <TooltipContent side="top" sideOffset={4} dir="auto" className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
       {text}
     </TooltipContent>
   </Tooltip>
 );
 
 const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ row }) => {
+  // Touch controls are 36px: on the phone a row grows to fit them instead of overlapping the next one.
+  const touch = React.useContext(WorkStatusTouchContext);
   // An icon the app does not have is left out rather than replaced.
   const icon = row.icon && isGuestIconName(row.icon) ? row.icon : null;
   // A chart has its own hover label, so the row's tooltip moves to the label.
@@ -393,9 +426,9 @@ const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ ro
     <span dir="auto" tabIndex={labelTooltip ? 0 : undefined} className={cn('min-w-0 truncate', row.content ? 'w-24 shrink-0' : 'flex-1')}>{row.label}</span>
   );
   const body = (
-    <div className="flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-muted-foreground" tabIndex={rowTooltip ? 0 : undefined}>
+    <div className={cn('flex w-full items-center gap-2 rounded-md text-start text-[13px] text-muted-foreground', touch ? 'min-h-7 px-2.5' : 'h-7 px-1')} tabIndex={rowTooltip ? 0 : undefined}>
       {row.dot ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: strokeColor(row.dot) }} /> : null}
-      {icon ? <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+      {icon ? <Icon name={icon} className="size-[13px] shrink-0 text-muted-foreground" /> : null}
       {labelTooltip ? <RowTooltip text={labelTooltip}>{label}</RowTooltip> : label}
       {row.content ? <Content content={row.content} /> : null}
       {row.badge ? <WorkStatusPill {...pillStyle(row.badge.tone)}>{row.badge.label}</WorkStatusPill> : null}

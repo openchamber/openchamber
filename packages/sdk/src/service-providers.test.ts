@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
+import { browserProviderResultSchema, notificationsProviderSchemasV1, quotaProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
 import {
   BROWSER_CONTROL_ACTIONS,
   GUEST_NOTIFICATION_KINDS,
@@ -30,7 +30,11 @@ import {
   isTrackerProviderWriteMethod,
   readTrackerProviderRequest,
   trackerProviderTimeoutMs,
+  QUOTA_PROVIDER_METHODS,
+  isQuotaProviderMethod,
+  readQuotaProviderRequest,
 } from './service-providers.ts';
+import type { SourceControlMutationResult, SourceControlReconcileData } from './service-providers.ts';
 
 describe('browser provider contract', () => {
   test('reads the body the host posts and refuses anything else', () => {
@@ -141,6 +145,8 @@ describe('source-control provider contract', () => {
       v: 1, requestId: 'req-1', method: 'listIssues', provider: 'ext-teahouse', session, input: { directory: '/repo', remote: 'origin', page: 1 },
     });
     expect(readSourceControlProviderRequest(call({ method: 'auth.verify', session: { ...session, user: null }, input: {} }))?.session?.user).toBeNull();
+    expect(readSourceControlProviderRequest(call({ method: 'auth.status', session: { ...session, user: null }, input: {} }))?.session)
+      .toEqual({ ...session, user: null });
     expect(readSourceControlProviderRequest(call({ session: null }))?.session).toBeNull();
 
     expect(readSourceControlProviderRequest('not json')).toBeNull();
@@ -151,18 +157,18 @@ describe('source-control provider contract', () => {
     expect(readSourceControlProviderRequest(call({ requestId: '' }))).toBeNull();
     expect(readSourceControlProviderRequest(call({ input: [] }))).toBeNull();
     expect(readSourceControlProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
-    expect(readSourceControlProviderRequest(call({ session: { ...session, user: { id: '7', login: 'mona' } } }))).toBeNull();
   });
 
   test('forwards the auth hooks, the fifteen reads and the three mutation steps, each with its deadline', () => {
     expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(15);
-    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(20);
+    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(21);
     expect(isSourceControlProviderMethod('mutation.perform')).toBe(true);
     expect(isSourceControlProviderMethod('references')).toBe(false);
     expect(sourceControlProviderTimeoutMs('changeRequestStatus')).toBe(12_000);
     expect(sourceControlProviderTimeoutMs('listIssues')).toBe(20_000);
     expect(sourceControlProviderTimeoutMs('mutation.reconcile')).toBe(30_000);
     expect(sourceControlProviderTimeoutMs('auth.probe')).toBe(15_000);
+    expect(sourceControlProviderTimeoutMs('auth.status')).toBe(15_000);
   });
 
   test('the forge helper posts to the callback listener with the handle and relays any forge status', async () => {
@@ -212,8 +218,20 @@ describe('source-control provider contract', () => {
   });
 
   test('answers the host acts on are checked deeply', () => {
-    expect(schemas.data['auth.verify'].safeParse({ user: { id: 7, login: 'mona' } }).success).toBe(true);
-    expect(schemas.data['auth.verify'].safeParse({ user: { id: '7', login: 'mona' } }).success).toBe(false);
+    for (const id of [7, Number.MAX_SAFE_INTEGER, 'member:mona', '0007', '90071992547409931234567', ' member:mona ', 'x'.repeat(256)]) {
+      const user = { id, login: 'mona' };
+      expect(schemas.data['auth.verify'].parse({ user }).user).toEqual(user);
+      expect(schemas.data['auth.status'].parse({ user }).user).toEqual(user);
+      expect(readSourceControlProviderRequest(call({ session: { ...session, user } }))?.session?.user).toEqual(user);
+    }
+    for (const id of ['', 'x'.repeat(257), 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, true]) {
+      const user = { id, login: 'mona' };
+      expect(schemas.data['auth.verify'].safeParse({ user }).success).toBe(false);
+      expect(schemas.data['auth.status'].safeParse({ user }).success).toBe(false);
+      expect(readSourceControlProviderRequest(call({ session: { ...session, user } }))).toBeNull();
+    }
+    expect(schemas.data['auth.status'].safeParse({ user: null }).success).toBe(true);
+    expect(schemas.data['auth.status'].safeParse({}).success).toBe(false);
     expect(schemas.data['auth.probe'].safeParse({ supported: true, version: '1.22.0' }).success).toBe(true);
 
     const head = schemas.data.readChangeRequestHead.safeParse({
@@ -238,6 +256,14 @@ describe('source-control provider contract', () => {
     expect(schemas.data['mutation.perform'].safeParse({ number: 4, url: 'https://x' }).success).toBe(false);
     expect(schemas.data['mutation.reconcile'].safeParse({ state: 'succeeded', result: { number: 4 } }).success).toBe(true);
     expect(schemas.data['mutation.reconcile'].safeParse({ state: 'running' }).success).toBe(false);
+
+    const converted: SourceControlMutationResult = { number: 4, draft: true };
+    const reconciled: SourceControlReconcileData = { state: 'succeeded', result: { number: 4, draft: false } };
+    expect(schemas.data['mutation.perform'].parse(converted)).toEqual(converted);
+    expect(schemas.data['mutation.reconcile'].parse(reconciled)).toEqual(reconciled);
+    expect(schemas.mutationResult.safeParse({ number: 4, draft: true }).success).toBe(true);
+    expect(schemas.data['mutation.perform'].safeParse({ number: 4, draft: 'yes' }).success).toBe(false);
+    expect(schemas.data['mutation.reconcile'].safeParse({ state: 'succeeded', result: { number: 4, draft: 1 } }).success).toBe(false);
 
     expect(schemas.data.liveSummaries.safeParse({
       summaries: [{ owner: 'mona', repo: 'tea', number: 3, state: 'open', draft: false, title: 'T', mergeable: null, mergeableState: null, checks: null }],
@@ -464,5 +490,51 @@ describe('tracker provider contract', () => {
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);
     expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
+  });
+});
+
+describe('quota provider contract', () => {
+  const credentials = { openrouter: { type: 'api', key: 'sk-or-1' }, deepinfra: { type: 'oauth', access: 'a', refresh: 'r', expires: 1_800_000_000_000 } };
+  const call = <T,>(patch?: T) => JSON.stringify({ v: 1, requestId: 'req-1', method: 'usage.read', provider: 'ext-teapot-usage', input: { credentials }, ...patch });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readQuotaProviderRequest(call())).toEqual({ v: 1, requestId: 'req-1', method: 'usage.read', provider: 'ext-teapot-usage', input: { credentials } });
+    expect(readQuotaProviderRequest(call({ input: { credentials: {} } }))?.input.credentials).toEqual({});
+
+    expect(readQuotaProviderRequest('not json')).toBeNull();
+    expect(readQuotaProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ method: 'items.list' }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: [] }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: {} }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: { credentials: [] } }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: { credentials: { openrouter: 'sk-or-1' } } }))).toBeNull();
+    expect(QUOTA_PROVIDER_METHODS).toEqual(['usage.read']);
+    expect(isQuotaProviderMethod('usage.read')).toBe(true);
+    expect(isQuotaProviderMethod('items.list')).toBe(false);
+  });
+
+  test('the host accepts a result shaped like a built-in\'s and refuses one it cannot draw', () => {
+    const usage = quotaProviderSchemasV1.data['usage.read'];
+    const window = { usedPercent: 42, windowSeconds: 18_000, resetAt: 1_800_000_000_000 };
+    const result = { ok: true, configured: true, planLabel: 'Pro', usage: { windows: { '5h': window, credits_balance: { usedPercent: null, valueLabel: '$12.50', value: { kind: 'spend', spent: 7.5, limit: 20 } } }, models: { 'teapot-large': { windows: { weekly: { usedPercent: 10, creditsUsed: 3 } } } } } };
+    expect(usage.safeParse(result).success).toBe(true);
+    expect(usage.safeParse({ ok: false, configured: true, error: 'The key was refused; make a new one at teapot.example.', usage: null }).success).toBe(true);
+    expect(usage.safeParse({ ok: false, configured: false, error: 'Not configured', usage: null }).success).toBe(true);
+
+    expect(usage.safeParse({ ...result, extra: 1 }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { ...window, extra: 1 } } } }).success).toBe(false);
+    // A `__proto__` key from a service's JSON never reaches the UI's iteration: zod leaves it out of the record it builds.
+    const prototypeKey = usage.safeParse({ ...result, usage: { windows: JSON.parse('{"__proto__":{"usedPercent":1},"5h":{"usedPercent":2}}') } });
+    expect(prototypeKey.success && Object.keys(prototypeKey.data.usage!.windows)).toEqual(['5h']);
+    expect(usage.safeParse({ ...result, usage: { windows: JSON.parse('{"constructor":{"usedPercent":1}}') } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`w${index}`, window])) } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: -1 } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, resetAt: 1.5 } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, valueLabel: 'x'.repeat(129) } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, value: { kind: 'spend', spent: 1, limit: 0 } } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, planLabel: 'x'.repeat(129) }).success).toBe(false);
+    expect(usage.safeParse({ ok: true, configured: true, usage: { windows: {}, models: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`m${index}`, { windows: {} }])) } }).success).toBe(false);
+    expect(quotaProviderSchemasV1.envelope.safeParse({ ok: false, error: { message: 'down', status: 503 } }).success).toBe(true);
   });
 });

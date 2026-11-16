@@ -23,6 +23,12 @@ Usage works for the providers that publish a quota, including Claude, Codex, Git
 
 A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need a credential of their own, which you enter on the Usage settings — exe.dev, Cursor and ZenMux are the three. If a provider shows no data, it usually means that credential is missing.
 
+## Let agents read it
+
+Turn on **Agent usage tool** in **Settings → General → OpenChamber Tools** and agents can read the same numbers: each provider's windows, how much of each is used and when it resets. Ask an agent to check a limit before a long task, or have a [scheduled task](/scheduled-tasks/) report where your plans stand.
+
+The agent sees what this page shows, without the account each provider is signed in with. Every check asks your providers again, the same as opening this page. The tool is off by default, and it works on desktop and web installations that use OpenChamber's own OpenCode server.
+
 ## Related
 
 - [Providers, Models & Agents](/providers/) — sign in before usage appears

@@ -7,6 +7,9 @@
 
 import React from 'react';
 
+import { isCapacitorApp } from '@/lib/platform';
+import { setRuntimeRequestObserver } from '@/lib/runtime-fetch';
+
 type MobileConnectDebugEntry = {
   at: number;
   step: string;
@@ -38,7 +41,32 @@ export const recordMobileConnectDebug = (step: string, detail: string): void => 
 // Launch separator: makes "everything above happened in a previous run of the
 // app" readable at a glance in the persisted trail.
 if (typeof window !== 'undefined') {
-  recordMobileConnectDebug('app:launch', '{}');
+  // How long the WebView took to reach this module: the part of a cold launch
+  // that passes before the first connection step.
+  recordMobileConnectDebug('app:launch', JSON.stringify({ sinceNavigationMs: Math.round(performance.now()) }));
+}
+
+// The requests of a cold launch, so a slow start can be told apart: the
+// connection, one slow request, or many requests in a row. Paths only, since a
+// query can carry a folder path. The app stops recording after the window, so
+// the trail stays a launch trail.
+const LAUNCH_REQUEST_WINDOW_MS = 30_000;
+const LAUNCH_REQUEST_LIMIT = 150;
+
+if (typeof window !== 'undefined' && isCapacitorApp()) {
+  let recorded = 0;
+  setRuntimeRequestObserver(({ method, url, status, durationMs }) => {
+    if (recorded >= LAUNCH_REQUEST_LIMIT) return;
+    recorded += 1;
+    let path = url;
+    try {
+      path = new URL(url, window.location.origin).pathname;
+    } catch {
+      path = url.split('?')[0] ?? url;
+    }
+    recordMobileConnectDebug('request', JSON.stringify({ method, path, status, ms: Math.round(durationMs) }));
+  });
+  window.setTimeout(() => setRuntimeRequestObserver(null), LAUNCH_REQUEST_WINDOW_MS);
 }
 
 export const getMobileConnectDebugEntries = (): MobileConnectDebugEntry[] => [...entries];

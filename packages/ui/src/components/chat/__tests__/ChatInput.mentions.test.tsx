@@ -72,6 +72,12 @@ const responseFor = (input: RequestInfo | URL) => {
     data: liveSessions.map((record) => ({ ...record, location: { directory: record.directory } })),
     cursor: {},
   });
+  // A send reads the composer's session from the server before it switches the model.
+  const composerSession = /^\/api\/session\/(ses_composer_\d+)$/.exec(path)?.[1];
+  if (composerSession) return Response.json({
+    location,
+    data: { ...session(composerSession, 'Composer session'), model: { providerID: 'provider', id: 'model' }, location: { directory: DIRECTORY } },
+  });
   if (path === '/api/config') return Response.json([]);
   if (path === '/api/project') return Response.json([]);
   if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
@@ -84,7 +90,6 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input) => responseFor(input
 plugin({
   name: 'composer-mentions-vite-modules',
   setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
     build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
       const directory = resolve(dirname(path), '../assets/provider-logos');
       const logos = Object.fromEntries(readdirSync(directory).filter((name) => name.endsWith('.svg')).map((name) => [
@@ -326,7 +331,7 @@ test('the queued row Send preserves the newer remembered effort', async () => {
 test('hand-typed @coder review keeps the session selectable even after coder becomes a chip', async () => {
   await withComposer(async ({ container, view, type, rows, choose }) => {
     await type('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     await type('review');
     expect(view.state.doc.toString()).toBe('@coder review');
     expect(rows().some((row) => row.textContent?.includes(review.title))).toBe(true);
@@ -342,7 +347,7 @@ test('Enter completes an agent query before the next frame and later s/k cannot 
     await type('@cod');
     await key('Enter');
     expect(view.state.doc.toString()).toBe('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('s');
     expect(rows().length).toBe(0);
@@ -401,11 +406,11 @@ const fileScenario = async (relativePath: string, directory: boolean, selectWith
       await key('Enter');
     } else await choose(name);
     expect(view.state.doc.toString()).toBe(`@${relativePath} `);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('sk');
     expect(view.state.doc.toString()).toBe(`@${relativePath} sk`);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
   });
 };
@@ -420,6 +425,32 @@ test('Enter on a directory completes its query without changing the reference', 
 
 test('a selected path containing spaces stays one reference after continuing prose', async () => {
   await fileScenario('design notes/overview.md', false, false);
+});
+
+test('file chips use the latest confirmed paths after draft persistence', async () => {
+  await withComposer(async ({ container, view, type, choose }) => {
+    useFileSearchStore.setState({ searchFiles: async (_directory, _query, _limit, options) => (
+      options?.type === 'directory' ? [] : [
+        { name: 'file name.png', path: `${DIRECTORY}/docs/file name.png`, relativePath: 'docs/file name.png' },
+        { name: 'other file.png', path: `${DIRECTORY}/other file.png`, relativePath: 'other file.png' },
+      ]
+    ) });
+    await type('Please ');
+    // Advance the controlled clock past the draft's 500ms persistence debounce.
+    await settle();
+    await type('@file');
+    await choose('docs/file name.png');
+    await type('inspect');
+    expect(container.querySelector('[title^="@docs/file name.png"]')?.textContent).toBe('file name.png');
+    expect(container.querySelector('[title^="@docs/file\n"]')).toBeNull();
+
+    await settle();
+    await type(' and @other');
+    await choose('other file.png');
+    await type('too');
+    expect(container.querySelector('[title^="@other file.png"]')?.textContent).toBe('other file.png');
+    expect(view.state.doc.toString()).toBe('Please @docs/file name.png inspect and @other file.png too');
+  });
 });
 
 test('completion follows text inserted before it and is removed with the reference', async () => {

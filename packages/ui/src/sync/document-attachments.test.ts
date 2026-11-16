@@ -229,3 +229,34 @@ describe("document attachment extraction", () => {
     expect(result?.images).toEqual([])
   })
 })
+
+describe("spreadsheet attachments", () => {
+  const workbook = (entries: Record<string, string>) => zippedFile("book.xlsx", {
+    "xl/workbook.xml": `<workbook xmlns:r="r"><sheets><sheet name="Data" r:id="rId1"/></sheets></workbook>`,
+    "xl/_rels/workbook.xml.rels": relationships([{ id: "rId1", target: "worksheets/sheet1.xml" }]),
+    ...entries,
+  })
+
+  test("an empty styled cell does not take the next cell's place, and dates read as dates", async () => {
+    const text = await (await extractDocumentAttachments(workbook({
+      "xl/styles.xml": `<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>`,
+      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1"><c r="A1" s="1"/><c r="B1" s="1"><v>45231</v></c></row></sheetData></worksheet>`,
+    })))?.textFile.text()
+    expect(text).toContain("Range: B1:B1\n2023-11-01")
+  })
+
+  test("expands ODS repeats with values and stays bounded on absurd ones", async () => {
+    const file = zippedFile("book.ods", {
+      "content.xml": `<office:document-content><table:table table:name="Budget">
+        <table:table-row><table:table-cell table:number-columns-repeated="4294967296"/><table:table-cell><text:p>far</text:p></table:table-cell></table:table-row>
+        <table:table-row>
+          <table:table-cell table:number-columns-repeated="2"/>
+          <table:table-cell><text:p>A&amp;B</text:p></table:table-cell>
+          <table:covered-table-cell/>
+          <table:table-cell table:number-columns-repeated="2"><text:p>x</text:p></table:table-cell>
+        </table:table-row>
+      </table:table></office:document-content>`,
+    })
+    expect(await (await extractDocumentAttachments(file))?.textFile.text()).toContain(" |  | A&B |  | x | x\n")
+  })
+})

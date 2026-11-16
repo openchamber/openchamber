@@ -32,10 +32,11 @@ describe('BrowserEngineSelect', () => {
     expect(markup).toContain('Server (Chrome on the OpenChamber server)');
   });
 
-  test('shows This device once the user picked the in-app browser', () => {
+  test('shows OpenChamber Web once the user picked the in-app browser', () => {
     Object.assign(initialState, { browserProvider: 'builtin' });
     const markup = renderSelect();
-    expect(markup).toContain('This device (in-app browser)');
+    expect(markup).toContain('OpenChamber Web');
+    expect(markup).toContain('value="builtin"');
   });
 
   test('falls back to Server when the saved value names a gone extension', () => {

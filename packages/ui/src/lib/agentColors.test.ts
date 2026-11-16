@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { createAgentColorResolver } from './agentColors';
+import { describe, expect, test } from 'bun:test';
+import { createAgentColorResolver, restingAgentColor } from './agentColors';
 import { getDefaultTheme, getThemeById } from './theme/themes';
 import { chromaticDistance } from './theme/color';
 import type { Theme } from '@/types/theme';
@@ -96,4 +96,10 @@ test('ignores colours OpenCode v2 does not accept and the migration placeholder'
     const resolve = createAgentColorResolver(theme, roster.map((agent) => (agent.name === 'plan' ? { ...agent, color } : agent)));
     expect(resolve('plan')).toEqual(plain('plan'));
   }
+});
+
+describe('restingAgentColor', () => {
+  test('keeps the agent hue and mixes it toward the muted text colour', () => {
+    expect(restingAgentColor('#34983a')).toBe('color-mix(in oklab, #34983a 55%, var(--muted-foreground))');
+  });
 });

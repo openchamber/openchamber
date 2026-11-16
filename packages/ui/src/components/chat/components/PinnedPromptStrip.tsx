@@ -165,12 +165,12 @@ export const PinnedPromptStrip: React.FC<PinnedPromptStripProps> = ({ scrollRef,
                         <UserTextPart
                             key={`pinned-${index}`}
                             part={part}
-                            messageId={turnId}
                             isMobile
                             messageExpanded
                             onExpandMessage={noop}
                             partIndex={index}
                             onTruncationChange={noop}
+                            onCollapsedLinesChange={noop}
                             attachmentFilenames={attachmentFilenames}
                         />
                     ))}

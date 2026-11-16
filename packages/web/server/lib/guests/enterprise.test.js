@@ -14,31 +14,28 @@ const withOrigins = { origins: ['https://api.acme.test'] };
 const withLoopback = { loopback: { port: 8123, routes: [{ path: '/state', methods: ['GET'] }] } };
 
 describe('enterpriseBlockedCapabilities', () => {
-  test.each([
-    ['path', undefined, false, true],
-    ['path', undefined, true, false],
-    ['zip', undefined, true, true],
-    ['git', 'https://github.com/acme/ext.git', false, false],
-    ['git', 'https://github.com/other/ext.git', false, true],
-  ])('applies existing extension policy to loopback from %s / %s', (source, gitUrl, allowLocalExtensions, blocked) => {
-    // Given the administrator's Git allowlist and local-development choice.
-    const policy = { ...enterprise(['https://github.com/acme/ext']), allowLocalExtensions };
-    // When checking a loopback-only guest.
-    const refused = enterpriseBlockedCapabilities(withLoopback, { source, gitUrl }, policy);
-    // Then it receives exactly the service/network source policy.
-    expect(refused).toEqual(blocked ? ['loopback'] : []);
+  test('refuses what acts on sessions or steers agents, unless the repository is allowed', () => {
+    const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionControl: {}, instructions: true, skills: 'skills', opencodePlugin: 'plugin' };
+    const refused = ['service', 'sessionControl', 'instructions', 'skills', 'opencodePlugin'];
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise()).sort()).toEqual([...refused].sort());
+    expect(enterpriseBlockedCapabilities({ skills: 'skills' }, { source: 'path' }, enterprise())).toEqual(['skills']);
+    // Code inside OpenCode itself: refused from any source but an allowed repository or an allowed local folder.
+    expect(enterpriseBlockedCapabilities({ opencodePlugin: 'plugin' }, { source: 'path' }, enterprise())).toEqual(['opencodePlugin']);
+    expect(enterpriseBlockedCapabilities({ opencodePlugin: 'plugin' }, { source: 'path' }, { ...enterprise(), allowLocalExtensions: true })).toEqual([]);
+    expect(enterpriseBlockedCapabilities({ opencodePlugin: 'plugin' }, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+    expect(enterpriseBlockedCapabilities({ opencodePlugin: 'plugin' }, { source: 'path' }, { enterpriseMode: false, allowedExtensions: [] })).toEqual([]);
+    expect(enterpriseBlockedCapabilities(guest, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
   });
 
-  test('allows loopback when enterprise mode is off', () => {
-    // Given a ZIP guest outside enterprise mode.
-    const policy = { enterpriseMode: false };
-    // When checking its loopback declaration.
-    const refused = enterpriseBlockedCapabilities(withLoopback, { source: 'zip' }, policy);
-    // Then normal approval remains available.
-    expect(refused).toEqual([]);
-  });
   test('refuses nothing outside enterprise mode', () => {
     expect(enterpriseBlockedCapabilities({ origins: withOrigins.origins }, { source: 'zip' }, { enterpriseMode: false, allowedExtensions: [] })).toEqual([]);
+  });
+
+  test('applies the repository and local-source policy to loopback access', () => {
+    expect(enterpriseBlockedCapabilities(withLoopback, { source: 'zip' }, enterprise())).toEqual(['loopback']);
+    expect(enterpriseBlockedCapabilities(withLoopback, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+    expect(enterpriseBlockedCapabilities(withLoopback, { source: 'path' }, { ...enterprise(), allowLocalExtensions: true })).toEqual([]);
+    expect(enterpriseBlockedCapabilities(withLoopback, { source: 'path' }, { enterpriseMode: false })).toEqual([]);
   });
 
   test('refuses what could send data out, from any source but an allowed repository', () => {
@@ -155,6 +152,17 @@ describe('extensions in enterprise mode', () => {
 });
 
 describe('session content in enterprise mode', () => {
+  test('OpenCode reads are gated with the service that would receive them', () => {
+    const guest = { service: { entry: 's.js', runtime: 'host', provides: ['opencode'] } };
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'opencode']);
+  });
+
+  test('marks are not gated by themselves: the service that sets them is', () => {
+    const guest = { service: { entry: 'service/main.js', runtime: 'host', keepRunning: true }, marks: true };
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service']);
+    expect(enterpriseBlockedCapabilities(guest, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+  });
+
   test('transcript is gated with the service that would receive it', () => {
     const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionEvents: { events: ['turn-finished'], content: true } };
     expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'transcript']);

@@ -13,7 +13,7 @@ import { writeSkillDisabled } from './config-v2.js';
  * config; OpenCode watches the files, so the change applies without a
  * restart. `id` passed `isSkillSwitchId`.
  *
- * Off writes one exact `skill:<id>` deny where the skill lives: the project
+ * Off writes one exact `skill.use` deny for `id` where the skill lives: the project
  * config of `directory` for a project skill, else the user's global config
  * (`OPENCODE_CONFIG` when set, like every other Settings write).
  *

@@ -74,7 +74,7 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                 }
             }}
             aria-label={label}
-            title={label}
+            {...(withTooltip ? {} : { title: label })}
         >
             <Icon name={icon} className={cn(iconSizeClass)} style={color ? { color } : undefined} />
         </button>

@@ -22,7 +22,13 @@
     /* Shared glass surfaces. Semantic surface tokens provide each tint. */
     --oc-glass-blur: 22px;
     --oc-glass-opacity: 52%;
-    --oc-glass-popover-opacity: 50%;
+    /* Menus and popovers open over text: the fill and blur keep what is
+       behind them a soft wash, never words that can still be read. The blur
+       leaves a faint sharp trace of text in Chromium (measured: 3 levels of
+       contrast under a 92% fill, enough to read letters), so the fill is
+       97%, where the trace drops to a single level. */
+    --oc-glass-popover-opacity: 97%;
+    --oc-glass-popover-blur: 40px;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
     /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
@@ -69,17 +75,23 @@
     --oc-elevation-button:
       0 1px 1.5px 0 rgb(0 0 0 / 0.08),
       0 0 0 0.5px rgb(0 0 0 / 0.14);
+    /* The raised level's cast shadow alone, for a surface that draws its own
+       edge (oc-panel-edge's inset ring). */
+    --oc-elevation-raised-shadow:
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 10px -2px rgb(0 0 0 / 0.07);
     --oc-elevation-raised:
       inset 0 1px 0 0 rgb(255 255 255 / 0.7),
       0 0 0 0.5px var(--oc-elevation-ring),
-      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
-      0 4px 10px -2px rgb(0 0 0 / 0.07);
+      var(--oc-elevation-raised-shadow);
+    /* Over the light chat a menu read as a pale stain: the floating level
+       casts a deeper shadow than the raised one, so it lifts off the page. */
     --oc-elevation-floating:
       inset 0 1px 0 0 rgb(255 255 255 / 0.7),
       0 0 0 0.5px var(--oc-elevation-ring),
-      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
-      0 4px 8px -2px rgb(0 0 0 / 0.08),
-      0 12px 20px -4px rgb(0 0 0 / 0.06);
+      0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+      0 4px 10px -2px rgb(0 0 0 / 0.11),
+      0 14px 28px -6px rgb(0 0 0 / 0.12);
 
     /* Motion: springs traced as linear() easings (lib/motion/springs.ts,
        whose test keeps these in step). Popups open on the popup spring and
@@ -143,12 +155,14 @@
       inset 0 0 0 0.5px var(--oc-elevation-ring),
       0 0 0 0.5px rgb(0 0 0 / 0.55),
       0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --oc-elevation-raised-shadow:
+      0 2px 4px 0 rgb(0 0 0 / 0.25),
+      0 1px 2px 0 rgb(0 0 0 / 0.25);
     --oc-elevation-raised:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
       inset 0 0 0 0.5px var(--oc-elevation-ring),
       0 0 0 0.5px rgb(0 0 0 / 0.55),
-      0 2px 4px 0 rgb(0 0 0 / 0.25),
-      0 1px 2px 0 rgb(0 0 0 / 0.25);
+      var(--oc-elevation-raised-shadow);
     --oc-elevation-floating:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
       inset 0 0 0 0.5px var(--oc-elevation-ring),
@@ -157,7 +171,8 @@
       0 4px 8px 0 rgb(0 0 0 / 0.25);
     --oc-glass-blur: 26px;
     --oc-glass-opacity: 50%;
-    --oc-glass-popover-opacity: 52%;
+    --oc-glass-popover-opacity: 97%;
+    --oc-glass-popover-blur: 40px;
     --oc-glass-tooltip-opacity: 64%;
     --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
@@ -426,6 +441,7 @@
 .oc-glass-popover {
   --oc-glass-color: var(--surface-elevated);
   --oc-glass-opacity: var(--oc-glass-popover-opacity);
+  --oc-glass-blur: var(--oc-glass-popover-blur);
 }
 
 .oc-glass-tooltip {
@@ -444,6 +460,59 @@
    (menus, tooltips, the docks above the composer) keep the glass. */
 .oc-surface-floating {
   background-color: var(--surface-elevated);
+}
+
+/* The composer in light themes: light themes paint --surface-elevated darker
+   than the page, which made the app's main raised surface read greyer than
+   the canvas, as if recessed or disabled. Like every raised control in a
+   light theme it takes the canvas colour and lifts on its ring and shadow.
+   Dark themes keep the elevated fill, lighter than the page. */
+.oc-composer-surface {
+  --oc-composer-foreground: var(--surface-elevated-foreground);
+  --oc-composer-background: var(--surface-elevated);
+}
+
+/* The fill and its text go together: on the canvas fill the composer and its
+   editor (composer/editor/theme.ts) write in the canvas foreground. A light
+   theme with a white canvas and dark elevated surfaces would otherwise type
+   its elevated foreground, white, on white. */
+html:not(.dark) .oc-composer-surface {
+  background-color: var(--surface-background);
+  --oc-composer-foreground: var(--surface-foreground);
+  --oc-composer-background: var(--surface-background);
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
+}
+
+/* The composer's Send and Stop (chat/composer/ui/ComposerActionButtons.tsx):
+   a flat disc of the composer's text colour with its glyph cut out in the
+   composer's own fill, so the pair is foreground on its surface in every
+   theme. No ring, edge or shadow: nothing else in the footer is raised. With
+   nothing to send it is a quiet tone step of the text colour, the glyph in
+   the muted text. The fallbacks cover a disc drawn outside a composer box. */
+.oc-action-disc {
+  --oc-action-disc-fg: var(--oc-composer-foreground, var(--foreground));
+  --oc-action-disc-bg: var(--oc-composer-background, var(--background));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--oc-action-disc-fg);
+  color: var(--oc-action-disc-bg);
+}
+
+button:enabled:hover > .oc-action-disc:not([data-idle]) {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 90%, var(--oc-action-disc-bg));
+}
+
+.oc-action-disc[data-idle] {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 7%, var(--oc-action-disc-bg));
+  color: var(--muted-foreground);
+}
+
+.dark .oc-action-disc[data-idle] {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 9%, var(--oc-action-disc-bg));
 }
 
 /* The desktop composer box in dark themes: the text fields' faint sheen,
@@ -467,23 +536,24 @@
 }
 
 /* Panels that are part of the layout (the context panel card, the work
-   status card beside the chat) take a hairline ring and a short shadow: they
-   hold their place rather than float, so less lift than a dropdown. The ring sits inside, on ::after above the
-   content: the context panel card is flush under the header in a clipping
-   container, which cut an outside ring's top edge, and an editor or diff
-   painting its own background would cover an inset on the card itself.
-   Needs a positioned element. */
+   status card beside the chat) take their own page colour (below), a
+   hairline ring and the composer's shadow: lifted above the surface at the
+   raised level, the same low, quiet lift as the composer and less than a
+   dropdown. Over the chat the work status card is a dropdown and takes the
+   floating light. The ring sits inside, on ::after above the content: the context panel card is
+   flush under the header in a clipping container, which cut an outside
+   ring's top edge, and an editor or diff painting its own background would
+   cover an inset on the card itself. Needs a positioned element. */
 .oc-panel-edge {
   /* Its own stacking context, so the ring below can sit above every layer
      inside (a diff's sticky file header, editor overlays) without competing
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
-  /* The raised level's shadows; its ring is the inset one below. Kept within
-     the card's gutter (about 8px), which the aside clips. */
-  box-shadow:
-    0 2px 4px 0 rgb(0 0 0 / 0.04),
-    0 1px 2px -1px rgb(0 0 0 / 0.08);
+  /* The raised level's cast shadow, the composer's; the ring is the inset
+     one below, and dark themes add the lit top line there. */
+  box-shadow: var(--oc-elevation-raised-shadow);
+  transition: box-shadow 200ms ease;
 }
 
 .oc-panel-edge::after {
@@ -497,24 +567,6 @@
   transition: opacity 200ms ease;
 }
 
-/* Dark themes add a faint lit top line to the hairline and a denser shadow,
-   since a shadow barely shows on a dark page. Still lower than the floating
-   card below, which is a dropdown. */
-.dark .oc-panel-edge {
-  box-shadow:
-    0 2px 4px 0 rgb(0 0 0 / 0.3),
-    0 1px 2px 0 rgb(0 0 0 / 0.3);
-}
-
-/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
-   chat sits between two side surfaces of one tone; tiles
-   inside mix from it. It redefines the page colour for the whole card rather
-   than painting the card: this rule sits in the components layer, below the
-   card's bg-background utility, and the panes inside paint the page colour
-   over the card anyway. Surfaces coloured from the theme object (terminal,
-   extension frames) follow through usePageColors (hooks/usePageColors.ts).
-   Floating, the card keeps its glass. Light themes go only halfway to the
-   sidebar's fill: the full step read too heavy against a light chat. */
 :root {
   /* The chat's page colour, kept under its own name because the panel rules
      below redefine --surface-background and cannot mix from themselves. */
@@ -526,6 +578,17 @@
   --brand-canary-foreground: oklch(0.899 0.186 97.9); /* #ffdd00 */
 }
 
+/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
+   chat sits between two side surfaces of one tone. Light themes go only
+   halfway to it: the full step read too heavy against a light chat. Never a
+   text-colour tone step: tiles inside use that step to stand off their
+   parent, and on a panel that already spent it they vanish. It redefines the
+   page colour for the whole card rather than painting it: this rule sits in
+   the components layer, below the card's bg-background utility, and the
+   panes inside paint the page colour over the card anyway. Tiles inside mix
+   from it. Surfaces coloured from the theme object (terminal, extension
+   frames) follow through usePageColors (hooks/usePageColors.ts). Floating,
+   the card keeps its glass. */
 .oc-panel-edge:not([data-edge-floating]) {
   --background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
   --surface-background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
@@ -536,6 +599,7 @@
   --surface-background: var(--surface-muted);
 }
 
+/* Dark themes add a faint lit top line to the hairline. */
 .dark .oc-panel-edge::after {
   box-shadow:
     inset 0 0.5px 0 0 rgb(255 255 255 / 0.06),
@@ -543,9 +607,8 @@
 }
 
 /* The work status card opened over the chat is a dropdown, and takes the
-   floating level. */
-.oc-panel-edge[data-edge-floating],
-.dark .oc-panel-edge[data-edge-floating] {
+   floating level; its own floating edge replaces the hairline. */
+.oc-panel-edge[data-edge-floating] {
   box-shadow: var(--oc-elevation-floating);
 }
 
@@ -553,10 +616,8 @@
   opacity: 0;
 }
 
-/* A panel animating out drops its edge along with its fill. Listed for dark
-   too, so it outranks the dark floating shadow above. */
-.oc-panel-edge[data-edge-hidden],
-.dark .oc-panel-edge[data-edge-hidden] {
+/* A panel animating out drops its edge along with its fill. */
+.oc-panel-edge[data-edge-hidden] {
   box-shadow: none;
 }
 
@@ -699,6 +760,20 @@
 .oc-tile.oc-tile-hover:hover {
   background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-hover-tone), transparent);
 }
+
+/* The selected row of a list: the sidebar's session, the Settings page, a
+   theme, a model in the picker. The selection token is translucent, so on
+   the sidebar, a tile, a dialog and a glass menu it came out as four
+   different tones. Painted over the chat's page colour it is one opaque tone
+   wherever the row sits. Like bg-interactive-selection it owns its text
+   context: children writing text-foreground get the selection's foreground,
+   so a theme with a dark selection and light selection text stays legible. */
+.oc-selected {
+  background-color: var(--oc-chat-background);
+  background-image: linear-gradient(var(--interactive-selection), var(--interactive-selection));
+  --foreground: var(--interactive-selection-foreground);
+  color: var(--foreground);
+}
 }
 
 /* Popups (menus, selects, tooltips) open on the popup spring and close on a
@@ -768,9 +843,9 @@
 .oc-modal-shadow {
   box-shadow:
     0 0 0 0.5px var(--oc-elevation-ring),
-    0 2px 6px -1px rgb(0 0 0 / 0.08),
-    0 12px 28px -6px rgb(0 0 0 / 0.16),
-    0 32px 72px -12px rgb(0 0 0 / 0.24);
+    0 2px 6px -1px rgb(0 0 0 / 0.053),
+    0 12px 28px -6px rgb(0 0 0 / 0.107),
+    0 32px 72px -12px rgb(0 0 0 / 0.16);
 }
 
 .dark .oc-modal-shadow {

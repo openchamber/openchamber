@@ -111,6 +111,73 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## The User's Session List In The Stand
+
+What the sidebar and the global session list cost scales with how many
+sessions, projects and worktrees there are, and a stand with a handful of
+sessions hides it: one 21-step turn allocated 0.1 GB there and 2.5 GB with a
+real list of 3,700 sessions. `node scripts/perf/seed-session-list.mjs --root
+tmp/scale` copies the user's session records (no messages) and projects into a
+stand of its own, every path rewritten under the root, so the stand's server
+never touches the user's repositories; OpenCode's worktree folders become real
+worktrees. It reads the user's database read-only. Then `bun run profile:serve
+-- --root tmp/scale` and the profile commands with `--dir tmp/scale/project`.
+Seed again before each run of a comparison, since a run adds a session.
+
+`profile:session --heap-sampling` reports the megabytes allocated during the
+turn (`heapSampling.sampledMb`), the figure that moved with churn fixes while
+heap max stayed flat; `syncCounters.sidebarStructureBuilds` counts the sidebar
+rebuilds behind it.
+
+## A Real Session In The Stand
+
+The stand's synthetic sessions miss bugs that depend on the shape of a real
+history (scroll jumps in a collapsed long session, a freeze while one streams).
+Copy the user's session into `profile:serve`; export only reads their local
+OpenCode database.
+
+1. `opencode session export <ses_id> --standalone > tmp/real/session.json`
+2. Set `info.location.directory` in that JSON to `$PWD/tmp/perf-serve/project`.
+3. From `tmp/perf-serve/project`:
+   `HOME=$PWD/../state/home opencode session import ../../real/session.json --standalone`.
+   It can answer 409 or Bad Request and still have imported; check with
+   `opencode session list` under the same `HOME` and directory.
+
+To stream into it, register the fixture provider in
+`tmp/perf-serve/project/opencode.json` with a large `limit.context` and
+`compaction.auto: false`: an imported session usually sits past the fixture's
+context window and gets auto-compacted instead of answered. Then
+`bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --session <id> --model perf/stream-300cps`.
+A hand-driven probe switches the model first with
+`POST /api/session/:id/model` and body `{"model":{"providerID":"perf","id":"stream-300cps"}}`
+(204), because the prompt route ignores a model field. The fixture streams no
+reasoning; a reasoning-heavy report needs a fixture that sends
+`reasoning_content` deltas.
+
+A cold open loads only the tail of the history, so the page holds fewer rows
+than the user who watched the session live; wheel up until the whole history
+is loaded before measuring what scales with rows. Busy-time figures on such a
+session can flip between runs; render-probe counts are the stable proof.
+
+## OpenCode's Own Web UI Beside Ours
+
+To run the same probe against OpenCode's app on the stand's data, with
+`profile:serve` running (it keeps the fixture provider on 4798), from
+`tmp/perf-serve/project`:
+
+```bash
+HOME=$PWD/../state/home \
+OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
+/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+```
+
+It serves its web app at `/` and prints a throwaway `server password` in its
+log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+password, and connect; it lists the same sessions as `profile:serve`. Its
+controls carry `data-slot` and `data-component` attributes
+(`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),
+which make stable probe selectors.
+
 ## When An Accessibility Client Is On
 
 Chrome builds no accessibility tree until a client asks for one: a screen
@@ -266,7 +333,14 @@ metrics.
 bun run profile:session -- --url http://127.0.0.1:4599 --dir <project directory>
 # What an idle session costs while a different session is active elsewhere:
 bun run profile:session -- --view-session <idle session id> --expand-projects --expand-sessions
+# Several agents at once: the displayed session and three more stream together:
+bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --model perf/agent-20tools-300cps --parallel 4
 ```
+
+Measured with `--parallel` (2026-11-13, `--process-cpu-only`, headless, two
+runs each), three extra sessions streaming in the background raised the
+renderer from 11% to 12-13% of a core; the managed OpenCode went from 9% to
+20%. The page pays for what it shows, and background streams cost OpenCode.
 
 Without `--model` this command calls a real model. Use a real one to confirm
 that a report reproduces, and the fixture provider below for everything else.
@@ -331,6 +405,13 @@ globbing (`isolated-server.mjs` writes them into the project under
 `agent-100tools-x5-300cps` makes its hundred calls five at a time: twenty
 steps whose messages hold five tool parts each, the turn that windowing by
 messages left fully mounted.
+`agent-20tools-wait3000ms-300cps` waits three seconds before each step's first
+token, as a hosted model does. Every step's assistant message then exists
+without parts for that long, which the instant fixtures never show; that wait
+is what once made the client reload the transcript page once per step. Read
+what a turn requested in `pageSignals.requestsByRoute` of the summary, a count
+per route with ids replaced and the `limit` kept
+(`GET /api/session/:id/message?limit=30`).
 `perf/unicode-300cps` (and `unicode-1200cps`) streams prose with em dashes,
 curly quotes and whole Cyrillic paragraphs, and a 150-line TypeScript fence
 whose comments and strings carry the same characters. V8 stores a string with
@@ -347,18 +428,22 @@ node scripts/perf/seed-long-session.mjs --port 4599 --dir <project directory> --
 
 A seeded session opens with only its last ten turns in memory, the
 cold-navigation window, so streaming into it measures a short history however
-long the session is. Someone working in one chat holds every turn since they
-opened it. `--grow <turns>` reproduces that: before recording it sends that
-many turns with the page showing the session (`--grow-model`, by default
-`agent-20tools-20000cps`, and the `agent-*-20000cps` models grow agentic
-history in about three seconds a turn), scrolling to the end after each one as
-a reader who follows the chat. The summary reports the message records held
-before and after (`historyRecordsBefore`/`After`). What scales with history is
-small on a fast machine: one agentic turn cost 4.9% of the main thread with 10
-turns held and 6.2% with 100. `--cpu-throttle <rate>` slows the page's CPU
-(`Emulation.setCPUThrottlingRate`) to approximate a slower machine; at 4 the
-same turns cost 14% and 26%, with 28 long tasks instead of 5. The `grow` and
-`grow-short` scenarios of `profile:compare` are those two, throttled.
+long the session is. `--grow <turns>` reproduces a chat someone has worked in
+for a long time: before recording it sends that many turns with the page
+showing the session (`--grow-model`, by default `agent-20tools-20000cps`, and
+the `agent-*-20000cps` models grow agentic history in about three seconds a
+turn), scrolling to the end after each one as a reader who follows the chat.
+The summary reports the message records held before and after
+(`historyRecordsBefore`/`After`). The page keeps a window of the history: after
+10 and after 100 grown `agent-20reads` turns it held about 240 records either
+way. `--cpu-throttle <rate>` slows the page's CPU
+(`Emulation.setCPUThrottlingRate`) to approximate a slower machine. Measured
+at 4 with `--timing` (2026-11-11, one run each, the `grow-short` and `grow`
+arguments below), a streamed agentic turn kept the main thread 9.2% busy with
+10 turns grown and 13.2% with 100, with 1 and 6 long tasks, the longest 64 and
+68 ms. OpenCode's own CPU while it streamed rose from 7% to 25% of a core
+between the two. The `grow` and `grow-short` scenarios of `profile:compare`
+are those two runs.
 
 Run-to-run spread on an unchanged build is one to two points of renderer CPU,
 so a smaller difference is noise.
@@ -520,8 +605,7 @@ Clicks sidebar session rows with real mouse input and measures, per click:
 - `content`: messages that were not rendered before are rendered (a timeline kept
   in the DOM under `display: none` counts as not rendered). They may still
   be invisible: a freshly opened timeline stays at opacity 0 while renderers
-  hold their provisional first paint (`data-timeline-reveal="pending"`), then
-  fades in;
+  hold their provisional first paint (`data-timeline-reveal="pending"`);
 - `visible`: every new message that intersects the chat viewport has an
   effective opacity (its own times every ancestor's) of 1, checked once per
   animation frame. This is when the user sees the session, and it does not
@@ -587,7 +671,12 @@ the process was spawned: the main process's own `[startup-performance]` marks
 (entry module, Electron ready, window created and shown, main module loaded,
 server start and ready, OpenCode ready, application navigation and load), and
 renderer readiness from `startup-probe.mjs`, a recorder installed into the
-application document before it runs and checked once per animation frame:
+application document and checked once per animation frame. The application
+navigates before the debugging port answers, so the recorder usually goes into
+a document that is already loading; marks from before that moment come from
+the polled fields, and `trace:` marks the app made earlier are missing.
+`applicationDocuments` in a sample counts the application documents seen: more
+than one means the window loaded the application again during startup.
 
 - `reactMounted`: a child of `#root` carries React's fiber expando. `#root`
   holds the HTML splash `#initial-loading` from the first parsed byte, so a
@@ -605,6 +694,11 @@ application document before it runs and checked once per animation frame:
   and a selected model;
 - `trace:<name>`: the first occurrence of every `markStartupTrace` mark (the
   recorder turns the `OPENCHAMBER_STARTUP_TRACE` flag on);
+- `transcriptPresent` and `transcriptShown` with `--transcript`: a message of
+  the session the launch restores is rendered, then its reveal has finished.
+  The home has to restore one: import a session into the bench home
+  (*A Real Session In The Stand*, with the bench home's `HOME` and `XDG_*`),
+  open it once in the bench app and quit, then run without `--fresh`;
 - `rendererIdle` once the renderer main thread stayed quiet for `--settle-ms`.
 
 Medians and p95 with min…max over the measured runs. A launch fails, and the
@@ -695,6 +789,17 @@ OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popo
 
 It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
 
+## Rendered page layout regression
+
+`html-render-page-fit.browser.test.mjs` builds the real rendered-page document through `buildHtmlRenderDocument` in an isolated Vite fixture that has its own optimizer cache, and compares the document root's `scrollWidth` with its `clientWidth` inside frames 420, 720 and 960 px wide. A page whose pictures carry a `1px` border at `width: 100%`, and one with a bare embedded frame, must not scroll sideways; a page with a 1200 px block still must, because a page wider than its frame keeps its scrollbar (#4949). Like the two tests above, it stays on loopback and stops what it started.
+
+```bash
+node --test scripts/perf/html-render-page-fit.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/html-render-page-fit.browser.test.mjs
+```
+
+It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
+
 ## profile:heap
 
 Reads the JS heap, DOM nodes and listeners three times, each after two forced
@@ -731,6 +836,32 @@ to compare; milliseconds follow the machine. The run fails when the page has
 no editable composer, and warns when the editor holds fewer lines than were
 typed, because then Shift+Enter inserted nothing and only typing was measured.
 
+`--type <n>` measures typing instead: an idle window with the composer
+focused, then `n` keys one at a time every `--interval` ms (80 by default),
+for the same length of time. It reports main-thread time per keystroke (the
+typing window's busy time minus the idle window's, per key), tasks over one
+frame, and Event Timing entries over 16 ms. `--prefill <chars>` types into a
+long draft, `--cpu-throttle` approximates a slower machine, `--cpu-profile`
+and `--save-trace` keep what `profile:analyze` and a trace viewer read.
+
+```bash
+bun run profile:composer -- --url http://127.0.0.1:4799 --session <id> --type 150 --cpu-throttle 4 --prefill 3000
+```
+
+Measured that way (2026-11-14, production build, three alternating pairs), a
+keystroke cost 13.4 ms of main thread at 4x before and 10.9 ms after the
+composer stopped recomputing model metadata and the shortcut dispatcher
+stopped re-parsing every binding per keydown. CodeMirror's own input handling
+was under 1 ms of it; the composer's React render on every keystroke was the
+rest. Moving the draft text out of `ChatInput` state (composer
+`DOCUMENTATION.md`, "Why the draft text lives outside React state") took the
+same scenario from 13.3 to 9.0 ms per key (medians of three alternating pairs,
+on a machine reading about 2 ms higher than the run above), and tasks over
+8.3 ms from 21 to 62 per run to 4 to 6. The diagnostic build's CPU profile
+then shows no React render in the typing window. Event Timing entries came out
+empty on some headless runs and not others: read them only next to the busy
+figure.
+
 ## profile:toggle
 
 Opens a session from the sidebar (`--title`, default `perf: long 120`), then
@@ -756,7 +887,9 @@ open when wider than 1 px, so a baseline from before them still measures. The
 `file` surface opens tree-only (240 px) in a project with no file open;
 `--open-file <name>` first opens that root-level file of the project from the
 panel's tree, so every panel toggle shows the editor with it, and a
-`panel-open` whose editor does not show the file afterwards is invalid.
+`panel-open` whose editor does not show the file afterwards is invalid. A file
+that opens rendered (Markdown) has no editor: there the panel's card must hold
+over 2000 characters of it.
 `--surface context` measures a full-width panel. `--method key` presses `mod+b` and
 `mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
 the button for `--hover` ms before a phase, so its tooltip opens there; the
@@ -835,13 +968,32 @@ per close, while removing the editor's DOM cost a few ms (`CodeMirrorEditor`
 same scenarios, same server state, same scripts, only the build differs.
 
 ```bash
-# The uncommitted change against HEAD:
-bun run profile:compare
-# A committed change, more scenarios, before and after alternating twice:
-bun run profile:compare -- --before <commit> --after HEAD --scenarios stream,code,agent,long,quiet,switch,idle,startup-cold --rounds 2
+# The uncommitted change against HEAD, on what it can affect:
+bun run profile:compare -- --scenarios stream
+# A committed change:
+bun run profile:compare -- --before <commit> --after HEAD --scenarios switch,idle
+# The set a release checks: stream, code, agent, switch, idle:
+bun run profile:compare -- --before <tag> --after HEAD --scenarios release
+# The noise floor of this machine, an A/A run:
+bun run profile:compare -- --before HEAD --after HEAD --scenarios stream
 # The plan only: sources, worktrees, builds and every command line:
-bun run profile:compare -- --dry-run
+bun run profile:compare -- --scenarios stream --dry-run
 ```
+
+`--scenarios` is required, because the scenarios are what a compare costs. Pick
+what the change can affect:
+
+| The change touches | Scenarios |
+|---|---|
+| Markdown, code blocks, text rendering | `stream`, `code` (`unicode` for non-Latin text) |
+| Message list, tool parts, activity | `agent`; `long` when the cost scales with history |
+| Sync, event handling, stores | `stream`, `long`, `quiet` |
+| Sidebar, header, chat container, session open | `switch` |
+| Timers, polling, indicators, animation | `idle` (`cpu` for what a process monitor shows) |
+| Bundle, code splitting, boot | `startup-cold`, `startup-warm` |
+| Composer | `composer` |
+| Panels and their layout | `toggle`, `toggle-context` |
+| Retained data | `heap` |
 
 What it does, in order:
 
@@ -860,53 +1012,71 @@ What it does, in order:
 4. Seeds the server state once per root, on the before build, when a scenario
    needs it: `perf: long 120` (120 turns) and `perf: short A/B/C`, kept in
    `<root>/seed`.
-5. Per round, before then after: restores the seed, wipes the Chrome profiles,
-   starts the fixture provider and an isolated server on that side's build and
-   server code, refuses to continue unless the server serves that build's main
-   chunk, runs every scenario serially under `nice`, and stops what it started.
-6. Prints the table and writes it to `<output>/comparison.md`.
+5. Runs pairs of blocks, before then after in odd pairs and after then before
+   in even ones. Per block: restores the seed, wipes the Chrome profiles,
+   starts an isolated server on that side's build and server code, refuses to
+   continue unless it serves that build's main chunk, runs every scenario still
+   undecided, and stops what it started. The fixture provider stays up.
+6. With `--pairs auto`, looks at pairs 8, 12, 18, 26 and 40. A scenario stops
+   when its primary metric has a verdict, from 12 pairs when the spread says a
+   verdict needs more pairs than `--max-minutes` affords, and at the first look
+   after `--max-minutes`.
+7. Runs one instrumented run per side for a scenario whose primary moved
+   (`--why`), under `<output>/why/`, for `profile:analyze`.
+8. Prints the table and the time per step, and writes `comparison.md` and
+   `timing.json` to `<output>`.
 
 | Scenario | What runs | Notes |
 |---|---|---|
 | `stream`, `code`, `unicode`, `agent` | `profile:session` on the `-300cps` fixture (`agent`: `agent-40tools-300cps`) | a new session per run |
 | `long` | `profile:session` streaming into the 120-turn session | the streaming path at scale |
 | `quiet` | `profile:session --quiet 20` on the 120-turn session | the floor `long` stands on |
-| `grow`, `grow-short` | `profile:session --grow 100` / `--grow 10` with `agent-20reads` turns, `--cpu-throttle 4` | a chat worked in for a long time; slow, about ten minutes a run |
+| `grow`, `grow-short` | `profile:session --grow 100` / `--grow 10` with `agent-20reads` turns, `--cpu-throttle 4` | a chat worked in for a long time; slow, about ten minutes a run, so give it `--pairs 6` |
 | `cpu` | `profile:session --process-cpu-only --headed` | the process CPU a user sees; opens a visible window |
-| `switch` | `profile:switch` over long, short A and short B, `--cold-reload --repeat <runs>` | one invocation per round |
+| `switch` | `profile:switch` over long, short A and short B, `--cold-reload --repeat <runs>` | |
 | `idle` | `profile:idle`, 30 s with the long session open | |
-| `startup-cold`, `startup-warm` | `profile:startup --url`, `--runs <runs>` | one invocation per round |
-| `heap` | `profile:heap --count 20` | sees the sessions earlier scenarios added; keep the scenario list identical between compares |
+| `startup-cold`, `startup-warm` | `profile:startup --url`, `--runs <runs>` | |
+| `heap` | `profile:heap --count 20` | sees the sessions earlier scenarios of the block added, so keep the scenario list identical between compares |
 | `composer` | `profile:composer` on the long session | |
-| `toggle`, `toggle-short`, `toggle-context` | `profile:toggle` on the long session and on short A, `--count <runs>`; `toggle-context` on the long session with the full-width `context` surface | one invocation per round; headed, opens a visible window |
+| `toggle`, `toggle-short`, `toggle-context` | `profile:toggle` on the long session and on short A, `--count <runs>`; `toggle-context` on the long session with the full-width `context` surface | headed, opens a visible window |
 
-`--render-probe` and `--save-trace` pass through to the scenarios that take
-them. `--force-accessibility` launches the session, switch and toggle
-scenarios with Chrome's accessibility tree on, so the table does not depend on
-whether the machine runs an accessibility client. `--rounds 2` or more alternates the sides, so machine drift lands on
-both; use it when the expected change is a few percent.
+`--render-probe` and `--save-trace` apply to the instrumented runs and turn
+them on for every scenario that has them. `--force-accessibility` launches the
+session, switch and toggle scenarios with Chrome's accessibility tree on, so
+the table does not depend on whether the machine runs an accessibility client.
 
 ### Reading the table
 
-Per scenario and metric: `median / p95 (n)` for each side, the change of the
-median, and a verdict.
+Per scenario and metric: `median / p95 (n)` for each side, the change per pair
+with its interval, the pairs behind it, and a verdict. The bold row is the
+scenario's primary metric, the one the verdict and the stop rule are about.
 
-- `noise`: the after median lies inside the before runs' min…max. With five
-  runs a change that small is not a result.
-- `better` / `WORSE`: outside that range. Lower is better for every timing,
-  count and percentage.
+- `better` / `WORSE`: the interval lies entirely on one side of zero. Lower is
+  better for every timing, count and percentage.
+- `same`: the interval lies inside ±5% of the before value.
+- No word on the primary: no verdict. The interval overlaps the ±5% bound, or
+  there are under 6 pairs, which cannot reach a 95% interval. `No verdict:` under
+  the table says why the scenario stopped. More pairs or a quieter machine
+  answer it, and it never means "no change".
+- Secondary rows show their interval always and a verdict word only when the
+  primary has one and they clear Holm's correction, so a table of twenty rows
+  does not raise a false alarm on most runs.
+- `exact`: a count that held one value on each side in every pair. The
+  difference is the answer, it needs no test, and it reads whatever the primary
+  did.
 - Rows marked `(workload)` must match. `WORKLOAD DIFFERS` means the two sides
   did different work (different rendered characters, a different sidebar row
   count), and no other row of that scenario is comparable.
-- `switch` and `startup` pool every switch or launch. Switch pools sessions of
-  different sizes, so its range is wide and its noise verdict conservative;
-  `bySession` in each `switch-summary.json` has one session's numbers.
-- `toggle` pools every measured toggle, one row set per toggle type
-  (`panel-open worst frame ms`); `byType` in each `toggle-summary.json` has
-  every metric, including the ones the table leaves out.
-- With `--save-trace`, session scenarios add pipeline rows (frames submitted,
-  elements restyled, layerize, GPU compositor, raster); with `--render-probe`,
-  render rows and a renders/s table per component.
+- `switch` and `startup` take the median of a block's switches or launches per
+  pair. Switch mixes sessions of different sizes, the same mix on both sides of
+  a pair; `bySession` in each `switch-summary.json` has one session's numbers.
+- `toggle` has one row set per toggle type (`panel-open worst frame ms`), and
+  its primary is the first type's worst frame; `byType` in each
+  `toggle-summary.json` has every metric, including the ones the table leaves out.
+- `longest task ≥50 ms, observed` comes from the page's Long Tasks observer, so
+  shorter tasks do not exist there. The full trace rows (tasks over 8 and 16 ms,
+  task p99, the longest task after idle) appear in the instrumented tables, with
+  pipeline rows under `--save-trace` and render rows under `--render-probe`.
 
 The lines under each scenario are its validity flags: runs excluded and why,
 modifications (render probe, injected script, quiet), low frame liveness, a
@@ -917,10 +1087,14 @@ A run whose summary exists is skipped, so an interrupted compare resumes.
 `<output>/sources.json` pins the sources and the build; once the code changes,
 the old output is refused and needs a new `--output`. A compare of a clean
 tree against `HEAD` is an A/A run: it measures the noise floor of the machine.
+A primary that reads `better` or `WORSE` on A/A means the machine was busy or
+the scenario leaks state between blocks.
 
 `node scripts/perf/compare-runs.mjs <before dir> <after dir>` reprints the
-table from saved runs, and compares any two directories of run directories
-named `<scenario>-<n>`, such as an ablation batch against its control.
+table from saved runs (add `--confidence 0.9842` after `--pairs auto`, the level
+its looks used), and compares any two directories of run directories
+named `<scenario>-<n>`, such as an ablation batch against its control. Runs pair
+up by `<n>`, so run ablations and their control in turn; a verdict needs 6 pairs.
 
 ## Attribution
 
@@ -1004,8 +1178,10 @@ One rule at a time goes through `--inject-css` on `profile:session`, such as
 
 ```bash
 bun run profile:serve        # in its own terminal
-for i in 1 2 3; do bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --model perf/stream-300cps --output tmp/ablate/control/stream-$i; done
-for i in 1 2 3; do bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --model perf/stream-300cps --inject-script scripts/perf/ablations/instant-web-animations.js --output tmp/ablate/no-waapi/stream-$i; done
+for i in 1 2 3 4 5 6; do
+  bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --timing --model perf/stream-300cps --output tmp/ablate/control/stream-$i
+  bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --timing --model perf/stream-300cps --inject-script scripts/perf/ablations/instant-web-animations.js --output tmp/ablate/no-waapi/stream-$i
+done
 node scripts/perf/compare-runs.mjs tmp/ablate/control tmp/ablate/no-waapi
 ```
 
@@ -1037,8 +1213,10 @@ compared later without re-running:
 - `--render-probe` → `render-probe.json`; `--heap-sampling` → `heap.heapprofile`;
   `--save-trace` → `trace.json` (`profile:analyze` and `compare-runs.mjs` cache
   their pipeline figures next to it in `trace-pipeline.json`)
-- `profile:compare` → `<output>/before|after/<scenario>-<n>/` with the above,
-  `bundle-check-<round>.json` per side, `sources.json`, `comparison.md`
+- `profile:compare` → `<output>/before|after/<scenario>-<pair>/` with the
+  above, `<output>/why/before|after/<scenario>-1/` for the instrumented runs,
+  `bundle-check.json` per side, `sources.json`, `comparison.md`, and
+  `timing.json`, the wall time of every step
 
 `--baseline <directory>` prints a per-metric delta table against a previous run
 of the same command. `--budget-*` options make the command exit non-zero, so the
@@ -1111,20 +1289,23 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 |---|---|
 | `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`, which also removes the `openchamber-perf-*` profiles earlier runs left: those whose `SingletonLock` symlink names a dead process); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
-| `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
-| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
+| `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Context switches (wakes) and idle wakeups per process from macOS `top`, read around the measured window. Unresolved processes are reported as missing, never as zero. |
+| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. A prompt from `fixture-conversations.mjs` gets that conversation's scripted answer instead. |
+| `fixture-conversations.mjs` | Scripted conversations keyed by prompt, with tool steps OpenCode runs for real, and the scratch project files they edit. `scripts/design/shots.mjs` seeds its sessions from them; no perf scenario sends these prompts. |
 | `seed-long-session.mjs` | Builds a long session (default 120 turns) through the `openchamber session` CLI and the fixture provider's seeding models. |
 | `aggregate-runs.mjs` | Median, p95, min and max per metric over repeated single-run captures, excluding runs whose validity flags say they measured nothing. |
 | `network.mjs` | Request and byte accounting over the CDP Network domain, grouped by endpoint pattern. |
 | `startup-probe.mjs` | Page-side startup recorder: React mounted, splash and overlay gone, composer usable, model picker, and the app's startup trace marks. |
 | `cpu-profile.mjs` | Aggregates `Profiler.stop()` output into self time per function. |
 | `idle-probe.mjs` | Page-side instrumentation installed before application code runs; attributes scheduled work to the call site that scheduled it. Must never change observable behaviour. |
-| `scenario.mjs` | Shared scenario setup, currently sidebar expansion. Setup always runs before the measured window. |
+| `scenario.mjs` | Shared scenario setup: sidebar expansion and waiting until the app is ready and quiet. Setup always runs before the measured window. |
 | `animation-fixture.html` | Isolated animation variants for `profile:animation`. |
 | `isolated-server.mjs` | `profile:serve`, and the server, fixture, seed-restore and bundle-check functions `profile:compare` uses. Strips `OPENCHAMBER_*`, `OPENCODE_*` and `ELECTRON_*` from every child it starts. |
 | `render-probe.mjs` | Page-side render attribution: React commit hook, store probe, DOM mutations per region; its summary and report. Must never change observable behaviour. |
 | `run-summary.mjs` | Reading run directories, and the one definition of a run that measured nothing and of a modified run. |
-| `compare-runs.mjs` | The before/after table over two directories of runs. |
+| `compare-runs.mjs` | The before/after table over two directories of runs: pairing, each scenario's primary metric, verdict words. |
+| `paired-stats.mjs` | Signed-rank test, Hodges-Lehmann estimate, Walsh interval, planned looks, Holm. Pure, with no knowledge of metrics or runs. |
+| `page-signals.mjs` | Long tasks, layout shift and requests from the browser's own observers, cheap enough for a timed window. |
 | `analyze-run.mjs` | `profile:analyze`: attribution report for one run directory. |
 | `accessibility.mjs` | Accessibility-tree work in a trace window, whether a tree was built and who asked for it, and the flag that forces one. |
 | `trace-analysis.mjs` | Saved-trace analysis: pipeline per second, task classification, large style recalcs. |
@@ -1132,3 +1313,50 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 | `source-map.mjs` | Dependency-free source-map reader for the diagnostic build. |
 | `soak-system.mjs`, `soak-cdp.mjs`, `soak-capture.sh`, `soak-analyze.mjs` | `profile:soak`: OS samplers (ps, footprint, nettop), the light CDP recorder, the privileged packet and exec capture, and the per-second analysis. Every source writes JSON lines or raw text into the run directory, so a cut-short run still analyzes. |
 | `ablations/`, `controls/` | Injected scripts: ablations switch a suspect off, controls create the effect a metric must catch. |
+
+## Why `profile:compare` Measures The Way It Does
+
+### Why pairs and an interval, and not a range on the before runs
+
+The old verdict called a change noise when the after median lay inside the
+before runs' min…max. With five runs per side, all before then all after, machine
+drift landed on one side, and the range said nothing about how sure the verdict
+was. Alternating pairs cost the same runs and cancel drift, and the signed-rank
+interval says how sure. Five Pocock looks hold false positives near 5% overall,
+where a look after every pair would double them.
+
+### Why timing runs carry no sampler and no RunTask trace
+
+Instruments that explain a number change it. On the stream scenario the full
+instrumentation left main-thread busy where the noise cannot tell it apart, and
+raised renderer process CPU by 45% and renderer wakes 29 times, from about 300
+to 8,000 per second (the sampling thread). Pairs run with `--timing`, so process
+CPU and wakes mean what a user's machine does; one instrumented run per side
+explains a change that moved. Long tasks in a timing run come from the Long
+Tasks observer, so only tasks of 50 ms and over exist there.
+
+### Why the settle wait has a floor and then a signal
+
+`settlePage` waits 7 s, then for the composer, a session row and 1.5 s with a
+quiet main thread and no new request, with `--settle` as the longest wait. A
+quiet signal alone is wrong: the app goes quiet about 3 s after load and starts
+its deferred work at 4 s, so the wait ended inside the gap, and 30 extra requests
+landed in the measured window (70 against 41 with the fixed wait). With the
+floor, the requests and every metric match the fixed wait on stream and idle, at
+10.5 s against 12 and 15. `PERF_FIXED_SETTLE=1` restores the fixed wait to
+check a scenario against it.
+
+### Why measured runs are not under nice
+
+Chrome inherits the priority, so at nice 10 it would lose the CPU to whatever
+else runs. Eight pairs on a machine with load around 5 did not show a difference
+(+2% [-2 … +7]); the rule stands on that mechanism, and on the fact that the
+compare measures alone by design. Builds stay under nice.
+
+### Why the bound for `same` is ±5%
+
+On a MacBook with other work running, `busy ms per 1k chars` spreads about ±10%
+per pair: an A/A run has an interval of about ±10% at 12 pairs, and a 3 ms task
+every 100 ms (+88%) reads `WORSE` at 8. A ±3% bound would need over 60 pairs. A
+small change therefore comes back without a verdict, and `--max-minutes` stops it
+early instead of spending an hour on the same answer.

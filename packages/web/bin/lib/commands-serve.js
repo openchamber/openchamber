@@ -27,9 +27,8 @@ const DAEMON_READY_TIMEOUT_MS = 30000;
 
 function createServeCommand({
   serverPath,
-  bunBin,
   checkOpenCodeCLI,
-  getPreferredServerRuntime,
+  getServerRuntimeBinary,
   setForegroundServerActive,
   setForegroundShutdown,
 }) {
@@ -102,10 +101,8 @@ async function serveCommand(options) {
       }
     }
 
-    // A front door runs no OpenCode: its sessions run in the agent server.
     const opencodeBinary = readAgentServerMode(process.env).frontDoor ? null : await checkOpenCodeCLI(emitNotice);
-    const preferredRuntime = getPreferredServerRuntime();
-    const runtimeBin = preferredRuntime === 'bun' ? bunBin : process.execPath;
+    const runtimeBin = getServerRuntimeBinary();
 
     ensureLogsDir();
     const initialLogPort = targetPort === 0 ? 'auto' : String(targetPort);

@@ -66,7 +66,9 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `ContextRailSurfacesDialog` edits this same order with drag handles beside
   the visibility checkboxes (`SettingsSortableVisibilityList`, which the phone's
   workspace tab settings also use; those tabs keep their own per-device order
-  and hidden set, `lib/mobileWorkspaceTabs.ts`), including hidden panels. Mouse, touch and keyboard
+  and hidden set, `lib/mobileWorkspaceTabs.ts`, and an extension that opted
+  its panel into the phone is one of them under the same `plugin:<id>` id),
+  including hidden panels. Mouse, touch and keyboard
   drops update the rail immediately; visibility changes and "Show all" preserve
   the order. Dialog reorders retain saved ids of unavailable extensions at the
   end of the preference. Escape cancels a drag before closing the dialog.
@@ -205,6 +207,23 @@ failed read shows Retry. A tracker answers a missing item and a failed read
 the same way, so a tracker item's tab, for every tracker, falls back only on
 that first read.
 
+An item tab's icon is its item's state glyph, the one the preview's state pill
+draws (`repositoryStateLook`, `trackerStateGlyph`), and a tab in the background
+colours it, so a PR merged or an issue closed meanwhile reads from the strip.
+The active tab keeps the strip's text colour beside the coloured pill. Each
+item tab follows its link's item while the panel is open (`useTrackedItems`,
+`lib/trackedItems`); until the server first answers, the tab shows its kind
+icon.
+
+### Why each tab follows its item and not the open view handing its state over
+
+Only the active tab's view is mounted, so a state it handed over would freeze
+the moment another tab opened, and a PR merged in the background would keep
+reading open. The server's followed items are pushed as they change, read on a
+cadence per state (a merged PR is never read again), shared with the sidebar's
+link badges and kept across launches, so a tab costs one followed item and not
+a read of its own.
+
 Changes and the walkthrough opened from another project's PR keep that
 project's folder as their tab's `targetDirectory`, so they read the PR through
 that project's binding beside the chat on screen. Changes then shows that PR
@@ -253,6 +272,32 @@ for the shortcut). While workflows are not shown (`selectWorkflowsShown`: VS
 Code, or the workflow tool off) it is absent from the rail and from the rail's
 surfaces dialog, and turning the tool off closes open Workflows tabs, as
 memory's tab goes with its tool.
+
+## Shared pages
+
+The `pages` surface holds pages other people shared with the user by link
+(`components/chat/sharePages/received/`, decisions 0013 and 0018). It is on
+the rail while the server holds any received page (`receivedPagesShown`, the
+list fed by `receivedPagesStore.ts`), or a tab of it is open. Opened with no
+tab, it shows the list tab (no `targetPath`): every received page, newest
+first, with its title, the link's host (until pages carry a sender's name)
+and where it stands: not opened (sent without its PIN), waiting for your
+answer, answer sent, read only, expired, withdrawn, locked after wrong PINs,
+already answered elsewhere, or a link that no longer works
+(`received/status.ts`); a row opens the page's tab. A page tab keeps its
+`receivedId` as `targetPath` and its title as the label (a tab opened before
+the PIN takes the title once the page opens), so persisted tabs reopen from
+the server's store. Each page tab is a keep-alive pane in
+`ContextSurfacePanes`, mounted the first time it shows, so a form's unsent
+choices survive switching away; the list tab is rendered by the zone and
+remounts. Received pages belong to the server, not a project: a link names
+no folder, so every project lists them all.
+
+On the phone the list is a tab of the workspace drawer (`pages` in
+`lib/mobileWorkspaceTabs.ts`, never stored in the user's order), shown while
+the server holds any page, always right after Status (first when Status is
+hidden) so the strip, which scrolls past five tabs, never hides it; a row opens the page full screen with Back to the
+drawer, as a card's Open does from the chat.
 
 ## Panel header
 

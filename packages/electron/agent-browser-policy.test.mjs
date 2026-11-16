@@ -16,7 +16,7 @@ const policy = buildAgentBrowserPolicy({
 const cancel = (url, extra = {}) => shouldCancelAgentBrowserRequest({ partition: AGENT_BROWSER_PARTITION, url, policy, ...extra });
 
 test('accepts only the exact human and agent panel partition names', () => {
-  assert.equal(AGENT_BROWSER_PARTITION, 'persist:openchamber-agent-browser');
+  assert.equal(AGENT_BROWSER_PARTITION, 'persist:openchamber-browser-agent');
   assert.equal(isStandaloneBrowserPanelPartition(BROWSER_PANEL_PARTITION), true);
   assert.equal(isStandaloneBrowserPanelPartition(AGENT_BROWSER_PARTITION), true);
   for (const partition of ['', 'persist:openchamber-agent', `${AGENT_BROWSER_PARTITION}-other`, ` ${AGENT_BROWSER_PARTITION}`]) {

@@ -31,8 +31,21 @@ describe('dictation model choice', () => {
 
   const activeModel = async (localModel) => (await service.getStatus({ provider: 'local', localModel })).activeModel;
 
-  it('uses Parakeet v3 when nobody picked a model', async () => {
+  it('uses Parakeet Ultra when nobody picked a model', async () => {
+    expect(await activeModel('')).toBe('parakeet-ultra-int8');
+  });
+
+  it('keeps Parakeet v3 for someone who picked nothing until Ultra is installed', async () => {
+    await installModel(modelsDir, 'parakeet-tdt-0.6b-v3-int8');
     expect(await activeModel('')).toBe('parakeet-tdt-0.6b-v3-int8');
+    await installModel(modelsDir, 'parakeet-ultra-int8');
+    expect(await activeModel('')).toBe('parakeet-ultra-int8');
+  });
+
+  it('keeps Parakeet v3 for someone who picked it', async () => {
+    await installModel(modelsDir, 'parakeet-tdt-0.6b-v3-int8');
+    await installModel(modelsDir, 'parakeet-ultra-int8');
+    expect(await activeModel('parakeet-tdt-0.6b-v3-int8')).toBe('parakeet-tdt-0.6b-v3-int8');
   });
 
   it('keeps Parakeet v2 for someone who has it installed and picked nothing', async () => {

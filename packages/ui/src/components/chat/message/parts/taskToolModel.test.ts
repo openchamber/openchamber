@@ -23,6 +23,11 @@ describe('taskToolModel', () => {
         expect(readTaskSessionIdFromOutput('result\n<task_metadata>{broken</task_metadata>')).toBe(undefined);
     });
 
+    test('reads the session id out of the OpenCode 2.3.0 launch notice without its punctuation', () => {
+        const notice = 'The subagent is working in the background (sessionID: ses_abc-1). You will receive a <subagent> message when it goes idle.';
+        expect(readTaskSessionIdFromOutput(notice)).toBe('ses_abc-1');
+    });
+
     test('strips task metadata and caps oversized task output before markdown rendering', () => {
         const oversized = 'x'.repeat(TOOL_OUTPUT_MAX_CHARS + 5_000);
         const output = `${oversized}\n<task_metadata>{"sessionID":"child-1"}</task_metadata>`;

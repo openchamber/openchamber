@@ -7,6 +7,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   useAutoNestedRepoSelection,
   useEffectiveGitDirectory,
+  useGitRepoUnreadable,
   useGitStore,
   useIsGitRepo,
   useIsUnbornGitRepo,
@@ -79,6 +80,13 @@ export const useNestedGitDirectory = (
   const selectedIsGitRepo = useIsGitRepo(
     gitDirectory && gitDirectory !== root ? gitDirectory : null,
   );
+
+  // Git could not read the root: the surfaces show Git's message instead of
+  // their content. A selected repository Git cannot read is dropped like a
+  // stale one below, so the picker stays reachable.
+  const rootUnreadable = useGitRepoUnreadable(root);
+  const unreadable = rootUnreadable !== null && root ? { directory: root, message: rootUnreadable } : null;
+  const selectedUnreadable = useGitRepoUnreadable(gitDirectory && gitDirectory !== root ? gitDirectory : null) !== null;
 
   const { ensureStatus, recheckRepository, ensureNestedRepos, selectNestedRepo, clearNestedRepoSelection } = useGitStore(
     useShallow((state) => ({
@@ -187,7 +195,7 @@ export const useNestedGitDirectory = (
   React.useEffect(() => {
     if (!enabled || !root || !nestedRepoSelection) return;
     if (!gitDirectory || gitDirectory === root) return;
-    if (selectedIsGitRepo !== false) return;
+    if (selectedIsGitRepo !== false && !selectedUnreadable) return;
     clearNestedRepoSelection(root);
     void ensureNestedRepos(root, { force: true });
   }, [
@@ -198,6 +206,7 @@ export const useNestedGitDirectory = (
     nestedRepoSelection,
     root,
     selectedIsGitRepo,
+    selectedUnreadable,
   ]);
 
   const discovered = Array.isArray(nestedRepos) && nestedRepos.length > 0 ? nestedRepos : null;
@@ -222,5 +231,9 @@ export const useNestedGitDirectory = (
     repositoryOptions = rootIsGitRepo === true ? [root, ...discovered] : discovered;
   }
 
-  return { rootIsGitRepo, gitDirectory, nestedRepos, nestedRepoSelection, repositoryOptions };
+  // Whether `repositoryOptions` is the answer: a failed discovery counts, since
+  // nothing more is coming, and a root that is not searched has none to wait for.
+  const repositoriesKnown = rootIsGitRepo !== null && (!searchesNested || nestedRepos !== undefined);
+
+  return { rootIsGitRepo, gitDirectory, nestedRepos, nestedRepoSelection, repositoryOptions, repositoriesKnown, unreadable };
 };

@@ -6,6 +6,7 @@ import { Radio } from '@/components/ui/radio';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { dominantTextDirection } from '@/lib/i18n/textDirection';
 import { FORM_CUSTOM_TEXTAREA_MIN_HEIGHT, getFormCustomTextareaHeight } from './formTextareaSizing';
 import { FormMarkdown } from './FormMarkdown';
 import { isRecommendedOption, stripRecommendedMarker } from './formSerializers';
@@ -114,9 +115,17 @@ const { t } = useI18n();
 const value = valueOf(values, field.key);
 const isMissing = showErrors && missing.includes(field.key);
 const label = field.title?.trim() || field.key;
+// The field runs the way most of its own words do, so a Persian question sets
+// its label, options and radios from the right even when an option opens
+// with a Latin term. Translated controls inside it follow along.
+const dir = dominantTextDirection(
+    label,
+    field.description,
+    ...('options' in field ? field.options ?? [] : []).flatMap((option) => [option.label, option.description]),
+);
 
 return (
-        <div key={field.key} className="px-1.5 py-1">
+        <div key={field.key} dir={dir} className="px-1.5 py-1">
             <div className="flex items-baseline gap-1.5">
                 <span className={cn('typography-meta font-medium', isMissing ? 'text-[var(--status-error)]' : 'text-foreground')}>
                     {label}

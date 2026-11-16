@@ -11,7 +11,6 @@ import { NotificationChannelCard } from './NotificationChannelCard';
 import { TrackerSettings } from './TrackerSettings';
 import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { loadNotificationChannels, type NotificationChannel } from '@/lib/notifications/channels';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -371,6 +370,8 @@ export const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ gues
                 controlClassName="w-full max-w-none"
               >
                 <Input
+                  type={field.secret ? 'password' : undefined}
+                  placeholder={field.secret && status?.secretsSet.includes(field.id) ? t('settings.integrations.guest.secret.saved') : undefined}
                   value={settings[field.id] ?? ''}
                   onChange={(event) => {
                     setSettings((current) => ({ ...current, [field.id]: event.target.value }));
@@ -435,7 +436,7 @@ export const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ gues
   );
 };
 
-export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divider = true }) => {
+export const GuestIntegrationsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
@@ -469,12 +470,12 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
   }, []);
 
   React.useEffect(() => {
-    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return;
+    if (isVSCodeRuntime()) return;
     void refreshChannels();
     // Approving or pausing an extension changes which channels exist.
   }, [refreshChannels, guests]);
 
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  if (isVSCodeRuntime()) {
     return null;
   }
 
@@ -487,7 +488,6 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
     <SettingsSection
       title={t('settings.integrations.guests.title')}
       info={t('settings.integrations.guests.info')}
-      divider={divider}
       settingsItem="integrations.guests"
       contentClassName="space-y-3"
     >

@@ -60,11 +60,21 @@ describe('readTabletLayout', () => {
     expect(withViewport(1194, 834).roomyForPanels).toBe(true);
   });
 
-  test('an unfolded foldable is a tablet but never roomy enough for panels', () => {
+  test('a near-square foldable is a tablet but never roomy enough for panels', () => {
     // Book foldables are near-square: the long side is barely wider than a
     // tablet's short one, so both orientations keep the portrait layout.
-    expect(withViewport(690, 840)).toEqual({ enabled: true, roomyForPanels: false });
-    expect(withViewport(840, 690)).toEqual({ enabled: true, roomyForPanels: false });
+    expect(withViewport(690, 840)).toEqual({ enabled: true, roomyForPanels: false, roomyForOnePanel: false });
+    expect(withViewport(840, 690)).toEqual({ enabled: true, roomyForPanels: false, roomyForOnePanel: false });
+  });
+
+  test('one panel at a time where one fits beside the chat but two do not', () => {
+    // An unfolded iPhone Duo, and a 13-inch iPad in portrait.
+    expect(withViewport(951, 669)).toEqual({ enabled: true, roomyForPanels: false, roomyForOnePanel: true });
+    expect(withViewport(1032, 1376)).toEqual({ enabled: true, roomyForPanels: false, roomyForOnePanel: true });
+    // An 11-inch iPad in portrait keeps the guest sidebar and the drawer.
+    expect(withViewport(834, 1194).roomyForOnePanel).toBe(false);
+    // Room for both: the one-at-a-time rule is off.
+    expect(withViewport(1194, 834)).toEqual({ enabled: true, roomyForPanels: true, roomyForOnePanel: false });
   });
 
   test('folding shut drops back to the phone layout', () => {
@@ -78,19 +88,31 @@ describe('readTabletLayout', () => {
     // falls under the threshold. The size class must not follow it, or the
     // surface holding the focused field remounts and the keyboard closes.
     keyboardOpen = true;
+    focusedInput = true;
     expect(withViewport(932, 404).enabled).toBe(true);
     // Keyboard gone, viewport whole again.
     keyboardOpen = false;
+    focusedInput = false;
     expect(withViewport(932, 704).enabled).toBe(true);
   });
 
   test('rotating a phone while typing keeps the phone layout until the keyboard closes', () => {
     expect(withViewport(390, 844).enabled).toBe(false);
     keyboardOpen = true;
+    focusedInput = true;
     // Landscape over a viewport the keyboard shrank: 844 wide must not read as a tablet.
-    expect(withViewport(844, 90)).toEqual({ enabled: false, roomyForPanels: false });
+    expect(withViewport(844, 90)).toEqual({ enabled: false, roomyForPanels: false, roomyForOnePanel: false });
     keyboardOpen = false;
+    focusedInput = false;
     expect(withViewport(844, 390).enabled).toBe(false);
+  });
+
+  test('a keyboard class left behind without a focused field holds nothing', () => {
+    // Unfolded with the keyboard up, then folded shut: the keyboard went away
+    // with the screen it was on, and the hide event never came.
+    expect(withViewport(951, 669).enabled).toBe(true);
+    keyboardOpen = true;
+    expect(withViewport(466, 678).enabled).toBe(false);
   });
 
   test('in the native shell a focused field over a shrunk viewport is the keyboard', () => {

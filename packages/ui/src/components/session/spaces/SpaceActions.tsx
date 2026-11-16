@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { isSpaceApplicable, runSpaceAction } from '@/lib/spaces/space-repair';
@@ -124,52 +125,45 @@ export const SpaceActionsSheet: React.FC = () => {
   const close = () => useSpacesStore.getState().closeActionsSheet();
   return (
     <MobileOverlayPanel open={spaceId !== null} title={name ?? t('spaces.actions.menu')} onClose={close}>
-      <div className="flex flex-col gap-1 px-3 pb-4 pt-1">
-        {/* What the row's mark stands for: the phone has no tooltip to say it. */}
-        {spaceId ? <SpaceStatusLines spaceId={spaceId} className="px-3 pb-2" onAction={close} /> : null}
-        {spaceId && applicable ? (
-          <Button
-            variant="ghost"
-            className="justify-start gap-2"
-            disabled={busy}
-            onClick={() => {
-              close();
-              openSpaceApply(spaceId);
-            }}
-          >
-            <Icon name="git-merge" className="h-4 w-4" />
-            {t('spaces.actions.apply')}
-          </Button>
-        ) : null}
-        {spaceId ? (
-          <Button
-            variant="ghost"
-            className="justify-start gap-2"
-            onClick={() => {
-              close();
-              openAccess(spaceId);
-            }}
-          >
-            <Icon name="key" className="h-4 w-4" />
-            {t('spaces.actions.access')}
-          </Button>
-        ) : null}
-        {spaceId ? actions.map((action) => (
-          <Button
-            key={action}
-            variant={action === 'remove' ? 'destructive' : 'ghost'}
-            className="justify-start gap-2"
-            disabled={busy || unavailable(action)}
-            onClick={() => {
-              close();
-              pickSpaceAction(spaceId, action);
-            }}
-          >
-            <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
-            {t(SPACE_ACTION_TEXT[action])}
-          </Button>
-        )) : null}
-      </div>
+      {/* What the row's mark stands for: the phone has no tooltip to say it. */}
+      {spaceId ? <SpaceStatusLines spaceId={spaceId} className="px-2 pb-2" onAction={close} /> : null}
+      {spaceId && applicable ? (
+        <MobileSheetRow
+          icon="git-merge"
+          disabled={busy}
+          onClick={() => {
+            close();
+            openSpaceApply(spaceId);
+          }}
+        >
+          {t('spaces.actions.apply')}
+        </MobileSheetRow>
+      ) : null}
+      {spaceId ? (
+        <MobileSheetRow
+          icon="key"
+          onClick={() => {
+            close();
+            openAccess(spaceId);
+          }}
+        >
+          {t('spaces.actions.access')}
+        </MobileSheetRow>
+      ) : null}
+      {spaceId ? actions.map((action) => (
+        <MobileSheetRow
+          key={action}
+          icon={ACTION_ICON[action]}
+          destructive={action === 'remove'}
+          disabled={busy || unavailable(action)}
+          onClick={() => {
+            close();
+            pickSpaceAction(spaceId, action);
+          }}
+        >
+          {t(SPACE_ACTION_TEXT[action])}
+        </MobileSheetRow>
+      )) : null}
     </MobileOverlayPanel>
   );
 };

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { parseMetadata } from '@/lib/metadataParse';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getBtwOriginalSessionID, isBtwSession, wasPromotedBtwSession } from '@/lib/sessionBtwMetadata';
 import { getOriginalSessionID, isReviewSession } from '@/lib/sessionReviewMetadata';
@@ -42,7 +43,7 @@ const getSessionOriginId = (session: Session): string | null => {
 // A present marker is enough: a fork inherits its source's marker and is still
 // kept out of the run (see `lib/multirun/identity.ts`).
 const isMultiRunLane = (session: Session): boolean => Object.hasOwn(
-  openchamberNamespaceSchema.safeParse(session.metadata).data?.openchamber ?? {},
+  parseMetadata(openchamberNamespaceSchema, session.metadata).data?.openchamber ?? {},
   'multirun',
 );
 

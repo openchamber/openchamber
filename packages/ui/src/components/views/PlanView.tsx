@@ -4,8 +4,15 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { ActionToolbar } from '@/components/ui/action-toolbar';
-import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { ActionToolbar, type ToolbarAction } from '@/components/ui/action-toolbar';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Icon } from '@/components/icon/Icon';
+import { PlanProgressLabel } from '@/components/session/project-context/PlansSection';
+import { usePlanActions } from '@/components/session/project-context/usePlanActions';
+import { useSessionKnowledgePins } from '@/components/session/project-context/useSessionKnowledgePins';
+import { PlanTodos } from '@/components/session/project-context/PlanTodos';
+import { registerOpenPlan } from '@/components/session/project-context/openPlanViews';
 import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection } from '@/components/comments';
 
 import { useDeviceInfo } from '@/lib/device';
@@ -61,7 +68,14 @@ type PlanViewProps = {
   onNavigatedToChat?: () => void;
   /** Rendered before the title, e.g. the project knowledge panel's back control. */
   leading?: React.ReactNode;
+  /** Closes the view: the host calls it when the plan is deleted from its menu. */
+  onClose?: () => void;
 };
+
+const NO_PROJECT = { id: '', path: '' };
+
+/** A leading `# Title` line: the toolbar already shows it. */
+const LEADING_HEADING = /^\s*#\s+.+?(?:\n+|$)/;
 
 type PlanSendAction = 'improve' | 'implement';
 type PlanSendTarget = 'session' | 'worktree';
@@ -124,7 +138,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProjectPlan = null, onNavigatedToChat, leading }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProjectPlan = null, onNavigatedToChat, leading, onClose }) => {
   const { t } = useI18n();
   const inPanelHeader = useInContextPanelHeader();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -170,6 +184,15 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     [savedPlanProjectId, savedPlanProjectPath],
   );
   const savedPlanId = savedProjectPlan?.planId ?? null;
+  const planLink = useProjectContextStore((state) => {
+    if (!savedPlanProjectRef || !savedPlanId) return null;
+    return state.entries[resolveProjectContextId(savedPlanProjectRef)]?.plans.find((plan) => plan.id === savedPlanId) ?? null;
+  });
+  const planActions = usePlanActions(savedPlanProjectRef ?? NO_PROJECT);
+  const { pinnedPlanIds, togglePin } = useSessionKnowledgePins();
+  const togglePlanPin = React.useCallback(async (planId: string, pinned: boolean) => {
+    if (!await togglePin('plan', planId, pinned)) toast.error(t('rightSidebar.contextNotesTodo.toast.updatePlanFailed'));
+  }, [t, togglePin]);
   // Stable logical identity, composed from primitives: an effect keyed on the
   // descriptor object would reload — and flush — the same plan whenever a
   // parent rebuilds the owner object with identical values.
@@ -214,11 +237,17 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     }
     return parsePlanMarkdown(content, t('planView.title.default')).title;
   }, [content, t]);
+  const previewContent = React.useMemo(() => {
+    const heading = LEADING_HEADING.exec(content);
+    return heading ? content.slice(heading[0].length) : content;
+  }, [content]);
   const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || t('planView.title.default'), [parsedTitle, t]);
   const [loading, setLoading] = React.useState(false);
-  const [copiedContent, setCopiedContent] = React.useState(false);
-  const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
-  const copiedContentTimeoutRef = React.useRef<number | null>(null);
+  // A plan opened from a list is read first, the way a note reads formatted;
+  // one with nothing under its title yet opens to be written.
+  const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('preview');
+  const [startsEmpty, setStartsEmpty] = React.useState(false);
+  const viewMode = startsEmpty ? 'edit' : mdViewMode;
 
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
   const editorViewRef = React.useRef<EditorView | null>(null);
@@ -236,7 +265,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     filePath: loadedProjectPlanPath,
     workspaceRoot: savedPlanProjectRef?.path ?? null,
     onOpenFile: openLinkedFile,
-    enabled: mdViewMode === 'preview' && hasDocument,
+    enabled: viewMode === 'preview' && hasDocument,
     colorScheme: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
   });
 
@@ -256,6 +285,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
   }, []);
 
   const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
+    setStartsEmpty(false);
     setMdViewMode(mode);
     try {
       localStorage.setItem(MD_VIEWER_MODE_KEY, JSON.stringify(mode));
@@ -318,8 +348,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     if (rangeOverride) {
       setLineSelection(rangeOverride);
     }
-    saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
-    setLineSelection(null);
+    const saved = saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
+    if (saved) setLineSelection(null);
+    return saved;
   }, [lineSelection, saveComment]);
 
   React.useEffect(() => {
@@ -481,6 +512,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           runtimeKey: activeRuntimeKey,
         };
         setContent(plan.raw);
+        setStartsEmpty(!parsePlanMarkdown(plan.raw, '').body.trim());
         setLoadedProjectPlanId(savedPlanId);
         setLoadedProjectPlanPath(plan.path ?? null);
       } catch (error) {
@@ -497,6 +529,23 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       cancelled = true;
     };
   }, [activeRuntimeKey, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, scheduleSave]);
+
+  // A move of this plan to or from the team's folder holds the editor and
+  // waits for its typing to be written, under the plan as it is before the move.
+  const [heldForMove, setHeldForMove] = React.useState(false);
+  React.useEffect(() => {
+    if (!savedPlanProjectRef || !savedPlanId || !savedPlanKey || loadedProjectPlanId !== savedPlanId) return;
+    return registerOpenPlan(resolveProjectContextId(savedPlanProjectRef), savedPlanId, {
+      setHeld: setHeldForMove,
+      flush: async () => {
+        scheduleSave();
+        await saveQueue.pendingFor(savedPlanKey);
+        // The queue settles on failure too; only a written revision counts.
+        const doc = docRef.current;
+        return doc.key === savedPlanKey && doc.savedRevision >= doc.editRevision;
+      },
+    });
+  }, [loadedProjectPlanId, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, scheduleSave]);
 
   // An agent can change the open plan, through the knowledge tool or by
   // editing its file. With no unsaved edits the editor takes the new text, so
@@ -604,14 +653,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       scheduleSave();
     };
   }, [scheduleSave]);
-
-  React.useEffect(() => {
-    return () => {
-      if (copiedContentTimeoutRef.current !== null) {
-        window.clearTimeout(copiedContentTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const routeToChat = React.useCallback(() => {
     setSessionSwitcherOpen(false);
@@ -806,17 +847,34 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     </>
   );
 
+  // Picked from a menu, where a check on the button would never be seen.
   const copyPlanContents = async () => {
     const result = await copyTextToClipboard(content);
-    if (!result.ok) return;
-    setCopiedContent(true);
-    if (copiedContentTimeoutRef.current !== null) {
-      window.clearTimeout(copiedContentTimeoutRef.current);
-    }
-    copiedContentTimeoutRef.current = window.setTimeout(() => {
-      setCopiedContent(false);
-    }, 1200);
+    if (result.ok) toast.success(t('planView.toast.copied'));
   };
+
+  const entryActions: ToolbarAction[] = planLink && savedPlanProjectRef ? [
+    {
+      id: 'pin',
+      label: pinnedPlanIds.has(planLink.id)
+        ? t('rightSidebar.contextNotesTodo.pin.detach')
+        : t('rightSidebar.contextNotesTodo.pin.attach'),
+      icon: pinnedPlanIds.has(planLink.id) ? 'pushpin-2-fill' : 'pushpin-2',
+      onSelect: () => void togglePlanPin(planLink.id, !pinnedPlanIds.has(planLink.id)),
+    },
+    // Sharing stays in the list row: a moved plan gets a new id, and the open
+    // view, its pending save and its todos would keep pointing at the old one.
+    ...planActions.actionsFor(planLink, { onDeleted: onClose }).filter((action) => action.id !== 'move').map((action): ToolbarAction => ({
+      id: action.id,
+      label: action.label,
+      icon: action.id === 'open-session' ? 'chat-3' : 'delete-bin',
+      disabled: action.disabled,
+      destructive: action.destructive,
+      onSelect: action.onSelect,
+    })),
+  ] : [];
+  // A plan with nothing under its title has nothing to build or improve.
+  const sendDisabled = !previewContent.trim() || isManagedChatPlan;
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
@@ -827,7 +885,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           className="flex-1"
           start={(
             <div className="min-w-0 flex-1">
-              <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate typography-ui-label font-medium" dir="auto">{parsedTitle}</span>
+                {planLink?.progress ? <PlanProgressLabel progress={planLink.progress} /> : null}
+              </div>
               {loadError ? (
                 <div className="typography-micro text-[color:var(--status-error)] truncate" title={loadError}>
                   {t('planView.error.loadFailed')}
@@ -840,56 +901,61 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
               ) : null}
             </div>
           )}
+          // What a plan is for, said in words: an icon could not tell
+          // "build this" from "rewrite this" without a hover.
+          status={hasDocument ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="xs" disabled={sendDisabled} className="typography-ui-label">
+                  {t('planView.actions.implement')}
+                  <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {sendMenu('implement')}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : undefined}
           groups={hasDocument ? [
             [{
               id: 'mode',
               label: t('documentToolbar.preview'),
               icon: 'eye',
-              pressed: mdViewMode === 'preview',
-              onSelect: () => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview'),
+              pressed: viewMode === 'preview',
+              onSelect: () => saveMdViewMode(viewMode === 'preview' ? 'edit' : 'preview'),
               pinned: true,
             }],
-            [
-              {
-                id: 'improve',
-                label: t('planView.actions.improve'),
-                icon: 'loop-right-ai',
-                disabled: !content.trim() || isManagedChatPlan,
-                menu: sendMenu('improve'),
-              },
-              {
-                id: 'implement',
-                label: t('planView.actions.implement'),
-                icon: 'code-ai',
-                disabled: !content.trim() || isManagedChatPlan,
-                menu: sendMenu('implement'),
-              },
-            ],
-            [
-              // Reads the plan's text, so it works in either mode.
-              showMessageTTSButtons && {
-                id: 'read-aloud',
-                label: isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud'),
-                icon: 'volume-up',
-                iconClassName: isTTSPlaying ? 'text-[var(--primary-text)]' : undefined,
-                onSelect: () => {
-                  if (isTTSPlaying) {
-                    stopTTS();
-                  } else if (content.trim()) {
-                    void playTTS(content);
-                  }
-                },
-              },
-              {
-                id: 'copy-contents',
-                label: t('planView.actions.copyPlanContents'),
-                icon: 'file-copy',
-                done: copiedContent,
-                onSelect: () => void copyPlanContents(),
-              },
-            ],
           ] : []}
-          fold
+          menuOnly={hasDocument ? [
+            {
+              id: 'improve',
+              label: t('planView.actions.improve'),
+              icon: 'loop-right-ai',
+              disabled: sendDisabled,
+              menu: sendMenu('improve'),
+            },
+            // Reads the plan's text, so it works in either mode.
+            showMessageTTSButtons && {
+              id: 'read-aloud',
+              label: isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud'),
+              icon: 'volume-up',
+              iconClassName: isTTSPlaying ? 'text-[var(--primary-text)]' : undefined,
+              onSelect: () => {
+                if (isTTSPlaying) {
+                  stopTTS();
+                } else if (content.trim()) {
+                  void playTTS(content);
+                }
+              },
+            },
+            {
+              id: 'copy-contents',
+              label: t('planView.actions.copyPlanContents'),
+              icon: 'file-copy',
+              onSelect: () => void copyPlanContents(),
+            },
+            ...entryActions,
+          ] : []}
         />
       </div>
       </ContextPanelHeaderToolbar>
@@ -915,7 +981,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           ) : (
             <div className="relative h-full">
               <div className="h-full">
-                {mdViewMode === 'preview' ? (
+                {viewMode === 'preview' ? (
                   <>
                   <div className="overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3" ref={setPreviewContainer}>
                     {/* Same comment-on-selection as a markdown file preview. */}
@@ -934,7 +1000,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                         </div>
                       }
                     >
-                      <SimpleMarkdownRenderer content={content} documentAssets={markdownDocumentAssets} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
+                      <SimpleMarkdownRenderer content={previewContent} documentAssets={markdownDocumentAssets} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
                   <OverlayScrollbar containerRef={previewRef} />
@@ -944,7 +1010,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                     <CodeMirrorEditor
                       value={content}
                       onChange={handleContentChange}
-                      readOnly={false}
+                      readOnly={heldForMove}
                       className="h-full"
                       extensions={editorExtensions}
                       onViewReady={(view) => { editorViewRef.current = view; }}
@@ -965,6 +1031,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           )}
         </ScrollableOverlay>
       </div>
+      {savedPlanProjectRef && savedPlanId && hasDocument ? <PlanTodos projectRef={savedPlanProjectRef} planId={savedPlanId} /> : null}
     </div>
   );
 };

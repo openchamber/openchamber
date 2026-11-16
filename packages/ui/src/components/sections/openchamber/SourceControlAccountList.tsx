@@ -102,7 +102,7 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
               return (
                 <div
                   key={account.id}
-                  className="flex flex-col gap-2 py-2 first:pt-0 last:pb-0 @xl:flex-row @xl:items-center @xl:justify-between"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2 first:pt-0 last:pb-0"
                 >
                   <div className="flex flex-wrap items-center gap-1.5 typography-micro text-muted-foreground">
                     <span>{source}</span>
@@ -117,7 +117,9 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
                     {group.accounts.length > 1 && account.current
                       ? <span className="oc-tile-inset rounded-full px-1.5">{currentLabel}</span> : null}
                   </div>
-                  <div className="flex flex-wrap gap-2">{renderActions(account)}</div>
+                  {/* Actions keep to the row's end, also when a narrow card wraps them under the label:
+                      a borderless action at the start would sit indented by its own padding. */}
+                  <div className="ms-auto flex flex-wrap justify-end gap-2">{renderActions(account)}</div>
                 </div>
               );
             })}

@@ -11,7 +11,8 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { isSessionUnread } from '@/sync/session-unread';
+import { markSessionRead } from '@/sync/notification-store';
+import { canSessionBeUnread, isSessionUnread, markSessionUnread } from '@/sync/session-unread';
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { useGroupRefs } from '../projects/useGroupRefs';
 import type { SessionGroup } from '../types';
@@ -19,9 +20,35 @@ import { formatProjectLabel, isPathWithinProject, normalizePath } from '../utils
 import { refreshSpacesJourney, useSpaceTakesNoNewSession } from '@/lib/spaces/spaces-store';
 import { setSpaceTaskTitle } from '@/lib/spaces/spaces-api';
 import { spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
-import { collectWorkSessions, finishSpaceWork, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork } from './workActions';
+import { collectWorkSessions, finishSpaceWork, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork, type FinishWorktreeWorkOutcome } from './workActions';
 
 const CURRENT_SESSION = '\u0000session';
+
+/** What a work's Done tells the user, from its row or from bulk Mark done. */
+export const toastFinishWorkOutcome = (
+  outcome: FinishWorktreeWorkOutcome,
+  label: string,
+  t: ReturnType<typeof useI18n>['t'],
+): void => {
+  switch (outcome.kind) {
+    case 'done':
+      break;
+    case 'archived':
+      toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
+      break;
+    case 'busy':
+      toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
+      break;
+    case 'unknown':
+      toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
+      break;
+    case 'failed':
+      toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
+        description: outcome.error.message,
+      });
+      break;
+  }
+};
 
 type Args = {
   group: SessionGroup;
@@ -57,7 +84,11 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const projectLabel = project ? formatProjectLabel(project.label?.trim() || project.path) : null;
   const refs = useGroupRefs(group, sessions, true);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const inWork = sessionWorkEnabled && isWorkInWork(sessions);
+  // The pin lives in the branch's config, so a detached worktree has none.
+  // The row moves once the server's topology event lists the change.
+  const pinned = worktree?.pinnedAt !== undefined;
+  // A pinned work is never in work.
+  const inWork = sessionWorkEnabled && !pinned && isWorkInWork(sessions);
   // Where the user is: the open session (`CURRENT_SESSION`) or the open
   // draft (its id, '' before it has one) in this worktree; null elsewhere.
   // A space's draft waits on the project root while the space is made, and
@@ -110,6 +141,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     prepare();
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
   };
+  // The folder `open` lands in: its session's own, else the work's, where a new chat starts.
+  const openDirectory = sessionToOpen?.directory ?? directory;
   const open = (): void => {
     const session = sessionToOpen;
     if (!session) {
@@ -117,15 +150,15 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
       return;
     }
     prepare();
-    useSessionUIStore.getState().setCurrentSession(session.id, session.directory ?? directory);
+    useSessionUIStore.getState().setCurrentSession(session.id, openDirectory);
   };
-  // The pin lives in the branch's config, so a detached worktree has none.
-  // The row moves once the server's topology event lists the change.
-  const pinned = worktree?.pinnedAt !== undefined;
   // The pin list it is filed in (Pin to), Pinned when none.
   const pinList = pinned ? worktree?.pinList ?? DEFAULT_PIN_LIST : null;
   const canPin = Boolean(group.directory && worktree?.branch?.trim()) && !worktreeRemoving;
-  /** `list` null is Pinned; `pin` false unpins. */
+  /**
+   * `list` null is Pinned; `pin` false unpins. The sidebar closes the work of
+   * a pinned worktree's sessions once the pin arrives (`useClosePinnedWork`).
+   */
   const setPin = async (pin: boolean, list: string | null = null): Promise<void> => {
     if (!group.directory || !canPin) return;
     try {
@@ -166,31 +199,13 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     if (!pending) return;
     setFinishing(true);
     try {
-      const outcome = await pending;
-      switch (outcome.kind) {
-        case 'done':
-          break;
-        case 'archived':
-          toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
-          break;
-        case 'busy':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
-          break;
-        case 'unknown':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
-          break;
-        case 'failed':
-          toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
-            description: outcome.error.message,
-          });
-          break;
-      }
+      toastFinishWorkOutcome(await pending, label, t);
     } finally {
       setFinishing(false);
     }
   };
-  /** Done or Track: present while the feature is on and there is a session to track. */
-  const workAction = sessionWorkEnabled && (inWork || sessions.length > 0);
+  /** Done or Track: present while the feature is on, the work is not pinned and there is a session to track. */
+  const workAction = sessionWorkEnabled && !pinned && (inWork || sessions.length > 0);
   const toggleWork = (): void => {
     if (inWork) {
       void finish(archiveOnDone);
@@ -210,6 +225,36 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
   ), [workSessionIds]));
 
+  /**
+   * Mark as read clears every unread session of the work. Mark as unread marks
+   * the one whose turn ended last, the session the user would come back to.
+   */
+  const toggleRead = (): void => {
+    const records = useGlobalSessionsStore.getState().entityById;
+    if (unreadSessionId) {
+      for (const id of workSessionIds) {
+        if (isSessionUnread(records.get(id))) markSessionRead(id);
+      }
+      return;
+    }
+    // A session whose turn ended beats any without one, such as a new empty chat.
+    let target: string | null = null;
+    let targetRank: [number, number] = [-1, -1];
+    for (const id of workSessionIds) {
+      const record = records.get(id);
+      if (!canSessionBeUnread(record)) continue;
+      const rank: [number, number] = record.time.idle !== undefined ? [1, record.time.idle] : [0, record.time.updated];
+      if (rank[0] > targetRank[0] || (rank[0] === targetRank[0] && rank[1] > targetRank[1])) {
+        target = id;
+        targetRank = rank;
+      }
+    }
+    if (!target) return;
+    void markSessionUnread(target).then((saved) => {
+      if (!saved) toast.error(t('sessions.sidebar.session.unread.markFailed'));
+    });
+  };
+
   return {
     worktree,
     space,
@@ -217,6 +262,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     canRename,
     canNewChat,
     directory,
+    openDirectory,
     worktreeRemoving,
     sessions,
     project,
@@ -237,6 +283,9 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     activityState,
     runningSessionId,
     durationSessionId: runningSessionId ?? unreadSessionId,
+    hasUnread: unreadSessionId !== null,
+    canMarkUnread: workSessionIds.length > 0,
+    toggleRead,
     open,
     newChat,
     saveTitle,

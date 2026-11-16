@@ -25,8 +25,8 @@ describe('session events contract', () => {
   const body = <T,>(patch?: T) => JSON.stringify({ ...request, ...patch });
   const event = <T,>(patch: T) => body({ event: { ...request.event, ...patch } });
 
-  test('the four event types of v1', () => {
-    expect(GUEST_SESSION_EVENT_TYPES).toEqual(['turn-finished', 'turn-failed', 'permission-asked', 'question-asked']);
+  test('the event types, the first four in their original order', () => {
+    expect(GUEST_SESSION_EVENT_TYPES).toEqual(['turn-finished', 'turn-failed', 'permission-asked', 'question-asked', 'turn-started', 'session-created', 'session-archived', 'session-deleted']);
     expect(isGuestSessionEventType('question-asked')).toBe(true);
     expect(isGuestSessionEventType('turn-aborted')).toBe(false);
   });
@@ -38,6 +38,8 @@ describe('session events contract', () => {
     expect(child?.event.project).toEqual({ directory: null });
     const permission = readSessionEventRequest(event({ type: 'permission-asked', permission: { requestId: 'perm_1' } }));
     expect(permission?.event.permission).toEqual({ requestId: 'perm_1' });
+    const question = readSessionEventRequest(event({ type: 'question-asked', question: { kind: 'form', id: 'form_1' } }));
+    expect(question?.event.question).toEqual({ kind: 'form', id: 'form_1' });
     const withContent = readSessionEventRequest(body({
       content: { type: 'turn-finished', sessionTitle: 'Fix the parser', reply: 'Done.', replyTruncated: false },
     }));
@@ -58,6 +60,8 @@ describe('session events contract', () => {
     expect(readSessionEventRequest(event({ project: { directory: 7 } }))).toBeNull();
     expect(readSessionEventRequest(event({ linked: 'none' }))).toBeNull();
     expect(readSessionEventRequest(event({ permission: { requestId: '' } }))).toBeNull();
+    expect(readSessionEventRequest(event({ question: { kind: 'dialog', id: 'x' } }))).toBeNull();
+    expect(readSessionEventRequest(event({ question: { kind: 'form', id: '' } }))).toBeNull();
     // Content of another type than the event is a malformed body, not a surprise for the handler.
     expect(readSessionEventRequest(body({ content: { type: 'turn-failed', sessionTitle: null, error: { type: 'x', message: 'y' } } }))).toBeNull();
     expect(readSessionEventRequest(body({ content: 'Done.' }))).toBeNull();

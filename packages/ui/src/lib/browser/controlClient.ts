@@ -14,7 +14,8 @@
  *
  * Every browser tab registers its view under the tab's id, with the project it
  * belongs to and the session whose agent opened it (none for the user's own
- * tabs). Actions run only in agent-owned tabs in the agent partition.
+ * tabs). Actions run in agent-owned tabs, using the agent profile unless the
+ * user explicitly enabled the upstream shared-logins setting.
  * An action with a `tabId` goes to that eligible tab. Without one it goes to the
  * calling session's tab: the one the user is looking at if it is the
  * session's, else the one the session last opened or worked in. A session
@@ -36,7 +37,7 @@
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeOpenchamberEvents, type BrowserControlRequestContext } from '@/lib/openchamberEvents';
-import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { canDriveBrowserPage } from './hostCapability';
 import { AGENT_BROWSER_PARTITION } from './contract';
 
@@ -110,7 +111,13 @@ const callerOf = (context: BrowserControlRequestContext): Caller => ({
  */
 const VIEW_ATTACH_TIMEOUT_MS = 2_000;
 /** What `browser.settle` tells about the page a new tab opened. */
-const settledPageSchema = z.object({ title: z.string(), settled: z.boolean() });
+const settledPageSchema = z.object({
+  title: z.string(),
+  settled: z.boolean(),
+  // Dialogs the page showed while it loaded, in a tab that answers its own.
+  dialogs: z.array(z.unknown()).optional(),
+  note: z.string().optional(),
+});
 /**
  * How long an open into a new tab may take before it answers: the server gives
  * up at 45 s (`openchamber-control/service.js`), and the answer still has to
@@ -141,6 +148,8 @@ let shownTabId: string | null = null;
 const lastTabBySession = new Map<string, string>();
 let opener: BrowserOpener | null = null;
 let closer: BrowserCloser | null = null;
+/** Told each time an agent action runs in a loaded tab, so the panel knows which agent tabs sit idle. */
+let activityListener: ((directory: string, tabId: string) => void) | null = null;
 let unsubscribe: (() => void) | null = null;
 
 /**
@@ -219,11 +228,12 @@ const registeredTabs = (): RegisteredTab[] => [
 ];
 
 const isAgentTab = (tab: BrowserTabOwnership): boolean => (
-  Boolean(tab.ownerSessionId) && tab.partition === AGENT_BROWSER_PARTITION
+  Boolean(tab.ownerSessionId) && (tab.partition === AGENT_BROWSER_PARTITION
+    || (useUIStore.getState().agentBrowserSharesLogins && tab.partition === 'persist:openchamber-browser'))
 );
 
 const agentTabError = 'Agent actions cannot use this browser tab. '
-  + 'Only tabs opened by an agent session in the agent browser partition can be controlled. Open a new tab with browser.open.';
+  + 'Only tabs opened by an agent session in an allowed browser profile can be controlled. Open a new tab with browser.open.';
 
 /**
  * The tab an action that names none runs in, or null when the caller has
@@ -529,10 +539,12 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       // The view loads the page itself; `browser.settle` waits it out the way
       // an open in a named tab does and reports `title` and `settled`.
       // The tab is open whatever the wait says, so a failed wait is `settled: false`, not an error.
+      const budgetMs = Math.max(0, OPEN_ANSWER_BUDGET_MS - (Date.now() - openStartedAt));
+      // The answer for dialogs from here on; one the page showed before the
+      // wait began was answered no, and the answer reports it too.
+      const settleParameters = request.parameters.dialog === 'accept' ? { budgetMs, dialog: 'accept' } : { budgetMs };
       const page = settle
-        ? settledPageSchema.safeParse(await attached.run('browser.settle', {
-          budgetMs: Math.max(0, OPEN_ANSWER_BUDGET_MS - (Date.now() - openStartedAt)),
-        }).catch(() => null))
+        ? settledPageSchema.safeParse(await attached.run('browser.settle', settleParameters).catch(() => null))
         : null;
       await answer(request, {
         ok: true,
@@ -587,7 +599,7 @@ const runAction = async (
   action: string,
   parameters: BrowserControlRequest['parameters'],
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
-  if (!isAgentTab(controller)) return { ok: false, error: agentTabError };
+  activityListener?.(controller.directory, controller.tabId);
   try {
     const data = await controller.run(action, parameters);
     if (action === 'browser.snapshot' && Object(data) === data) {
@@ -654,6 +666,23 @@ export const setShownBrowserTab = (directory: string, tabId: string | null): voi
   shownDirectory = directory;
   if (tabId) shownTabId = tabId;
 };
+
+/** Registers the panel's listener for agent actions run in a tab. */
+export const registerBrowserTabActivity = (listener: (directory: string, tabId: string) => void): (() => void) => {
+  activityListener = listener;
+  return () => {
+    if (activityListener === listener) activityListener = null;
+  };
+};
+
+/**
+ * Opens a page in a new tab for an agent's session the way its own
+ * browser.open does, loaded at once: a link its page opens in a new tab.
+ * Null when no panel can open one.
+ */
+export const openBrowserTabForSession = (url: string, context: BrowserControlRequestContext): string | null => (
+  opener ? opener(url, context) : null
+);
 
 /** Registers the app-level fallback that can open a browser tab on demand. */
 export const registerBrowserOpener = (open: BrowserOpener): (() => void) => {

@@ -11,17 +11,20 @@ import { useCurrentContextReading } from './useCurrentContextReading';
 
 const UNKNOWN_PERCENT = '—';
 
+// Neutral until the warning threshold, as the Session card's meter: green
+// means finished, and a context in use is not.
 const TONE_COLOR = {
-  safe: 'var(--status-success)',
+  safe: 'var(--muted-foreground)',
   warn: 'var(--status-warning)',
   critical: 'var(--status-error)',
 } as const;
 
 /**
  * The header's context fill: a ring in the fill's tone and the percent, the
- * same figure the Work Status row shows. It stays in the header whatever
- * panels are open, so the reading never moves; a click opens the context
- * overview and a second click closes it.
+ * same figure the Work Status row shows. While the Session card is on screen
+ * with its Context row, the card carries the figure and the header leaves it
+ * out, so the reading shows once. A click opens the context overview and a
+ * second click closes it; the rail's Context item does the same.
  */
 const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const { t } = useI18n();
@@ -33,8 +36,10 @@ const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ bu
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const contextShown = useUIStore((state) => directoryKey !== ''
     && shownContextModes(state.contextPanelByDirectory[directoryKey], state.contextSurfaceZones).has('context'));
+  const cardShowsContext = useUIStore((state) => state.workStatusPanelVisible
+    && !state.workStatusHiddenSections.includes('session'));
 
-  if (!sessionId || !fill) {
+  if (!sessionId || !fill || cardShowsContext) {
     return null;
   }
 

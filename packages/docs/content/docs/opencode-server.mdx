@@ -12,11 +12,10 @@ OpenChamber runs on top of an OpenCode server. By default it starts one for you,
 When OpenChamber starts, it looks for a server in this order:
 
 1. reuse a server it already started
-2. connect to an external one if you told it to (see below)
-3. auto-detect a server on the default port (`4096`)
-4. otherwise, start and manage its own
+2. connect to an external one if you configured it
+3. otherwise, start and manage its own
 
-If nothing is configured, step 4 happens automatically and you're up and running.
+By default, OpenChamber manages its own server on an allocated port. The port can change after a restart. It does not automatically connect to another OpenCode server on port `4096`.
 
 ## Connect to a server you already run
 

@@ -1065,215 +1065,10 @@ describe('canonical GitHub mutations', () => {
   });
 
   it.each([
-    ['merged', 'merge', { merged: true }],
-    ['enqueued', 'squash', { merged: false, outcome: 'queued' }],
-    ['pending', 'rebase', { merged: false, outcome: 'merging' }],
-  ])('merges a native upper layer with status %s through %s and durably replays it', async (status, method, result) => {
-    // Given GitHub's live native stack containing the selected upper layer and its lower layer.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const pr = pullRequest({ base: { ...pullRequest().base, ref: 'lower' } });
-    const parent = pullRequest({ number: 6, head: { ...pr.head, ref: 'lower' } });
-    const fetch = vi.fn(async (input, options) => {
-      const url = new URL(input);
-      if (options.method === 'PUT') return jsonResponse({ status });
-      if (url.pathname.endsWith('/stacks')) {
-        expect(url.searchParams.get('pull_request')).toBe('7');
-        return jsonResponse([{ number: 90, open: true, pull_requests: [parent, pr] }]);
-      }
-      return url.searchParams.has('head') ? jsonResponse([parent]) : jsonResponse(pr);
-    });
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-    const payload = { ...context(account.accountId, { target: {
-      project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'lower', headSha: 'abc123',
-    } }), method };
-
-    // When the upstream native action selects the upper layer.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send(payload).expect(200);
-
-    // Then the exact selected commit reaches native asynchronous merge once, including queued and pending outcomes.
-    expect(response.body).toMatchObject({ target: payload.target, result, replayed: false });
-    expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-merge', state: 'succeeded', result });
-    expect(fetch.mock.calls.filter(([, options]) => options.method === 'PUT').map(([input, options]) => ({
-      path: new URL(input).pathname, body: JSON.parse(options.body),
-    }))).toEqual([{ path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: method, sha: 'abc123', bypass_rules: true } }]);
-    fetch.mockClear();
-    const replay = await request(makeApp({ store }).app).post('/api/source-control/github/pr/merge').send(payload).expect(200);
-    expect(replay.body).toMatchObject({ target: payload.target, result, replayed: true });
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['malformed membership', null, 200],
-    ['malformed stack identity', [{ number: '90', open: true, pull_requests: [{ number: 7 }] }], 200],
-    ['forbidden membership', { message: 'Forbidden' }, 403],
-    ['unavailable membership', { message: 'Unavailable' }, 503],
-  ])('does not admit an upper native merge from %s', async (_label, membership, status) => {
-    // Given an upper layer whose native membership cannot be established.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const pr = pullRequest({ base: { ...pullRequest().base, ref: 'lower' }, stack: { number: 90 } });
-    const parent = pullRequest({ number: 6, head: { ...pr.head, ref: 'lower' } });
-    const fetch = vi.fn(async (input) => {
-      const url = new URL(input);
-      if (url.pathname.endsWith('/stacks')) return jsonResponse(membership, status);
-      return url.searchParams.has('head') ? jsonResponse([parent]) : jsonResponse(pr);
-    });
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When the ordinary merge route resolves its live admission state.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7, headSha: 'abc123' } }), method: 'merge',
-    }).expect(503);
-
-    // Then a PR's stack hint cannot replace authoritative membership or cause a write.
-    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_STACK_UNAVAILABLE');
-    expect(store.records.size).toBe(0);
-    expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
-  });
-
-  it('keeps the explicit native stack merge route bottom-only', async () => {
-    // Given a native stack whose selected PR is its upper layer.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const provider = serveStackProvider({ native: true });
-    const { app } = makeApp();
-
-    // When the snapshot-checked stack control requests an upper-layer merge.
-    await request(app).post('/api/source-control/github/pulls/stack/merge')
-      .send(stackPayload(account.accountId, 'register')).expect(409);
-
-    // Then it remains distinct from the upstream native whole-stack merge action.
-    expect(provider.writes).toEqual([]);
-  });
-
-  it('rejects a moved native upper head before checking membership or writing', async () => {
-    // Given a native upper-layer action that captured an older head commit.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const pr = pullRequest({ base: { ...pullRequest().base, ref: 'lower' }, stack: { number: 90 } });
-    const fetch = vi.fn(async () => jsonResponse(pr));
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When the caller tries to merge that old snapshot.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7, headSha: 'old-head' } }), method: 'merge',
-    }).expect(409);
-
-    // Then native membership cannot override the target snapshot or claim its operation key.
-    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_CHANGED');
-    expect(store.records.size).toBe(0);
-    expect(fetch.mock.calls.map(([input, options]) => [new URL(input).pathname, options.method]))
-      .toEqual([['/repos/acme/app/pulls/7', 'GET']]);
-  });
-
-  it.each([
-    'merge', 'squash', 'rebase',
-  ])('rejects an inferred upper stack PR before claiming or dispatching a %s merge', async (method) => {
-    // Given an open parent whose same-repository head is this PR's base.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const pr = pullRequest({ base: { ...pullRequest().base, ref: 'lower' } });
-    const parent = pullRequest({ number: 6, head: { ...pr.head, ref: 'lower' } });
-    const fetch = vi.fn(async (url, options) => {
-      if (options.method === 'PUT') return jsonResponse({ merged: true });
-      if (new URL(url).pathname.endsWith('/stacks')) return jsonResponse([]);
-      return new URL(url).searchParams.has('head') ? jsonResponse([parent]) : jsonResponse(pr);
-    });
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When the ordinary merge route targets the upper PR.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7, base: 'lower' } }), method,
-    }).expect(409);
-
-    // Then no durable claim or provider write occurs.
-    expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_STACK_ORDER');
-    expect(store.records.size).toBe(0);
-    expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
-    expect(new URL(fetch.mock.calls[1][0]).searchParams.get('head')).toBe('acme:lower');
-  });
-
-  it.each(['bottom', 'standalone', 'fork namesake'])('merges a %s PR through the durable executor', async (kind) => {
-    // Given no same-repository open parent, even if a fork reuses the base name.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const pr = pullRequest();
-    const child = pullRequest({ number: 8, base: { ...pr.base, ref: 'feature' }, head: { ...pr.head, ref: 'upper' } });
-    const fork = pullRequest({ number: 6, head: {
-      ...pr.head, ref: 'main', repo: { owner: { login: 'contributor' }, name: 'app', html_url: 'https://github.com/contributor/app' },
-    } });
-    const pulls = kind === 'bottom' ? [pr, child] : kind === 'fork namesake' ? [fork, pr] : [pr];
-    const fetch = vi.fn(async (url, options) => {
-      if (options.method === 'PUT') return jsonResponse({ status: 'merged' });
-      const head = new URL(url).searchParams.get('head');
-      return jsonResponse(head ? pulls.filter((pull) => `acme:${pull.head.ref}` === head) : pr);
-    });
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When the ordinary merge route is called.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7 } }), method: 'merge',
-    }).expect(200);
-
-    // Then one provider write completes the durable merge record.
-    expect(response.body.result).toEqual({ merged: true });
-    expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-merge', state: 'succeeded' });
-    expect(fetch.mock.calls.filter(([, options]) => options.method === 'PUT').map(([url, options]) => ({
-      path: new URL(url).pathname, body: JSON.parse(options.body),
-    }))).toEqual([{ path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: 'merge', sha: 'abc123', bypass_rules: true } }]);
-  });
-
-  it.each([
-    ['missing collection', null, {}],
-    ['malformed parent', [{}], {}],
-    ['unknown head repository', [pullRequest({ head: { ...pullRequest().head, ref: 'main', repo: null } })], {}],
-    ['full page', Array.from({ length: 100 }, () => pullRequest()), {}],
-    ['next page', [], { link: '<https://api.github.com/repos/acme/app/pulls?page=2>; rel="next"' }],
-  ])('fails closed before merge when the parent query returns %s', async (_label, parents, headers) => {
-    // Given an answer that cannot prove the absence of an open parent.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const fetch = vi.fn(async (url) => new URL(url).searchParams.has('head')
-      ? Response.json(parents, { headers }) : jsonResponse(pullRequest()));
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When the ordinary merge route checks stack order.
-    const response = await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7 } }), method: 'merge',
-    }).expect(500);
-
-    // Then the unresolved order grants no mutation authority.
-    expect(response.body.code).toBe('MALFORMED_PROVIDER_RESPONSE');
-    expect(store.records.size).toBe(0);
-    expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
-  });
-
-  it.each([
-    403, 503,
-  ])('keeps a failed parent read with status %s outside the mutation executor', async (status) => {
-    // Given a provider refusal or outage while reading the parent PRs.
-    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-    const fetch = vi.fn(async (url) => new URL(url).searchParams.has('head')
-      ? jsonResponse({ message: 'Unavailable' }, status) : jsonResponse(pullRequest()));
-    vi.stubGlobal('fetch', fetch);
-    const { app, store } = makeApp();
-
-    // When stack order cannot be resolved.
-    await request(app).post('/api/source-control/github/pr/merge').send({
-      ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7 } }), method: 'merge',
-    }).expect(status);
-
-    // Then no write is claimed or dispatched and the read is not retried.
-    expect(store.records.size).toBe(0);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
-  });
-
-  it.each([
-    ['ready', 'running', { ready: true }, pullRequest({ draft: false })],
-    ['merge', 'running', { merged: true }, pullRequest({ state: 'closed', merged: true, merged_at: '2026-01-01T00:00:00Z' })],
-    ['merge', 'succeeded', { merged: true }, null],
-  ])('replays a %s mutation in %s state without repeating the write', async (kind, state, result, providerState) => {
+    ['ready', { ready: true }, pullRequest({ draft: false })],
+    ['draft', { draft: true }, pullRequest({ draft: true })],
+    ['merge', { merged: true }, pullRequest({ state: 'closed', merged: true, merged_at: '2026-01-01T00:00:00Z' })],
+  ])('reconciles a running %s mutation from provider state without repeating the write', async (kind, result, providerState) => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
     const target = {
       repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
@@ -1282,8 +1077,7 @@ describe('canonical GitHub mutations', () => {
     const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
     const input = { kind, actor, credential: credentialFor(account), target };
     if (kind === 'merge') input.method = 'merge';
-    const record = { key: 'request-one', inputDigest: digestMutationInput(input), kind: `change-request-${kind}`, actor, target, state };
-    if (state === 'succeeded') record.result = result;
+    const record = { key: 'request-one', inputDigest: digestMutationInput(input), kind: `change-request-${kind}`, actor, target, state: 'running' };
     const store = makeStore([record]);
     const fetch = vi.fn(async () => jsonResponse(providerState));
     vi.stubGlobal('fetch', fetch);
@@ -1296,8 +1090,36 @@ describe('canonical GitHub mutations', () => {
     const response = await request(app).post(`/api/source-control/github/pr/${kind}`)
       .send(body).expect(200);
     expect(response.body).toMatchObject({ replayed: true, result });
-    expect(fetch).toHaveBeenCalledTimes(state === 'running' ? 1 : 0);
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  });
+
+  it('converts an open pull request to a draft, and writes nothing when it already is one', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    let draft = false;
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      if (entry.method === 'GET') return jsonResponse(pullRequest({ draft }));
+      draft = true;
+      return jsonResponse({ data: { convertPullRequestToDraft: { pullRequest: { id: 'PR_node', isDraft: true } } } });
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'abc123' },
+    });
+
+    const response = await request(app).post('/api/source-control/github/pr/draft').send(body).expect(200);
+    expect(response.body.result).toEqual({ draft: true });
+    const mutation = requests.at(-1);
+    expect(mutation.path).toBe('/graphql');
+    expect(mutation.body.query).toContain('convertPullRequestToDraft');
+
+    const again = await request(app).post('/api/source-control/github/pr/draft')
+      .send({ ...body, idempotencyKey: 'request-two' }).expect(200);
+    expect(again.body.result).toEqual({ draft: true });
+    expect(requests.filter((entry) => entry.path === '/graphql')).toHaveLength(1);
   });
 
   it.each([

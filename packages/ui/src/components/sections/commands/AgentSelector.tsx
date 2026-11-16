@@ -14,6 +14,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
@@ -84,54 +85,27 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     onClose={closeMobilePanel}
                     title={t('settings.commands.agentSelector.title')}
                 >
-                <div className="space-y-1">
-                    <button
-                        type="button"
-                        className={cn(
-                            'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-start',
-                            !agentName ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
-                        )}
+                <MobileSheetRow
+                    selected={!agentName}
+                    onClick={() => {
+                        handleAgentChange('');
+                        closeMobilePanel();
+                    }}
+                >
+                    {t('settings.commands.agentSelector.notSelected')}
+                </MobileSheetRow>
+                {agents.map((agent) => (
+                    <MobileSheetRow
+                        key={agent.name}
+                        selected={agent.name === agentName}
                         onClick={() => {
-                            handleAgentChange('');
+                            handleAgentChange(agent.name);
                             closeMobilePanel();
                         }}
                     >
-                        <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>
-                            {t('settings.commands.agentSelector.notSelected')}
-                        </span>
-                        {!agentName && <div className="h-2 w-2 rounded-full bg-current" />}
-                    </button>
-                    {agents.map((agent) => {
-                        const isSelected = agent.name === agentName;
-
-                        return (
-                            <button
-                                key={agent.name}
-                                type="button"
-                                className={cn(
-                                    'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-start',
-                                    isSelected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
-                                )}
-                                onClick={() => {
-                                    handleAgentChange(agent.name);
-                                    closeMobilePanel();
-                                }}
-                            >
-                                <div className="flex flex-col">
-                                    <span className="typography-meta font-medium">{agentLabel(agent)}</span>
-                                    {agent.description && (
-                                        <span className="typography-micro text-muted-foreground">
-                                            {agent.description}
-                                        </span>
-                                    )}
-                                </div>
-                                {isSelected && (
-                                    <div className="h-2 w-2 rounded-full bg-current" />
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
+                        {agentLabel(agent)}
+                    </MobileSheetRow>
+                ))}
             </MobileOverlayPanel>
         );
     };
@@ -145,7 +119,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     disabled={!isReady}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
-                        'w-full',
+                        'w-fit max-w-full',
                         className
                     )}
                 >
@@ -172,14 +146,15 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     'w-fit opacity-60',
                     className
                 )}>
+                    {/* Picker triggers share one text style: the model picker's. */}
                     {agentName ? (
-                        <Icon name="robot-2" className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <Icon name="robot-2" className="size-3.5 text-muted-foreground flex-shrink-0" />
                     ) : isUnavailable ? (
-                        <Icon name="error-warning" className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <Icon name="error-warning" className="size-3.5 text-muted-foreground flex-shrink-0" />
                     ) : (
-                        <Spinner className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <Spinner className="size-3.5 text-muted-foreground flex-shrink-0" />
                     )}
-                    <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
+                    <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
                         {agentName || (isUnavailable ? t('common.unavailable') : t('common.loading'))}
                     </span>
                 </div>
@@ -191,11 +166,11 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             'w-fit cursor-pointer',
                             className
                         )}>
-                            <Icon name="robot-2" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-                            <span className="typography-micro min-w-0 flex-1 truncate text-start font-medium">
+                            <Icon name="robot-2" className="size-3.5 flex-shrink-0 text-muted-foreground" />
+                            <span className="typography-ui-label min-w-0 flex-1 truncate text-start font-normal text-foreground">
                                 {agentName || t('settings.commands.agentSelector.notSelected')}
                             </span>
-                            <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="max-w-[300px]" portalToBody={dropdownPortalToBody}>

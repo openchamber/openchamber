@@ -1,4 +1,5 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { asNonEmptyString } from '../../shared/guards.js';
 import { envelopeError } from './zhipuai-coding-plan.js';
 import {
   getAuthEntry,
@@ -55,6 +56,10 @@ const pickZaiGiftReset = (records) => {
     if (expireAt === null || expireAt <= now) continue;
     if (best === null || expireAt < best.expireAt) {
       best = { recordId: record.recordId, expireAt };
+      const grantType = asNonEmptyString(record.grantType);
+      if (grantType) {
+        best.grantType = grantType;
+      }
     }
   }
   return best;
@@ -102,7 +107,7 @@ export const isConfigured = (auth) => {
 const ZAI_GIFT_RESET_USE_URL = 'https://api.z.ai/api/biz/customer-package-reset/use';
 export const giftResetTypes = ['FIVE_HOUR', 'WEEK'];
 
-export const useZaiGiftReset = async ({ recordId, resetType }) => {
+export const useZaiGiftReset = async ({ recordId, resetType, grantType }) => {
   const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
@@ -110,10 +115,16 @@ export const useZaiGiftReset = async ({ recordId, resetType }) => {
   if (!apiKey) {
     throw new Error('Not configured');
   }
-  if (!Number.isFinite(recordId) || !giftResetTypes.includes(resetType)) {
+  const normalizedGrantType = asNonEmptyString(grantType);
+  if (!Number.isFinite(recordId)
+    || !giftResetTypes.includes(resetType)
+    || (grantType !== undefined && normalizedGrantType === null)) {
     throw new Error('Invalid gift reset request');
   }
 
+  // z.ai requires grantType (added to the contract in late Oct 2026). The value
+  // comes from the list record the user activates; GLOBAL is the only value
+  // observed so far, so it doubles as the fallback for records without one.
   const response = await fetch(ZAI_GIFT_RESET_USE_URL, {
     method: 'POST',
     headers: {
@@ -124,7 +135,8 @@ export const useZaiGiftReset = async ({ recordId, resetType }) => {
       targetType: 'PERSONAL',
       resetType,
       recordId,
-      requestId: crypto.randomUUID()
+      requestId: crypto.randomUUID(),
+      grantType: normalizedGrantType ?? 'GLOBAL'
     })
   });
 

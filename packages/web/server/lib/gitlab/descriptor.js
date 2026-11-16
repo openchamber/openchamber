@@ -22,6 +22,7 @@ export const gitlabDescriptor = Object.freeze({
     issues: true,
     changeRequests: true,
     draftChangeRequests: true,
+    draftConversion: true,
     // Rebase is not one atomic merge on GitLab, so it is never offered.
     merge: Object.freeze({ methods: Object.freeze(['merge', 'squash']) }),
     ci: true,

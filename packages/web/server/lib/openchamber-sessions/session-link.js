@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { buildLinkedIssuesPatch } from './session-linked-issues.js';
 
 /**
  * Links a pull request, merge request or issue to a session: the agent's way
@@ -16,8 +17,9 @@ import { sourceControlProviderDescriptors } from '../source-control/provider-des
  * names one. The shapes are the UI's (`packages/ui/src/lib/linkedIssues.ts`),
  * under `openchamber.linked_issues`.
  *
- * Linking only: removing a link stays with the user, so an agent never drops
- * one the user set.
+ * Unlinking names the link the way the agent linked it, by its url or its
+ * identifier, and removes it through the same list transform the Work Status
+ * unlink uses (`session-linked-issues.js`).
  */
 
 const MAX_TITLE_LENGTH = 300;
@@ -76,7 +78,9 @@ const trackerEntryKind = (provider) => (provider === 'linear' ? 'linear' : 'trac
  */
 export const buildLinkEntry = (input, linkedAt, { matchTrackerUrl = () => null } = {}) => {
   const parsed = linkInputSchema.safeParse(input);
-  if (!parsed.success) return { error: 'link needs url, title, and kind (change or issue); identifier is optional' };
+  // Fields put straight into parameters never arrive: the tool schema has no
+  // url or kind there and drops them, so the message names the nesting.
+  if (!parsed.success) return { error: 'Pass the link as parameters.link: { url, title, kind: "change" | "issue", identifier? }; the link was not added' };
   const { title, kind, identifier } = parsed.data;
   const url = parseHttpUrl(parsed.data.url);
   if (!url) return { error: 'link.url must be an absolute http(s) URL' };
@@ -179,6 +183,58 @@ const trackerUrlMatcher = async (trackers) => {
   };
 };
 
+const storedLinkSchema = z.looseObject({
+  id: z.string(),
+  url: z.string().optional().catch(undefined),
+  identifier: z.string().optional().catch(undefined),
+  number: z.number().optional().catch(undefined),
+  kind: z.string().optional().catch(undefined),
+  title: z.string().optional().catch(undefined),
+});
+
+/** An address as compared for unlinking: no fragment, no trailing slash, any case. */
+const comparableUrl = (value) => {
+  const url = parseHttpUrl(value.trim());
+  if (!url) return null;
+  url.hash = '';
+  return url.toString().replace(/\/+$/, '').toLowerCase();
+};
+
+/**
+ * The stored links `target` names. A url matches the entry linking that
+ * address would write (so a GitHub `/files` tab or a GitLab `/diffs` tab names
+ * its thread) or an entry stored under the same address, whoever linked it.
+ * An identifier matches an entry's identifier (`!42`, `ENG-7`), its id
+ * (`acme/app#7`) or a GitHub entry's `#7`, in any case.
+ */
+const storedLinks = (metadata) => linkMetadataSchema.parse(metadata ?? {}).openchamber.linked_issues
+  .flatMap((item) => {
+    const parsed = storedLinkSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
+
+const findLinkedEntries = (metadata, { url, identifier }, { matchTrackerUrl = () => null } = {}) => {
+  const stored = storedLinks(metadata);
+  if (url) {
+    const id = buildLinkEntry({ url, title: 'unlink', kind: 'issue' }, 0, { matchTrackerUrl }).entry?.id;
+    const address = comparableUrl(url);
+    return stored.filter((entry) => entry.id === id || (address !== null && entry.url !== undefined && comparableUrl(entry.url) === address));
+  }
+  const wanted = identifier.toUpperCase();
+  // `#N` is GitHub's own label; the composer also stores GitLab threads as
+  // issue or pull entries, where a merge request is `!N`.
+  const isGitHubThread = (entry) => (entry.kind === 'issue' || entry.kind === 'pull')
+    && entry.number !== undefined
+    && parseHttpUrl(entry.url ?? '')?.hostname.replace(/^www\./, '').toLowerCase() === NATIVE_THREAD.host;
+  return stored.filter((entry) => [
+    entry.id,
+    entry.identifier,
+    isGitHubThread(entry) ? `#${entry.number}` : undefined,
+  ].some((name) => name?.toUpperCase() === wanted));
+};
+
+const trimmedText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+
 /** `trackers` is the tracker registry; its trackers' links become tracker entries. */
 export const createSessionLinker = ({ updateMetadata, createError, trackers = null, now = Date.now }) => {
   const link = async ({ sessionId, directory, link: input }) => {
@@ -190,5 +246,40 @@ export const createSessionLinker = ({ updateMetadata, createError, trackers = nu
     return { sessionId, linked: entry, changed };
   };
 
-  return { link };
+  /**
+   * Removes the link `target.url` or `target.identifier` names. A url removes
+   * every entry for that thread; an identifier that names more than one link
+   * removes nothing and asks for the url. Nothing to remove is an error that
+   * lists what is linked, so the next call can name it.
+   */
+  const unlink = async ({ sessionId, directory, target }) => {
+    if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
+    const url = trimmedText(target?.url);
+    const identifier = trimmedText(target?.identifier);
+    if (!url && !identifier) throw createError('Name the link to remove by url or identifier, the way it was linked', 400);
+    const matchTrackerUrl = url ? await trackerUrlMatcher(trackers) : undefined;
+
+    let matches = [];
+    let linkedUrls = [];
+    const { changed } = await updateMetadata(sessionId, (current) => {
+      matches = findLinkedEntries(current, { url, identifier }, { matchTrackerUrl });
+      if (matches.length === 0) {
+        linkedUrls = storedLinks(current).map((entry) => entry.url ?? entry.id);
+        return null;
+      }
+      if (!url && matches.length > 1) return null;
+      return buildLinkedIssuesPatch(current, matches, false);
+    }, { directory: directory ?? '' });
+
+    if (matches.length === 0) {
+      throw createError(`No link on this session matches ${url ?? identifier}. Linked: ${linkedUrls.join(', ') || 'nothing'}`, 404);
+    }
+    if (!url && matches.length > 1) {
+      throw createError(`${identifier} names ${matches.length} links: ${matches.map((entry) => entry.url ?? entry.id).join(', ')}. Pass url to pick one; nothing was removed`, 409);
+    }
+    const unlinked = matches.map(({ id, number, title, url: address, kind }) => ({ id, number, title, url: address, kind }));
+    return { sessionId, unlinked, changed };
+  };
+
+  return { link, unlink };
 };

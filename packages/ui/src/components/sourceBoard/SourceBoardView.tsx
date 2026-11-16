@@ -82,6 +82,7 @@ import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
 import { useBoardRevalidation } from './useBoardRevalidation';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 const NO_REPOSITORIES: readonly string[] = [];
 const NO_FOLLOWED: TrackedItem[] = [];
@@ -165,16 +166,16 @@ const MobileBoardHeader: React.FC<{ onClose?: () => void; onBack?: () => void; c
     const { t } = useI18n();
     const action = onBack ?? onClose;
     return (
-        <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-edge px-3">
+        <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge')}>
             {action ? (
                 <button
                     type="button"
-                    className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className={MOBILE_HEADER_BUTTON_CLASS}
                     aria-label={onBack ? t('references.picker.actions.back') : t('mobile.surface.closeAria')}
                     onClick={action}
                     style={{ touchAction: 'manipulation' }}
                 >
-                    <Icon name={onBack ? 'arrow-left-s' : 'close'} className="size-5" />
+                    <Icon name={onBack ? 'arrow-left' : 'close'} className="size-5" />
                 </button>
             ) : null}
             <div className="flex min-w-0 flex-1 items-center">{children}</div>

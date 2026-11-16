@@ -151,6 +151,18 @@ describe('filesystem search', () => {
       };
 
       const search = createFsSearchRuntime({ fsPromises: fs, path, spawn: neverCloses, resolveGitBinaryForSpawn: () => 'git', workspaceSearch });
+
+      // A caller that moved on kills the Git read at once and gets no answer,
+      // with the 50 ms timeout pushed out of the way.
+      process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = '0';
+      const stoppable = createFsSearchRuntime({ fsPromises: fs, path, spawn: neverCloses, resolveGitBinaryForSpawn: () => 'git', workspaceSearch });
+      const abort = new AbortController();
+      const stopped = stoppable.searchFilesystemFiles(root, { query: '', limit: 10, respectGitignore: true, signal: abort.signal });
+      setTimeout(() => abort.abort(), 20);
+      await expect(stopped).rejects.toMatchObject({ name: 'AbortError' });
+      expect(kills).toEqual(['SIGKILL']);
+      kills.length = 0;
+
       const files = await Promise.race([
         search.searchFilesystemFiles(root, { query: '', limit: 10, respectGitignore: true }),
         new Promise((_, reject) => {

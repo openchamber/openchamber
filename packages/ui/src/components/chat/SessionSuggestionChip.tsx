@@ -1,5 +1,4 @@
 import React from 'react';
-import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -46,8 +45,6 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
     }
   }, [sessionId, dismissing]);
 
-  useComposerStatusChip('suggestion', suggestion && !hidden ? { icon: 'pencil-ai-2', label: suggestion } : null);
-
   if (!suggestion || hidden) {
     return null;
   }
@@ -73,18 +70,22 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
             {suggestion}
           </TooltipContent>
         </Tooltip>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(event) => void handleDismiss(event)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-label={t('chat.suggestion.dismissAria')}
-          title={t('chat.suggestion.dismissAria')}
-          className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
-        >
-          <Icon name="close" className="size-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={(event) => void handleDismiss(event)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label={t('chat.suggestion.dismissAria')}
+              className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
+            >
+              <Icon name="close" className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('chat.suggestion.dismissAria')}</TooltipContent>
+        </Tooltip>
     </>
   );
 

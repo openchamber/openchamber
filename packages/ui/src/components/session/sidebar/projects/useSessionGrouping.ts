@@ -1,4 +1,3 @@
-import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -17,7 +16,6 @@ import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
-import { listedChildren } from '../listedChildren';
 
 type Args = {
   homeDirectory: string | null;
@@ -82,44 +80,6 @@ export const useSessionGrouping = (args: Args) => {
     }
     return sessionOwnersRef.current;
   }, [args.sessionOwners]);
-  const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
-    return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
-  }, []);
-
-  const buildSessionSearchText = React.useCallback((session: Session): string => {
-    const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null) ?? '';
-    const sessionTitle = (session.title || t('sessions.sidebar.session.untitled')).trim();
-    return `${sessionTitle} ${sessionDirectory}`.toLowerCase();
-  }, [t]);
-
-  const filterSessionNodesForSearch = React.useCallback(
-    (nodes: SessionNode[], query: string): SessionNode[] => {
-      if (!query) {
-        return nodes;
-      }
-
-      const normalizedQuery = query.trim().toLowerCase();
-      const isIdQuery = normalizedQuery.startsWith('ses_');
-      return nodes.flatMap((node) => {
-        if (isIdQuery && isArchivedSession(node.session)) return [];
-        const nodeMatches = isIdQuery
-          ? node.session.id.toLowerCase() === normalizedQuery
-          : matchesRankQuery([buildSessionSearchText(node.session)], query, SIDEBAR_SEARCH);
-        if (nodeMatches) {
-          return [node];
-        }
-
-        const filteredChildren = filterSessionNodesForSearch([...listedChildren(node)], query);
-        if (filteredChildren.length === 0) {
-          return [];
-        }
-
-        return [{ ...node, children: filteredChildren }];
-      });
-    },
-    [buildSessionSearchText],
-  );
-
   const buildGroupedSessions = React.useCallback(
     (
       projectSessions: Session[],
@@ -415,9 +375,6 @@ export const useSessionGrouping = (args: Args) => {
   }, []);
 
   return {
-    buildGroupSearchText,
-    buildSessionSearchText,
-    filterSessionNodesForSearch,
     buildGroupedSessions,
     getGroupingSessions,
   };

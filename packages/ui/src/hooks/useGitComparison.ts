@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitDiffResponse } from '@/lib/api/types';
-import { getCommitFiles, getGitCommitDiff, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
+import { getCommitFileDiff, getCommitFiles, getGitCommitDiff, getGitRangeDiff, getGitRangeFiles, getGitRangeFileVersions } from '@/lib/gitApi';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useI18n } from '@/lib/i18n';
@@ -108,7 +108,7 @@ export function useGitComparison(
       return { diff: file.patch };
     }
     return target.kind === 'branch'
-      ? getGitRangeDiff(directory, { base: target.baseRef, head: target.headRef, path: filePath, contextLines, includeWorkingTree: true })
+      ? getGitRangeDiff(directory, { base: target.baseRef, head: target.headRef, path: filePath, previousPath: file.previousPath, contextLines, includeWorkingTree: true })
       : getGitCommitDiff(directory, { hash: target.hash, path: filePath, previousPath: file.previousPath, contextLines });
   }, [directory, enabled, filesByPath, key, t]);
 
@@ -121,6 +121,17 @@ export function useGitComparison(
     return fetchPullRequestFile(directory, target, context, { path: file.path, previousPath: file.previousPath, status: file.status });
   }, [directory, enabled, filesByPath, key, t]);
 
+  // A document is compared in the viewer, so it needs both whole versions.
+  const fetchVersions = useCallback(async (filePath: string): Promise<{ original: string; modified: string }> => {
+    const { key: targetKey, source: target, enabled: active, readContext: context } = sourceRef.current;
+    const file = filesByPath.get(filePath);
+    if (!directory || targetKey !== key || !target || !file || !enabled || !active) throw new Error(t('diffView.state.failedToLoadDiff'));
+    if (target.kind === 'commit') return getCommitFileDiff(directory, target.hash, filePath, true, file.previousPath);
+    if (target.kind === 'branch') return getGitRangeFileVersions(directory, { base: target.baseRef, head: target.headRef, path: filePath, previousPath: file.previousPath, includeWorkingTree: true });
+    if (!context) throw new Error(t('diffView.state.failedToLoadDiff'));
+    return fetchPullRequestFile(directory, target, context, { path: file.path, previousPath: file.previousPath, status: file.status, binary: true });
+  }, [directory, enabled, filesByPath, key, t]);
+
   return {
     key,
     revision: current?.status === 'ready' ? current.revision : 0,
@@ -130,5 +141,6 @@ export function useGitComparison(
     refresh,
     fetchDiff,
     fetchFullFile,
+    fetchVersions,
   };
 }

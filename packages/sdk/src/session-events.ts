@@ -17,9 +17,15 @@
  * step still driving it). `turn-failed`: the turn ended in an error.
  * `permission-asked`: the agent asked for a permission the user has to
  * answer. `question-asked`: the agent asked the user a question through a
- * form or a page. A turn the user stopped emits nothing.
+ * form or a page. A turn the user stopped emits nothing. `turn-started`: the
+ * session began a turn. `session-created`, `session-archived` and
+ * `session-deleted` name what they say; subagents' sessions are included, with
+ * `session.parentId` set.
  */
-export const GUEST_SESSION_EVENT_TYPES = ['turn-finished', 'turn-failed', 'permission-asked', 'question-asked'] as const;
+export const GUEST_SESSION_EVENT_TYPES = [
+  'turn-finished', 'turn-failed', 'permission-asked', 'question-asked',
+  'turn-started', 'session-created', 'session-archived', 'session-deleted',
+] as const;
 export type GuestSessionEventType = (typeof GUEST_SESSION_EVENT_TYPES)[number];
 
 /** Route on the service loopback OpenChamber posts every event to. */
@@ -43,7 +49,7 @@ export const SESSION_EVENT_ERROR_MAX = 2_000;
  * panel or background entry for this alone.
  */
 export type SessionEventsContribution = {
-  /** 1 to 4 distinct types. */
+  /** 1 to 8 distinct types. */
   events: GuestSessionEventType[];
   /** Asks for the `transcript` capability: the reply, the question, the permission's detail. */
   content?: true;
@@ -96,19 +102,51 @@ export type GuestPermissionAskedContent = {
   message: string | null;
 };
 
+/**
+ * One field of a form, enough to ask it elsewhere and answer it with
+ * `sessions.answerForm`: the value goes under `key`. `options` are the
+ * choices of a `string` or `multiselect` field (send their `value`);
+ * `custom` says a multiselect also takes values of its own. `when` lists
+ * conditions on earlier fields' answers; a field whose conditions do not all
+ * hold is not asked, and a value sent for it is dropped. Fields left out of
+ * the answer take their default. `external` is a link the user has to open
+ * and cannot be answered from a service.
+ */
+export type GuestFormField = {
+  key: string;
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'multiselect' | 'external';
+  title: string;
+  description: string | null;
+  required: boolean;
+  options?: Array<{ value: string; label: string }>;
+  custom?: boolean;
+  when?: Array<{ key: string; op: 'eq' | 'neq'; value: string | number | boolean }>;
+};
+
+/**
+ * A `page` is the agent's own page waiting for a click; it cannot be answered
+ * from a service. Sending to the session with `sessions.send` closes it as
+ * if the user wrote in the chat, and so does it for an open form.
+ */
 export type GuestQuestionAskedContent = {
   type: 'question-asked';
   sessionTitle: string | null;
   ask:
-    | { kind: 'form'; id: string; title: string; fields: Array<{ title: string; description: string | null }> }
+    | { kind: 'form'; id: string; title: string; fields: GuestFormField[] }
     | { kind: 'page'; id: string; title: string };
+};
+
+export type GuestSessionTitleContent = {
+  type: 'turn-started' | 'session-created' | 'session-archived' | 'session-deleted';
+  sessionTitle: string | null;
 };
 
 export type GuestSessionEventContent =
   | GuestTurnFinishedContent
   | GuestTurnFailedContent
   | GuestPermissionAskedContent
-  | GuestQuestionAskedContent;
+  | GuestQuestionAskedContent
+  | GuestSessionTitleContent;
 
 /**
  * One event, as OpenChamber posts it. `event` is what every subscriber gets;
@@ -116,7 +154,9 @@ export type GuestSessionEventContent =
  * that have content. `project.directory` is the session's directory, `null`
  * when OpenChamber does not know it. `session.parentId` is set for a
  * subagent's session. `permission.requestId` names the request on a
- * `permission-asked` event.
+ * `permission-asked` event, and `question` what a `question-asked` event
+ * waits on; both are what `sessions.answerPermission` and
+ * `sessions.answerForm` take.
  */
 export type GuestSessionEventRequest = {
   v: typeof SESSION_EVENTS_WIRE_VERSION;
@@ -131,6 +171,7 @@ export type GuestSessionEventRequest = {
     project: { directory: string | null };
     linked: GuestSessionLinkedItem[];
     permission?: { requestId: string };
+    question?: { kind: 'form' | 'page'; id: string };
   };
   content?: GuestSessionEventContent;
 };
@@ -149,9 +190,11 @@ export const isGuestSessionEventType = (value: string): value is GuestSessionEve
 type WireSession = { id?: unknown; parentId?: unknown };
 type WireProject = { directory?: unknown };
 type WirePermission = { requestId?: unknown };
+type WireQuestion = { kind?: unknown; id?: unknown };
 type WireContent = { type?: unknown };
 type WireEvent = {
-  id?: unknown; type?: unknown; at?: unknown; session?: WireSession; project?: WireProject; linked?: unknown; permission?: WirePermission;
+  id?: unknown; type?: unknown; at?: unknown; session?: WireSession; project?: WireProject; linked?: unknown;
+  permission?: WirePermission; question?: WireQuestion;
 };
 type WireRequest = { v?: unknown; requestId?: unknown; event?: WireEvent; content?: WireContent };
 
@@ -175,7 +218,7 @@ export const readSessionEventRequest = (body: string): GuestSessionEventRequest 
   if (v !== SESSION_EVENTS_WIRE_VERSION) return null;
   if (String(requestId) !== requestId || requestId.length === 0) return null;
   if (Object(event) !== event || event === undefined) return null;
-  const { id, type, at, session, project, linked, permission } = event;
+  const { id, type, at, session, project, linked, permission, question } = event;
   if (String(id) !== id || id.length === 0) return null;
   if (String(type) !== type || !isGuestSessionEventType(type)) return null;
   if (!Number.isFinite(at)) return null;
@@ -200,6 +243,13 @@ export const readSessionEventRequest = (body: string): GuestSessionEventRequest 
     const permissionRequestId = permission.requestId;
     if (String(permissionRequestId) !== permissionRequestId || permissionRequestId.length === 0) return null;
     request.event.permission = { requestId: permissionRequestId };
+  }
+  if (question !== undefined) {
+    if (Object(question) !== question) return null;
+    const { kind, id: questionId } = question;
+    if (kind !== 'form' && kind !== 'page') return null;
+    if (String(questionId) !== questionId || questionId.length === 0) return null;
+    request.event.question = { kind, id: questionId };
   }
   if (content !== undefined) {
     if (Object(content) !== content || content.type !== type) return null;

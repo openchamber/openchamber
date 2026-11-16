@@ -16,7 +16,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getArchivedScopeKey } from '@/lib/sessionFolders/folderScopes';
 import { useSessionFoldersStore } from './useSessionFoldersStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
 import { z } from 'zod';
@@ -60,7 +60,14 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
-  adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
+  /**
+   * Registers the folder of a session and resolves to the session's folder as
+   * the server confirmed it, or null when `isCurrent` no longer holds. The
+   * server moves a session recorded under a symlinked spelling of its folder
+   * to the canonical path, so the answer can differ from `directory`;
+   * `isCurrent` is asked with each of the two.
+   */
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: (directory: string) => boolean) => Promise<string | null>;
   addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
@@ -404,6 +411,17 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
 };
 
+// Discovery looks the project up in the server's list, so it waits for the
+// debounced write that adds these entries. One project at a time, so adding a
+// batch does not walk every folder at once.
+const discoverIconsOnceSaved = async (get: () => ProjectsStore, entries: ProjectEntry[]) => {
+  const saved = await updateDesktopSettings({ projects: get().projects });
+  if (!saved.ok) return;
+  for (const entry of entries) {
+    await get().discoverProjectIcon(entry.id);
+  }
+};
+
 const persistManualProjectOrder = (manualOrder: string[]) => {
   try {
     safeStorage.setItem(getProjectsStorageKey() + ':manualOrder', JSON.stringify(manualOrder));
@@ -607,27 +625,32 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     adoptSessionProject: async (sessionId, directory, isCurrent) => {
-      if (!isCurrent()) return false;
+      if (!isCurrent(directory)) return null;
       if (isVSCodeProjectsRuntime) {
         const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
         if (!add) throw new Error('Adding workspace folders is unavailable');
         const folders = await add(directory);
-        if (!isCurrent()) return false;
+        if (!isCurrent(directory)) return null;
         get().syncVSCodeWorkspaceFolders(folders);
         if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
-        return true;
+        return directory;
       }
-      const response = await runBackgroundNetworkTask(() => isCurrent() ? runtimeFetch('/api/projects/session-directory', {
+      const response = await runBackgroundNetworkTask(() => isCurrent(directory) ? runtimeFetch('/api/projects/session-directory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, directory }),
       }) : Promise.resolve(null));
-      if (!response) return false;
+      if (!response) return null;
       if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
-      const { project } = z.object({ project: z.object({
-        id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
-        addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
-      }) }).parse(await response.json());
-      if (!isCurrent()) return false;
+      const { project, directory: answered } = z.object({
+        project: z.object({
+          id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
+          addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
+        }),
+        // The native mobile app can reach a server that predates this field.
+        directory: z.string().min(1).optional(),
+      }).parse(await response.json());
+      const confirmed = answered ?? directory;
+      if (!isCurrent(confirmed)) return null;
       // This response owns only an append, never a replacement or activation.
       if (!get().projects.some((entry) => entry.id === project.id)) {
         const projects = [...get().projects, project];
@@ -637,7 +660,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       // Join the append to this window's pending full-registry mutations. An
       // older debounced manual add must not overwrite the confirmed project.
       void updateDesktopSettings({ projects: get().projects });
-      return true;
+      return confirmed;
     },
 
     addProject: async (path: string, options?: { label?: string; id?: string }) => {
@@ -701,7 +724,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
-      void get().discoverProjectIcon(entry.id);
+      void discoverIconsOnceSaved(get, [entry]);
       return entry;
     },
 
@@ -763,9 +786,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       // Mirror addProject: the first newly added project becomes active.
       get().setActiveProject(entries[0].id);
-      for (const entry of entries) {
-        void get().discoverProjectIcon(entry.id);
-      }
+      void discoverIconsOnceSaved(get, entries);
       return entries;
     },
 
@@ -1020,6 +1041,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Custom icons are not supported in this runtime' };
       }
 
+      const runtime = getRuntimeKey();
       try {
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
           method: 'POST',
@@ -1034,15 +1056,23 @@ export const useProjectsStore = create<ProjectsStore>()(
           error?: string;
           skipped?: boolean;
           reason?: string;
-          settings?: DesktopSettings;
+          project?: { iconImage?: unknown } | null;
         } | null;
 
         if (!response.ok) {
           return { ok: false, error: payload?.error || 'Failed to discover project icon' };
         }
 
-        if (payload?.settings) {
-          get().synchronizeFromSettings(payload.settings, { adoptActiveProject: false });
+        // The search can outlast changes made in this window, so the answer's
+        // settings are already old: only this project's icon is taken from it.
+        // A full-list write still queued or in flight lacks the icon and would
+        // erase it on the server, so the list that has it is written after.
+        const iconImage = sanitizeProjectIconImage(payload?.project?.iconImage);
+        if (iconImage && runtime === getRuntimeKey() && get().projects.some((entry) => entry.id === id)) {
+          const projects = get().projects.map((entry) => (entry.id === id ? { ...entry, iconImage } : entry));
+          set({ projects });
+          cacheProjects(projects, get().activeProjectId);
+          void updateDesktopSettings({ projects });
         }
 
         return {

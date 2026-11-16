@@ -7,7 +7,7 @@ const MAX_DOCUMENT_CHARS = 64 * 1024 * 1024;
 
 type LoadAsset = (path: string) => Promise<Response>;
 
-const toDataUrl = async (blob: Blob): Promise<string> => {
+export const toDataUrl = async (blob: Blob): Promise<string> => {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 8192) {

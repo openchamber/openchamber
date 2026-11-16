@@ -19,7 +19,6 @@ type FolderCallbacks = {
 type RowPropsCapture = Pick<SessionGroupSectionProps,
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
 >;
 
@@ -75,6 +74,12 @@ mock.module('../sessions/SessionTreeItem', () => ({
   },
 }));
 
+// Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => ({ isMobile: false }),
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
+
 const { SessionGroupSection } = await import('./SessionGroupSection');
 
 const folder: SessionFolder = {
@@ -108,9 +113,6 @@ const createProps = (): SessionGroupSectionProps => ({
   groupKey: 'project:main',
   projectId: 'project',
   hideGroupLabel: true,
-  hasSessionSearchQuery: false,
-  normalizedSessionSearchQuery: '',
-  groupSearchDataByGroup: new WeakMap(),
   collapsedGroups: new Set(),
   hideDirectoryControls: false,
   showMoreGroupSessions: () => undefined,
@@ -135,7 +137,6 @@ const createProps = (): SessionGroupSectionProps => ({
   setOpenSidebarMenuKey: () => undefined,
   startFolderRename: () => undefined,
   allowReselect: false,
-  resetSessionSearch: () => undefined,
   deleteSessionConfirm: null,
   setDeleteSessionConfirm: () => undefined,
   startSessionWorktreeMenuLoad: () => ({
@@ -234,22 +235,18 @@ describe('SessionGroupSection public behavior', () => {
     const root = createRoot(dom.container);
     const firstSelected = () => undefined;
     const nextSelected = () => undefined;
-    const firstResetSearch = () => undefined;
-    const nextResetSearch = () => undefined;
     const initialProps = createProps();
 
     try {
-      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} onSessionSelected={firstSelected} resetSessionSearch={firstResetSearch} /></I18nProvider>));
+      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} onSessionSelected={firstSelected} /></I18nProvider>));
       expect(rowPropsCapture?.onSessionSelected).toBe(firstSelected);
-      expect(rowPropsCapture?.resetSessionSearch).toBe(firstResetSearch);
       expect(rowPropsCapture?.deleteSessionConfirm).toBeNull();
 
       // SAFETY: the confirmation is only forwarded by identity to the row mock.
       const confirmation = { session: { id: 'session-a' } as Session, descendantCount: 0, descendantIds: [], archivedBucket: false };
-      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} allowReselect onSessionSelected={nextSelected} resetSessionSearch={nextResetSearch} deleteSessionConfirm={confirmation} /></I18nProvider>));
+      await act(async () => root.render(<I18nProvider><SessionGroupSection {...initialProps} group={groupWithSession} allowReselect onSessionSelected={nextSelected} deleteSessionConfirm={confirmation} /></I18nProvider>));
       expect(rowPropsCapture?.allowReselect).toBe(true);
       expect(rowPropsCapture?.onSessionSelected).toBe(nextSelected);
-      expect(rowPropsCapture?.resetSessionSearch).toBe(nextResetSearch);
       expect(rowPropsCapture?.deleteSessionConfirm).toBe(confirmation);
     } finally {
       await act(async () => root.unmount());

@@ -123,6 +123,7 @@ export function createGiteaClient({
           const result = { status: response.status, headers: response.headers };
           if (response.status === 204) return { ...result, body: null };
           if (responseType === 'text') return { ...result, body: await response.text() };
+          if (responseType === 'bytes') return { ...result, body: Buffer.from(await response.arrayBuffer()) };
           const text = await response.text();
           return { ...result, body: text ? JSON.parse(text) : null };
         }
@@ -152,6 +153,7 @@ export function createGiteaClient({
   return Object.freeze({
     get: async (path, query) => (await send('GET', path, { query })).body,
     text: async (path, query) => (await send('GET', path, { query, responseType: 'text' })).body,
+    bytes: async (path, query) => (await send('GET', path, { query, responseType: 'bytes' })).body,
     post: async (path, body) => (await send('POST', path, { body })).body,
     patch: async (path, body) => (await send('PATCH', path, { body })).body,
     put: async (path, body) => (await send('PUT', path, { body })).body,

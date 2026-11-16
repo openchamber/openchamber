@@ -41,12 +41,29 @@ describe('source-control mutation storage', () => {
     { ok: true, merged: true, status: 'merged', retargeted: 8 },
     { ok: true, merged: false, status: 'pending', retargeted: null },
     { ok: true, merged: false, status: 'enqueued', retargeted: null },
+    { merged: false, outcome: 'queued', stacked: true },
+    { merged: false, outcome: 'merging', stacked: false },
   ])('preserves compact stack results across restart: %j', async (result) => {
     const { filePath, store } = await makeStore();
     const claim = claimFor('stack');
     await store.claim(claim);
     await store.complete(claim.key, claim.inputDigest, { state: 'succeeded', result });
-    expect((await createMutationStore({ filePath }).read('stack')).result).toEqual(result);
+    const reopened = createMutationStore({ filePath });
+    expect((await reopened.read('stack')).result).toEqual(result);
+    expect((await reopened.complete(claim.key, claim.inputDigest, { state: 'succeeded', result })).result).toEqual(result);
+  });
+
+  it.each([
+    { ok: false }, { registered: 'true' }, { nativeNumber: 0 },
+    { status: 'unknown' }, { retargeted: -1 },
+  ])('rejects malformed compact stack fields without changing the snapshot: %j', async (result) => {
+    const { filePath, store } = await makeStore();
+    const claim = claimFor('stack');
+    await store.claim(claim);
+    const previous = await fs.readFile(filePath, 'utf8');
+    await expect(store.complete(claim.key, claim.inputDigest, { state: 'succeeded', result }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_MUTATIONS' });
+    expect(await fs.readFile(filePath, 'utf8')).toBe(previous);
   });
 
   it('claims once across processes and preserves sibling claim and completion writes', async () => {
@@ -171,6 +188,21 @@ describe('source-control mutation storage', () => {
       .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_CONFLICT', record: completed });
     await expect(store.complete('key-one', 'different', { state: 'succeeded' }))
       .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_CONFLICT', record: completed });
+  });
+
+  it('keeps the ready/draft transition result through completion, replay and reload', async () => {
+    const { filePath, store } = await makeStore({ now: () => 100 });
+    for (const [kind, result] of [['change-request-ready', { ready: true }], ['change-request-draft', { draft: true }]]) {
+      await store.claim(claimFor(kind, `digest-${kind}`, { kind }));
+      const completed = await store.complete(kind, `digest-${kind}`, { state: 'succeeded', result });
+      expect(completed.result).toEqual(result);
+      await expect(store.complete(kind, `digest-${kind}`, { state: 'succeeded', result })).resolves.toEqual(completed);
+    }
+
+    const reopened = createMutationStore({ filePath });
+    for (const [kind, result] of [['change-request-ready', { ready: true }], ['change-request-draft', { draft: true }]]) {
+      await expect(reopened.read(kind)).resolves.toMatchObject({ state: 'succeeded', result });
+    }
   });
 
   it('stores only compact failed replay metadata', async () => {

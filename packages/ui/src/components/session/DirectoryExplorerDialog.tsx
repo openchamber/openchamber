@@ -42,7 +42,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
-import { cn, formatPathForDisplay } from '@/lib/utils';
+import { cn, formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatProjectLabel } from './sidebar/utils';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDeviceInfo } from '@/lib/device';
@@ -70,7 +72,14 @@ type BrowseEntry = {
 };
 
 // An added folder can still be browsed for its subfolders; only adding it again is blocked.
-type BrowseRow = { value: string; name: string; path: string; added: boolean };
+// A link to an added project names that project and where it really is.
+type BrowseRow = {
+  value: string;
+  name: string;
+  path: string;
+  added: boolean;
+  linkTarget: { label: string; path: string } | null;
+};
 
 type ExplorerView = 'folder' | 'opencode' | 'clone';
 
@@ -249,11 +258,26 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   const explorerRootDirectory = dialogHomeDirectory || homeDirectory;
 
-  const addedProjectPaths = React.useMemo(() => new Set(
-    projects
-      .map((project) => normalizeDirectoryPath(project.path))
-      .filter((path): path is string => Boolean(path))
-  ), [projects]);
+  const addedProjectsByPath = React.useMemo(() => {
+    const byPath = new Map<string, (typeof projects)[number]>();
+    for (const project of projects) {
+      const normalized = normalizeDirectoryPath(project.path);
+      if (normalized) byPath.set(normalized, project);
+    }
+    return byPath;
+  }, [projects]);
+  // Settings keep a project under its real path, so a folder that links to an
+  // added project is that project and adding it again would add nothing.
+  // Keyed by the normalized folder path; filled as folders are listed.
+  const [realPaths, setRealPaths] = React.useState<ReadonlyMap<string, string>>(new Map());
+  const addedProjectOf = React.useCallback((path: string) => {
+    const normalized = normalizeDirectoryPath(path);
+    if (!normalized) return null;
+    const own = addedProjectsByPath.get(normalized);
+    if (own) return own;
+    const real = normalizeDirectoryPath(realPaths.get(normalized));
+    return (real && addedProjectsByPath.get(real)) || null;
+  }, [addedProjectsByPath, realPaths]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -268,6 +292,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setIdentityChoice(null);
     setSelectedPaths([]);
     setShowHidden(false);
+    setRealPaths(new Map());
 
     let cancelled = false;
     const resolveHome = async () => {
@@ -338,10 +363,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setIsBrowseDirectoryMissing(false);
     setBrowseErrorReason(null);
     opencodeClient.listLocalDirectory(browseDirectoryAbsolutePath)
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) return;
-        setIsBrowseDirectoryMissing(false);
-        setBrowseErrorReason(null);
         const nextEntries = result
           .filter((entry) => entry.isDirectory)
           .map((entry) => ({
@@ -349,6 +372,23 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             path: normalizeSeparators(entry.path),
           }))
           .sort((left, right) => left.name.localeCompare(right.name));
+        // With the rows, so a link never shows as addable first. The folder
+        // itself is resolved too: the path field can point at it.
+        const resolved = await opencodeClient.getDirectoryRealPaths([
+          browseDirectoryAbsolutePath,
+          ...nextEntries.map((entry) => entry.path),
+        ]);
+        if (cancelled) return;
+        setIsBrowseDirectoryMissing(false);
+        setBrowseErrorReason(null);
+        setRealPaths((current) => {
+          const next = new Map(current);
+          for (const [path, realPath] of resolved) {
+            const normalized = normalizeDirectoryPath(path);
+            if (normalized) next.set(normalized, realPath);
+          }
+          return next;
+        });
         setEntries(nextEntries);
       })
       .catch((error) => {
@@ -381,16 +421,28 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [browseFilterQuery, entries, showHidden]);
 
   const rows = React.useMemo<BrowseRow[]>(() => {
+    // A folder is a link when it is not where its parent really is: a link
+    // further up (a linked home folder) moves every row and marks none.
+    const folderRealPath = realPaths.get(normalizeDirectoryPath(browseDirectoryAbsolutePath) ?? '');
     return filteredEntries.map((entry) => {
-      const normalized = normalizeDirectoryPath(entry.path);
+      const project = addedProjectOf(entry.path);
+      const unlinkedPath = !folderRealPath ? entry.path
+        : isRootPath(folderRealPath) ? `/${entry.name}`
+          : `${trimTrailingSeparators(folderRealPath)}/${entry.name}`;
+      const isLink = project !== null && normalizeDirectoryPath(project.path) !== normalizeDirectoryPath(unlinkedPath);
       return {
         value: `browse:${entry.path}`,
         name: entry.name,
         path: entry.path,
-        added: Boolean(normalized && addedProjectPaths.has(normalized)),
+        added: project !== null,
+        // The sidebar's name for the project.
+        linkTarget: isLink ? {
+          label: formatProjectLabel(project.label?.trim() || formatDirectoryName(project.path, explorerRootDirectory) || project.path),
+          path: project.path,
+        } : null,
       };
     });
-  }, [addedProjectPaths, filteredEntries]);
+  }, [addedProjectOf, browseDirectoryAbsolutePath, explorerRootDirectory, filteredEntries, realPaths]);
 
   React.useEffect(() => {
     setHighlightedIndex(0);
@@ -401,11 +453,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return trimTrailingSeparators(displayPathToAbsolutePath(resolvedQuery, explorerRootDirectory));
   }, [explorerRootDirectory, resolvedQuery]);
   const selectionPaths = React.useMemo(
-    () => selectedPaths.filter((path) => {
-      const normalized = normalizeDirectoryPath(path);
-      return Boolean(normalized && !addedProjectPaths.has(normalized));
-    }),
-    [addedProjectPaths, selectedPaths]
+    () => selectedPaths.filter((path) => Boolean(normalizeDirectoryPath(path)) && !addedProjectOf(path)),
+    [addedProjectOf, selectedPaths]
   );
   const togglePathSelection = React.useCallback((path: string) => {
     setSelectedPaths((prev) => (
@@ -431,8 +480,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return isRootPath(targetPath) ? `/${name}` : `${targetPath}/${name}`;
   }, [browseErrorReason, cloneRemoteUrl, exactEntry, isBrowseDirectoryMissing, isCloneMode, isLoading, resolvedQuery, targetPath]);
   const submitTarget = isCloneMode ? cloneDestination : targetPath;
-  const normalizedTargetPath = normalizeDirectoryPath(submitTarget);
-  const isAlreadyAdded = Boolean(normalizedTargetPath && addedProjectPaths.has(normalizedTargetPath));
+  const isAlreadyAdded = addedProjectOf(submitTarget) !== null;
   const shouldCreateTarget = Boolean(
     targetPath
     && !isAlreadyAdded
@@ -593,8 +641,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const handleQuickAdd = React.useCallback(async (event: React.MouseEvent, path: string) => {
     event.stopPropagation();
     if (isConfirming) return;
-    const normalized = normalizeDirectoryPath(path);
-    if (normalized && addedProjectPaths.has(normalized)) return;
+    if (addedProjectOf(path)) return;
     const project = await addProject(path);
     if (!project) {
       toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
@@ -603,28 +650,31 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       return;
     }
     openProjectDraft(project.id, project.path);
-  }, [addProject, addedProjectPaths, isConfirming, openProjectDraft, t]);
+  }, [addProject, addedProjectOf, isConfirming, openProjectDraft, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (runtimeKey !== getRuntimeKey()) return;
     if (isConfirming) return;
     if (isCloneMode && (!canSubmitClone || cloneController.current)) return;
     const capturedRuntime = runtimeKey;
-    const normalized = normalizeDirectoryPath(target);
     // Batch selections supersede the single-target flow. Only the single-target
     // flow is blocked by an already-added (or missing) directory.
     const selectionToAdd = isCloneMode
       ? []
-      : selectedPaths.filter((path) => {
-        const selectionNormalized = normalizeDirectoryPath(path);
-        return Boolean(selectionNormalized && !addedProjectPaths.has(selectionNormalized));
-      });
-    if (selectionToAdd.length === 0 && (!target || (normalized && addedProjectPaths.has(normalized)))) return;
+      : selectedPaths.filter((path) => Boolean(normalizeDirectoryPath(path)) && !addedProjectOf(path));
+    if (selectionToAdd.length === 0 && (!target || addedProjectOf(target))) return;
     let selectedTarget = target;
     let setupRequired = false;
 
     setIsAddingProject(true);
     try {
+      // A folder picked outside the list (the system picker) has not been
+      // resolved yet; a link to an added project is that project.
+      const normalized = normalizeDirectoryPath(target);
+      if (selectionToAdd.length === 0 && !isCloneMode && normalized && !realPaths.has(normalized)) {
+        const realPath = normalizeDirectoryPath((await opencodeClient.getDirectoryRealPaths([target])).get(target));
+        if (realPath && addedProjectsByPath.has(realPath)) return;
+      }
       const shouldCreateSelection = !isCloneMode && shouldCreateTarget && normalizeDirectoryPath(target) === normalizeDirectoryPath(targetPath);
       if (isCloneMode) {
         const remoteUrl = cloneRemoteUrl.trim();
@@ -712,7 +762,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       cloneController.current = null;
       setIsAddingProject(false);
     }
-  }, [addProject, addProjects, addedProjectPaths, canSubmitClone, cloneRecovery, cloneSelection, identityChosen, cloneRemoteUrl, existingRepository, git, handleClose, isCloneMode, isConfirming, mobileActions, openContextSurface, openProjectDraft, runtimeKey, selectedGitIdentity, selectedPaths, shouldCreateTarget, sourceControl, targetPath, t]);
+  }, [addProject, addProjects, addedProjectOf, addedProjectsByPath, canSubmitClone, cloneRecovery, cloneSelection, identityChosen, cloneRemoteUrl, existingRepository, git, handleClose, isCloneMode, isConfirming, mobileActions, openContextSurface, openProjectDraft, realPaths, runtimeKey, selectedGitIdentity, selectedPaths, shouldCreateTarget, sourceControl, targetPath, t]);
 
   const browseToDisplayPath = React.useCallback((displayPath: string) => {
     setQuery(ensureBrowseDirectoryPath(displayPath));
@@ -992,6 +1042,19 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         children: (
           <>
             <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label text-foreground">{row.name}</span>
+            {row.linkTarget ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1 typography-meta text-muted-foreground">
+                    <Icon name="arrow-right" className="size-3.5 flex-shrink-0" />
+                    <span dir="auto" className="truncate">{row.linkTarget.label}</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t('directoryExplorerDialog.browse.linkTarget', { path: formatPathForDisplay(row.linkTarget.path, explorerRootDirectory) })}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             {row.added ? (
               <span className="typography-meta text-muted-foreground">{t('directoryExplorerDialog.browse.addedBadge')}</span>
             ) : view === 'folder' && (!isMobile || onProjectAdded) ? (

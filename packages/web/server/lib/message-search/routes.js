@@ -5,6 +5,7 @@
  *   session    only this session (in-conversation search)
  *   directory  only sessions in these directories (repeatable)
  *   role       'user' | 'assistant' | 'reasoning'
+ *   lifecycle  'active' | 'archived' | 'all' (default, archive state filter)
  *   reasoning  '0' leaves reasoning hits out (the reader hides reasoning)
  *   order      'desc' (newest first, default) | 'asc'
  *   before     page cursor from a previous answer's `next` (`<createdAt>:<id>`)
@@ -36,6 +37,18 @@ const querySchema = z.object({
   before: text,
   limit: z.coerce.number().int().catch(20),
   directory: z.union([z.string(), z.array(z.string())]).catch([]),
+  lifecycle: z.enum(['active', 'archived', 'all']).catch('all'),
+});
+
+const groupedQuerySchema = z.object({
+  q: text,
+  role: z.enum(['user', 'assistant', 'reasoning']).optional(),
+  reasoning: z.enum(['0', '1']).optional(),
+  lifecycle: z.enum(['active', 'archived', 'all']).optional(),
+  before: text.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  directory: z.union([z.string(), z.array(z.string())]).optional(),
+  exclude: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 const parseBefore = (raw) => {
@@ -45,6 +58,18 @@ const parseBefore = (raw) => {
   const id = raw.slice(separator + 1);
   return Number.isFinite(createdAt) && id ? { createdAt, id } : null;
 };
+
+const parseSessionBefore = (raw) => {
+  const separator = raw.indexOf(':');
+  if (separator <= 0) return null;
+  const createdAt = Number(raw.slice(0, separator));
+  const sessionId = raw.slice(separator + 1);
+  return Number.isFinite(createdAt) && sessionId ? { createdAt, sessionId } : null;
+};
+
+const directoriesFrom = (directory) => (Array.isArray(directory) ? directory : [directory ?? ''])
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
   app.get('/api/openchamber/message-search/status', async (_req, res) => {
@@ -66,9 +91,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
 
   app.get('/api/openchamber/message-search', (req, res) => {
     const query = querySchema.parse({ role: null, ...req.query });
-    const directories = (Array.isArray(query.directory) ? query.directory : [query.directory])
-      .map((directory) => directory.trim())
-      .filter(Boolean);
+    const directories = directoriesFrom(query.directory);
     try {
       const result = messageSearchRuntime.search({
         query: query.q,
@@ -76,6 +99,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
         directories,
         role: query.role,
         includeReasoning: query.reasoning === '1',
+        lifecycle: query.lifecycle,
         before: parseBefore(query.before),
         limit: query.limit,
         order: query.order,
@@ -85,6 +109,35 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
         ...result,
         next: result.next ? `${result.next.createdAt}:${result.next.id}` : null,
       });
+    } catch (error) {
+      return res.status(500).json({ error: error?.message || 'Search failed' });
+    }
+  });
+
+  app.get('/api/openchamber/message-search/sessions', (req, res) => {
+    const parsed = groupedQuerySchema.safeParse(req.query);
+    if (!parsed.success || !Object.prototype.hasOwnProperty.call(req.query, 'q')) {
+      return res.status(400).json({ error: 'Invalid message search parameters' });
+    }
+    const query = parsed.data;
+    const excluded = directoriesFrom(query.exclude);
+    if (excluded.length > 200) return res.status(400).json({ error: 'Too many excluded sessions' });
+    const before = query.before ? parseSessionBefore(query.before) : null;
+    if (query.before && !before) return res.status(400).json({ error: 'Invalid message search cursor' });
+    try {
+      const result = messageSearchRuntime.searchSessions({
+        query: query.q,
+        directories: directoriesFrom(query.directory),
+        role: query.role ?? null,
+        includeReasoning: query.reasoning !== '0',
+        lifecycle: query.lifecycle ?? 'all',
+        before,
+        limit: query.limit ?? 20,
+        exclude: excluded,
+      });
+      if (!result) return res.status(503).json({ error: 'Message search is off on this server' });
+      if (result.status === 'query-too-short') return res.json(result);
+      return res.json({ ...result, next: result.next ? `${result.next.createdAt}:${result.next.sessionId}` : null });
     } catch (error) {
       return res.status(500).json({ error: error?.message || 'Search failed' });
     }

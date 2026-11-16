@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { browserUrlLabel } from '@/lib/browser/url';
@@ -54,22 +55,26 @@ export const BrowserAddressSuggestions: React.FC<{
             </div>
             <div className="truncate typography-micro text-muted-foreground">{entry.url}</div>
           </div>
-          <button
-            type="button"
-            className={cn(
-              'shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity',
-              'hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100',
-            )}
-            aria-label={t('contextPanel.browser.history.forget')}
-            title={t('contextPanel.browser.history.forget')}
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onForget(entry.url);
-            }}
-          >
-            <Icon name="close" className="size-3" aria-hidden="true" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  'shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity',
+                  'hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100',
+                )}
+                aria-label={t('contextPanel.browser.history.forget')}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onForget(entry.url);
+                }}
+              >
+                <Icon name="close" className="size-3" aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextPanel.browser.history.forget')}</TooltipContent>
+          </Tooltip>
         </div>
       ))}
     </div>

@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBindingService } from './binding-service.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createBindingStore } from './binding-storage.js';
 import { createHttpsCredentialReference, createSshCredentialReference, normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
 import { parseBinding, parseBindingResponse, resolveBindingReadiness } from './binding-contract.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
+import { detachExtensionDescriptors } from './provider-descriptors.test-support.js';
+
+afterEach(() => detachExtensionDescriptors());
 
 const createMemoryBindingFs = () => {
   const files = new Map();
@@ -873,6 +877,28 @@ describe('narrow provider association mutations', () => {
 });
 
 describe('source-control binding service', () => {
+  it('keeps a binding readable when an unsafe extension identity cannot be presented', async () => {
+    const provider = 'ext-opaque';
+    const instance = 'https://forge.example';
+    sourceControlProviderDescriptors.attachExtension({ ...sourceControlProviderDescriptors.get('gitea'), id: provider });
+    for (const id of ['alice ', 'alice\nteam']) {
+      const providerUserId = `${instance}#${id}`;
+      const endpoint = { displayUrl: `${instance}/team/repo.git`, fingerprint: 'endpoint' };
+      const remote = { name: 'origin', fetch: endpoint, push: endpoint, mode: 'managed', readiness: 'ready',
+        credentialId: createHttpsCredentialReference({ provider, instance, credentialId: 'credential-one', credentialRevision: 1, providerUserId }) };
+      const repository = { supported: true, repositoryId: 'repo_opaque', configRevision: 'config', bare: false,
+        remotes: [{ name: 'origin', fetch: endpoint, push: endpoint }] };
+      const binding = { repositoryId: repository.repositoryId, revision: 1, state: 'bound', configRevision: 'config',
+        providers: [], remotes: [remote], auxiliary: [] };
+      const service = createBindingService({ store: { read: async () => ({ revision: 1, binding }) }, resolveRepository: async () => repository,
+        readTransportAccount: async () => ({ credentialId: 'credential-one', credentialRevision: 1, providerUserId,
+          status: 'valid', source: 'pat', user: { id, login: 'mona' } }),
+      });
+      const read = await service.get('/repository');
+      expect(read.binding.remotes[0].presentation).toEqual({ status: 'unavailable' });
+      expect(parseBindingResponse(read.binding).remotes[0].credentialId).toBe(remote.credentialId);
+    }
+  });
   const transportRepository = {
     ...repository,
     transportRevision: 'transport_one',
@@ -1103,12 +1129,16 @@ describe('source-control binding service', () => {
       push: { displayUrl: 'git@github.com:owner/repo.git', fingerprint: 'push' },
     }];
     const base = { repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', providers: [], auxiliary: [] };
+    const parentCredentialId = createHttpsCredentialReference({
+      provider: 'github', instance: 'github.com', credentialId: 'parent-credential',
+      credentialRevision: 1, providerUserId: 'github.com#1',
+    });
 
     // A managed parent answers for a submodule on its own host with its own credential.
-    await expect(service({ ...base, remotes: remotes('managed', { credentialId: 'parent-credential' }) })
+    await expect(service({ ...base, remotes: remotes('managed', { credentialId: parentCredentialId }) })
       .validateGitAuxiliaryContext(input('https://github.com/owner/child.git')))
-      .resolves.toMatchObject({ transportMode: 'managed', credentialId: 'parent-credential' });
-    await expect(service({ ...base, remotes: remotes('managed', { credentialId: 'parent-credential' }) })
+      .resolves.toMatchObject({ transportMode: 'managed', credentialId: parentCredentialId });
+    await expect(service({ ...base, remotes: remotes('managed', { credentialId: parentCredentialId }) })
       .validateGitAuxiliaryContext(input('https://gitlab.com/owner/child.git')))
       .rejects.toMatchObject({ code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' });
     // A System parent hands every submodule to the machine's own Git.
@@ -1118,6 +1148,50 @@ describe('source-control binding service', () => {
     // So does an unbound repository.
     await expect(service(null, 0).validateGitAuxiliaryContext(input('https://gitlab.com/owner/child.git', 0)))
       .resolves.toMatchObject({ transportMode: 'system' });
+  });
+
+  it('does not lend a managed SSH parent credential to an HTTPS auxiliary endpoint', async () => {
+    const sshEndpoint = 'git@github.com:owner/repo.git';
+    const sshRepository = {
+      ...repository,
+      remotes: [{
+        name: 'origin',
+        fetch: { displayUrl: sshEndpoint, fingerprint: 'ssh-fetch' },
+        push: { displayUrl: sshEndpoint, fingerprint: 'ssh-push' },
+      }],
+    };
+    const sshTransportRepository = {
+      ...sshRepository,
+      transportRevision: 'transport_one',
+      remotes: [{
+        ...sshRepository.remotes[0],
+        fetch: { ...sshRepository.remotes[0].fetch, rawUrl: sshEndpoint },
+        push: { ...sshRepository.remotes[0].push, rawUrl: sshEndpoint },
+      }],
+    };
+    const credentialId = createSshCredentialReference('parent-key');
+    const binding = {
+      repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', providers: [], auxiliary: [],
+      remotes: [{
+        name: 'origin', mode: 'managed', readiness: 'ready', credentialId,
+        fetch: { displayUrl: sshEndpoint, fingerprint: 'ssh-fetch' },
+        push: { displayUrl: sshEndpoint, fingerprint: 'ssh-push' },
+      }],
+    };
+    const service = createBindingService({
+      store: { read: vi.fn(async () => ({ revision: 3, binding })), compareAndSwap: vi.fn() },
+      resolveRepository: async () => sshRepository,
+      resolveTransportRepository: async () => sshTransportRepository,
+    });
+    const input = (rawEndpoint) => ({
+      directory: '/repository', repositoryId: 'repo_one', bindingRevision: 3,
+      configRevision: 'config_one', kind: 'lfs', rawEndpoint, parentRemote: 'origin',
+    });
+
+    await expect(service.validateGitAuxiliaryContext(input('https://github.com/owner/repo.git/info/lfs')))
+      .rejects.toMatchObject({ code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED', status: 409 });
+    await expect(service.validateGitAuxiliaryContext(input('git@github.com:owner/child.git')))
+      .resolves.toMatchObject({ transportMode: 'managed', credentialId });
   });
 
   it.each([

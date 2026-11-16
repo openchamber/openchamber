@@ -27,6 +27,15 @@ const legendList = join(
 // fractional, and whether they are depends on the measured average. One
 // height profile can pass by luck, so the scenarios run over several.
 const heightProfiles = [[5, 137], [7, 137], [3, 101], [6, 53], [4, 211]];
+// The list's average estimate, our per-row estimate, and the touch layout,
+// whose corrections wait until the reader stops scrolling; the app on a phone
+// runs the last two together.
+const modes = [
+    { touch: false, estimate: false },
+    { touch: false, estimate: true },
+    { touch: true, estimate: false },
+    { touch: true, estimate: true },
+];
 
 // Exercise the actual list component and its prop wiring without mounting the
 // application or connecting to a user's backend. Only row content and the
@@ -53,6 +62,16 @@ function Row({ item }) {
     </div>;
 }
 const renderTimelineItem = ({ item }) => <Row item={item} />;
+// What TimelineList reads from the page around it. "touch" turns on the
+// touch layout, which defers corrections while the reader scrolls;
+// "estimate" gives every row a per-row estimate that is off by 40 px, the
+// path getEstimatedItemSize opens, instead of the list's average.
+const fixtureParams = new URLSearchParams(location.search);
+const isTouchLayout = () => fixtureParams.get('touch') === 'true';
+const readColumnWidth = () => 800;
+const readToolLineHeight = () => 32;
+const estimateTimelineRowSize = row => (fixtureParams.get('estimate') === 'true' ? row.height + 40 : undefined);
+const useSelectionRowHold = () => undefined;
 ${source.slice(start, end)}
 const frames = async count => {
     for (let i = 0; i < count; i++) await new Promise(requestAnimationFrame);
@@ -76,6 +95,12 @@ function App() {
             scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
             scroller.scrollTop = top;
         };
+        // A reader scrolls up in steps. The list holds the end it opened at
+        // (initialScrollAtEnd) until a scroll it counts as the user's, and a
+        // single jump can land while its initial scroll is still settling;
+        // the hold then brings the end back with the prepend.
+        moveTo(1200);
+        await frames(10);
         moveTo(moveWhileLoading ? 600 : 0);
         await frames(40);
         // The request begins here. The reader can keep scrolling before the
@@ -119,10 +144,61 @@ function App() {
             tailGrowthShift,
         };
     };
+    // A steady scroll toward older rows, far from the start, through rows
+    // whose estimate is 40 px too tall. Each one measured above the reader
+    // is a size correction. Every frame checks whether the list moved
+    // scrollTop on its own; on touch that has to wait until the scroll stops.
+    window.runScrollScenario = async () => {
+        await frames(40);
+        const scroller = list.getScrollableNode();
+        const set = top => {
+            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true }));
+            scroller.scrollTop = top;
+        };
+        set(scroller.scrollTop - 1200);
+        await frames(10);
+        set(scroller.scrollTop - 1200);
+        await frames(10);
+        let expected = scroller.scrollTop;
+        const startTop = expected;
+        const corrections = [];
+        for (let i = 0; i < 60; i++) {
+            expected -= 30;
+            set(expected);
+            await frames(1);
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const deviation = scroller.scrollTop - expected;
+            if (Math.abs(deviation) > 1) corrections.push(Math.round(deviation));
+            expected = scroller.scrollTop;
+        }
+        const visible = [...scroller.querySelectorAll('[data-probe-id]')].find(
+            node => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top + 1,
+        );
+        const key = visible.dataset.probeId;
+        const read = () => {
+            const node = scroller.querySelector('[data-probe-id="' + key + '"]');
+            return node ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
+        };
+        const atStop = read();
+        const topAtStop = scroller.scrollTop;
+        await new Promise(resolve => setTimeout(resolve, 600));
+        await frames(5);
+        return {
+            startTop: Math.round(startTop), endTop: Math.round(topAtStop),
+            corrections: corrections.length, correctedPx: corrections.reduce((sum, value) => sum + value, 0),
+            correctedAtRestPx: Math.round(scroller.scrollTop - topAtStop),
+            restShift: read() === null ? null : read() - atStop,
+        };
+    };
     return <TimelineList
-        entries={rows} registerList={registerList} endPinningReleased={true}
+        rows={rows} stickyRowIndices={undefined} showReasoningTraces={false} collapsibleThinkingBlocks={false}
+        registerList={registerList} endPinningReleased={true}
         composerOverlayHeight={0} onIsAtEndChange={noop} onListMetricsChange={noop}
         onTimelineDataChange={noop} rowContext={{ sessionIsWorking: false }}
+        // The chat's fixed 48 px "Load older" slot (ChatContainer.tsx). With
+        // nothing above the rows, a reader at scrollTop 0 is at the list's
+        // start, and the list shows a prepend from the top in any version.
+        listHeader={<div style={{ height: 48 }} />}
         listFooter={<div style={{ height: footerHeight }} />}
         scrollContainerProps={{ style: { height: 600, width: 800, overflow: 'auto', overflowAnchor: 'none' } }}
     />;
@@ -174,10 +250,10 @@ try {
     await client.send('Page.enable');
     const exceptions = [];
     client.on('Runtime.exceptionThrown', event => exceptions.push(event.exceptionDetails));
-    for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
+    for (const mode of modes) for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
         const loaded = client.once('Page.loadEventFired');
         await client.send('Page.navigate', {
-            url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}&period=${period}&step=${step}`,
+            url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}&period=${period}&step=${step}&touch=${mode.touch}&estimate=${mode.estimate}`,
         });
         await loaded;
         let ready = false;
@@ -188,7 +264,7 @@ try {
         }
         assert.ok(ready, 'The browser fixture mounted');
         const result = await evaluateValue(client, `window.runScenario(${moveWhileLoading})`);
-        console.log(JSON.stringify({ period, step, moveWhileLoading, ...result }));
+        console.log(JSON.stringify({ ...mode, period, step, moveWhileLoading, ...result }));
         assert.deepEqual(exceptions, [], 'No browser runtime errors');
         assert.equal(result.dataCount, 81, 'The prepend and tail append actually committed');
         assert.equal(result.frameCount, 70);
@@ -197,6 +273,25 @@ try {
         assert.ok(result.maxShift <= 1, `History shifted the visible anchor by ${result.maxShift}px`);
         assert.ok(Math.abs(result.tailGrowthShift) <= 1, 'Content below the reader must not move them');
     }
+    // The touch layout's deferral: without it the list corrects scrollTop
+    // during the scroll (the control that the scenario makes corrections);
+    // with it, nothing moves until the scroll stops, and the reader's row
+    // stays put through the one correction at rest.
+    const scrolls = {};
+    for (const touch of [false, true]) {
+        const loaded = client.once('Page.loadEventFired');
+        await client.send('Page.navigate', { url: `http://127.0.0.1:${server.port}/?period=5&step=137&touch=${touch}&estimate=true` });
+        await loaded;
+        for (let attempt = 0; attempt < 100 && !(await evaluateValue(client, 'typeof window.runScrollScenario === "function"')); attempt++) await wait(100);
+        scrolls[touch] = await evaluateValue(client, 'window.runScrollScenario()');
+        console.log(JSON.stringify({ scroll: true, touch, ...scrolls[touch] }));
+        assert.deepEqual(exceptions, [], 'No browser runtime errors');
+        assert.ok(scrolls[touch].startTop > 2400, 'The scroll stays more than two viewports from the start');
+    }
+    assert.ok(scrolls[false].corrections > 0, 'Rows measured above the reader correct the scroll position');
+    assert.equal(scrolls[true].corrections, 0, 'On touch, corrections wait until the scroll stops');
+    assert.ok(Math.abs(scrolls[true].correctedAtRestPx) > 1, 'The deferred correction lands at rest');
+    assert.ok(scrolls[true].restShift !== null && Math.abs(scrolls[true].restShift) <= 1, `The correction at rest moved the reader's row by ${scrolls[true].restShift}px`);
 } finally {
     client?.socket.close();
     if (chrome.exitCode === null && chrome.signalCode === null) {

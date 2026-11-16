@@ -399,7 +399,7 @@ export const getRenderablePatchInfo = (patch: string): { patch: string; title?: 
     }
 
     try {
-        const parsedPatches = parsePatchFiles(normalized, undefined, true);
+        const parsedPatches = parsePatchFiles(normalized, { throwOnError: true });
         if (parsedPatches.length !== 1) {
             return null;
         }

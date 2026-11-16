@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelineScroll';
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
-import { dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchPageWaiting, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { isWaitingPageRevealPending, releaseWaitingPageRevealOutside, revealWaitingPage } from '@/sync/request-reveal';
 import { useUIStore } from '@/stores/useUIStore';
 import { KeepAlive } from '@/components/ui/KeepAlive';
 import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
@@ -16,18 +17,20 @@ let scroll: ReturnType<typeof useChatTimelineScroll>;
 let frames: Map<number, FrameRequestCallback>;
 let subscribers: Set<() => void>;
 let writes: number;
+let listOffsets: number[];
 let loads: number;
 let missing: number;
 let checkLinkedMessage: (() => Promise<'exists' | 'missing'>) | undefined;
 let contentLength: number;
 let working: boolean;
 let dom: Window;
+let alignAnchor: (anchor: MessageViewportAnchor) => 'aligned' | 'missing';
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
 function Harness() {
     scroll = useChatTimelineScroll({
         currentSessionId: 'session', currentSessionKey: 'runtime\n/repo\nsession', composerOverlayHeight: 0,
-        messageListRef: { current: { alignViewportAnchor: () => 'missing' } }, sessionIsWorking: working,
+        messageListRef: { current: { alignViewportAnchor: (anchor) => alignAnchor(anchor) } }, sessionIsWorking: working,
         checkLinkedMessage,
         loadHistoryUntilMessage: async () => { loads += 1; return false; },
         onLinkedMessageMissing: () => { missing += 1; },
@@ -45,7 +48,7 @@ function Harness() {
                     return () => { subscribers.delete(notify); };
                 },
             }),
-            scrollToEnd: () => { writes += 1; }, scrollToOffset: () => {}, scrollToIndex: () => {},
+            scrollToEnd: () => { writes += 1; }, scrollToOffset: ({ offset }) => { listOffsets.push(offset); }, scrollToIndex: () => {},
         };
         registerList(list);
         return () => registerList(null);
@@ -64,7 +67,7 @@ const frame = async () => {
 
 beforeEach(() => {
     dom = new Window({ url: 'https://app.test' });
-    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true;
+    frames = new Map(); subscribers = new Set(); writes = 0; listOffsets = []; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true; alignAnchor = () => 'missing';
     let nextFrame = 0;
     const request = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
     const cancel = (id: number) => { frames.delete(id); };
@@ -76,7 +79,9 @@ beforeEach(() => {
         Element: dom.Element,
         CustomEvent: dom.CustomEvent,
         WheelEvent: dom.WheelEvent,
-        CSS: dom.CSS,
+        // happy-dom supports every property; this is a desktop engine, where
+        // the follow draws its own glide.
+        CSS: { escape: dom.CSS.escape.bind(dom.CSS), supports: () => false },
         localStorage: dom.localStorage,
         sessionStorage: dom.sessionStorage,
         getComputedStyle: dom.getComputedStyle.bind(dom),
@@ -118,13 +123,16 @@ test('cancels a pending follow frame and can schedule again after effect reconne
     await render('visible'); await frame();
     expect(subscribers.size).toBe(1);
     node.scrollTop = 100;
-    const before = writes;
     act(() => { for (const callback of stale) callback(performance.now()); });
-    expect(writes).toBe(before);
+    // The stale frame starts no glide.
+    expect(frames.size).toBe(0);
     act(() => { scroll.onTimelineDataChange(); scroll.onTimelineDataChange(); });
     expect(frames.size).toBe(1);
     await frame();
-    expect(writes).toBe(before + 1);
+    // The follow frame started a glide, and its first frame moves toward the end.
+    expect(frames.size).toBe(1);
+    await frame();
+    expect(node.scrollTop).toBeGreaterThan(100);
 });
 
 for (const leaving of ['first reading position', 'changed reading position', 'end'] as const) {
@@ -239,6 +247,19 @@ test('clears return-to-end reassert timers across a hidden interval', async () =
     expect(writes).toBe(before + 4);
 });
 
+test('a message link opened while the follow glides keeps the reader on the message', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 100;
+    act(() => scroll.onTimelineDataChange());
+    // The follow frame aims the glide, and the glide takes a step.
+    await frame(); await frame();
+    expect(node.scrollTop).toBeGreaterThan(100);
+    alignAnchor = () => { node.scrollTop = 200; return 'aligned'; };
+    act(() => requestMessageFocus('session', 'linked-message'));
+    for (let i = 0; i < 60; i++) await frame();
+    expect(node.scrollTop).toBe(200);
+});
+
 test('does not start a history search from a linked-message check completed after cleanup', async () => {
     let complete!: (value: 'exists') => void;
     checkLinkedMessage = () => new Promise((resolve) => { complete = resolve; });
@@ -284,6 +305,35 @@ test('a return to the end ends the reveal of a page taller than the screen', asy
     expect(targets.length).toBe(1);
 });
 
+test('the toast of a waiting page brings it to a reader who scrolled away, even if it came before', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 300;
+    const { block, targets } = waitingPage();
+    act(() => dispatchPageWaiting(block));
+    await frame();
+    expect(targets).toEqual([1300]);
+    node.scrollTop = 300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await frame();
+
+    act(() => revealWaitingPage('session'));
+    await frame();
+
+    expect(targets).toEqual([1300, 1300]);
+});
+
+test('the toast of a waiting page is not served to another session, and a later entry drops it', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 300;
+    const { targets } = waitingPage();
+    act(() => revealWaitingPage('other'));
+    await frame();
+    expect(targets).toEqual([]);
+    expect(isWaitingPageRevealPending('other')).toBe(true);
+    releaseWaitingPageRevealOutside('session');
+    expect(isWaitingPageRevealPending('other')).toBe(false);
+});
+
 test('leaves a reader with auto-follow off where they are when a page waits for an answer', async () => {
     useUIStore.getState().setStreamingAutoFollowEnabled(false);
     try {
@@ -298,6 +348,27 @@ test('leaves a reader with auto-follow off where they are when a page waits for 
     }
 });
 
+test('a question card named by its dock line comes into view with auto-follow off, past a card above it', async () => {
+    useUIStore.getState().setStreamingAutoFollowEnabled(false);
+    try {
+        await render('visible'); await frame();
+        node.scrollTop = 300;
+        // Two waiting blocks at the end; the dock's line names the lower one.
+        const { targets } = waitingPage(1100);
+        const named = document.createElement('div');
+        named.dataset.waitingPage = 'form-2';
+        node.append(named);
+        Object.defineProperty(named, 'getBoundingClientRect', { value: () => ({ top: 1500 - node.scrollTop, bottom: 1700 - node.scrollTop }) });
+        act(() => revealWaitingPage('session', 'form-2'));
+        await frame();
+        // Whole, ending at the viewport's bottom (1700 - 500); the block above would aim at 1088.
+        expect(targets).toEqual([1200]);
+        expect(isWaitingPageRevealPending('session')).toBe(false);
+    } finally {
+        useUIStore.getState().setStreamingAutoFollowEnabled(true);
+    }
+});
+
 test('leaves a reader who scrolled up away from a page waiting for an answer', async () => {
     await render('visible'); await frame();
     node.scrollTop = 300;
@@ -306,6 +377,63 @@ test('leaves a reader who scrolled up away from a page waiting for an answer', a
     act(() => dispatchPageWaiting(block));
     await frame();
     expect(targets).toEqual([]);
+});
+
+describe('Next on a waiting form\'s Tabs', () => {
+    // The reader sits at the end, the bottom of a 700 px tab in a 500 px viewport.
+    const atEndOfTallTab = async () => {
+        await render('visible'); await frame();
+        node.scrollTop = 1500;
+        return waitingPage(1100);
+    };
+
+    test('brings the start of the next tab into view from the end of a tab taller than the screen', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchTabStep(block));
+        await frame();
+        expect(targets).toEqual([1088]);
+        expect(listOffsets).toEqual([1500]);
+    });
+
+    test('moves a reader who scrolled up, or who turned auto-follow off', async () => {
+        useUIStore.getState().setStreamingAutoFollowEnabled(false);
+        try {
+            const { block, targets } = await atEndOfTallTab();
+            act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+            act(() => dispatchTabStep(block));
+            await frame();
+            expect(targets).toEqual([1088]);
+        } finally {
+            useUIStore.getState().setStreamingAutoFollowEnabled(true);
+        }
+    });
+
+    test('aims again as the list grows, until the reader scrolls', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchTabStep(block));
+        await frame();
+        node.scrollTop = 1400;
+        act(() => scroll.onTimelineDataChange());
+        await frame();
+        expect(targets).toEqual([1088, 1088]);
+        act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+        act(() => scroll.onTimelineDataChange());
+        await frame();
+        expect(targets.length).toBe(2);
+    });
+
+    test('a height report from the page keeps the aim on the tab', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchPageWaiting(block));
+        await frame();
+        const tabs = document.createElement('div');
+        block.append(tabs);
+        Object.defineProperty(tabs, 'getBoundingClientRect', { value: () => ({ top: 1250 - node.scrollTop, bottom: 1800 - node.scrollTop }) });
+        act(() => dispatchTabStep(tabs));
+        act(() => dispatchPageWaiting(block));
+        await frame();
+        expect(targets.at(-1)).toBe(1238);
+    });
 });
 
 // The list reports a new total before it moves the viewport for rows above

@@ -1,5 +1,21 @@
 import { isInvisibleText } from '@/lib/invisibleText';
+import { readContextPart } from '@/lib/messages/contextParts';
 import type { Part } from '@/lib/opencode/model';
+
+const COLLAPSED_LINES = 2;
+
+/**
+ * The context parts a collapsed user message leaves out. The message gets two
+ * lines: its own text takes what it needs and context rows get the rest, so
+ * the text always stays. Session mentions draw no row and do not count.
+ */
+export const contextPartsPastCollapse = (parts: Part[], textLines: number): ReadonlySet<Part> => {
+    const rows = parts.filter((part) => {
+        const context = readContextPart(part);
+        return context !== null && context.kind !== 'session' && context.kind !== 'session-message';
+    });
+    return new Set(rows.slice(Math.max(0, COLLAPSED_LINES - textLines)));
+};
 
 const isValidPart = (part: unknown): part is Part => {
     return Boolean(part && typeof part === 'object' && typeof (part as { type?: unknown }).type === 'string');

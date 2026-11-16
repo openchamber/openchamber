@@ -9,7 +9,7 @@
  */
 
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
-import { readContextPart } from '@/lib/messages/contextParts';
+import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type { SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { repositoryIssueLinkMime, trackerItemLinkMime } from '@/lib/messages/attachmentPreview';
@@ -48,6 +48,16 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     return redundant;
 };
 
+/** A linked item a message's text can draw as an inline chip where its link stands. */
+export type InlineLinkedItem = Extract<ContextPartPayload, { kind: 'repository-issue' | 'repository-discussion' | 'change-request' | 'tracker-item' }>;
+
+// The item behind each display part, for the text's inline chips; held aside
+// so the part keeps the plain file shape the attachment row reads.
+const linkedItems = new WeakMap<Part, InlineLinkedItem>();
+
+/** The issue, change request or tracker item a display part stands for; null for any other part. */
+export const linkedItemOfDisplayPart = (part: Part): InlineLinkedItem | null => linkedItems.get(part) ?? null;
+
 /**
  * The display-only file part a linked issue or pull request renders as. It
  * keeps the identity of the context part it replaces, and never goes back to
@@ -56,7 +66,14 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
 const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const payload = readContextPart(part);
     if (!payload) return null;
+    const display = displayPartOf(part, payload, descriptorOf);
+    if (display && (payload.kind === 'repository-issue' || payload.kind === 'repository-discussion' || payload.kind === 'change-request' || payload.kind === 'tracker-item')) {
+        linkedItems.set(display, payload);
+    }
+    return display;
+};
 
+const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const identity = { id: part.id, sessionID: part.sessionID, messageID: part.messageID };
 
     switch (payload.kind) {
@@ -100,7 +117,8 @@ const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescripto
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.openchamber.guest-issue-link',
-                filename: `${payload.id}: ${payload.title}`,
+                // A link's chip has no title of its own (`contributes.links`): its identifier once.
+                filename: payload.title === payload.id ? payload.id : `${payload.id}: ${payload.title}`,
                 url: payload.url,
             };
         case 'guest-pr':

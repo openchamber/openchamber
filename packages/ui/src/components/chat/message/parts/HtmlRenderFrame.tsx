@@ -48,8 +48,12 @@ import {
 import { useRenderPageHtml } from './renderPageImages';
 import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
+import { DeclinePageButton } from './DeclinePageButton';
+import { usePageDecline } from './usePageDecline';
+import { pageBlocksTurn, usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
+import { SharedPageCard } from '../../sharePages/SharedPageCard';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size
@@ -92,6 +96,10 @@ interface HtmlRenderDocumentProps {
     answerState?: HtmlRenderAnswerState;
     /** Delivers what the page sent with `openchamber.submit`; rejects with the reason it was not delivered. */
     onSubmit?: (submission: HtmlRenderSubmission) => Promise<void>;
+    /** The user clicked the Decline the page shows beside its last button. */
+    onDecline?: () => void;
+    /** Whether the page found a button to put its Decline beside. */
+    onDeclinePlaced?: (placed: boolean) => void;
     onContentHeight?: (height: number) => void;
     /** Receives the frame, for a caller that drives the page from outside (annotation). */
     frameRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -104,13 +112,17 @@ interface HtmlRenderDocumentProps {
  * state its script holds survives. The page's selections, quote marks and
  * reveals pass through here to the chat (see pageQuoteBridge.ts).
  */
-function HtmlRenderDocument({ partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onContentHeight, frameRef: outerFrameRef }: HtmlRenderDocumentProps) {
+function HtmlRenderDocument({
+    partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onDecline, onDeclinePlaced, onContentHeight, frameRef: outerFrameRef,
+}: HtmlRenderDocumentProps) {
+    const { t } = useI18n();
     const theme = useHtmlRenderTheme();
     const [initialTheme] = React.useState(theme);
     const [initialAnswerState] = React.useState(answerState);
+    const [declineLabel] = React.useState(() => t('chat.htmlRender.decline'));
     const srcDoc = React.useMemo(
-        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState }),
-        [contained, html, initialAnswerState, initialTheme],
+        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState, declineLabel }),
+        [contained, declineLabel, html, initialAnswerState, initialTheme],
     );
     const frameRef = React.useRef<HTMLIFrameElement>(null);
     const setFrame = React.useCallback((node: HTMLIFrameElement | null) => {
@@ -131,10 +143,10 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
     }, [answerState, theme]);
     React.useEffect(postState, [postState]);
 
-    const submitRef = React.useRef({ answerState, onSubmit });
+    const submitRef = React.useRef({ answerState, onSubmit, onDecline, onDeclinePlaced });
     React.useLayoutEffect(() => {
-        submitRef.current = { answerState, onSubmit };
-    }, [answerState, onSubmit]);
+        submitRef.current = { answerState, onSubmit, onDecline, onDeclinePlaced };
+    }, [answerState, onSubmit, onDecline, onDeclinePlaced]);
 
     const postMarks = React.useCallback(() => {
         frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId)), '*');
@@ -226,6 +238,17 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
                 if (!message.submission.summary) return reply('summary is required: the choice in a few words');
                 deliver(message.submission).then(() => reply(), (error) => reply(error instanceof Error ? error.message : String(error)));
             }
+            if (message?.kind === 'decline') {
+                const { answerState: current, onDecline: decline } = submitRef.current;
+                // Like an answer, only a click while the page waits declines it.
+                // Refused, the page gets its state back, which turns its Decline on again.
+                if (!decline || !current.waiting || (navigator.userActivation && !navigator.userActivation.isActive)) {
+                    frame.contentWindow?.postMessage(htmlRenderAnswerStateMessage(current), '*');
+                } else {
+                    decline();
+                }
+            }
+            if (message?.kind === 'decline-placed') submitRef.current.onDeclinePlaced?.(message.placed);
             if (message?.kind === 'selection') {
                 const handle = handleRef.current;
                 if (message.text) {
@@ -280,7 +303,7 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
  * tall as it needs. The dialog grows with it up to the window and the page
  * scrolls inside past that, so a short page leaves no empty half-screen.
  */
-function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit }: {
+function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit, onDecline, decline }: {
     partId: string;
     messageId: string;
     html: string;
@@ -288,6 +311,9 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
     initialHeight: number;
     answerState: HtmlRenderAnswerState;
     onSubmit: (submission: HtmlRenderSubmission) => Promise<void>;
+    onDecline: () => void;
+    /** The host's Decline for a page without a button of its own, so the dialog need not be closed to decline. */
+    decline: React.ReactNode;
 }) {
     const [height, setHeight] = React.useState(initialHeight);
     const handleContentHeight = React.useCallback((contentHeight: number) => setHeight(Math.ceil(contentHeight)), []);
@@ -302,8 +328,10 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
                 contained
                 answerState={answerState}
                 onSubmit={onSubmit}
+                onDecline={onDecline}
                 onContentHeight={handleContentHeight}
             />
+            {decline ? <div className="mt-2 shrink-0">{decline}</div> : null}
         </PageSelectionScope>
     );
 }
@@ -350,9 +378,15 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    if (!page) return null;
-    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={page.ask} />;
-    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
+    const ask = usePageAsk(part, page?.ask);
+    if (!page || !ask) return null;
+    const plainPage = page.ui
+        ? <UiPageFrame part={part} source={page.ui} ask={ask} />
+        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    // A page shared with other people shows as its card: what it asks and where each link stands.
+    // With sharing turned off by policy the card falls back to the page itself.
+    if (page.share) return <SharedPageCard part={part} page={{ ...page, share: page.share }} plainPage={plainPage} />;
+    return plainPage;
 }
 
 interface HtmlRenderFrameProps {
@@ -424,12 +458,16 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     // What this client sent, shown until the call completes with the answer
     // OpenCode stores.
     const [sent, setSent] = React.useState<HtmlRenderSubmission | null>(null);
+    const [submitting, setSubmitting] = React.useState(false);
+    const [decline, sendDecline] = usePageDecline(part.sessionID, part.callID);
     const answerState = React.useMemo<HtmlRenderAnswerState>(() => {
         if (ask.kind === 'answered') return { waiting: false, answer: ask.data };
         if (sent) return { waiting: false, answer: sent.data };
-        return { waiting: ask.kind === 'waiting', answer: null };
-    }, [ask, sent]);
+        // A decline on its way takes the page out of waiting, so its own button cannot answer too.
+        return { waiting: ask.kind === 'waiting' && decline === 'idle', answer: null };
+    }, [ask, sent, decline]);
     const handleSubmit = React.useCallback(async (submission: HtmlRenderSubmission) => {
+        setSubmitting(true);
         try {
             await answerRenderedPage({ sessionId: part.sessionID, callId: part.callID, ...submission });
             setSent(submission);
@@ -437,20 +475,29 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
             const message = error instanceof Error ? error.message : String(error);
             toast.error(t('chat.htmlRender.answerFailed'), { description: message });
             throw error;
+        } finally {
+            setSubmitting(false);
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
+    const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
+    const blocking = waiting && pageBlocksTurn(ask);
+    // The page puts Decline beside its own last button; only a page without
+    // one gets it under the page. Unknown until the page has loaded.
+    const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
+    const declineButton = waiting && declineInPage === false
+        ? <DeclinePageButton onDecline={sendDecline} disabled={submitting || decline === 'sending'} />
+        : null;
     // The chat brings a page that waits for an answer into view, and again
     // as its height arrives: an off-screen frame reports its size only once
     // it is scrolled into view.
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
-        if (waiting) dispatchPageWaiting(blockRef.current);
-    }, [height, waiting]);
+        if (blocking) dispatchPageWaiting(blockRef.current);
+    }, [height, blocking]);
 
     return (
-        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={blocking ? partId : undefined}>
         {isMobile ? null : (
             // A row of its own above the page: over the page the buttons
             // covered its own controls in the top corner. The row keeps its
@@ -483,6 +530,8 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                     className="block size-full border-0 bg-transparent"
                     answerState={answerState}
                     onSubmit={handleSubmit}
+                    onDecline={sendDecline}
+                    onDeclinePlaced={setDeclineInPage}
                     onContentHeight={handleContentHeight}
                     frameRef={frameRef}
                 />
@@ -501,6 +550,8 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                                     initialHeight={height}
                                     answerState={answerState}
                                     onSubmit={handleSubmit}
+                                    onDecline={sendDecline}
+                                    decline={declineButton}
                                 />
                             ) : null}
                         </DialogContent>
@@ -508,7 +559,8 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 </>
             )}
         </PageSelectionScope>
-        <PageAskStatus ask={ask} answeredSummary={answeredSummary} />
+        {declineButton ? <div className="mt-2">{declineButton}</div> : null}
+        <PageAskStatus ask={decline === 'declined' && ask.kind === 'waiting' ? { kind: 'declined' } : ask} answeredSummary={answeredSummary} />
         </div>
     );
 }

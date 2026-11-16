@@ -213,14 +213,21 @@ const clampWindowBoundsToVisibleWorkArea = (bounds) => {
   }
 };
 
+let cachedMacosMajorVersion = null;
+
+// Asked several times before the first window exists. Electron knows the
+// version without a child process; `sw_vers` remains for a plain Node run.
 export const macosMajorVersion = () => {
   if (process.platform !== 'darwin') return 0;
-  const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' });
-  const raw = (result.stdout || '').trim();
+  if (cachedMacosMajorVersion !== null) return cachedMacosMajorVersion;
+  const raw = typeof process.getSystemVersion === 'function'
+    ? process.getSystemVersion()
+    : (spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' }).stdout || '').trim();
   const [majorRaw, minorRaw] = raw.split('.');
   const major = Number.parseInt(majorRaw || '0', 10);
   const minor = Number.parseInt(minorRaw || '0', 10);
-  return major === 10 ? minor : major;
+  cachedMacosMajorVersion = major === 10 ? minor : major;
+  return cachedMacosMajorVersion;
 };
 
 let cachedMacTrafficLightPosition = null;
@@ -383,7 +390,7 @@ export const buildRendererAdditionalArguments = ({
 
 // Linux can opt into the desktop environment's own title bar (Settings ->
 // Desktop); it takes effect at the next start, like the window it shapes.
-const usesLinuxNativeFrame = () => (
+export const usesLinuxNativeFrame = () => (
   process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
 );
 
@@ -392,8 +399,7 @@ export const usesFramelessChrome = () => (
 );
 
 export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
-  const frameless = usesFramelessChrome();
-  const usesCustomTitleBar = process.platform === 'darwin' || frameless;
+  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome();
   const options = {
     title: 'OpenChamber',
     width: bounds?.width ?? DEFAULT_WINDOW_WIDTH,
@@ -403,7 +409,10 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     icon: getWindowIconPath(),
     show: false,
     backgroundColor,
-    frame: frameless ? false : undefined,
+    // Only the Linux system title bar keeps the window manager's frame. Electron
+    // reads a present `frame: undefined` as false, so the value is always a
+    // boolean; macOS draws its traffic lights through titleBarStyle 'hidden'.
+    frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.

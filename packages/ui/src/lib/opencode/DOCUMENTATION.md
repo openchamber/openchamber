@@ -22,7 +22,9 @@ to the shared UI domain model. Sync owns transcript membership and store writes.
   Sync also passes the agent when the session already sits on one the folder's
   loaded catalog lacks, so that session gets the same check.
   An agent missing from it throws `AgentUnavailableError` before any switch,
-  the model included. A failed or empty list lets the switch through.
+  the model included. A failed or empty list lets the switch through. The class
+  lives in `agent-unavailable-error.ts`, so code that only reads the error does
+  not load the client.
 
 ## Decisions
 

@@ -77,7 +77,10 @@ describe('always allow without anything to save', () => {
     expect(canSavePermission(['git *'])).toBe(true);
   });
 
-  const press = (key: string, shiftKey = false) => ({ key, shiftKey, altKey: true, metaKey: false, ctrlKey: false });
+  // SAFETY: shortcut matching reads only the fields set here.
+  const press = (key: string, shiftKey = false, modifiers: Partial<KeyboardEvent> = {}) => ({
+    key, code: key, shiftKey, altKey: true, metaKey: false, ctrlKey: false, ...modifiers,
+  }) as KeyboardEvent;
 
   test('Alt+Shift+Enter sends nothing when there is nothing to save', () => {
     expect(permissionShortcutReply(press('Enter', true), false)).toBeNull();
@@ -88,7 +91,14 @@ describe('always allow without anything to save', () => {
   test('Alt+Shift+Enter still answers always when there is something to save', () => {
     expect(permissionShortcutReply(press('Enter', true), true)).toBe('always');
     expect(permissionShortcutReply(press('Enter'), true)).toBe('once');
-    expect(permissionShortcutReply({ ...press('Enter'), altKey: false }, true)).toBeNull();
-    expect(permissionShortcutReply({ ...press('Enter'), metaKey: true }, true)).toBeNull();
+    expect(permissionShortcutReply(press('Enter', false, { altKey: false }), true)).toBeNull();
+    expect(permissionShortcutReply(press('Enter', false, { metaKey: true }), true)).toBeNull();
+  });
+
+  test('rebinding moves the reply to the new key and frees the old one', () => {
+    const overrides = { permission_allow_once: 'alt+y', permission_deny: '__unassigned__' };
+    expect(permissionShortcutReply(press('y', false, { code: 'KeyY' }), false, overrides)).toBe('once');
+    expect(permissionShortcutReply(press('Enter'), false, overrides)).toBeNull();
+    expect(permissionShortcutReply(press('Backspace'), false, overrides)).toBeNull();
   });
 });

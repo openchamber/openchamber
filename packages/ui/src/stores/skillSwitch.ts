@@ -1,14 +1,14 @@
 /**
  * Whether agents can use an installed skill, from OpenCode's own policy
- * config: a skill is off when the `integration.use` statement that decides
- * `skill:<id>` is a deny. The skills list is the installed inventory (OpenCode's
+ * config: a skill is off when the `skill.use` statement that decides it
+ * (projected as `skill:<id>`) is a deny. The skills list is the installed inventory (OpenCode's
  * list merged with a disk scan), so a switched-off skill is still in it; this
  * module tells which of them agents are offered.
  */
 import { findIntegrationPolicy, type IntegrationPolicy } from '@/lib/opencode/projection';
 
 /**
- * The id OpenCode's `skill:<id>` policies name: the folder of a `SKILL.md`, or
+ * The id OpenCode's `skill.use` policies name: the folder of a `SKILL.md`, or
  * a loose `<id>.md` file's name (`config/plugin/skill-file.ts` upstream). A
  * built-in skill's id is its name.
  */

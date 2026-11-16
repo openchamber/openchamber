@@ -13,6 +13,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { SyncProvider } from '@/sync/sync-context';
+import { useUIStore } from '@/stores/useUIStore';
 import { PluginPane } from './PluginPane';
 
 // The user presses Generate, closes the panel before the model answers, and
@@ -66,6 +67,7 @@ test('a generate answer that arrives after its panel closed reaches the reopened
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  const originalFontSize = useUIStore.getState().fontSize;
   const restores: Array<() => void> = [];
   const pane = (open: boolean, headless = false) => (
     <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
@@ -99,8 +101,12 @@ test('a generate answer that arrives after its panel closed reaches the reopened
   };
   const late = (received: HostMessage[]) => received.filter((message) => message.type === 'generate-late');
   try {
+    useUIStore.setState({ fontSize: 125 });
     const first = await openPanel();
-    expect(first.received.find((message) => message.type === 'ready')).toMatchObject({ payload: { features: { lateGenerateResults: true } } });
+    expect(container.querySelector('iframe')?.style.zoom).toBe('1.25');
+    expect(first.received.find((message) => message.type === 'ready')).toMatchObject({ payload: { features: { lateGenerateResults: true, tooltips: true } } });
+    const panelReady = first.received.find((message) => message.type === 'ready');
+    expect(panelReady?.type === 'ready' ? panelReady.payload.features?.statusSummary : 'no ready').toBeUndefined();
     await first.send({ channel: 'openchamber.sdk', v: 1, type: 'generate', id: 'oc-1', payload: { prompt: 'Write a brief' } });
     expect(answers).toHaveLength(1);
 
@@ -143,6 +149,7 @@ test('a generate answer that arrives after its panel closed reaches the reopened
     expect(late(third.received)).toEqual([]);
   } finally {
     await act(async () => root.unmount());
+    useUIStore.setState({ fontSize: originalFontSize });
     for (const restore of restores) restore();
     fetch.mockRestore();
     await dom.happyDOM.close();

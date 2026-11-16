@@ -1,6 +1,8 @@
 import { BLOCK_PATH_TOKEN_RE, localPathFromFileUrl, normalizeReferencePath, parseFileReference } from '../fileReferenceParser';
-import { fileReferenceExists, findUniqueFileByName } from '../fileReferenceStat';
+import { checkFileReference, fileReferenceExists, findUniqueFileByName, lookupFilesByName } from '../fileReferenceStat';
+import { toastContextFileOpenFailure } from '@/lib/contextFileOpenGuard';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { ConfirmedCodePath } from './streamdownCode';
 import React from 'react';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
@@ -46,6 +48,33 @@ export function useOpenMarkdownFile() {
     // shows only once the drawer is open on Files (#5486).
     mobileActions?.openFiles();
   }, [directory, editor, isVSCode, mobileActions]);
+}
+
+// The phone runs no automatic probes, so inline code learns it is a file only
+// when tapped (#6056). The answer decides between the viewer and a toast.
+export function useOpenTappedMarkdownFile() {
+  const { directory } = useMarkdownPresentation();
+  const open = useOpenMarkdownFile();
+  // A slow answer must not open the drawer over the chat the user moved to.
+  const mounted = React.useRef(false);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  return React.useCallback(async (raw: string) => {
+    const reference = resolveMarkdownFile(raw, directory);
+    if (!reference) return;
+    const runtimeKey = getRuntimeKey();
+    const check = await checkFileReference(reference.resolvedPath, directory);
+    const named = check === 'missing' && !/[\\/]/.test(reference.path)
+      ? await lookupFilesByName(reference.path, directory)
+      : [];
+    if (!mounted.current || getRuntimeKey() !== runtimeKey) return;
+    // Several files with the name exist, so "not found" would be untrue.
+    if (check === 'failed' || !named || named.length > 1) toastContextFileOpenFailure(reference.resolvedPath, { reason: 'unreadable', message: null });
+    else if (check === 'missing' && named.length === 0) toastContextFileOpenFailure(reference.resolvedPath, { reason: 'missing' });
+    else await open(raw, named[0] ?? reference.resolvedPath);
+  }, [directory, open]);
 }
 
 // A `file:` link the click rules do not take as a file is usually a folder.

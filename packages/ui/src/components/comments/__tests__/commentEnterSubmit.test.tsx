@@ -90,7 +90,7 @@ describe('comment fields and the return key', () => {
                     <I18nProvider>
                         <InlineCommentInput
                             initialText="note"
-                            onSave={() => { saved += 1; }}
+                            onSave={() => { saved += 1; return true; }}
                             onCancel={() => undefined}
                         />
                     </I18nProvider>,
@@ -112,7 +112,7 @@ describe('comment fields and the return key', () => {
                             comment="quoted"
                             editing
                             onEditingChange={() => undefined}
-                            onSave={() => { saved += 1; }}
+                            onSave={() => { saved += 1; return true; }}
                             onRemove={() => undefined}
                         />
                     </I18nProvider>,

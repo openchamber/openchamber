@@ -5,7 +5,7 @@ import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/so
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
-import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveModelMetadata, useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
@@ -25,7 +25,6 @@ import {
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
     isReadOnSendMentionFilename,
-    prepareAttachmentFile,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -51,6 +50,7 @@ import {
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { abortShortcutReachesComposer, isTouchOnlyInput } from './composer/state/abortShortcutReach';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { BtwPanel } from './btw/BtwPanel';
@@ -63,7 +63,9 @@ import type { ToolPopupContent } from './message/types';
 import { QueuedMessagesStrip } from './QueuedMessagesStrip';
 import { AutoReviewStrip } from './AutoReviewStrip';
 import { PullRequestWatchStrip } from './PullRequestWatchStrip';
+import { ExtensionWaitStrip } from './ExtensionWaitStrip';
 import type { FileMentionHandle } from './FileMentionAutocomplete';
+import { resolveGuestMention, type GuestMention } from '@/lib/guests/mentions';
 import type { CommandAutocompleteHandle, CommandInfo } from './CommandAutocomplete';
 import type { SkillAutocompleteHandle } from './SkillAutocomplete';
 import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
@@ -73,7 +75,7 @@ import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
-import { shouldSubmitEnter } from './composer/keyboardPolicy';
+import { shouldPreserveDeferredEnterShift, shouldSubmitEnter } from './composer/keyboardPolicy';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useChatColumnActions, useChatColumnExpandedInput, useChatColumnSession, type ChatColumnSession } from './chatColumnSession';
 import { usePinnedComposerSelection } from './pinnedComposerSelection';
@@ -88,6 +90,12 @@ import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { getSettingsSurface } from '@/lib/settings/surface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useProjectActions } from '@/components/layout/projectActionsRunnerContext';
+import { collectRunningActions, planRunningActionsNote } from './lib/runningActionsNote';
+import { openGuestSurface } from '@/lib/guests/open-surface';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
 import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isCapacitorApp } from '@/lib/platform';
@@ -96,9 +104,13 @@ import { setNativeImagePasteEnabled, subscribeToNativeImagePastes } from '@/lib/
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
-import { useAttachReferences } from '@/components/references/useAttachReferences';
+import { useAttachReferences, useReadReferenceLink } from '@/components/references/useAttachReferences';
+import { trackerItemLabel } from '@/components/sourceBoard/openTrackerItem';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import {
     composerReferenceKey,
@@ -108,6 +120,7 @@ import {
     withoutComposerReference,
     type ComposerReference,
 } from './composer/composerReferences';
+import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, withReferencesFromText } from './composer/referenceLinks';
 import {
     loadSessionLinkReference,
     sessionLinkText,
@@ -116,10 +129,11 @@ import {
     sessionReferencesInText,
     type SessionReference,
 } from './composer/sessionReferences';
-import { findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
+import { PastedSessionIds, sessionLinkOverPastedId, type PastedSessionIdRange } from './composer/pastedSessionIds';
+import { bareSessionId, findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
-import type { Session } from '@/lib/opencode/model';
+import { findCatalogModel, type Session } from '@/lib/opencode/model';
 import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, type ComposerReferenceHandoff } from './composer/pendingComposerReferences';
 import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
@@ -133,12 +147,12 @@ import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces';
-import { useGuestDialogStore } from '@/lib/guests/dialog-store';
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { guestAttachContextText } from '@/lib/guests/attach-text';
+import { openGuestWithItem, useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { runGuestCommand } from '@/lib/guests/run-command';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
-import { routeGuestSlashCommand } from './composer/submit/guestCommands';
+import { reservedComposerCommandNames, routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { AgentUnavailableError, opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
@@ -149,6 +163,7 @@ import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useS
 import { selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
 import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
@@ -156,6 +171,7 @@ import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/perm
 import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
+import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
@@ -170,6 +186,7 @@ import {
     findImagePathCitationNames,
     imageSaveModeForModel,
     nextPastedContextFilename,
+    prepareImageToSave,
     renameFileForAttachmentCitation,
 } from './attachmentCitations';
 import {
@@ -185,7 +202,10 @@ import {
 import type { LargeTextPasteBehavior } from '@/stores/useUIStore';
 import type { FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import {
-    classifyMention,
+    confirmMention,
+    dismissMention,
+    isFileMentionCandidate,
+    isMentionDismissed,
     scanMentions,
 } from './composer/language/mentions';
 import { collectKnownTokenNames, lastPrefixSigilIndex } from './composer/language/prefixTokens';
@@ -208,6 +228,7 @@ import {
     appendWithLineBreaks,
     buildImagePasteInsertion,
     getMarkdownAutoPairEdit,
+    getOrderedListContinuationEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
 } from './composer/text';
@@ -225,6 +246,7 @@ import {
 import {
     INLINE_SERVER_ATTACHMENT_ID_PREFIX,
     filterMissingInlineAttachments,
+    findMissingPaths,
     isMentionAlreadyAttached,
 } from './composer/attachments/inlineMentionAttachments';
 import { buildComposerContext, buildOutgoingMessage, expandCommentSnippets, selectComposerQueue } from './composer/submit/buildOutgoingMessage';
@@ -240,7 +262,9 @@ import { useMessageHistory, type MessageHistoryValue } from './composer/state/us
 import type { PromptHistoryCandidate } from './composer/state/promptHistorySearch';
 import { registerPromptHistorySearchRoute } from './composer/state/promptHistorySearchRoute';
 import { useComposerDraft } from './composer/state/useComposerDraft';
+import { createComposerText, useComposerTextEffect, useComposerTextValue } from './composer/state/composerText';
 import { MentionCompletionState } from './composer/state/mentionCompletion';
+import { useFileMentionCheck } from './composer/state/useFileMentionCheck';
 import { useSessionDraftPublishing } from './composer/state/useSessionDraftPublishing';
 import { useDictationOrigin } from './composer/state/useDictationOrigin';
 import { useDraftTarget } from './composer/state/useDraftTarget';
@@ -264,15 +288,19 @@ import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/p
 import { ComposerAutocompletePopups } from './composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from './composer/ui/ComposerFooter';
 import { MobilePillComposer } from './composer/ui/MobilePillComposer';
-import { MobileComposerTopRows } from './composer/ui/MobileComposerTopRows';
-import { useMobileComposerFoldStore } from './composer/state/mobileComposerFold';
 import { PromptHistorySearchPanel } from './composer/ui/PromptHistorySearchPanel';
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
+import { findShareLink, withoutShareLinkKeys } from '@/lib/received-pages/link';
+import { SharedPageChip } from './sharePages/received/SharedPageChip';
+import { takeShareLink, withRegisteredSharedPages } from './sharePages/received/takeShareLink';
+import { useReceivedPageBases } from './sharePages/received/useReceivedPage';
 import { usePlaceholderFitsOneLine } from './composer/ui/usePlaceholderFitsOneLine';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionFolderMissingRow } from './SessionFolderMissingRow';
+import { SessionTrustPausedRow } from './SessionTrustPausedRow';
+import { useOpenCodeTrustPaused } from '@/components/projects/useOpenCodeTrustPause';
 import { useFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
@@ -414,6 +442,8 @@ interface ChatInputProps {
     scrollToLatest?: () => void;
     active?: boolean;
     draftPresentationExiting?: boolean;
+    /** The chat shows waiting questions as cards; the dock only points at them. */
+    formsInChat?: boolean;
 }
 
 // A new Chat's working directory moves from the Chats root to a prepared
@@ -476,6 +506,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     scrollToLatest,
     active = true,
     draftPresentationExiting = false,
+    formsInChat = false,
 }) => {
     const { t } = useI18n();
     // The session this composer belongs to: its column's (see
@@ -486,7 +517,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const initialDraftRef = React.useRef<string | null>(null);
     const initialDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(null);
     const initialDraftSnapshotRef = React.useRef<ChatDraftSnapshot>({ text: '', confirmedMentions: new Set() });
-    const [message, setMessage] = React.useState(() => {
+    // The draft text lives outside React state, so a keystroke re-renders only
+    // what shows a value derived from it (see composerText.ts).
+    const [composerText] = React.useState(() => {
         const identity = resolveChatDraftIdentity(chatColumnSession);
         const snapshot = readChatDraftClaimingFolderDraft(identity);
         initialDraftIdentityRef.current = identity;
@@ -494,8 +527,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (snapshot.text) {
             initialDraftRef.current = snapshot.text;
         }
-        return snapshot.text;
+        return createComposerText(snapshot.text);
     });
+    // Bumped by every text the app puts into the composer, so the editor
+    // writes it even when it equals the `value` it last rendered with.
+    const [editorValueRevision, setEditorValueRevision] = React.useState(0);
+    // Text the app puts into the composer: a restored draft, a picked command,
+    // a cleared send. Typed text reaches `composerText` from the editor.
+    const setMessage = React.useCallback((value: string) => {
+        if (value === composerText.get()) return;
+        composerText.set(value);
+        setEditorValueRevision((revision) => revision + 1);
+    }, [composerText]);
+    const hasText = useComposerTextValue(composerText, (text) => text.trim().length > 0);
     const confirmedMentionsRef = React.useRef<Set<string>>(initialDraftSnapshotRef.current.confirmedMentions);
     const [storedInputMode, setInputMode] = React.useState<'normal' | 'shell'>('normal');
     const inputModeParentRef = React.useRef<string | null>(null);
@@ -549,8 +593,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     const emojiRef = React.useRef<EmojiAutocompleteHandle>(null);
-    // Ref to track current message value without triggering re-renders in effects
-    const messageRef = React.useRef(message);
     const dictationSendInFlightRef = React.useRef(false);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
@@ -587,6 +629,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // the panel is expanded, so this composer's sends route to the fork
     // instead of the main session. Collapsed keeps the fork alive (chip stays
     // visible) while the composer talks to the main session again.
+    const trustDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const trustPausedDirectory = useOpenCodeTrustPaused(trustDirectory) ? trustDirectory : null;
     const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const orphaned = useOrphanedQuestions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined, pendingForms);
@@ -600,6 +644,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? btwPendingComposerKey(currentSessionId)
         : btwSessionId;
     const isBtwActive = Boolean(btwComposerSessionId) && !btwPanel.collapsed;
+    useRetryModelPick(
+        isBtwActive ? btwSessionId : currentSessionId,
+        (isBtwActive ? btwDirectory : null) ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
+    );
     const isBtwPanelVisible = btwHoldsDock(btwPanel, hasPendingForm);
     const immediateBtwSubmitRef = React.useRef<{ identity: ChatDraftIdentity; text: string } | null>(null);
     const draftCaretModeRef = React.useRef({ btw: isBtwActive, atEnd: isBtwActive });
@@ -681,11 +729,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
     const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.pending.length);
 
-    React.useEffect(() => {
+    useComposerTextEffect(composerText, (message) => {
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
         void prepareChatDraftDirectory();
-    }, [message, newSessionDraft.target, newSessionDraftOpen, prepareChatDraftDirectory]);
+    }, [newSessionDraft.target, newSessionDraftOpen, prepareChatDraftDirectory]);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
+    // Read when a message leaves, so a run that starts or stops does not rebuild the send handlers.
+    const projectActions = useProjectActions();
+    const projectActionsRef = React.useRef(projectActions);
+    projectActionsRef.current = projectActions;
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
@@ -719,14 +771,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configCatalogLoaded = useConfigStore((state) => state.providersLoaded && state.agentsLoaded);
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
-    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-    // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
-    useConfigStore((state) => state.modelsMetadata);
+    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const providerCatalog = useConfigStore((state) => state.providers);
     const autoReady = useRoutingStore(selectAutoReady);
-    const currentModelMetadata = currentProviderId && currentModelId
-        ? getModelMetadata(currentProviderId, currentModelId)
-        : undefined;
+    // The composer renders on every keystroke; for a model models.dev does not
+    // list, a lookup scans the whole metadata catalog and builds a new object.
+    const currentModelMetadata = React.useMemo(
+        () => currentProviderId && currentModelId
+            ? resolveModelMetadata(modelsMetadata, providerCatalog, currentProviderId, currentModelId)
+            : undefined,
+        [currentProviderId, currentModelId, modelsMetadata, providerCatalog],
+    );
     const configVariant = useConfigStore((state) => state.currentVariant);
     const currentVariant = pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant;
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
@@ -749,7 +804,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : undefined,
         [btwAgentSelection, btwComposerSessionId, btwModelSelection],
     ));
-    const btwComposerVariant = currentVariantSelection.override === null ? null : currentVariantSelection.override ?? configVariant;
+    // A pinned chat's `/btw` starts on that chat's level, as it does on its model.
+    const btwComposerVariant = pinnedComposerSelection
+        ? pinnedComposerSelection.variant
+        : currentVariantSelection.override === null ? null : currentVariantSelection.override ?? configVariant;
     // Memoized: the footer and its model controls compare this selection by
     // identity, and nothing in it changes while the user types.
     const effectiveBtwSelection = React.useMemo(() => resolveBtwSelection({
@@ -771,21 +829,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         selections.saveAgentModelForSession(btwComposerSessionId, agent, model.providerId, model.modelId);
         selections.saveAgentModelVariantForSession(btwComposerSessionId, agent, model.providerId, model.modelId, variant);
     }, [btwComposerSessionId, effectiveBtwSelection, isBtwActive]);
-    // While BTW is open the app-wide favorite-model handlers decline, so the
-    // parent's model never moves; these step the BTW model from the one its
-    // chip shows and save it the way the BTW model picker does (#5914). As
-    // with permission keys, a key pressed in a chat pinned in the side panel
-    // is that chat's and a key pressed anywhere else is the main chat's.
-    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+    // While BTW is open the app-wide model, effort and favorite-model handlers
+    // decline, so the parent's selection never moves; these act on the BTW
+    // selection its chips show and save it the way the BTW picker does
+    // (#5914, #6403). As with permission keys, a key pressed in a chat pinned
+    // in the side panel is that chat's and a key pressed anywhere else is the
+    // main chat's.
+    const [btwModelSelectorOpen, setBtwModelSelectorOpen] = React.useState(false);
+    if (!isBtwActive && btwModelSelectorOpen) setBtwModelSelectorOpen(false);
+    const isBtwKey = (event: KeyboardEvent): boolean => {
         const keyColumn = event.target instanceof Element ? event.target.closest('[data-chat-column="pinned"]') : null;
         if (columnPinned ? !keyColumn?.contains(composerFormRef.current) : keyColumn) return false;
         const ui = useUIStore.getState();
-        const hasOverlay = ui.isSettingsDialogOpen
+        return !(ui.isSettingsDialogOpen
             || ui.isCommandPaletteOpen
             || ui.isHelpDialogOpen
             || ui.isSessionSwitcherOpen
-            || ui.isAboutDialogOpen;
-        if (hasOverlay || !btwComposerSessionId) return false;
+            || ui.isAboutDialogOpen);
+    };
+    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+        if (!isBtwKey(event) || !btwComposerSessionId) return false;
+        const ui = useUIStore.getState();
         const { model, agent } = effectiveBtwSelection;
         const next = getNextFavoriteModel(
             ui.favoriteModels,
@@ -798,8 +862,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const selections = useSelectionStore.getState();
         selections.saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
         if (agent) selections.saveAgentModelForSession(btwComposerSessionId, agent, next.providerID, next.modelID);
+        selections.pickSessionModel(btwComposerSessionId, next.providerID, next.modelID);
+    };
+    const cycleBtwThinkingVariant = (event: KeyboardEvent): boolean | void => {
+        if (!isBtwKey(event) || !btwComposerSessionId) return false;
+        const { model, agent, variant } = effectiveBtwSelection;
+        if (!model || !agent) return false;
+        const variants = modelVariantNames(findCatalogModel(providerCatalog.find((provider) => provider.id === model.providerId)?.models, model.modelId));
+        if (variants.length === 0) return false;
+        useSelectionStore.getState().saveAgentModelVariantForSession(
+            btwComposerSessionId,
+            agent,
+            model.providerId,
+            model.modelId,
+            nextThinkingVariant(variants, variant),
+        );
     };
     useKeybinds(isBtwActive ? {
+        open_model_selector: (event) => {
+            if (!isBtwKey(event) || !btwComposerSessionId) return false;
+            setBtwModelSelectorOpen((open) => !open);
+        },
+        cycle_thinking_variant: cycleBtwThinkingVariant,
         cycle_favorite_model_forward: (event) => cycleBtwFavoriteModel(event, 1),
         cycle_favorite_model_backward: (event) => cycleBtwFavoriteModel(event, -1),
     } : {});
@@ -808,7 +892,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const enterToSend = useUIStore((state) => state.enterToSend);
     const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
     const mobileReturnKeySends = useUIStore((state) => state.mobileReturnKeySends);
-    const { enabled: isTabletLayout } = useTabletLayout();
+    const { enabled: isTabletLayout, roomyForOnePanel } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
@@ -980,11 +1064,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? EMPTY_COMPOSER_SKILLS
         : selectAvailableSkillsForDirectory(s, commandsTarget.directory));
     const knownSlashNames = React.useMemo(() => {
-        const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
-        ]);
-        if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
-        for (const command of availableCommands) names.add(command.name.toLowerCase());
+        const names = reservedComposerCommandNames(availableCommands);
+        if (isMobile || isVSCodeRuntime()) names.delete('handoff-review');
         return names;
     }, [availableCommands, isMobile]);
     const knownSkillNames = React.useMemo(
@@ -1050,31 +1131,50 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [rememberSessionMentions, t]);
     // Text that comes back without a paste (a revert, a fork, a restored
     // draft, a link typed by hand) gets its chips too.
-    React.useEffect(() => {
+    useComposerTextEffect(composerText, (message) => {
         if (isVSCodeRuntime()) return;
         const pending = findSessionLinks(message, sessionLinkOrigins)
             .map((range) => range.target)
             .filter((target) => !attemptedSessionLinksRef.current.has(sessionLinkKey(target)));
         if (pending.length > 0) void resolveSessionLinks(pending, false);
-    }, [message, resolveSessionLinks, sessionLinkOrigins]);
+    }, [resolveSessionLinks, sessionLinkOrigins]);
     // Read before a send consumes anything: a second Enter while the read is
     // out does nothing, and a link the read cannot resolve goes as the text it is.
     const sessionMentionReadRef = React.useRef(false);
+    // Pasted issue and PR links being read, by the link: a send waits for them too.
+    const referenceLinkReadsRef = React.useRef(new Map<string, Promise<unknown>>());
     const readSessionMentionsBeforeSend = React.useCallback(async (text: string): Promise<boolean> => {
         if (isVSCodeRuntime()) return true;
         const pending = findSessionLinks(text, sessionLinkOrigins)
             .map((range) => range.target)
             .filter((target) => !sessionMentionsRef.current.has(sessionLinkKey(target)));
-        if (pending.length === 0) return true;
+        const linkReads = findWebLinks(text).flatMap(({ link }) => referenceLinkReadsRef.current.get(link) ?? []);
+        if (pending.length === 0 && linkReads.length === 0) return true;
         if (sessionMentionReadRef.current) return false;
         sessionMentionReadRef.current = true;
         try {
-            await resolveSessionLinks(pending, true);
+            await Promise.all([pending.length > 0 ? resolveSessionLinks(pending, true) : null, ...linkReads]);
         } finally {
             sessionMentionReadRef.current = false;
         }
         return true;
     }, [resolveSessionLinks, sessionLinkOrigins]);
+    const [pastedSessionIds] = React.useState(() => new PastedSessionIds());
+    // A pasted id becomes the link once its session is read. One this server
+    // does not have stays the text it is, with nothing to announce.
+    const linkPastedSessionId = useStableHandler(async (range: PastedSessionIdRange) => {
+        // This composer's own draft: focus moving to another column must not
+        // cancel the link, so the shared attachment slot stays out of it.
+        const scope = largeTextPasteScopeRef.current;
+        const reference = await loadSessionLinkReference({ sessionId: range.sessionId, messageId: null }).catch(() => null);
+        const followed = pastedSessionIds.settle(range);
+        const editor = composerRef.current;
+        if (!reference || !followed || !editor || scope !== largeTextPasteScopeRef.current) return;
+        const replacement = sessionLinkOverPastedId(editor.getValue(), range, editor.getSelection(), sessionLinkOrigins);
+        if (!replacement) return;
+        rememberSessionMentions([reference]);
+        editor.replaceRange(range.from, range.to, replacement.link, replacement.selection.start, replacement.selection.end);
+    });
     // What the text mentions, once each, in order.
     const sessionMentionsIn = React.useCallback((text: string): SessionReference[] => (
         isVSCodeRuntime() ? [] : sessionReferencesInText(text, sessionLinkOrigins, sessionMentionsRef.current).references
@@ -1084,14 +1184,70 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         return [key, { label: chip.label, title: chip.title, iconHref: `#oc-${chip.icon}` }] as const;
     })), [sessionMentions]);
 
+    // Issues, change requests and tracker items linked in the text, by the
+    // link as written. A pasted link is read like the picker's choice; the
+    // text decides what is sent, as with session links.
+    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const repositoryUrls = useRepositoryUrlMatcher();
+    const trackerUrls = useTrackerUrlMatcher();
+    const readReferenceLink = useReadReferenceLink(referencePickerDirectory);
+    const [referenceLinks, setReferenceLinks] = React.useState<ReadonlyMap<string, ComposerReference>>(() => new Map());
+    const referenceLinksRef = React.useRef(referenceLinks);
+    React.useLayoutEffect(() => {
+        referenceLinksRef.current = referenceLinks;
+    }, [referenceLinks]);
+    // The ref moves at once, so a send right after a read sees what it found.
+    const rememberReferenceLinks = React.useCallback((entries: ReadonlyArray<readonly [string, ComposerReference]>) => {
+        if (entries.length === 0) return;
+        const next = new Map(referenceLinksRef.current);
+        for (const [link, reference] of entries) next.set(link, reference);
+        referenceLinksRef.current = next;
+        setReferenceLinks(next);
+    }, []);
+    // Each paste reads afresh, as the picker does. One that cannot be read
+    // stays a plain link, and the toast says why.
+    const readPastedReferenceLinks = useStableHandler(async (text: string) => {
+        const pending = findReferenceLinks(text, repositoryUrls, trackerUrls);
+        if (pending.length === 0) return;
+        const reads = referenceLinkReadsRef.current;
+        const read = Promise.allSettled(pending.map(({ target }) => readReferenceLink(target)));
+        for (const { link } of pending) reads.set(link, read);
+        const results = await read;
+        for (const { link } of pending) if (reads.get(link) === read) reads.delete(link);
+        rememberReferenceLinks(results.flatMap((result, index) => (
+            result.status === 'fulfilled' ? [[pending[index].link, result.value] as const] : []
+        )));
+        const failed = results.flatMap((result, index) => (result.status === 'rejected' ? [{ index, reason: result.reason }] : []));
+        if (failed.length > 0) {
+            toast.error(t('references.picker.error.attachFailed', {
+                items: failed.map(({ index }) => trackerItemLabel(pending[index].link, repositoryUrls, trackerUrls) ?? pending[index].link).join(', '),
+                error: failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason),
+            }));
+        }
+    });
+    const referenceLinksIn = React.useCallback((text: string): ComposerReference[] => (
+        isVSCodeRuntime() ? [] : referenceLinksInText(text, referenceLinksRef.current)
+    ), []);
+    const referenceLinkChips = React.useMemo(() => new Map([...referenceLinks].map(([link, reference]) => (
+        [link, referenceLinkChip(reference, repositoryUrls)] as const
+    ))), [referenceLinks, repositoryUrls]);
+
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
      * when a registry changes, so typing does not churn the tokenizer input.
      */
+    const [confirmedMentionsRevision, setConfirmedMentionsRevision] = React.useState(0);
+    const mentionDismissal = React.useMemo(() => ({
+        dismiss: (name: string) => dismissMention(name, confirmedMentionsRef.current),
+        hint: t('chat.chatInput.mentionChip.editHint'),
+    }), [t]);
     const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
         inputMode,
         knownAgentNames,
-        confirmedMentions: confirmedMentionsRef.current,
+        // A getter: a draft switch puts a new set in the ref without a new context.
+        get confirmedMentions() { return confirmedMentionsRef.current; },
+        confirmedMentionsRevision,
+        mentionDismissal,
         knownSlashNames: knownSlashNamesWithGuests,
         knownSnippetTriggers,
         attachmentFilenames,
@@ -1100,7 +1256,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         fileIconVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
         sessionLinkChips,
         sessionLinkOrigins,
-    }), [attachmentFilenames, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, sessionLinkChips, sessionLinkOrigins]);
+        referenceLinkChips,
+    }), [attachmentFilenames, confirmedMentionsRevision, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, mentionDismissal, referenceLinkChips, sessionLinkChips, sessionLinkOrigins]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1114,11 +1271,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     );
 
     const resolveInlineFileMention = React.useCallback((mentionPath: string): { serverPath: string; filename: string; root: string } | null => {
-        const kind = classifyMention(mentionPath, {
+        const isCandidate = isFileMentionCandidate(mentionPath, {
             knownAgentNames: knownAgentNamesRef.current,
             confirmedMentions: confirmedMentionsRef.current,
         });
-        if (kind !== 'file') return null;
+        if (!isCandidate) return null;
 
         const normalizedMentionPath = mentionPath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
         if (!normalizedMentionPath) return null;
@@ -1139,6 +1296,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             root,
         };
     }, [chatSearchDirectory]);
+
+    const resolveFileMentionPath = React.useCallback(
+        (name: string) => resolveInlineFileMention(name)?.serverPath ?? null,
+        [resolveInlineFileMention],
+    );
+    const repaintConfirmedMentions = React.useCallback(() => setConfirmedMentionsRevision((revision) => revision + 1), []);
+    useFileMentionCheck({
+        text: composerText,
+        enabled: inputMode === 'normal' && !isBtwActive,
+        confirmedMentionsRef,
+        resolvePath: resolveFileMentionPath,
+        lister: opencodeClient,
+        onConfirmed: repaintConfirmedMentions,
+    });
+
+    /** An agent the user turned back into text is not asked for by its mention. */
+    const mentionableAgents = React.useCallback(
+        () => agents.filter((agent) => !isMentionDismissed(agent.name.toLowerCase(), confirmedMentionsRef.current)),
+        [agents],
+    );
 
     const extractInlineFileMentions = React.useCallback((
         rawText: string,
@@ -1200,11 +1377,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ): Promise<ReadOnSendMentionPreparation> => {
         const prepared = new Map<string, AttachedFile[]>();
         for (const rawText of texts) {
-            for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
+            const mentions = scanMentions(rawText, confirmedMentionsRef.current).flatMap((token) => {
                 const mention = resolveInlineFileMention(token.name);
+                return mention && isReadOnSendMentionFilename(mention.filename) ? [mention] : [];
+            });
+            // `@logo.png` in pasted text names no file: it stays text and the
+            // message goes. Reading can only fail for a file that is there.
+            const missing = await findMissingPaths(mentions.map((mention) => mention.serverPath), opencodeClient);
+            if (getRuntimeKey() !== runtimeKey) return { status: 'runtime-changed' };
+            for (const mention of mentions) {
                 if (
-                    !mention
-                    || !isReadOnSendMentionFilename(mention.filename)
+                    missing.has(mention.serverPath)
                     || prepared.has(mention.serverPath)
                     || isMentionAlreadyAttached(mention, alreadyAttached)
                 ) {
@@ -1242,8 +1425,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         editorRef: composerRef,
         formRef: composerFormRef,
         setExpandedInput,
-        // Without a soft keyboard, keep the full composer up.
-        alwaysExpanded: hasHardwareKeyboard || isTabletLayout,
+        // Without a soft keyboard, keep the full composer up. So does a tablet,
+        // except where only one side panel fits (an unfolded iPhone Duo, a
+        // 13-inch iPad in portrait), which keeps the phone's pill.
+        alwaysExpanded: hasHardwareKeyboard || (isTabletLayout && !roomyForOnePanel),
         holders: {
             controlsPanelOpen: Boolean(mobileControlsPanel),
             attachMenuOpen: mobileAttachMenuOpen,
@@ -1255,12 +1440,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
     const mobileComposerExpanded = mobileShell.expanded;
-    // Opening the keyboard, from a tap or from code, unfolds a folded composer.
-    React.useEffect(() => {
-        if (mobileComposerExpanded) useMobileComposerFoldStore.getState().setFolded(false);
-    }, [mobileComposerExpanded]);
     const mobileTextareaFocused = mobileShell.focused;
     const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+    // Relays whose share links turn into a page chip (none where the server opens none).
+    const receivedPageBases = useReceivedPageBases();
     const setLinkedReferencesFor = React.useCallback((
         target: ChatDraftIdentity | null,
         references: ComposerReference[],
@@ -1407,7 +1590,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const applyHistoryValue = React.useCallback((value: MessageHistoryValue<AttachedFile>, selection: 'start' | 'end') => {
         const identity = promptHistorySearchIdentityRef.current;
         setMessage(value.text);
-        messageRef.current = value.text;
         useInputStore.getState().setAttachedFiles([...value.attachments], chatDraftIdentity);
         scheduleHistoryFocusFrame(() => {
             if (promptHistorySearchIdentityRef.current !== identity) return;
@@ -1417,12 +1599,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             editor.focus();
             editor.setSelection(position, position);
         });
-    }, [chatDraftIdentity, scheduleHistoryFocusFrame]);
-
-    // Keep messageRef in sync with message state
-    React.useEffect(() => {
-        messageRef.current = message;
-    }, [message]);
+    }, [chatDraftIdentity, scheduleHistoryFocusFrame, setMessage]);
 
     React.useEffect(() => {
         currentChatDraftIdentityRef.current = chatDraftIdentity;
@@ -1436,8 +1613,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         restoreDraft,
         migrateDraft,
     } = useComposerDraft({
-        message,
-        messageRef,
+        text: composerText,
         setMessage,
         confirmedMentionsRef,
         identity: chatDraftIdentity,
@@ -1471,7 +1647,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // while it is the one on screen).
     useSessionDraftPublishing({
         identity: isBtwActive ? null : chatDraftIdentity,
-        message,
+        text: composerText,
         confirmedMentionsRef,
         projectId: newSessionDraftOpen ? newSessionDraft.selectedProjectId ?? null : null,
         enabled: newSessionDraftOpen && !currentSessionId,
@@ -1563,13 +1739,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // useComposerDraft: on a draft switch the incoming draft loads first and
     // the pending text lands on top of it.
     const focusComposer = React.useCallback(() => composerRef.current?.focus(), []);
-    usePendingComposerText({ target: mailboxTarget, sessionId: shownSessionId, setMessage, focus: focusComposer });
+    // A command picked in the command palette is no shell command.
+    const leaveShellMode = React.useCallback(() => setInputMode('normal'), []);
+    usePendingComposerText({
+        target: mailboxTarget,
+        sessionId: shownSessionId,
+        text: composerText,
+        setMessage,
+        focus: focusComposer,
+        holdSlashCommand: isBtwActive,
+        onSlashCommand: leaveShellMode,
+    });
 
     const parallel = useParallelComposer({
         enabled: !isMobile && !isBtwActive,
         draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
         draftProjectId: newSessionDraft?.selectedProjectId ?? null,
-        message,
+        text: composerText,
         setMessage,
     });
     const parallelProjectId = newSessionDraft?.selectedProjectId ?? null;
@@ -1595,15 +1781,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleRunInParallel = React.useCallback(() => {
         // The picker offers it everywhere; a run always starts from a new-session draft.
         if (newSessionDraftOpen && newSessionDraft?.target !== 'chat') enterParallel();
-        else openParallelComposer(messageRef.current);
-    }, [enterParallel, newSessionDraft?.target, newSessionDraftOpen]);
+        else openParallelComposer(composerText.get());
+    }, [composerText, enterParallel, newSessionDraft?.target, newSessionDraftOpen]);
 
     // A linked reference is attached context, not decoration: the submission
     // builder serializes it into the outgoing message, so a composer holding
     // only one of those chips is not empty and has to be sendable on its own.
     // BTW sends strip every reference, so the gate stays out of BTW.
     const hasLinkedReferences = linkedReferences.length > 0;
-    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences);
+    const hasContent = hasText || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences);
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
@@ -1623,12 +1809,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Reads the text through refs, so the send and queue callbacks built on
     // it keep their identity while the user types.
     const getCurrentInputSnapshot = React.useCallback(() => {
-        const currentMessage = composerRef.current?.getValue() ?? messageRef.current;
+        const currentMessage = composerRef.current?.getValue() ?? composerText.get();
         return {
             message: currentMessage,
             hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
         };
-    }, [attachedFiles.length, hasDrafts, hasLinkedReferences, isBtwActive]);
+    }, [attachedFiles.length, composerText, hasDrafts, hasLinkedReferences, isBtwActive]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -1667,7 +1853,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Queueing is the same user intent as sending, so an archived session
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
-        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        // A share link's key is never queued, even one the composer did not turn into a chip.
+        const messageToQueue = withoutShareLinkKeys(inputSnapshot.message.replace(/^\n+|\n+$/g, ''));
         if (!(await readSessionMentionsBeforeSend(messageToQueue))) return;
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
@@ -1686,7 +1873,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
+        const { sanitizedText, mention } = parseAgentMentions(messageToQueue, mentionableAgents());
         const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared, composerAttachments);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
@@ -1712,12 +1899,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
         const linked = linkedReferences;
+        // The chips and the items the text links; only the chips come back on a failure, the text brings its links.
+        const linkedToQueue = await withRegisteredSharedPages(withReferencesFromText(linked, referenceLinksIn(messageToQueue)));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
+        const actionsNote = currentSessionId
+            ? planRunningActionsNote(currentSessionId, collectRunningActions(projectActionsRef.current))
+            : null;
         const context = buildComposerContext({
             inlineComments: expandedDrafts,
-            syntheticTexts: syntheticParts.map((part) => part.text),
-            references: [...linked.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
+            syntheticTexts: [...syntheticParts.map((part) => part.text), ...(actionsNote?.text ? [actionsNote.text] : [])],
+            references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
         }, skillInstruction);
         const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
         // An armed goal belongs to this message: it leaves with it and starts
@@ -1770,7 +1962,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (goalArm.armed) useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride);
             // The composer was cleared on queueing; give everything back. The
             // text is appended if the user has already typed something new.
-            const currentInput = composerRef.current?.getValue() ?? messageRef.current;
+            const currentInput = composerRef.current?.getValue() ?? composerText.get();
             if (!currentInput) {
                 setMessage(messageToQueue);
             } else {
@@ -1796,13 +1988,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (inputMode !== 'shell') settleModelPick();
         void resumeAfterQueue().catch(console.warn);
-        recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
+        recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
+        if (currentSessionId) actionsNote?.commit(currentSessionId);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn, composerText, setMessage]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
-    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
+    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[], content: string) => {
         const synthetic: SyntheticContextPart[] = [];
-        const restored: ComposerReference[] = [];
+        const restored: Exclude<ComposerReference, { kind: 'shared-page' }>[] = [];
+        const sharedPages: ComposerReference[] = [];
         const mentions: SessionReference[] = [];
         for (const part of context) {
             if (part.kind === 'synthetic') {
@@ -1812,7 +2006,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // An instruction is derived from the text, and derived again on send.
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
-            if (payload.kind === 'repository-issue') {
+            if (payload.kind === 'shared-page') {
+                // A page someone else shared goes back as its chip; its text never held the link.
+                sharedPages.push({
+                    kind: 'shared-page',
+                    shareKey: payload.receivedId ?? payload.host,
+                    receivedId: payload.receivedId,
+                    host: payload.host,
+                    title: payload.title || null,
+                    opened: payload.opened,
+                    contextText: part.text,
+                });
+            } else if (payload.kind === 'repository-issue') {
                 restored.push({
                     kind: 'repository-issue',
                     ...(payload.provider ? { provider: payload.provider } : {}),
@@ -1874,19 +2079,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             } else {
                 const draft = draftFromContextPayload(payload);
                 if (draft && inlineDraftTarget) {
-                    useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft);
+                    useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft, { written: true });
                 }
             }
         }
-        if (restored.length > 0) {
-            updateLinkedReferences((current) => withComposerReferences(current, restored));
+        // An item the text links goes back as that link's chip, the rest above the text.
+        const textLinks = new Set(findWebLinks(content).map(({ link }) => link));
+        const chips: ComposerReference[] = [...restored.filter((reference) => !textLinks.has(reference.url)), ...sharedPages];
+        if (chips.length > 0) {
+            updateLinkedReferences((current) => withComposerReferences(current, chips));
         }
+        rememberReferenceLinks(restored.flatMap((reference) => (textLinks.has(reference.url) ? [[reference.url, reference] as const] : [])));
         rememberSessionMentions(mentions);
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
             useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
         }
-    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
+    }, [inlineDraftTarget, mailboxTarget, rememberReferenceLinks, rememberSessionMentions, updateLinkedReferences]);
 
     // Editing takes the message out of the queue, so sending it again queues
     // one message, not a copy.
@@ -1903,7 +2112,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setMessage(queued.content);
             // Back in the composer, the message is armed again as it was queued.
             if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
-            restoreQueuedContext(queued.context ?? []);
+            restoreQueuedContext(queued.context ?? [], queued.content);
             setTimeout(() => {
                 composerRef.current?.focus();
             }, 0);
@@ -1911,7 +2120,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             console.warn('[queue] failed to take queued message for editing:', error);
             toast.error(t('chat.queuedMessage.toast.takeFailed'));
         });
-    }, [messageQueueTarget, popQueuedToInput, restoreQueuedContext, t]);
+    }, [messageQueueTarget, popQueuedToInput, restoreQueuedContext, t, setMessage]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
@@ -1925,7 +2134,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const openGitHubPicker = React.useCallback(() => {
         setReferencePicker({ source: 'repository' });
     }, []);
-    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
     const descriptorOf = useSourceControlDescriptorOf();
@@ -2152,7 +2360,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // queues if the fork's own turn is busy).
         if (currentSessionId && !queuedOnly && !isBtwActive && !commandPlan) {
             // Sending is authoritative for blocking prompts: deny pending
-            // permissions and dismiss open forms for the session subtree. The
+            // permissions and dismiss the open forms that hold a turn in the
+            // session subtree (a form whose tool call ended stays). The
             // deny/clear vanishes the card instantly (optimistic); rejecting
             // unblocks the agent's tool but does NOT end its turn.
             const [deniedPermissions, dismissedForms] = await Promise.all([
@@ -2373,6 +2582,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // below skips, so their own words expand here.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
 
+        // The chips, then the items the text links that are not chips already.
+        const sentComposerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : '';
+        // A page chip whose link the server is still taking goes out with its id.
+        const linkedReferencesToSend = await withRegisteredSharedPages(withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText)));
+
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
@@ -2382,13 +2596,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
                 ...(syntheticParts?.map((part) => part.text) ?? []),
             ],
-            references: isBtwActive ? [] : linkedReferences.map(toContextReference).concat(
+            references: isBtwActive ? [] : linkedReferencesToSend.map(toContextReference).concat(
                 !queuedOnly && inputSnapshot.hasContent ? sessionMentionsIn(inputSnapshot.message) : [],
             ),
         }, {
             parseAgentMention: (text) => {
                 if (isBtwActive) return { text };
-                const { sanitizedText, mention } = parseAgentMentions(text, agents);
+                const { sanitizedText, mention } = parseAgentMentions(text, mentionableAgents());
                 return { text: sanitizedText, agentName: mention?.name };
             },
             extractFileMentions: (text) => {
@@ -2404,6 +2618,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const { primaryAttachments, additionalParts, agentMentionName, skillNames } = outgoing;
 
         if (outgoing.isEmpty) return;
+
+        // After the empty check: the note alone is no reason to send.
+        const actionsNote = isBtwActive ? null : planRunningActionsNote(currentSessionId ?? null, collectRunningActions(projectActionsRef.current));
+        if (actionsNote?.text) additionalParts.push({ text: actionsNote.text, synthetic: true });
 
         // Skills named inline are attached to the prompt so OpenCode loads
         // them with the message, rather than hoping the model follows a hint.
@@ -2428,7 +2646,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Clear input (the queue was taken above)
         if (!queuedOnly) {
             setMessage('');
-            messageRef.current = '';
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
             persistDraftImmediately(chatDraftIdentity, '');
@@ -2475,6 +2692,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         inputMode,
                         sendMessageOptions,
                     );
+                    if (currentSessionId) actionsNote?.commit(currentSessionId);
                 } catch (error) {
                     restoreConsumedInput();
                     toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
@@ -2558,6 +2776,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     drafts.restoreDrafts({ directory: forkDirectory, sessionKey: fork.id }, drafts.consumeDrafts(inlineDraftTarget));
                 }
                 useBtwStore.getState().setPanelState(currentSessionId, { pending: false, creating: false, pendingSend: undefined });
+                // The pending composer's picks live on the fork now
+                // (`startBtwSession` saved them there). Left under the pending
+                // key they outlive this question, and the next `/btw` in this
+                // parent would open on its agent, model and effort instead of
+                // Plan and what the main composer is on.
+                useSelectionStore.getState().clearSessionSelections(btwComposerSessionId);
                 scrollToBottom?.();
             } catch (error) {
                 if (!ownsPendingBtwSend()) return;
@@ -2602,13 +2826,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
                     ?? currentDirectory;
             if (linkTargetSessionId) {
-                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
+                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferencesToSend);
+                actionsNote?.commit(linkTargetSessionId);
             }
             // A session that starts with a tracker item attached reports itself
             // on that item (the tracker's Session comments, where it has them),
             // however it was started: a draft, a worktree made from the item.
             if (!currentSessionId && linkTargetSessionId) {
-                for (const reference of linkedReferences) {
+                for (const reference of linkedReferencesToSend) {
                     if (reference.kind !== 'tracker-item') continue;
                     void postTrackerSessionStarted(runtimeTrackers, reference.provider, {
                         sessionId: linkTargetSessionId,
@@ -2643,7 +2868,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const shown = currentChatDraftIdentityRef.current;
                 if (shown && getChatDraftIdentityKey(shown) === getChatDraftIdentityKey(failedSessionIdentity)) {
                     // The composer still shows the session that never was: its text moves to the draft.
-                    handoffDraft(chatDraftIdentity, messageRef.current);
+                    handoffDraft(chatDraftIdentity, composerText.get());
                 } else {
                     // The user moved on (the draft is back, or another session is
                     // open): the text typed in the session that never was joins
@@ -2750,12 +2975,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // The text goes straight into the submit (see SubmitOptions.presetText)
         // instead of through the composer input — the collapsed mobile pill has
         // no mounted textarea to stage it in.
-        const draft = (composerRef.current?.getValue() ?? messageRef.current).trim();
+        const draft = (composerRef.current?.getValue() ?? composerText.get()).trim();
         // OpenCode recognizes slash commands only when their arguments follow
         // the command on the same line. Skills retain the multiline prompt form.
         const presetText = draft ? `${text}${type === 'command' ? ' ' : '\n'}${draft}` : text;
         void handleSubmitRef.current({ presetText });
-    }, []);
+    }, [composerText]);
     const handlePresetChipSubmit = React.useCallback((starter: ResolvedStarter) => {
         submitPresetPrompt(starter.submitText, starter.ref.type);
     }, [submitPresetPrompt]);
@@ -2777,15 +3002,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const handleDictationInsert = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
         dictationSendEndRef.current?.();
-        setMessage((prev) => {
-            // The editor is controlled by this state; getCurrentInputSnapshot
-            // reads it back, so no imperative write is needed.
-            return appendInlineText(prev, text);
-        });
+        // The editor writes the new text on the render setMessage causes, so
+        // no imperative write is needed.
+        setMessage(appendInlineText(composerText.get(), text));
         setTimeout(() => {
             composerRef.current?.focus();
         }, 0);
-    }, [keepTranscriptForOrigin]);
+    }, [composerText, keepTranscriptForOrigin, setMessage]);
 
     const handleDictationInsertAndSend = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
@@ -2794,7 +3017,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // already collapsed into the pill by then, so the editor is unmounted
         // and getValue() returns '' — which silently dropped the user's typed
         // text and (once the composer cleared) the transcript with it.
-        const next = appendInlineText(messageRef.current, text);
+        const next = appendInlineText(composerText.get(), text);
         // Land the composed text in the composer state first, so a failed send
         // restores exactly what the user dictated, then submit it as an
         // explicit override (the textarea may be unmounted at this point).
@@ -2803,7 +3026,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         void handleSubmitRef.current({ presetText: next }).finally(() => {
             dictationSendEndRef.current?.();
         });
-    }, [keepTranscriptForOrigin]);
+    }, [keepTranscriptForOrigin, setMessage, composerText]);
 
     // A command with an argument sends once the isolated composer owns its draft.
     React.useEffect(() => {
@@ -2844,13 +3067,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const composerHolds = getCurrentInputSnapshot().hasContent
             || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
         if (composerHolds) {
-            setMessage((prev) => appendWithLineBreaks(prev, text));
+            setMessage(appendWithLineBreaks(composerText.get(), text));
             return;
         }
         setMessage(text);
-        messageRef.current = text;
         void handleSubmitRef.current({ presetText: text });
-    }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
+    }, [columnPinned, composerText, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit, setMessage]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -2892,6 +3114,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        // The text as it is now: a key can arrive before the render that
+        // follows the previous one.
+        const message = composerText.get();
         if (inputMode === 'shell' && e.key === 'Backspace' && message.length === 0) {
             e.preventDefault();
             setInputMode('normal');
@@ -2964,6 +3189,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const selEnd = ta?.getSelection().end ?? -1;
 
             if (ta && selStart >= 0) {
+                const listEdit = e.key === 'Enter' && e.shiftKey
+                    ? getOrderedListContinuationEdit(message, selStart, selEnd)
+                    : null;
+                if (listEdit) {
+                    e.preventDefault();
+                    ta.replaceRange(
+                        listEdit.from,
+                        listEdit.to,
+                        listEdit.insert,
+                        listEdit.selectionStart,
+                        listEdit.selectionEnd,
+                    );
+                    return;
+                }
+
                 const edit = getMarkdownAutoPairEdit(message, e.key, selStart, selEnd);
                 if (edit) {
                     e.preventDefault();
@@ -3029,7 +3269,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
-            const canQueue = !isBtwActive && !isPageWaiting && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
+            const canQueue = !isBtwActive && !isPageWaiting && inputMode === 'normal' && getCurrentInputSnapshot().hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
 
             if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
@@ -3056,7 +3296,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         fullWidth: isMobile,
         openAutocomplete,
         query: autocompleteQuery,
-        message,
+        text: composerText,
         editorRef: composerRef,
         containerRef: dropZoneRef,
     });
@@ -3147,7 +3387,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!editor) {
             // No mounted editor (collapsed mobile pill): append to the state
             // the editor will be seeded from.
-            const nextValue = messageRef.current + text;
+            const nextValue = composerText.get() + text;
             setMessage(nextValue);
             updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             return;
@@ -3164,7 +3404,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // frame where the caret sits at a stale offset.
         editor.insertText(text);
         updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
-    }, [updateAutocompleteState]);
+    }, [updateAutocompleteState, setMessage, composerText]);
 
     const clearDropTextSuppression = React.useCallback(() => {
         suppressNextFileDropTextInsertRef.current = false;
@@ -3204,6 +3444,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleComposerChange = ({ value, selection, changes, fromPaste, insertedText, fromValueProp }: ComposerChange) => {
+        const pastedSessionId = pastedSessionIds.applyChange({ value, changes, fromPaste, fromValueProp });
+        if (pastedSessionId) void linkPastedSessionId(pastedSessionId);
         if (fromValueProp) {
             mentionCompletion.clear();
         } else {
@@ -3217,7 +3459,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (shellTriggerNormalizationRef.current) {
             shellTriggerNormalizationRef.current = false;
-            setMessage(value);
+            composerText.set(value);
             return;
         }
 
@@ -3227,6 +3469,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const candidateAbsolutePaths = pendingDroppedAbsolutePathsRef.current;
             if (candidateAbsolutePaths.some((path) => path.length > 0 && value.includes(path))) {
                 clearDropTextSuppression();
+                // The editor goes back to the text without the path.
+                setEditorValueRevision((revision) => revision + 1);
                 return;
             }
         }
@@ -3257,7 +3501,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
-        setMessage(value);
+        // A share link someone sent becomes a page chip: the link, with its
+        // key, goes to the server and never stays in the text or the draft.
+        const shareLink = !fromValueProp && !isBtwActive && inputMode === 'normal' ? findShareLink(value, receivedPageBases) : null;
+        if (shareLink && composerRef.current) {
+            updateLinkedReferences((current) => withComposerReferences(current, [takeShareLink(shareLink)]));
+            composerRef.current.replaceRange(shareLink.start, shareLink.end, '', shareLink.start);
+            return;
+        }
+
+        composerText.set(value);
         // Text the app set (a restored draft, a prepared prompt) is not a
         // trigger being typed: a `#` line in it must not open the snippet list.
         if (fromValueProp) {
@@ -3277,7 +3530,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const insertCitationAtSelection = React.useCallback((citationText: string, leadingText: string) => {
         if (!citationText && !leadingText) return;
         const editor = composerRef.current;
-        const currentMessage = editor?.getValue() ?? messageRef.current;
+        const currentMessage = editor?.getValue() ?? composerText.get();
         const selectionStart = editor?.getSelection().start ?? currentMessage.length;
         const selectionEnd = editor?.getSelection().end ?? currentMessage.length;
         const insertionText = withInlineInsertionBoundaries(
@@ -3286,7 +3539,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             currentMessage.slice(selectionEnd),
         );
         insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
-    }, [insertTextAtSelection]);
+    }, [insertTextAtSelection, composerText]);
 
     const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
     const imageSaveMode = imageSaveModeForModel(savePastedImagesAsFiles, currentModelMetadata?.modalities?.input);
@@ -3300,26 +3553,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
      * (#5087), next to it for one that does (#5218). Each image gets a name no
      * attachment or link in the draft uses yet. Answers both groups under
      * those names; the caller attaches the unsaved ones as before, and in
-     * `alongside` the saved ones too.
+     * `alongside` the `attachable` saved ones too. A HEIC saved unconverted
+     * gets only its link (`prepareImageToSave`).
      */
     const saveImagesWithPathCitation = React.useCallback(async (
         files: File[],
         leadingText: string,
         reservedNames: string[],
         mode: 'instead' | 'alongside',
-    ): Promise<{ saved: File[]; unsaved: File[] }> => {
+    ): Promise<{ saved: File[]; attachable: File[]; unsaved: File[] }> => {
         const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
         const names = assignImageAttachmentFilenames(files, [
             ...reservedNames,
-            ...findImagePathCitationNames(composerRef.current?.getValue() ?? messageRef.current),
+            ...findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()),
         ]);
         const images = files.map((file, index) => renameFileForAttachmentCitation(file, names[index]));
         // A cold or remote OpenCode can take seconds; this toast says what is going on.
         const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: images.map((file) => file.name).join(', ') }));
-        const prepared = await Promise.all(images.map(async (file) => {
-            const output = await prepareAttachmentFile(file);
-            return output ? { file, filename: output.file.name, bytes: new Uint8Array(await output.file.arrayBuffer()) } : null;
-        }).map((entry) => entry.catch(() => null)));
+        const prepared = await Promise.all(images.map((file) => prepareImageToSave(file).catch(() => null)));
         const readable = prepared.filter((entry) => entry !== null);
         let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
         try {
@@ -3330,7 +3581,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             results = readable.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
         }
         toast.dismiss(savingToastId);
-        if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return { saved: [], unsaved: [] };
+        if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return { saved: [], attachable: [], unsaved: [] };
 
         const saved = results.flatMap((result) => 'path' in result ? [result] : []);
         const savedNames = new Set(saved.map((result) => result.filename));
@@ -3368,8 +3619,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ? t('chat.chatInput.toast.imageCopySaveFailed', { files })
                 : t('chat.chatInput.toast.imageSaveFailed', { files }));
         }
-        return { saved: images.filter((_file, index) => isSaved(index)), unsaved };
-    }, [currentDirectory, currentModelKey, currentModelName, insertCitationAtSelection, t]);
+        return {
+            saved: images.filter((_file, index) => isSaved(index)),
+            attachable: images.filter((_file, index) => isSaved(index) && !prepared[index]?.linkOnly),
+            unsaved,
+        };
+    }, [currentDirectory, currentModelKey, currentModelName, insertCitationAtSelection, t, composerText]);
 
     /**
      * Attach files that arrived by paste or drop and cite each one in the
@@ -3395,13 +3650,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const usedNames = () => [
             ...useInputStore.getState().attachedFiles.map((file) => file.filename),
             ...pendingPastedAttachmentFilenamesRef.current,
-            ...(savePastedImagesAsFiles ? findImagePathCitationNames(composerRef.current?.getValue() ?? messageRef.current) : []),
+            ...(savePastedImagesAsFiles ? findImagePathCitationNames(composerRef.current?.getValue() ?? composerText.get()) : []),
         ];
 
         let savedAny = false;
         let attached = false;
         if (imageSaveMode !== 'attach' && imageFiles.length > 0) {
-            const { saved, unsaved } = await saveImagesWithPathCitation(imageFiles, leadingText, usedNames(), imageSaveMode);
+            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(imageFiles, leadingText, usedNames(), imageSaveMode);
             if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
             if (saved.length > 0) {
                 savedAny = true;
@@ -3409,7 +3664,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             if (imageSaveMode === 'alongside') {
                 // The links already name these, so they attach without a second citation.
-                for (const file of saved) {
+                for (const file of attachable) {
                     try {
                         attached = (await addAttachedFile(file)) || attached;
                     } catch (error) {
@@ -3469,7 +3724,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (files.length > 0 && !attached && !savedAny && !reported) {
             toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
-    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, savePastedImagesAsFiles, saveImagesWithPathCitation, t]);
+    }, [addAttachedFile, imageSaveMode, insertCitationAtSelection, savePastedImagesAsFiles, saveImagesWithPathCitation, t, composerText]);
 
     const handlePaste = React.useCallback(async (event: ClipboardEvent) => {
         const clipboardData = event.clipboardData;
@@ -3484,6 +3739,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const links = findSessionLinks(e.clipboardData.getData('text'), sessionLinkOrigins);
             if (links.length > 0) void resolveSessionLinks(links.map((range) => range.target), true);
         }
+        // Issue and PR links are read only when the text lands in the composer,
+        // not when a large paste goes as a file.
+        const readLinksOfPaste = (text: string) => {
+            if (!isVSCodeRuntime() && inputMode === 'normal' && !isBtwActive) void readPastedReferenceLinks(text);
+        };
 
         // Pasting a URL over a selection wraps it as a markdown link:
         // [selected text](pasted url).
@@ -3494,8 +3754,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (ta && selEnd > selStart) {
                 const clipboardText = e.clipboardData.getData('text');
                 const url = clipboardText.trim();
+                const message = composerText.get();
                 const selected = message.slice(selStart, selEnd);
-                if (shouldWrapSelectionAsLink(url, selected)) {
+                // A share link replaces the selection and becomes its chip; wrapped, its key would stay in the text.
+                if (shouldWrapSelectionAsLink(url, selected) && !findShareLink(url, receivedPageBases)) {
                     e.preventDefault();
                     const next = `${message.slice(0, selStart)}[${selected}](${url})${message.slice(selEnd)}`;
                     const caret = selStart + 1 + selected.length + 2 + url.length + 1;
@@ -3560,6 +3822,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 if (pastedText.includes('@')) {
                     markFileMentionPasteSuppression();
                 }
+                const sessionId = !isVSCodeRuntime() && inputMode === 'normal' ? bareSessionId(pastedText) : null;
+                if (sessionId) pastedSessionIds.expect(sessionId);
+                readLinksOfPaste(pastedText);
                 return;
             }
 
@@ -3574,6 +3839,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     pastedText,
                     getFileMentionInputSourceForInsertedText(pastedText),
                 );
+                readLinksOfPaste(pastedText);
             };
 
             const attachAsFile = async (candidate: LargeTextPasteCandidate | null = null) => {
@@ -3586,7 +3852,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ]);
                 const citationText = buildAttachmentCitationText([filename]);
                 const editor = composerRef.current;
-                const currentMessage = editor?.getValue() ?? messageRef.current;
+                const currentMessage = editor?.getValue() ?? composerText.get();
                 const selectionStart = editor?.getSelection().start ?? currentMessage.length;
                 const selectionEnd = editor?.getSelection().end ?? currentMessage.length;
                 const insertionText = withInlineInsertionBoundaries(
@@ -3693,7 +3959,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, composerText, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds, isBtwActive, readPastedReferenceLinks, receivedPageBases]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
@@ -3735,16 +4001,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         editor.focus();
     });
 
+    const handleAgentSelect = useStableHandler((name: string) => {
+        confirmMention(name.toLowerCase(), confirmedMentionsRef.current);
+        completeMentionSelection(name);
+    });
+
     const handleFileSelect = useStableHandler((file: { name: string; path: string; relativePath?: string }) => {
         const mentionPath = (file.relativePath && file.relativePath.trim().length > 0)
             ? file.relativePath.trim()
             : (toMentionPath(file.path) || file.name);
-        confirmedMentionsRef.current.add(mentionPath);
+        confirmMention(mentionPath, confirmedMentionsRef.current);
         completeMentionSelection(mentionPath);
     });
 
     // A session is written as its link, which draws as a chip with its title.
     const handleSessionSelect = useStableHandler((session: Session) => {
+        const message = composerText.get();
         const cursorPosition = composerRef.current?.getSelection().start ?? message.length;
         const lastAtSymbol = message.substring(0, cursorPosition).lastIndexOf('@');
         const start = lastAtSymbol === -1 ? cursorPosition : lastAtSymbol;
@@ -3761,7 +4033,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         composerRef.current?.focus();
     });
 
+    // The row's content is read now: a row that cannot be read leaves no chip
+    // to send with nothing behind it, and says so.
+    const handleExtensionMentionSelect = useStableHandler((mention: GuestMention) => {
+        const editor = composerRef.current;
+        if (editor) {
+            const value = editor.getValue();
+            const cursorPosition = editor.getSelection().start;
+            const lastAtSymbol = value.substring(0, cursorPosition).lastIndexOf('@');
+            if (lastAtSymbol !== -1) editor.replaceRange(lastAtSymbol, cursorPosition, '');
+        }
+        closeAutocomplete();
+        editor?.focus();
+        const pickedIn = JSON.stringify(currentChatDraftIdentityRef.current);
+        void resolveGuestMention(mention).then((item) => {
+            if (!item) {
+                toast.error(t('chat.composer.extensionMention.failed', { title: mention.title, extension: mention.label }));
+                return;
+            }
+            // This composer's own chip, and only while it still shows the draft it was picked in.
+            if (JSON.stringify(currentChatDraftIdentityRef.current) === pickedIn) handleGuestAttach(item);
+        });
+    });
+
     const handleSkillSelect = useStableHandler((skillName: string) => {
+        const message = composerText.get();
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
@@ -3789,6 +4085,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     });
 
     const handleSnippetSelect = useStableHandler((_snippet: unknown, trigger: string) => {
+        const message = composerText.get();
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
@@ -3809,12 +4106,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // "Save draft as #name": the draft goes into the snippet without the
     // `#name` being typed, and once saved that token leaves the composer.
-    const snippetDraftText = openAutocomplete === 'snippet' ? withoutSnippetToken(message, autocompleteQuery) : undefined;
+    const snippetDraftText = useComposerTextValue(
+        composerText,
+        (text) => (openAutocomplete === 'snippet' ? withoutSnippetToken(text, autocompleteQuery) : undefined),
+    );
     const handleSnippetDraftSaved = useStableHandler((typedName: string) => {
-        setMessage(withoutSnippetToken(messageRef.current, typedName));
+        setMessage(withoutSnippetToken(composerText.get(), typedName));
     });
 
     const handleEmojiSelect = useStableHandler((emoji: string) => {
+        const message = composerText.get();
         const cursorPosition = composerRef.current?.getSelection().start ?? message.length;
         const startIndex = Math.max(0, cursorPosition - autocompleteQuery.length - 1);
         const inserted = `${emoji} `;
@@ -3869,6 +4170,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // when the user is already working inside its column (e.g. opened
             // a subtask from there).
             if (columnPinned && !composerFormRef.current?.closest('[data-chat-column]')?.contains(document.activeElement)) return;
+            // A rename that switched to this session (Rename on an inactive
+            // tab) keeps its title field.
+            if (document.activeElement?.closest('[data-session-rename-form]')) return;
             composerRef.current?.focus();
         });
         return () => window.cancelAnimationFrame(frame);
@@ -3911,7 +4215,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             .filter((entry) => entry.length > 0);
 
         for (const p of paths) {
-            confirmedMentionsRef.current.add(p);
+            confirmMention(p, confirmedMentionsRef.current);
         }
 
         const mentions = Array.from(new Set(paths.map((entry) => `@${entry}`)));
@@ -3987,10 +4291,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Internal drag: file tree → chat input (relative path as @mention)
         const internalPath = e.dataTransfer.getData('application/x-openchamber-file-path');
         if (internalPath && internalPath !== '.') {
-            confirmedMentionsRef.current.add(internalPath);
+            confirmMention(internalPath, confirmedMentionsRef.current);
             const mention = `@${internalPath}`;
             const textarea = composerRef.current;
-            const currentMessage = messageRef.current;
+            const currentMessage = composerText.get();
             if (textarea) {
                 const { start: pos, end } = textarea.getSelection();
                 const before = currentMessage.slice(0, pos);
@@ -4006,7 +4310,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 cursorPosRef.current = pos + insert.length;
                 textarea.focus();
             } else {
-                setMessage((prev) => appendInlineText(prev, mention));
+                setMessage(appendInlineText(composerText.get(), mention));
             }
             clearDropTextSuppression();
             return;
@@ -4055,7 +4359,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         const images = list.filter((file) => file.type.startsWith('image/'));
         if (imageSaveMode !== 'attach' && images.length > 0) {
-            const { saved, unsaved } = await saveImagesWithPathCitation(
+            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(
                 images,
                 '',
                 useInputStore.getState().attachedFiles.map((file) => file.filename),
@@ -4064,7 +4368,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
             const others = list.filter((file) => !file.type.startsWith('image/'));
             if (imageSaveMode === 'alongside') {
-                list = [...others, ...saved, ...unsaved];
+                // A HEIC saved unconverted gets only its link, which counts as attached.
+                attached = saved.length > attachable.length;
+                list = [...others, ...attachable, ...unsaved];
             } else {
                 attached = saved.length > 0;
                 list = [...others, ...unsaved];
@@ -4161,6 +4467,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setAttachDialogGuestId(guestId);
             return;
         }
+        // The phone's panel is the extension's workspace tab.
+        if (isMobileSurfaceRuntime()) {
+            openGuestSurface({ mode: pluginModeFromId(guestId), directory: currentDirectory || null, supported: true });
+            return;
+        }
         useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(guestId));
     }, [currentDirectory, guestAttachItems]);
     // Clicking the guest chip reopens that guest with the chip as `ready.item`,
@@ -4181,12 +4492,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (reference.data !== undefined) issue.data = reference.data;
         // A chip can outlive the place it was attached in: the session may be
-        // open on mobile or VS Code, where extensions never load, or the
-        // extension may be paused or removed here. Say so instead of opening
+        // open in VS Code, where extensions never load, or the extension may
+        // be paused or removed here. Say so instead of opening
         // an empty surface.
         const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
         if (!installed || !isGuestActive(installed)) {
-            toast.info(t('chat.chatInput.toast.guestUnavailableHere'));
+            const supported = useGuestsStore.getState().status !== 'unsupported';
+            toast.info(t(!supported
+                ? 'chat.chatInput.toast.guestUnavailableHere'
+                : installed ? 'chat.chatInput.toast.guestOff' : 'chat.chatInput.toast.guestRemoved'));
+            return;
+        }
+        // The phone opens an extension's panel or dialog only when it opted into the phone.
+        if (!guestPanelOpensHere(installed)) {
+            toast.info(t('chat.chatInput.toast.guestNotOnPhone', { name: installed.name }));
             return;
         }
         if (!installed.entry) {
@@ -4196,9 +4515,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
         // Only an extension that declared a dialog gets one; everything else
         // (panel mode, no attach declared) opens the rail with the item.
+        // The panel opens and stays open; a second chip click on an open panel
+        // must not toggle it closed with the item still parked.
         if (guest?.mode !== 'dialog') {
-            useGuestItemStore.getState().setPendingItem(issue.providerId, issue);
-            useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(issue.providerId));
+            if (!openGuestWithItem({ id: issue.providerId, attach: undefined }, issue, currentDirectory)) {
+                toast.info(t('chat.guestLink.noProject', { name: installed.name }));
+            }
             return;
         }
         setAttachDialogItem(issue);
@@ -4206,8 +4528,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         if (isBtwActive) return;
-        const contextText = issue.text
-            ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
+        const contextText = guestAttachContextText(issue);
         const reference: ComposerReference = {
             kind: 'guest',
             providerId: issue.providerId,
@@ -4348,6 +4669,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+    // Whether double Escape can stop this composer's run; where it cannot,
+    // the action button keeps a visible Stop beside Send (abortShortcutReach).
+    const abortShortcutReaches = abortShortcutReachesComposer({
+        surface: isBtwActive ? 'btw' : isMiniChatSurface ? 'mini-chat' : chatSurfaceMode === 'default' ? 'main' : 'unknown',
+        touch: isMobile || isTouchOnlyInput(),
+    });
     const showDesktopDraftPresentation = (newSessionDraftOpen || draftPresentationExiting)
         && !isDesktopExpanded
         && !isMobile
@@ -4456,11 +4783,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const pickPromptHistoryCandidate = React.useCallback((candidate: PromptHistoryCandidate<AttachedFile>) => {
         if (!isPromptHistorySearchOpen || promptHistorySearchIdentityRef.current !== promptHistorySearchIdentity) return;
-        const recalled = messageHistory.jumpTo(candidate.index, { text: messageRef.current, attachments: attachedFiles }, candidate.value);
+        const recalled = messageHistory.jumpTo(candidate.index, { text: composerText.get(), attachments: attachedFiles }, candidate.value);
         if (!recalled) return;
         setPromptHistorySearch(null);
         applyHistoryValue(recalled, 'end');
-    }, [applyHistoryValue, attachedFiles, isPromptHistorySearchOpen, messageHistory, promptHistorySearchIdentity]);
+    }, [applyHistoryValue, attachedFiles, isPromptHistorySearchOpen, messageHistory, promptHistorySearchIdentity, composerText]);
     attachMobileCommentRef.current = mobileComment.submit;
 
 
@@ -4471,7 +4798,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } else {
             requestAnimationFrame(() => composerRef.current?.focus());
         }
-    }, [isMobile, mobileComposerExpanded, mobileShell]);
+    }, [isMobile, mobileComposerExpanded, mobileShell, setMessage]);
 
     // Linked references render as chips beside the attached files, inside the
     // composer box and inside the mobile pill.
@@ -4540,6 +4867,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             />
                         );
                     }
+                    case 'shared-page':
+                        return (
+                            <SharedPageChip
+                                key={key}
+                                reference={reference}
+                                onChange={(next) => updateLinkedReferences((current) => withComposerReferences(current, [next]))}
+                                onRemove={remove}
+                            />
+                        );
                     case 'guest':
                         return (
                             <LinkedReferenceRow
@@ -4571,6 +4907,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             draftTarget={inlineDraftTarget}
             colors={currentTheme.colors}
             previewHost={contextPreviewHost}
+            isMobile={isMobile}
         />
     ) : null;
     // The suggested follow-up is the composer's own top row on every surface
@@ -4619,23 +4956,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const worktreeSetupDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const worktreeSetupPending = useWorktreeBootstrapPending(isBtwActive ? null : worktreeSetupDirectory);
     const worktreeSetupRow = worktreeSetupPending
-        ? <ComposerStatusStrip chipId="worktree" icon="loader-4" spin text={t('chat.worktreeSetup.running')} chipLabel={t('chat.composerStatus.chip.worktree')} />
+        ? <ComposerStatusStrip icon="loader-4" spin text={t('chat.worktreeSetup.running')} />
         : null;
     // The first message is on screen while the server still creates its
     // session; this says why Send waits. A worktree's setup line already does.
     // A fast server answers within the delay, and then nothing flashes.
     const creatingSession = Boolean(pendingFirstSend && !pendingFirstSend.sessionCreated && !worktreeSetupPending);
     const creatingSessionRow = useShownAfter(creatingSession, CREATING_SESSION_LINE_DELAY_MS)
-        ? <ComposerStatusStrip chipId="creating" icon="loader-4" spin text={t('chat.draft.creatingSession')} chipLabel={t('chat.draft.creatingSession')} />
+        ? <ComposerStatusStrip icon="loader-4" spin text={t('chat.draft.creatingSession')} />
         : null;
     // A message sent while its space is still being made waits for it; the
     // composer is empty then, so this row is the only sign it was not lost.
     const spaceWaitRow = showDraftTargetSelectors && messageWaitsForSpace
-        ? <ComposerStatusStrip chipId="space" icon="time" text={t('spaces.draft.queued')} chipLabel={t('chat.composerStatus.chip.space')} />
+        ? <ComposerStatusStrip icon="time" text={t('spaces.draft.queued')} />
         : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
-    // An OpenCode restart cut off this session's last turn; Continue sends the
-    // resume, and a cut-off question is answered in the form dock instead.
     const restartInterruptionRow = !isBtwActive && !newSessionDraftOpen ? (
         <SessionRestartInterruptionRow
             sessionId={currentSessionId}
@@ -4643,8 +4978,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             questionAnswerable={orphaned.questions.some((question) => question.cause.kind === 'opencode-restart')}
         />
     ) : null;
-    // The agent waits on its pull request; the server wakes it.
-    const prWatchRow = !isBtwActive && !newSessionDraftOpen ? <PullRequestWatchStrip sessionId={currentSessionId} /> : null;
+    // The agent waits on its pull requests; the server wakes it. Keyed by
+    // session, as the commands below, so an expanded list collapses on a
+    // switch; the prefix keeps the two keys of this fragment apart.
+    const prWatchRow = !isBtwActive && !newSessionDraftOpen ? <PullRequestWatchStrip key={`pr-watch:${currentSessionId ?? ''}`} sessionId={currentSessionId} /> : null;
+    // The agent waits on a timer or on something an extension follows; the server wakes it.
+    const extensionWaitRow = !isBtwActive && !newSessionDraftOpen ? <ExtensionWaitStrip sessionId={currentSessionId} /> : null;
     // The session's goal, then what is still running, then what waits for it.
     const goalRow = !isBtwActive ? (
         <SessionGoalRow
@@ -4671,9 +5010,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const folderMissingRow = sessionFolder.missing && currentSessionId && currentSessionDirectoryForSync && !isBtwActive && !newSessionDraftOpen
         ? <SessionFolderMissingRow sessionId={currentSessionId} directory={currentSessionDirectoryForSync} busy={sessionPhase !== 'idle'} />
         : null;
-    const composerTopRowsContent = folderMissingRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || restartInterruptionRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    // A folder the user declined to trust loads no agent or model; the row
+    // brings the prompt back. A missing folder says more, so it wins.
+    const trustPausedRow = trustPausedDirectory && !folderMissingRow && !isBtwActive
+        ? <SessionTrustPausedRow directory={trustPausedDirectory} />
+        : null;
+    const composerTopRows = folderMissingRow || trustPausedRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || extensionWaitRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {folderMissingRow}
+            {trustPausedRow}
             {worktreeSetupRow}
             {creatingSessionRow}
             {spaceWaitRow}
@@ -4681,6 +5026,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             {goalRow}
             {autoReviewRow}
             {prWatchRow}
+            {extensionWaitRow}
             {backgroundShellsRow}
             {revertRow}
             {queueRow}
@@ -4689,25 +5035,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             {suggestionRow}
         </>
     ) : null;
-    // A phone folds two or more rows into one line of chips.
-    const composerTopRows = composerTopRowsContent && isMobile
-        ? <MobileComposerTopRows rows={composerTopRowsContent} />
-        : composerTopRowsContent;
-    const mobileModelAgentRow = isMobile && !isBtwActive ? (
+    const mobileModelAgentRow = isMobile ? (
         // px-3.5 lines the model logo and the agent label up with the attach
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
         <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
-            {/* The effort follows the model as its suffix, as on the desktop. */}
-            <div className="flex min-w-0 items-center gap-0.5">
-                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
-                <MemoMobileEffortButton onCycleThinking={handleCycleThinking} onOpenThinking={handleOpenThinkingPanel} />
-            </div>
-            <MemoMobileAgentButton
-                onOpenAgentPanel={handleOpenAgentPanel}
-                onCycleAgent={handleCycleAgent}
-                className="flex-shrink-0 px-0"
-            />
+            {isBtwActive ? (
+                // `/btw` shows its fork's own model, effort and agent in the same row.
+                <ModelControls
+                    sessionId={btwComposerSessionId}
+                    selection={effectiveBtwSelection}
+                    rememberVariantPicks={false}
+                />
+            ) : (
+                <>
+                    {/* The effort follows the model as its suffix, as on the desktop. */}
+                    <div className="flex min-w-0 items-center gap-0.5">
+                        <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+                        <MemoMobileEffortButton onCycleThinking={handleCycleThinking} onOpenThinking={handleOpenThinkingPanel} />
+                    </div>
+                    <MemoMobileAgentButton
+                        onOpenAgentPanel={handleOpenAgentPanel}
+                        onCycleAgent={handleCycleAgent}
+                        className="flex-shrink-0 px-0"
+                    />
+                </>
+            )}
         </div>
     ) : null;
 
@@ -4744,13 +5097,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const goalArmed = useSessionGoalArmStore((state) => state.armed);
     // Set by the footer's desktop dictation; the mobile overlay lives outside the box.
     const [desktopDictating, setDesktopDictating] = React.useState(false);
-    const goalObjectiveLength = goalArmed ? message.length : 0;
+    const goalObjectiveLength = useComposerTextValue(composerText, (text) => (goalArmed ? text.length : 0));
+    // The collapsed phone pill shows the draft; nothing can be typed into it.
+    const pillText = useComposerTextValue(composerText, (text) => (isMobile && !mobileComposerExpanded ? text : ''));
     const waitingForOpenCode = useOpenCodeStartupStore((state) => state.waitingSends > 0);
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
-    const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
+    // Inside the action disc, the send arrow's size.
+    const stopIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     // 16px on desktop, the size of the model controls' effort and agent icons
     // and of the send arrow, so the footer's glyphs read as one row.
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : 'h-4 w-4';
@@ -4947,7 +5303,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     />
                 ) : isMobile && !mobileComposerExpanded && !isBtwActive ? (
                     <MobilePillComposer
-                        message={message}
+                        message={pillText}
                         sessionId={currentSessionId}
                         newSessionDraftOpen={newSessionDraftOpen}
                         hasContent={Boolean(hasContent) && !pendingFirstSend}
@@ -5008,9 +5364,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         snippetDraftText={snippetDraftText}
                         onSnippetDraftSaved={handleSnippetDraftSaved}
                         onFileSelect={handleFileSelect}
-                        onAgentSelect={completeMentionSelection}
+                        onAgentSelect={handleAgentSelect}
                         // VS Code shows no reference chips, so it cannot hold one.
                         onSessionSelect={isVSCode ? undefined : handleSessionSelect}
+                        onExtensionMentionSelect={isVSCode || isBtwActive ? undefined : handleExtensionMentionSelect}
                         currentSessionId={currentSessionId}
                         onEmojiSelect={handleEmojiSelect}
                         onClose={closeAutocomplete}
@@ -5045,7 +5402,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isComposerExpanded && 'flex-1 min-h-0',
                         // Opaque: always on screen over the moving transcript
                         // (see .oc-surface-floating in design-system.css).
-                        'oc-surface-floating',
+                        'oc-surface-floating oc-composer-surface',
                         // Lit like a dropdown (top edge, hairline, shadow). Its
                         // box-shadow would hide the drag ring, so it steps aside
                         // while a file is dragged over.
@@ -5092,16 +5449,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         {parallel.isActive ? <ParallelComposerStrip parallel={parallel} project={parallelProjectRef} /> : null}
                         {composerTopRows}
-                        {isMobile && isBtwActive ? (
-                            <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
-                                <ModelControls
-                                    className="flex-1 min-w-0"
-                                    sessionId={btwComposerSessionId}
-                                    selection={effectiveBtwSelection}
-                                    rememberVariantPicks={false}
-                                />
-                            </div>
-                        ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedFilesList draftIdentity={chatDraftIdentity} onShowPopup={handleShowAttachmentPreview} className="pt-2" />
                             {!isBtwActive ? linkedReferenceChips : null}
@@ -5133,7 +5480,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 ref={composerRef}
                                 viewStore={composerViewStore}
                                 data-testid="chat-input"
-                                value={message}
+                                // Read at render: the editor's own text, unless the app
+                                // just put new text in (see `setMessage`).
+                                value={composerText.get()}
+                                valueRevision={editorValueRevision}
                                 languageContext={languageContext}
                                 onChange={handleEditorChange}
                                 onKeyDown={handleEditorKeyDown}
@@ -5152,14 +5502,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
                                 autoCorrect={composerAutoCorrect({ isMobile })}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
-                                // Return-key send trusts the deferred Shift only from a
-                                // hardware keyboard: iOS autocapitalization arms a phantom
-                                // Shift at sentence starts that must send, not newline.
-                                preserveDeferredEnterShift={
-                                    isMobile && mobileReturnKeySends
-                                        ? hasHardwareKeyboard
-                                        : !enterToSendConfigured || !isMobile
-                                }
+                                preserveDeferredEnterShift={shouldPreserveDeferredEnterShift({ isMobile, hasHardwareKeyboard })}
                                 returnKeySends={isMobile && mobileReturnKeySends}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
                                 fillContainer={isComposerExpanded}
@@ -5181,7 +5524,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     <ComposerFooter
                         isMobile={isMobile}
                         isVSCode={isVSCode}
-                        escapeStops={!isMiniChatSurface}
+                        escapeStops={abortShortcutReaches}
                         sessionId={currentSessionId}
                         directory={currentSessionDirectoryForSync ?? currentDirectory}
                         newSessionDraftOpen={newSessionDraftOpen}
@@ -5220,6 +5563,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isBtw={isBtwActive}
                         modelSessionId={btwComposerSessionId}
                         btwSelection={effectiveBtwSelection}
+                        btwModelSelectorOpen={btwModelSelectorOpen}
+                        onBtwModelSelectorOpenChange={setBtwModelSelectorOpen}
                         pinnedSelection={pinnedComposerSelection}
                         onRunInParallel={!isMobile && !isBtwActive && !columnPinned ? handleRunInParallel : undefined}
                         parallelRun={parallelRun}
@@ -5270,7 +5615,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     />
                 ) : null}
             </div>
-            {showDesktopDraftPresentation ? (
+            {/* Starters act on a project ("Explore the codebase"), so they wait
+                until the draft has one: without a project the target is the
+                chat stand-in, shown as "Choose project". */}
+            {showDesktopDraftPresentation && selectedDraftProject && selectedDraftProject.kind !== 'chat' ? (
                 <DraftPresetChips
                     onSubmit={handlePresetChipSubmit}
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
@@ -5289,6 +5637,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionId={currentSessionId}
                 directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
                 hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission || isPromptHistorySearchOpen}
+                inChat={formsInChat}
             />
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} hidden={!isBtwPanelVisible} onExit={handleExitBtw} /> : null}
         </form>
@@ -5307,7 +5656,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onConfirm={attachReferences}
             />
         ) : null}
-        {attachDialogGuestId && !isMobile ? (
+        {attachDialogGuestId ? (
             <React.Suspense fallback={null}>
                 <GuestAttachDialog
                     guestId={attachDialogGuestId}
@@ -5354,51 +5703,58 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 title={t('chat.chatInput.actions.addAttachment')}
                 onClose={() => setMobileAttachMenuOpen(false)}
             >
-                <div className="flex flex-col px-3 pb-4 pt-1">
-                    <button
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                <MobileSheetRow
+                    icon="attachment-2"
+                    onClick={() => {
+                        // The native file/photo picker takes over next — restoring
+                        // the keyboard in between would flash it open and shut.
+                        mobileShell.cancelOverlayCloseRestore();
+                        setMobileAttachMenuOpen(false);
+                        requestAnimationFrame(handlePickLocalFiles);
+                    }}
+                >
+                    {t('chat.chatInput.actions.attachFiles')}
+                </MobileSheetRow>
+                <MobileSheetRow
+                    leading={<ProviderIcon descriptor={repositoryDescriptor} className="size-4 flex-shrink-0 text-muted-foreground" />}
+                    onClick={() => {
+                        // Hand-off to the picker: don't sync-restore the
+                        // keyboard under the overlay that opens next frame.
+                        mobileShell.skipNextOverlayCloseRestore();
+                        setMobileAttachMenuOpen(false);
+                        requestAnimationFrame(openGitHubPicker);
+                    }}
+                >
+                    {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
+                </MobileSheetRow>
+                {trackerPickers.map((picker) => (
+                    <MobileSheetRow
+                        key={picker.provider}
+                        icon={picker.icon}
                         onClick={() => {
-                            // The native file/photo picker takes over next — restoring
-                            // the keyboard in between would flash it open and shut.
-                            mobileShell.cancelOverlayCloseRestore();
-                            setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(handlePickLocalFiles);
-                        }}
-                    >
-                        <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.attachFiles')}
-                    </button>
-                    <button
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                        onClick={() => {
-                            // Hand-off to the picker: don't sync-restore the
-                            // keyboard under the overlay that opens next frame.
                             mobileShell.skipNextOverlayCloseRestore();
                             setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(openGitHubPicker);
+                            requestAnimationFrame(picker.open);
                         }}
                     >
-                        <ProviderIcon descriptor={repositoryDescriptor} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
-                    </button>
-                    {trackerPickers.map((picker) => (
-                        <button
-                            key={picker.provider}
-                            type="button"
-                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                            onClick={() => {
-                                mobileShell.skipNextOverlayCloseRestore();
-                                setMobileAttachMenuOpen(false);
-                                requestAnimationFrame(picker.open);
-                            }}
-                        >
-                            <Icon name={picker.icon} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                            {picker.label}
-                        </button>
-                    ))}
-                </div>
+                        {picker.label}
+                    </MobileSheetRow>
+                ))}
+                {/* Extensions that opted into the phone: a dialog opens full
+                    screen, a panel as the extension's workspace tab. */}
+                {guestAttachItems.map((guest) => (
+                    <MobileSheetRow
+                        key={guest.id}
+                        leading={<GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4 flex-shrink-0 text-muted-foreground" />}
+                        onClick={() => {
+                            mobileShell.skipNextOverlayCloseRestore();
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(() => openGuestAttach(guest.id));
+                        }}
+                    >
+                        {guest.name}
+                    </MobileSheetRow>
+                ))}
             </MobileOverlayPanel>
         ) : null}
 

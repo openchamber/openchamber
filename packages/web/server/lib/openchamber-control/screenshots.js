@@ -13,6 +13,8 @@
  */
 import path from 'node:path';
 import fsPromises from 'node:fs/promises';
+import { z } from 'zod';
+import { readToolEnvelope } from './tool-envelope.js';
 
 /** Project-relative home for agent screenshots. */
 export const SCREENSHOT_DIRECTORY = path.join('.openchamber', 'screenshots');
@@ -80,4 +82,17 @@ export const writeScreenshot = async ({
   // Posix separators in the reported path: it is written into Markdown and
   // commit messages, where a Windows separator is an escape character.
   return { path: relativePath.split(path.sep).join('/'), absolutePath };
+};
+
+const capturedSchema = z.object({ path: z.string().trim().min(1) });
+
+/**
+ * The file a successful `browser.capture` result names, from the text its
+ * tool stored. Anything else names none.
+ */
+export const capturedScreenshotPaths = (text) => {
+  const envelope = readToolEnvelope(text);
+  if (envelope?.ok !== true || envelope.action !== 'browser.capture') return [];
+  const captured = capturedSchema.safeParse(envelope.data);
+  return captured.success ? [captured.data.path] : [];
 };

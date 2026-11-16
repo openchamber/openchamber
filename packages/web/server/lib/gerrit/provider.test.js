@@ -162,7 +162,7 @@ describe('Gerrit mutations', () => {
   it('performs the change routes only; create is pushed, not posted', async () => {
     const { impl } = await setup();
     expect(impl.mutations.routes).toEqual([
-      '/pr/merge', '/pr/ready', '/pr/review', '/pr/review/comment', '/pr/review/comment/update', '/pr/review/comment/delete',
+      '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update', '/pr/review/comment/delete',
       '/pr/review/discard', '/pr/comment', '/pr/state', '/pr/reviewers',
     ]);
     expect(() => impl.mutations.prepare({ route: '/pr/create', input: { title: 'x' }, context, actor, credential })).toThrow(expect.objectContaining({ status: 400 }));

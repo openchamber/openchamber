@@ -1,13 +1,9 @@
-import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
-import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
+import type { SessionGroup } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
-import { getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
-import { countSessionSearchMatches } from '../sessionSidebarRowModel';
 
 type ProjectItem = {
   id: string;
@@ -63,11 +59,6 @@ const worktreeRanksKeyFor = (
 
 const EMPTY_WORKTREES: WorktreeMetadata[] = [];
 
-// Without a query no group has search data. One shared empty map keeps every
-// memoized group section from seeing a new prop when an unrelated project
-// section is rebuilt.
-const EMPTY_GROUP_SEARCH_DATA = new WeakMap<SessionGroup, GroupSearchData>();
-
 type Args = {
   normalizedProjects: ProjectItem[];
   getSessionsForProject: (projectId: string) => Session[];
@@ -87,18 +78,6 @@ type Args = {
     isRepo: boolean,
   ) => SessionGroup[];
   getGroupingSessions: (sessions: readonly Session[]) => Session[];
-  hasSessionSearchQuery: boolean;
-  normalizedSessionSearchQuery: string;
-  filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
-  buildGroupSearchText: (group: SessionGroup) => string;
-  foldersMap: SessionFoldersMap;
-  /**
-   * Groups the sidebar renders outside any project section — today the managed
-   * chats. They search like every other group: a group with no search data
-   * renders its filtered nodes as an empty list, so leaving them out made every
-   * chat vanish the moment a query was typed.
-   */
-  standaloneGroups: SessionGroup[];
 };
 
 export const useSessionSidebarSections = (args: Args) => {
@@ -114,12 +93,6 @@ export const useSessionSidebarSections = (args: Args) => {
     lastRepoStatus,
     buildGroupedSessions,
     getGroupingSessions,
-    hasSessionSearchQuery,
-    normalizedSessionSearchQuery,
-    filterSessionNodesForSearch,
-    buildGroupSearchText,
-    foldersMap,
-    standaloneGroups,
   } = args;
   const projectSectionCacheRef = React.useRef<Map<string, ProjectSectionCacheEntry>>(new Map());
 
@@ -220,86 +193,22 @@ export const useSessionSidebarSections = (args: Args) => {
     sessionOrderRanks,
   ]);
 
-  const visibleProjectSections = React.useMemo(() => {
-    return projectSections;
-  }, [projectSections]);
-
-  const groupSearchDataByGroup = React.useMemo(() => {
-    if (!hasSessionSearchQuery) {
-      return EMPTY_GROUP_SEARCH_DATA;
-    }
-    const result = new WeakMap<SessionGroup, GroupSearchData>();
-
-    const idQuery = normalizedSessionSearchQuery.trim().toLowerCase();
-    const isIdQuery = idQuery.startsWith('ses_');
-
-    const addSearchData = (group: SessionGroup) => {
-      const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
-      const matchedSessionCount = countSessionSearchMatches(filteredNodes, normalizedSessionSearchQuery);
-      const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery, SIDEBAR_SEARCH);
-      const scopeFolders = getSessionFolderScopes(group).flatMap(({ scopeKey }) => foldersMap[scopeKey] ?? []);
-      const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery, SIDEBAR_SEARCH)).length;
-
-      result.set(group, {
-        filteredNodes,
-        matchedSessionCount,
-        folderNameMatchCount,
-        groupMatches,
-        hasMatch: groupMatches || matchedSessionCount > 0 || folderNameMatchCount > 0,
-      });
-    };
-
-    visibleProjectSections.forEach((section) => {
-      section.groups.forEach(addSearchData);
-    });
-    standaloneGroups.forEach(addSearchData);
-
-    return result;
-  }, [
-    hasSessionSearchQuery,
-    visibleProjectSections,
-    standaloneGroups,
-    filterSessionNodesForSearch,
-    normalizedSessionSearchQuery,
-    buildGroupSearchText,
-    foldersMap,
-  ]);
-
-  const searchableProjectSections = React.useMemo(() => {
-    if (!hasSessionSearchQuery) {
-      return visibleProjectSections;
-    }
-
-    return visibleProjectSections
-      .map((section) => ({
-        ...section,
-        groups: section.groups.filter((group) => groupSearchDataByGroup.get(group)?.hasMatch === true),
-      }))
-      .filter((section) => section.groups.length > 0);
-  }, [hasSessionSearchQuery, visibleProjectSections, groupSearchDataByGroup]);
-
-  const sectionsForRender = hasSessionSearchQuery ? searchableProjectSections : visibleProjectSections;
-
   // Flat display sections: one merged group per project containing every
   // non-archived session from the project root and all of its worktrees.
   // Worktree grouping stays available in `projectSections` for data consumers
   // (bootstrap demand planning, ownership); rendering is flat.
   // The per-section cache keeps merged group references stable so the
   // memoized SessionGroupSection subtree skips unrelated update waves.
-  const flatSectionCacheRef = React.useRef<WeakMap<ProjectSection, { query: string; section: ProjectSection }>>(new WeakMap());
+  const flatSectionCacheRef = React.useRef<WeakMap<ProjectSection, ProjectSection>>(new WeakMap());
   const flatSectionsForRender = React.useMemo<ProjectSection[]>(() => {
     const cache = flatSectionCacheRef.current;
-    return sectionsForRender.map((section) => {
+    return projectSections.map((section) => {
       const cached = cache.get(section);
-      if (cached && cached.query === normalizedSessionSearchQuery) {
-        return cached.section;
-      }
+      if (cached) return cached;
 
       const nonArchivedGroups = section.groups.filter((group) => !group.isArchivedBucket);
       const archivedGroups = section.groups.filter((group) => group.isArchivedBucket);
-      const sessions = nonArchivedGroups.flatMap((group) => hasSessionSearchQuery
-        ? (groupSearchDataByGroup.get(group)?.filteredNodes ?? [])
-        : group.sessions);
+      const sessions = nonArchivedGroups.flatMap((group) => group.sessions);
       const folderScopes = nonArchivedGroups
         .map((group) => ({
           scopeKey: group.folderScopeKey ?? normalizePath(group.directory ?? null),
@@ -322,58 +231,14 @@ export const useSessionSidebarSections = (args: Args) => {
         sessions,
       };
 
-      if (hasSessionSearchQuery) {
-        const merged = nonArchivedGroups
-          .map((group) => groupSearchDataByGroup.get(group))
-          .filter((data): data is GroupSearchData => Boolean(data));
-        groupSearchDataByGroup.set(flatGroup, {
-          filteredNodes: sessions,
-          matchedSessionCount: merged.reduce((total, data) => total + data.matchedSessionCount, 0),
-          folderNameMatchCount: merged.reduce((total, data) => total + data.folderNameMatchCount, 0),
-          groupMatches: merged.some((data) => data.groupMatches),
-          hasMatch: merged.some((data) => data.hasMatch),
-        });
-      }
-
       const flatSection: ProjectSection = {
         project: section.project,
         groups: [flatGroup, ...archivedGroups],
       };
-      cache.set(section, { query: normalizedSessionSearchQuery, section: flatSection });
+      cache.set(section, flatSection);
       return flatSection;
     });
-  }, [groupSearchDataByGroup, hasSessionSearchQuery, normalizedSessionSearchQuery, sectionsForRender]);
+  }, [projectSections]);
 
-  const searchMatchCount = React.useMemo(() => {
-    if (!hasSessionSearchQuery) {
-      return 0;
-    }
-
-    const countGroup = (total: number, group: SessionGroup): number => {
-      const data = groupSearchDataByGroup.get(group);
-      if (!data) {
-        return total;
-      }
-      const metadataMatches = data.folderNameMatchCount + (data.groupMatches ? 1 : 0);
-      return total + data.matchedSessionCount + metadataMatches;
-    };
-
-    const projectMatches = sectionsForRender.reduce(
-      (total, section) => section.groups.reduce(countGroup, total),
-      0,
-    );
-    // Chats the user can see in the list count as matches too, or the header
-    // reports zero while their results sit right underneath it.
-    return standaloneGroups.reduce(countGroup, projectMatches);
-  }, [hasSessionSearchQuery, sectionsForRender, standaloneGroups, groupSearchDataByGroup]);
-
-  return {
-    projectSections,
-    visibleProjectSections,
-    groupSearchDataByGroup,
-    searchableProjectSections,
-    sectionsForRender,
-    flatSectionsForRender,
-    searchMatchCount,
-  };
+  return { projectSections, flatSectionsForRender };
 };

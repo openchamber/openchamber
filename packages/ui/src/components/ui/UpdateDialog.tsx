@@ -17,6 +17,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
 import { formatCanaryBuild, parseCanaryVersion } from '@/lib/updateChannel';
+import { formatReleaseDate, linkReleaseNoteMentions, parseReleaseNotesMarkdown, type ReleaseNotesContent } from '@/components/update/releaseNotes';
+import { ReleaseNotesBody } from '@/components/update/ReleaseNotesBody';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -58,28 +60,12 @@ type ParsedChangelog =
       kind: 'sections';
       title: string;
       // A Canary night comes as groups, each folded to CANARY_GROUP_LIMIT lines.
-      sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null }>;
+      // A stable release comes as data, drawn the way Settings > About draws it.
+      sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null; notes: ReleaseNotesContent | null }>;
     };
-
-function formatIsoDateForUI(isoDate: string): string {
-  const d = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(d.getTime())) {
-    return isoDate;
-  }
-  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
-}
 
 function stripChangelogHeading(sectionRaw: string): string {
   return sectionRaw.replace(/^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}\s*\n?/, '').trim();
-}
-
-function processChangelogMentions(content: string): string {
-  // Convert @username to markdown links so they can be styled via css
-  return content.replace(/(^|[^a-zA-Z0-9])@([a-zA-Z0-9-]+)/g, '$1[@$2](https://github.com/$2)');
 }
 
 function compareSemverDesc(a: string, b: string): number {
@@ -204,6 +190,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const isWebRuntime = runtimeType === 'web';
   // A desktop host installed from a Linux package asks for the password on its own screen.
   const desktopHostInstall = isWebRuntime && info?.installBlocked === 'desktop-host';
+  const needsNewerOpenCode = isWebRuntime && info?.installBlocked === 'opencode-version';
   const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
 
@@ -277,7 +264,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       return {
         kind: 'raw',
         title: t('updateDialog.changelog.title'),
-        content: processChangelogMentions(body),
+        content: linkReleaseNoteMentions(body),
       };
     }
 
@@ -286,7 +273,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       kind: 'sections',
       title: t('updateDialog.changelog.title'),
       sections: sorted.map((section, index) => {
-        const content = processChangelogMentions(stripChangelogHeading(section.raw) || body);
+        const stripped = stripChangelogHeading(section.raw) || body;
+        const content = linkReleaseNoteMentions(stripped);
         const canary = parseCanaryVersion(section.version);
         // Another build of the same day among the sections adds the build number.
         const sameDayBuild = canary
@@ -297,9 +285,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           : null;
         return {
           version: section.version,
-          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatIsoDateForUI(section.date),
+          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatReleaseDate(section.date),
           content,
           canaryGroups: canary ? splitNotesGroups(content) : null,
+          notes: canary ? null : parseReleaseNotesMarkdown(stripped),
         };
       }),
     };
@@ -407,7 +396,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                         >
                           {section.canaryGroups
                             ? section.canaryGroups.map((group) => <NotesGroupList key={group.heading} group={group} />)
-                            : <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />}
+                            : section.notes
+                              ? <ReleaseNotesBody notes={section.notes} folded={true} />
+                              : <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />}
                         </div>
                       </div>
                     ))}
@@ -468,6 +459,16 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {desktopHostInstall && (
             <p className="mt-4 typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: info?.version || '' })}
+            </p>
+          )}
+
+          {needsNewerOpenCode && (
+            <p className="mt-4 typography-meta text-[var(--status-warning)]">
+              {t('updateDialog.openCodeTooOld', {
+                version: describeVersion(info?.version || '', info?.currentVersion),
+                required: info?.requiredOpenCodeVersion || '',
+                current: info?.openCodeVersion || '',
+              })}
             </p>
           )}
 
@@ -546,7 +547,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {isWebRuntime && !isWebUpdating && !desktopHostInstall && (
               <button
                 onClick={handleWebUpdate}
-                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
+                disabled={needsNewerOpenCode}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="download" className="h-4 w-4" />
                 {t('updateDialog.actions.updateNow')}

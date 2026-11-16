@@ -5,6 +5,7 @@ import { isPastedInput } from '@/components/inline-picker/useTextareaInlinePicke
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -12,11 +13,17 @@ import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useCommentImagePaste } from './useCommentImagePaste';
 import { useCommentFieldPicker } from './useCommentFieldPicker';
 import { useCommentEnterSubmit } from './useCommentEnterSubmit';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 
 export interface InlineCommentInputProps {
   initialText?: string;
   onTextChange?: (text: string) => void;
-  onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => void;
+  /** False keeps the field open with its text: the save did not land. */
+  onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => boolean | void;
   onCancel: () => void;
   fileLabel?: string;
   lineRange?: { start: number; end: number; side?: 'additions' | 'deletions' };
@@ -93,6 +100,7 @@ export function InlineCommentInput({
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const lineActions = guestActionsWhere(useGuestActions(), 'diff');
   const [text, setText] = React.useState(initialText);
   const [addingToReview, setAddingToReview] = React.useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -189,7 +197,7 @@ export function InlineCommentInput({
 
   const save = () => {
     if (text.trim() && !saving) {
-      onSave(text, normalizeRange(stableRangeRef.current));
+      if (onSave(text, normalizeRange(stableRangeRef.current)) === false) return;
       void imagePaste.attachCitedImages(text);
     }
   };
@@ -233,6 +241,16 @@ export function InlineCommentInput({
     save();
   };
 
+  // Three worded actions do not fit one row on a phone; the paperclip reads without its word.
+  const compactAttach = isMobile && Boolean(suggestionCode) && !saveLabel;
+
+  const commentContext = (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+      {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
+      {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
+    </span>
+  );
+
   return (
     <div
       className={cn(
@@ -257,6 +275,7 @@ export function InlineCommentInput({
         )}
       >
         {fieldPicker.picker}
+        {isMobile && !floating ? <div className="px-3 pt-2">{commentContext}</div> : null}
         <textarea
           ref={textareaRef}
           rows={floating ? 1 : 2}
@@ -282,51 +301,99 @@ export function InlineCommentInput({
           style={{ minHeight: 0 }}
         />
         {floating ? (
-          <button
-            type="button"
-            onClick={handleSaveClick}
-            onPointerDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            disabled={!text.trim()}
-            className={cn(
-              'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40',
-              isMobile ? 'h-9 w-9' : 'h-8 w-8'
-            )}
-            aria-label={t('inlineComment.actions.comment')}
-            title={t('inlineComment.actions.comment')}
-          >
-            <Icon name="attachment-2" className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleSaveClick}
+                onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                disabled={!text.trim()}
+                className={cn(
+                  'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40',
+                  isMobile ? 'h-9 w-9' : 'h-8 w-8'
+                )}
+                aria-label={t('inlineComment.actions.comment')}
+              >
+                <Icon name="attachment-2" className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.comment')}</TooltipContent>
+          </Tooltip>
         ) : (
+          // A phone has no tooltips and no room for one line: the context heads
+          // the field and the actions say what they do in words.
           <div className="flex min-w-0 items-center gap-1.5 pb-1.5 pe-1.5 ps-3">
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-              {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
-              {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
-            </span>
-            {suggestionCode ? (
-              <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground" onClick={insertSuggestion} aria-label={t('review.action.suggest')} title={t('review.action.suggest')}>
-                <Icon name="code-box" className="size-4" />
+            {isMobile ? null : commentContext}
+            <div className={isMobile ? 'flex flex-1 flex-wrap items-center justify-end gap-1.5' : 'contents'}>
+            {fileLabel && lineRange ? lineActions.map((entry) => {
+              const runLineAction = () => void runGuestAction(entry, {
+                kind: 'diff',
+                action: entry.action.id,
+                directory: resolveEffectiveDirectory() || null,
+                path: fileLabel,
+                startLine: lineRange.start,
+                endLine: lineRange.end,
+                ...(lineRange.side ? { side: lineRange.side } : {}),
+              }, t);
+              return isMobile ? (
+                <Button key={`${entry.guest.id}:${entry.action.id}`} type="button" variant="ghost" size="sm" className="min-w-0 shrink gap-1.5 px-1.5 text-muted-foreground" onClick={runLineAction}>
+                  <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4 shrink-0" />
+                  <span className="truncate">{entry.action.label}</span>
+                </Button>
+              ) : (
+                <Tooltip key={`${entry.guest.id}:${entry.action.id}`}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 shrink-0 text-muted-foreground"
+                      aria-label={entry.action.label}
+                      onClick={runLineAction}
+                    >
+                      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>
+                </Tooltip>
+              );
+            }) : null}
+            {suggestionCode && isMobile ? (
+              <Button type="button" variant="ghost" size="sm" className="me-auto shrink-0 px-0 text-muted-foreground" onClick={insertSuggestion}>
+                {t('review.action.suggest')}
               </Button>
+            ) : suggestionCode ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground" onClick={insertSuggestion} aria-label={t('review.action.suggest')}>
+                    <Icon name="code-box" className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('review.action.suggest')}</TooltipContent>
+              </Tooltip>
             ) : null}
             {review ? (
-              <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => void addToReview()} disabled={!text.trim() || addingToReview}>
+              <Button type="button" variant="outline" size={isMobile ? 'sm' : 'xs'} className="shrink-0" onClick={() => void addToReview()} disabled={!text.trim() || addingToReview}>
                 {addingToReview ? <Spinner className="size-3.5" /> : null}
                 {t('review.action.addToReview')}
               </Button>
             ) : null}
             <Button
               type="button"
-              size="xs"
+              size={compactAttach ? 'icon' : isMobile ? 'sm' : 'xs'}
               className="shrink-0"
+              aria-label={saveLabel ?? t('review.action.attach')}
               onClick={handleSaveClick}
               onPointerDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
               disabled={!text.trim() || saving}
             >
               {saving ? <Spinner className="size-3.5" /> : saveLabel ? null : <Icon name="attachment-2" className="size-3.5" />}
-              {saveLabel ?? t('review.action.attach')}
+              {compactAttach ? null : saveLabel ?? t('review.action.attach')}
               {isMobile ? null : <span className="text-[0.6875rem] opacity-70">{saveShortcut}</span>}
             </Button>
+            </div>
           </div>
         )}
       </div>

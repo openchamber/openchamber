@@ -40,6 +40,22 @@ export const LOCAL_STT_MODEL_CATALOG = {
     },
     description: 'NVIDIA Parakeet TDT v3 (25 European languages, auto-detected)',
   },
+  // Moondream's post-trained v3: same architecture, tokenizer and speed.
+  // k2-fsa publishes no sherpa export of it, so OpenChamber hosts its own:
+  // the sherpa v3 export script run on the Ultra .nemo (archive README).
+  'parakeet-ultra-int8': {
+    type: 'nemo_transducer',
+    archiveUrl:
+      'https://github.com/openchamber/openchamber/releases/download/asr-models/sherpa-onnx-nemo-parakeet-ultra-int8.tar.bz2',
+    extractedDir: 'sherpa-onnx-nemo-parakeet-ultra-int8',
+    files: {
+      encoder: 'encoder.int8.onnx',
+      decoder: 'decoder.int8.onnx',
+      joiner: 'joiner.int8.onnx',
+      tokens: 'tokens.txt',
+    },
+    description: 'Moondream Parakeet Ultra (25 European languages, auto-detected)',
+  },
   'whisper-large-v3-turbo-int8': {
     type: 'whisper',
     archiveUrl:
@@ -287,10 +303,13 @@ export const LOCAL_TTS_MODEL_CATALOG = {
   },
 };
 
-export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-ultra-int8';
 
 /** The default before v3; kept for users who never picked a model and have it installed. */
 export const PREVIOUS_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+
+/** The default before Ultra; used while Ultra downloads for users who never picked a model. */
+export const REPLACED_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
 /**
  * Extracted directories of models the catalog no longer offers. Settings can

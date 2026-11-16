@@ -1,5 +1,5 @@
 import { exchangeGitLabDeviceCode, refreshGitLabAccessToken, resolveGitLabClientId, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
-import { getGlabToken } from './glab-credential.js';
+import { getGlabToken, getGlabTokenResult } from './glab-credential.js';
 import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
@@ -168,6 +168,19 @@ function mutationTable(descriptor) {
         expectedTarget: resolved.target,
       }),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-ready'),
+    },
+    '/pr/draft': {
+      kind: 'change-request-draft',
+      normalize: (_input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        return { digest: {} };
+      },
+      perform: (service, _normalized, resolved) => service.draftChangeRequest({
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
     },
     '/pr/comment': {
       kind: 'change-request-comment',
@@ -374,29 +387,40 @@ export function createProvider({
     return false;
   };
 
-  const getUsableGlab = async (origin) => {
+  const getGlabCliState = async (origin) => {
     const instance = await store.readInstance(origin);
-    if (instance.cliDisabled) return null;
-    const token = await glabToken(origin);
-    if (!token) return null;
+    if (instance.cliDisabled) return { status: 'disabled' };
+    const lookup = await getGlabTokenResult(origin, { execFile, timeoutMs: cliTimeoutMs });
+    if (lookup.gone) return { status: 'gone' };
+    if (lookup.unknown) return { status: 'unknown' };
     try {
-      return { token, user: await verify(origin, token) };
-    } catch {
-      return null;
+      return { status: 'usable', token: lookup.token, user: await verify(origin, lookup.token) };
+    } catch (error) {
+      // The instance refusing the token (a definite 401) is a login that is
+      // really gone; anything else leaves the question unsettled.
+      return error?.status === 401 ? { status: 'gone' } : { status: 'unknown' };
     }
+  };
+
+  const getUsableGlab = async (origin) => {
+    const state = await getGlabCliState(origin);
+    return state.status === 'usable' ? { token: state.token, user: state.user } : null;
   };
 
   const buildStatus = async (origin, renewed = false) => {
     const instance = await store.readInstance(origin);
     const activeRecord = instance.cliActive ? null : instance.accounts.find((account) => account.id === instance.activeAccountId) ?? null;
     const active = activeRecord?.status === 'invalid' ? null : activeRecord;
-    const cli = await getUsableGlab(origin);
-    if (instance.cliActive && !cli) {
+    const cliState = await getGlabCliState(origin);
+    // Like the gh rule: the user's switch to the glab account is undone only
+    // when that account is really gone. glab reporting no login for the host
+    // or the instance refusing its token settle that; a network blip, a
+    // timeout, a missing glab, or an unreachable instance must not.
+    if (instance.cliActive && cliState.status === 'gone') {
       await store.setCliActive(origin, false);
       return buildStatus(origin);
     }
-    // Like the gh rule: a glab login carries every scope glab was granted, so it
-    // is used only after the user switched to it, never as a silent fallback.
+    const cli = cliState.status === 'usable' ? { token: cliState.token, user: cliState.user } : null;
     const cliCurrent = Boolean(cli && instance.cliActive);
     const accounts = instance.accounts.map((account) => accountView(
       origin, account, Boolean(active && account.id === active.id && !cliCurrent), instance.accounts,
@@ -411,10 +435,12 @@ export function createProvider({
         };
       }
       if (!cli) {
-        if (instance.cliDisabled) {
+        // A switch kept while glab cannot answer is reported, so the user can
+        // turn it off with glab and the instance both down.
+        if (instance.cliDisabled || instance.cliActive) {
           return {
             provider: 'gitlab', instance: origin, status: 'disconnected', connected: false,
-            accounts, cli: { available: false, disabled: true, active: false },
+            accounts, cli: { available: false, disabled: instance.cliDisabled, active: instance.cliActive },
           };
         }
         const clientId = await getClientId(origin);
@@ -642,7 +668,9 @@ export function createProvider({
           const cli = await getUsableGlab(origin);
           if (!cli || `${origin}#cli:${cli.user.id}` !== accountId) return { removed: false };
           await events.removed(identityFor(origin, accountId));
-          return { removed: await store.setCliActive(origin, false) };
+          // `setCliActive` answers the switch's new state, which is off here.
+          await store.setCliActive(origin, false);
+          return { removed: true };
         }
         if (!instance.accounts.some((account) => account.id === accountId)) return { removed: false };
         await events.removed(identityFor(origin, accountId));
@@ -727,8 +755,8 @@ export function createProvider({
         .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, linked }) => serviceFor(session)
-        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, linked }),
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)
+        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, binary, linked }),
       /** Live state of known merge requests and issues. */
       liveSummaries: ({ session, refs, issueRefs, details }) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
       /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */

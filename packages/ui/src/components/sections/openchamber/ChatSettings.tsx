@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
@@ -10,6 +11,8 @@ import {
   SettingsControlGroup,
   SettingsRadioGroup,
   SettingsRadioOption,
+  SettingsStackedField,
+  SettingsNewBadge,
   SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_NUMBER_UNIT_CLASS,
@@ -29,11 +32,11 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type ChatWidth, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
-import { useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
+import { chatSettingsTabAnchors, useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
 
 type ChipOption<T extends string> = { id: T; labelKey: I18nKey };
 
@@ -58,9 +61,20 @@ const DIFF_LAYOUT_OPTIONS: ChipOption<'dynamic' | 'inline' | 'side-by-side'>[] =
   { id: 'side-by-side', labelKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.label' },
 ];
 
+const CHAT_WIDTH_OPTIONS: ChipOption<ChatWidth>[] = [
+  { id: 'default', labelKey: 'settings.openchamber.visual.option.chatWidth.default.label' },
+  { id: 'wider', labelKey: 'settings.openchamber.visual.option.chatWidth.wider.label' },
+  { id: 'full', labelKey: 'settings.openchamber.visual.option.chatWidth.full.label' },
+];
+
 const FOLLOW_UP_BEHAVIOR_OPTIONS: ChipOption<FollowUpBehavior>[] = [
   { id: 'steer', labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer.label' },
   { id: 'queue', labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label' },
+];
+
+const QUESTIONS_PLACEMENT_OPTIONS: ChipOption<'popup' | 'chat'>[] = [
+  { id: 'popup', labelKey: 'settings.openchamber.visual.option.questionsPlacement.popup.label' },
+  { id: 'chat', labelKey: 'settings.openchamber.visual.option.questionsPlacement.chat.label' },
 ];
 
 const INPUT_HISTORY_SCOPE_OPTIONS: ChipOption<InputHistoryScope>[] = [
@@ -84,10 +98,33 @@ const useChipOptions = <T extends string>(options: ChipOption<T>[]) => {
 };
 
 /** How the transcript reads: agent activity, layout, formatting, search. */
+const SelectionApprovalField: React.FC = () => {
+  const { t } = useI18n();
+  const selectionApprovalText = useUIStore((state) => state.selectionApprovalText);
+  const setSelectionApprovalText = useUIStore((state) => state.setSelectionApprovalText);
+
+  return (
+    <SettingsStackedField
+      className="pt-3"
+      label={t('settings.openchamber.visual.field.selectionApprovalText')}
+      info={t('settings.openchamber.visual.field.selectionApprovalTextInfo')}
+      settingsItem="chat.selection-approval-text"
+    >
+      <Input
+        value={selectionApprovalText}
+        placeholder={DEFAULT_SELECTION_APPROVAL_TEXT}
+        maxLength={1000}
+        onChange={(event) => setSelectionApprovalText(event.target.value)}
+        aria-label={t('settings.openchamber.visual.field.selectionApprovalText')}
+        dir="auto"
+      />
+    </SettingsStackedField>
+  );
+};
+
 const MessagesTab: React.FC = () => {
   const { t } = useI18n();
   const isVSCode = isVSCodeRuntime();
-  const { isMobile } = useDeviceInfo();
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
   const setActivityRenderMode = useUIStore((state) => state.setActivityRenderMode);
   const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
@@ -102,8 +139,8 @@ const MessagesTab: React.FC = () => {
   const setShowTurnChangedFiles = useUIStore((state) => state.setShowTurnChangedFiles);
   const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
   const setStreamingAutoFollowEnabled = useUIStore((state) => state.setStreamingAutoFollowEnabled);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
-  const setWideChatLayoutEnabled = useUIStore((state) => state.setWideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
+  const setChatWidth = useUIStore((state) => state.setChatWidth);
   const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
   const setPromptNavigatorEnabled = useUIStore((state) => state.setPromptNavigatorEnabled);
   const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
@@ -128,6 +165,7 @@ const MessagesTab: React.FC = () => {
   const userMessageOptions = useChipOptions(USER_MESSAGE_RENDERING_OPTIONS);
   const mermaidOptions = useChipOptions(MERMAID_RENDERING_OPTIONS);
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
+  const chatWidthOptions = useChipOptions(CHAT_WIDTH_OPTIONS);
 
   const handleActivityRenderModeChange = (mode: 'collapsed' | 'summary') => {
     setActivityRenderMode(mode);
@@ -138,7 +176,7 @@ const MessagesTab: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title={t('settings.layout.chat.section.activity')} divider={false} contentClassName="space-y-3">
+      <SettingsSection title={t('settings.layout.chat.section.activity')} contentClassName="space-y-3">
         <SettingsFieldRow label={t('settings.openchamber.visual.section.activityDefault')} settingsItem="chat.activity-default">
           <SettingsChipGroup
             value={activityRenderMode}
@@ -201,37 +239,39 @@ const MessagesTab: React.FC = () => {
       <SettingsSection
         title={t('settings.layout.chat.section.reading')}
         settingsItem="chat.message-appearance"
-        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+        contentClassName="space-y-3"
       >
-        <SettingsCheckboxRow
-          checked={wideChatLayoutEnabled}
-          onChange={(enabled) => {
-            setWideChatLayoutEnabled(enabled);
-            void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.wideChatLayout')}
-          ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-          settingsItem="chat.wide-layout"
-        />
-        <SettingsCheckboxRow
-          checked={streamingAutoFollowEnabled}
-          onChange={setStreamingAutoFollowEnabled}
-          label={t('settings.openchamber.visual.field.streamingAutoFollow')}
-          ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
-          info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
-          settingsItem="chat.streaming-auto-follow"
-        />
-        <SettingsCheckboxRow
-          checked={collapsibleUserMessages}
-          onChange={(enabled) => {
-            setCollapsibleUserMessages(enabled);
-            void updateDesktopSettings({ collapsibleUserMessages: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
-          ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
-          settingsItem="chat.collapsible-user-messages"
-        />
-        {isMobile ? (
+        <SettingsFieldRow
+          label={t('settings.openchamber.visual.field.chatWidth')}
+          info={t('settings.openchamber.visual.field.chatWidthInfo')}
+          settingsItem="chat.width"
+        >
+          <SettingsChipGroup
+            value={chatWidth}
+            options={chatWidthOptions}
+            onChange={setChatWidth}
+            aria-label={t('settings.openchamber.visual.field.chatWidth')}
+          />
+        </SettingsFieldRow>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            checked={streamingAutoFollowEnabled}
+            onChange={setStreamingAutoFollowEnabled}
+            label={t('settings.openchamber.visual.field.streamingAutoFollow')}
+            ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
+            info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
+            settingsItem="chat.streaming-auto-follow"
+          />
+          <SettingsCheckboxRow
+            checked={collapsibleUserMessages}
+            onChange={(enabled) => {
+              setCollapsibleUserMessages(enabled);
+              void updateDesktopSettings({ collapsibleUserMessages: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
+            ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
+            settingsItem="chat.collapsible-user-messages"
+          />
           <SettingsCheckboxRow
             checked={stickyUserHeader}
             onChange={(enabled) => {
@@ -242,28 +282,29 @@ const MessagesTab: React.FC = () => {
             ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
             settingsItem="chat.sticky-user-header"
           />
-        ) : null}
-        <SettingsCheckboxRow
-          checked={promptNavigatorEnabled}
-          onChange={(enabled) => {
-            setPromptNavigatorEnabled(enabled);
-            void updateDesktopSettings({ promptNavigatorEnabled: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
-          ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
-          settingsItem="chat.prompt-navigator"
-        />
-        <SettingsCheckboxRow
-          checked={showSplitAssistantMessageActions}
-          onChange={(enabled) => {
-            setShowSplitAssistantMessageActions(enabled);
-            void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
-          ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
-          info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
-          settingsItem="chat.inline-assistant-actions"
-        />
+          <SettingsCheckboxRow
+            checked={promptNavigatorEnabled}
+            onChange={(enabled) => {
+              setPromptNavigatorEnabled(enabled);
+              void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
+            ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+            settingsItem="chat.prompt-navigator"
+          />
+          <SettingsCheckboxRow
+            checked={showSplitAssistantMessageActions}
+            onChange={(enabled) => {
+              setShowSplitAssistantMessageActions(enabled);
+              void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
+            ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
+            info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
+            settingsItem="chat.inline-assistant-actions"
+          />
+          <SelectionApprovalField />
+        </div>
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.formatting')} contentClassName="space-y-3">
@@ -357,7 +398,10 @@ const ComposerTab: React.FC = () => {
   const inputHistoryLimit = useInputHistoryStore((state) => state.entryLimit);
   const applyInputHistoryScope = useInputHistoryStore((state) => state.applyScope);
   const applyInputHistoryLimit = useInputHistoryStore((state) => state.applyEntryLimit);
+  const questionsInChat = useUIStore((state) => state.questionsInChat);
+  const setQuestionsInChat = useUIStore((state) => state.setQuestionsInChat);
   const followUpOptions = useChipOptions(FOLLOW_UP_BEHAVIOR_OPTIONS);
+  const questionsPlacementOptions = useChipOptions(QUESTIONS_PLACEMENT_OPTIONS);
   const historyScopeOptions = useChipOptions(INPUT_HISTORY_SCOPE_OPTIONS);
   const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
 
@@ -383,7 +427,7 @@ const ComposerTab: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title={t('settings.layout.chat.section.sending')} divider={false} settingsItem="chat.composer" contentClassName="space-y-5">
+      <SettingsSection title={t('settings.layout.chat.section.sending')} settingsItem="chat.composer" contentClassName="space-y-5">
         <div>
           {/* Phones send with the keyboard's own button, so there is no send key to pick. */}
           {isMobile ? null : (
@@ -422,6 +466,18 @@ const ComposerTab: React.FC = () => {
               options={followUpOptions}
               onChange={setFollowUpBehavior}
               aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}
+            />
+          </SettingsFieldRow>
+          <SettingsFieldRow
+            label={t('settings.openchamber.visual.field.questionsPlacement')}
+            info={t('settings.openchamber.visual.field.questionsPlacementInfo')}
+            settingsItem="chat.questions-placement"
+          >
+            <SettingsChipGroup
+              value={questionsInChat ? 'chat' : 'popup'}
+              options={questionsPlacementOptions}
+              onChange={(value) => setQuestionsInChat(value === 'chat')}
+              aria-label={t('settings.openchamber.visual.field.questionsPlacement')}
             />
           </SettingsFieldRow>
         </div>
@@ -545,7 +601,6 @@ const AssistanceTab: React.FC = () => {
       <SettingsSection
         title={t('settings.openchamber.visual.section.sessionAssistance')}
         settingsItem="chat.session-assistance"
-        divider={false}
         contentClassName={SETTINGS_OPTION_STACK_CLASS}
       >
         <SettingsCheckboxRow
@@ -652,11 +707,13 @@ export const ChatSettings: React.FC = () => {
   const { t } = useI18n();
   const tab = useChatSettingsTabStore((state) => state.tab);
   const setTab = useChatSettingsTabStore((state) => state.setTab);
-  const tabs = React.useMemo<Array<SortableTabsStripItem & { id: ChatSettingsTab }>>(() => [
-    { id: 'messages', label: t('settings.layout.chat.tab.messages') },
-    { id: 'composer', label: t('settings.layout.chat.tab.composer') },
-    { id: 'assistance', label: t('settings.layout.chat.tab.assistance') },
-  ], [t]);
+  const tabs = React.useMemo<Array<SortableTabsStripItem & { id: ChatSettingsTab }>>(() => (
+    (['messages', 'composer', 'assistance'] as const).map((id) => ({
+      id,
+      label: t(`settings.layout.chat.tab.${id}`),
+      accessory: <SettingsNewBadge items={chatSettingsTabAnchors(id)} />,
+    }))
+  ), [t]);
 
   return (
     <>

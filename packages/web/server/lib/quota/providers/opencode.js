@@ -6,7 +6,7 @@ import {
   normalizeAuthEntry,
 } from '../utils/index.js';
 import { fetchOpenCodeZenUsage } from './opencode-zen.js';
-export { parseConsoleSummary, parseConsoleBudget, parseConsoleModelUsage } from './opencode-zen.js';
+export { parseConsoleBudget } from './opencode-zen.js';
 
 export const providerId = 'opencode';
 export const providerName = 'OpenCode Zen';

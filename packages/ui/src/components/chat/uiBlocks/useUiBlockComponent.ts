@@ -6,7 +6,7 @@ import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
  * loading failed. Kept once loaded, so a block that remounts (virtualized
  * rows) draws at once.
  */
-function onDemand<Props extends object>(load: () => Promise<React.ComponentType<Props>>) {
+export function onDemand<Props extends object>(load: () => Promise<React.ComponentType<Props>>) {
   let loaded: React.ComponentType<Props> | null = null;
   const loadOnce = () => load().then((component) => {
     loaded = component;

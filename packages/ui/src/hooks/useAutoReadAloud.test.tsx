@@ -85,7 +85,7 @@ afterEach(() => {
 describe('useAutoReadAloud', () => {
     const setVisible = (visible: boolean) => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, value: visible ? 'visible' : 'hidden' });
-        document.dispatchEvent(new Event('visibilitychange'));
+        document.dispatchEvent(new window.Event('visibilitychange'));
     };
 
     test('a native mobile background reply is skipped without a claim or replay on return', async () => {

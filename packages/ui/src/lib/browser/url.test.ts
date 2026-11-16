@@ -70,8 +70,14 @@ describe('isStartingServerFailure', () => {
     expect(isStartingServerFailure(-102, 'http://openchamber-preview.localhost:52418/')).toBe(true);
   });
 
+  test('retries a name under localhost, where a local proxy serves a project', () => {
+    expect(isStartingServerFailure(-102, 'http://myapp.localhost:1355/')).toBe(true);
+    expect(isStartingServerFailure(-102, 'https://auth.myapp.localhost/')).toBe(true);
+  });
+
   test('does not retry a public host that refused the connection', () => {
     expect(isStartingServerFailure(-102, 'https://example.com/')).toBe(false);
+    expect(isStartingServerFailure(-102, 'https://myapp.localhost.example.com/')).toBe(false);
   });
 
   test('does not retry a real page-level failure', () => {

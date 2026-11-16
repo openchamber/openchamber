@@ -224,7 +224,7 @@ export const IsolatedSpacesSettings: React.FC = () => {
 
   return (
     <>
-      <SettingsSection divider={false}>
+      <SettingsSection>
         <div className={SETTINGS_OPTION_STACK_CLASS}>
           <SettingsCheckboxRow
             settingsItem="general.isolated-spaces"

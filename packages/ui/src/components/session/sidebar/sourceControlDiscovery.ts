@@ -21,3 +21,30 @@ export const limitSourceControlDiscoveryCandidates = (
   }
   return [...candidates.values()];
 };
+
+/**
+ * The candidate list's identity, independent of the order the sidebar shows it
+ * in. Discovery restarts its subscriptions and binding reads only when this
+ * changes: session activity reorders rows without adding work, and each
+ * restart re-read every shown directory's binding (#6084).
+ */
+export const sourceControlDiscoverySignature = (
+  candidates: ReadonlyArray<{ directory: string; branch: string }>,
+): string => JSON.stringify(
+  [...candidates].sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0)),
+);
+
+/**
+ * How many bindings are read at once over the relay. There every request rides
+ * one tunnel, so no browser connection pool needs protecting and each round
+ * trip is slow; a binding read still spawns Git on the server, which bounds it.
+ */
+export const RELAY_BINDING_READ_CONCURRENCY = 8;
+
+/** Runs `read` for every item, at most `limit` at a time. */
+export const readWithConcurrency = async <T, R>(items: readonly T[], limit: number, read: (item: T) => Promise<R>): Promise<void> => {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await read(items[next++]);
+  }));
+};

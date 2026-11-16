@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { ChecksSummaryLine } from '@/components/references/ReferencePreview';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CheckRunList } from '@/components/views/git/CheckRunList';
 import { isFailedConclusion, useCheckRunExpansion } from '@/components/views/git/checkRunState';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -75,10 +76,15 @@ export const SourceBoardChecksDialog: React.FC<{
                         <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
                             <ChecksSummaryLine checks={ci.summary} />
                             {onAttachFailed && runs.some((run) => isFailedConclusion(run.conclusion)) ? (
-                                <Button variant="outline" size="xs" className="ms-auto" onClick={() => onAttachFailed(runs)}>
-                                    <Icon name="attachment-2" className="size-3.5" />
-                                    {t('gitView.pr.actions.resolveFailedChecks')}
-                                </Button>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="outline" size="xs" className="ms-auto" onClick={() => onAttachFailed(runs)}>
+                                            <Icon name="attachment-2" className="size-3.5" />
+                                            {t('gitView.pr.actions.resolveFailedChecks')}
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.attachFailedChecks')}</TooltipContent>
+                                </Tooltip>
                             ) : null}
                         </span>
                     ) : null}

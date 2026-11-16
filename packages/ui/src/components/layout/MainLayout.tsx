@@ -28,15 +28,18 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
+import { useGuestUpdateNotice } from '@/hooks/useGuestUpdateNotice';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { usePaletteShortcuts } from '@/hooks/usePaletteShortcuts';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 import { setChatCovered } from './rightSlot';
 
 import { ChatView } from '@/components/views/ChatView';
 import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
@@ -85,15 +88,17 @@ const OnDemand: React.FC<{
 const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const peek = useSidebarPeek({ enabled: !isSidebarOpen && !isMobile, layoutAnimationMs: useLayoutAnimationMs() });
+    // The list's own controls sit in the strip above it, beside the titlebar buttons.
+    const [listControlsSlot, setListControlsSlot] = React.useState<HTMLDivElement | null>(null);
     return (
         <Sidebar
             isOpen={isSidebarOpen}
             isMobile={isMobile}
             className="border-border"
-            topBar={<SidebarTopBar />}
+            topBar={<SidebarTopBar actionsSlotRef={setListControlsSlot} />}
             peek={peek}
         >
-            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} />
+            <SessionSidebar isVisible={isSidebarOpen || peek.state !== false} listControlsSlot={listControlsSlot} />
         </Sidebar>
     );
 });
@@ -108,6 +113,7 @@ LeftSidebar.displayName = 'LeftSidebar';
  */
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
+    usePaletteShortcuts();
     useTerminalSessionKeepalive();
     // The grant dialog of isolated spaces; the main layout is never VS Code's (decision 16).
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
@@ -148,7 +154,15 @@ export const MainLayout: React.FC = () => {
     // Any full-page surface replacing the chat area. While open, the chat is
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
-    const isSurfacePageOpen = isScheduledTasksPageOpen || isSuggestedTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || isOverviewOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || isOverviewOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
+    const mainRef = React.useRef<HTMLElement | null>(null);
+    // Cmd/Ctrl+W in the desktop app closes the page covering the chat before
+    // it closes the window. The page is the place the user last worked in, so
+    // it also wins over the session tabs while it is open.
+    React.useEffect(() => {
+        if (!isSurfacePageOpen) return;
+        return registerCloseTabTarget(() => useUIStore.getState().closeMainSurfaces(), mainRef, 1);
+    }, [isSurfacePageOpen]);
     // The work-status card sits in the right slot, outside the hidden chat,
     // so the slot is told to hide it with the chat.
     React.useLayoutEffect(() => {
@@ -172,6 +186,7 @@ export const MainLayout: React.FC = () => {
     const { isMobile } = useDeviceInfo();
 
     useUpdatePolling();
+    useGuestUpdateNotice();
 
 
     React.useEffect(() => {
@@ -226,7 +241,7 @@ export const MainLayout: React.FC = () => {
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
                                         {/* The chat column, with the bottom zone under the chat. */}
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
-                                        <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                        <main ref={mainRef} className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                 <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                             </div>

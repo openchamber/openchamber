@@ -21,6 +21,25 @@ OpenChamber maakt de branch, richt de map in en opent daar een nieuwe sessie, kl
 
 Wil je geen vragen, kies dan **Snelle worktree** in hetzelfde branchmenu: OpenChamber geeft de branch een tijdelijke naam en richt de nieuwe sessie erop. Zodra de agent de taak een naam geeft, hernoemt hij ook de branch ernaar, bijvoorbeeld `fix/login-timeout`, zolang de branch nog niet is gepusht.
 
+## Worktrees maken met uw eigen tool
+
+Elke nieuwe worktree is een verse checkout, dus bij een groot project kan het installeren van dependencies minuten duren voordat er iets draait. Een copy-on-write-tool maakt de worktree in plaats daarvan als kloon van een checkout die u al hebt: `node_modules`, `.venv` en build-uitvoer gaan mee en nemen geen extra schijfruimte in totdat ze veranderen.
+
+Om er een te gebruiken, opent u de instellingen van het project, gaat u naar **Worktrees** en vult u het commando van uw tool in onder **Worktrees aanmaken**. OpenChamber maakt eerst de branch en voert daarna het commando uit in de hoofdmap van het project, met twee omgevingsvariabelen:
+
+- `$WORKTREE_PATH` is de map waarin de worktree moet komen. Die bestaat nog niet.
+- `$WORKTREE_BRANCH` is de branch die daar wordt uitgecheckt. Die bestaat al.
+
+Dit commando doet wat OpenChamber zonder eigen commando doet; zet het commando van uw tool op de plek van `git worktree add`:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+Daarna verschijnt de worktree in de zijbalk zoals elke andere, en de setupcommando's van het project worden erin uitgevoerd. Bewaart de tool de checkout ergens anders en laat hij een link achter op `$WORKTREE_PATH`, dan werkt OpenChamber in de echte map. Mislukt het commando, dan toont OpenChamber de uitvoer en verwijdert het de branch die het heeft gemaakt. De worktree later verwijderen lukt ook als de tool hem heeft vergrendeld.
+
+Het commando is alleen van u: het wordt niet in de repository opgeslagen, dus teamgenoten zonder de tool houden de gewone manier van aanmaken. Laat het veld leeg om terug te gaan naar git. Worktrees voor een pull request uit de fork van iemand anders gebruiken altijd git.
+
 ## In de zijbalk
 
 Een worktree is één rij in de zijbalk, met alle sessies erin daaronder. Onder het project staat hij tussen de andere sessies van het project op volgorde van de laatste activiteit, dus een worktree waarin u net werkte, staat vrij bovenaan. De rij toont de naam van de taak zodra de agent die heeft gegeven (tot dan de titel van de sessie waarin u daar het laatst werkte), de pull request of issue die erbij hoort als gekleurde markering, en of een sessie daar bezig is of nieuws voor u heeft. Een worktree die voor een pull request of issue is gemaakt, begint met de titel daarvan tot de agent een kortere naam kiest. Beweeg de muis erover om de branch te zien. Klik erop om de sessie te openen waarin u daar het laatst werkte; om de lijst uit te klappen, beweegt u de muis over het branch-pictogram links ervan en klikt u op de pijl die ervoor in de plaats komt. Het menu hernoemt de taak, zet de worktree in een map van het project, archiveert hem of verwijdert hem. Op uw telefoon tikt u op de pijl in de rij om de lijst uit te klappen, en veegt u de rij opzij om hem als afgerond te markeren, de taak te hernoemen, de worktree te archiveren of hem te verwijderen. Hoe werk in en uit het blok In bewerking gaat, leest u in [Sessies in uitvoering](/nl/sessions-in-work/).

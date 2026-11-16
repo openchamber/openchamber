@@ -14,7 +14,7 @@ import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
-import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
+import { useHighlightedLines } from '@/components/code/useHighlightedLines';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // ── Threshold: files smaller than this render without virtualization ──
@@ -55,7 +55,7 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   // Tokenize the whole block in one worker call; rows index into the result.
   const fullText = React.useMemo(() => lines.map((line) => line.text).join('\n'), [lines]);
-  const highlightResult = useWorkerHighlightedLines(fullText, language);
+  const highlightResult = useHighlightedLines(fullText, language);
   // Unchanged lines keep their colours while an update tokenizes.
   const highlighted = highlightResult.status === 'loading' ? highlightResult.carriedLines : highlightResult.lines;
 

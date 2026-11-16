@@ -112,9 +112,6 @@ const createProps = (): SessionGroupSectionProps => ({
   groupKey: 'project:wt',
   projectId: PROJECT.id,
   hideGroupLabel: false,
-  hasSessionSearchQuery: false,
-  normalizedSessionSearchQuery: '',
-  groupSearchDataByGroup: new WeakMap(),
   collapsedGroups: new Set(),
   hideDirectoryControls: false,
   showMoreGroupSessions: () => undefined,
@@ -139,7 +136,6 @@ const createProps = (): SessionGroupSectionProps => ({
   setOpenSidebarMenuKey: () => undefined,
   startFolderRename: () => undefined,
   allowReselect: false,
-  resetSessionSearch: () => undefined,
   deleteSessionConfirm: null,
   setDeleteSessionConfirm: () => undefined,
   startSessionWorktreeMenuLoad: () => ({

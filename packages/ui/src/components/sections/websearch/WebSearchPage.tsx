@@ -107,7 +107,6 @@ const ModeSection: React.FC<{ snapshot: WebSearchSnapshot }> = ({ snapshot }) =>
     <SettingsSection
       title={t('settings.webSearch.section.provider')}
       info={t('settings.webSearch.section.providerInfo')}
-      divider={false}
       settingsItem="web-search.provider"
     >
       <div className="space-y-2">
@@ -322,7 +321,7 @@ const ProviderDetail: React.FC<{ entry: ProviderEntry; snapshot: WebSearchSnapsh
       titleLeading={<SettingsBackButton label={t('settings.webSearch.detail.back')} onClick={onBack} />}
       showSaveStatus
     >
-      <SettingsSection divider={false}>
+      <SettingsSection>
         <div className="space-y-2">
           {useLine ? <p className="typography-meta text-foreground">{useLine}</p> : null}
           {usable && !inUse ? (
@@ -378,7 +377,7 @@ export const WebSearchPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.webSearch.title')}
-      description={t('settings.page.webSearch.description')}
+      namedBySidebar
       showSaveStatus
     >
       {snapshot ? (
@@ -404,7 +403,7 @@ export const WebSearchPage: React.FC = () => {
           </SettingsSection>
         </>
       ) : state.kind === 'failed' ? (
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <div className="flex flex-wrap items-center gap-3">
             <p className="typography-meta text-[var(--status-error)]">{t('settings.webSearch.state.loadFailed')}</p>
             <Button variant="outline" size="xs" onClick={() => void load()}>
@@ -413,7 +412,7 @@ export const WebSearchPage: React.FC = () => {
           </div>
         </SettingsSection>
       ) : (
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.webSearch.state.loading')}</p>
         </SettingsSection>
       )}

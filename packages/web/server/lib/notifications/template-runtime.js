@@ -12,7 +12,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     resolvePrimaryWorktreeRoot = async (directory) => ({ root: directory }),
     chatRoots = [],
     readDisplayMetadata = null,
-    fetchImpl = fetch,
+    fetchImpl = (...args) => fetch(...args),
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
@@ -21,8 +21,10 @@ export const createNotificationTemplateRuntime = (deps) => {
   const CHATS_PROJECT_LABEL = 'Chats';
 
   // Where a session's record and messages are read: the host's OpenCode by default, the
-  // OpenCode inside a space for a session of that space (`runtime.js` builds that source).
+  // OpenCode inside a space for a session of that space (`runtime.js` builds that source
+  // and marks it `isSpace`).
   const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl };
+  const isHostSource = (source) => !source?.isSpace;
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
 
   const cachedZenModels = { models: [] };
@@ -208,7 +210,7 @@ export const createNotificationTemplateRuntime = (deps) => {
   const fetchSessionInfo = async (sessionId, source) => {
     if (!sessionId) return null;
 
-    const isHost = source === hostSource;
+    const isHost = isHostSource(source);
     const cached = isHost ? sessionInfoCache.get(sessionId) : undefined;
     if (cached && Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
       return cached.data;
@@ -276,7 +278,7 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     let sessionTitle = payload?.properties?.sessionTitle || payload?.properties?.session?.title || (typeof info.sessionTitle === 'string' ? info.sessionTitle : '') || '';
 
-    const isHost = source === hostSource;
+    const isHost = isHostSource(source);
     if (!sessionTitle && sessionId && isHost) {
       const cached = getCachedSessionTitle(sessionId);
       if (cached) {
@@ -365,6 +367,9 @@ export const createNotificationTemplateRuntime = (deps) => {
           baseDir: worktreeDir,
           spawnOptions: { windowsHide: true },
           binary: resolveGitBinaryForSpawn(),
+          // The binary comes from the server's own resolver; an override path
+          // with a space would otherwise be refused and leave {branch} empty.
+          unsafe: { allowUnsafeCustomBinary: true },
         });
         branch = await withGitTimeout(git.revparse(['--abbrev-ref', 'HEAD'])).catch(() => '');
       } catch {

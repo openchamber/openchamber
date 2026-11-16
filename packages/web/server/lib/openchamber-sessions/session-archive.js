@@ -45,9 +45,9 @@ const mapLimited = async (items, limit, work) => {
  */
 export const createOpenCodeSessionArchive = ({ clientFor }) => ({
   setArchived: (sessionID, archived) => clientFor().session.update({ sessionID, archived }),
-  readArchivedAt: async (sessionID) => {
+  readArchivedAt: async (sessionID, { signal } = {}) => {
     try {
-      const session = await clientFor().session.get({ sessionID });
+      const session = await clientFor().session.get({ sessionID }, { signal });
       return session.time?.archived ?? null;
     } catch (error) {
       if (errorTag(error) === 'SessionNotFoundError') return undefined;
@@ -128,6 +128,21 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
   };
 
   /**
+   * `'archived'`, `'active'`, or `'unknown'` when OpenCode could not be asked
+   * (or `signal` ended the read): unlike `archivedAt`, a caller that would
+   * wake the session can tell a failed read from an active session and wait.
+   */
+  const archiveState = async (sessionID, { signal } = {}) => {
+    try {
+      const entry = await store.entry(sessionID);
+      const at = entry !== undefined ? entry : await openCode.readArchivedAt(sessionID, { signal });
+      return Number.isFinite(at) ? 'archived' : 'active';
+    } catch {
+      return 'unknown';
+    }
+  };
+
+  /**
    * Pushes one legacy entry. It leaves the file when OpenCode took it or no
    * longer knows the session; a failed push keeps it for the next start.
    */
@@ -158,6 +173,7 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }) =
     },
     archivedAt,
     isArchived: async (sessionID) => typeof (await archivedAt(sessionID)) === 'number',
+    archiveState,
     migrateLegacy,
   };
 };

@@ -38,6 +38,8 @@ export type BrowserAnnotationOverlayTheme = {
   readonly border: string;
   readonly text: string;
   readonly mutedText: string;
+  /** The recording dot of dictation. */
+  readonly danger: string;
 };
 
 export type BrowserAnnotationOverlayLabels = {
@@ -48,6 +50,44 @@ export type BrowserAnnotationOverlayLabels = {
   readonly submit: string;
 };
 
+/**
+ * Dictation into the comment. The microphone is the app's: the overlay asks
+ * for it through `ANNOTATION_BINDING`, a function the desktop shell exposes
+ * only to the isolated world the overlay runs in, so the page itself can
+ * neither start a recording nor answer in the app's place. Without that
+ * function (the overlay running in the page's own world) there is no mic.
+ */
+export type BrowserAnnotationVoice = {
+  /** The app's dictation shortcut as this platform's keys; null when it has none the overlay can match. */
+  readonly shortcut: { key: string; meta: boolean; ctrl: boolean; alt: boolean; shift: boolean } | null;
+  readonly labels: {
+    readonly start: string;
+    readonly cancel: string;
+    readonly insert: string;
+    readonly listening: string;
+    readonly processing: string;
+  };
+  /** SVG path markup from the app's icon sprite. */
+  readonly icons: { readonly mic: string; readonly close: string; readonly check: string; readonly loader: string };
+};
+
+/** What the overlay sends the app, as JSON through the binding. */
+export type AnnotationOverlayMessage = { type: 'voice'; action: 'start' | 'finish' | 'cancel' };
+
+/**
+ * What the app sends the overlay. `failed` keeps a submit that waited on the
+ * recording from going out; `level` is the microphone's, 0 to 1.
+ */
+export type AnnotationAppMessage =
+  | { type: 'voice'; phase: 'idle' | 'recording' | 'processing'; note?: string; failed?: boolean }
+  | { type: 'insert'; text: string }
+  | { type: 'level'; level: number };
+
+/** The shell's binding into the overlay's world; `browser-panel-driver.mjs` names it the same. */
+const ANNOTATION_BINDING = '__openchamberAnnotationSend';
+/** Where the overlay takes the app's messages, in its own world. */
+const ANNOTATION_RECEIVER = '__openchamberAnnotationReceive';
+
 const ANNOTATION_ACTIVE_FLAG = '__openchamberBrowserAnnotationActive';
 
 /** Cancels an overlay left behind by an earlier session. Safe when none is active. */
@@ -55,6 +95,10 @@ export const ANNOTATION_TEARDOWN_SCRIPT = `(() => {
   try {
     var host = document.querySelector('[data-openchamber-annotation]');
     if (host && host.parentNode) host.parentNode.removeChild(host);
+  } catch (error) { /* page navigated away */ }
+  try {
+    var input = document.querySelector('[data-openchamber-annotation-input]');
+    if (input && input.parentNode) input.parentNode.removeChild(input);
   } catch (error) { /* page navigated away */ }
   try {
     var cursor = document.getElementById('openchamber-annotation-cursor');
@@ -66,17 +110,24 @@ export const ANNOTATION_TEARDOWN_SCRIPT = `(() => {
 export const buildAnnotationOverlayScript = (
   theme: BrowserAnnotationOverlayTheme,
   labels: BrowserAnnotationOverlayLabels,
+  voice: BrowserAnnotationVoice | null = null,
 ): string => {
-  const config = JSON.stringify({ theme, labels });
+  const config = JSON.stringify({ theme, labels, voice });
   return String.raw`new Promise((resolve) => {
   var CONFIG = ${config};
   var THEME = CONFIG.theme;
   var LABELS = CONFIG.labels;
+  var VOICE = CONFIG.voice;
+  var sendToApp = VOICE && typeof window['${ANNOTATION_BINDING}'] === 'function' ? window['${ANNOTATION_BINDING}'] : null;
   var OVERLAY_ATTR = 'data-openchamber-annotation';
   var Z_OVERLAY = 2147483646;
   var MAX_TEXT = 400;
   var MIN_RECT = 3;
   var EDITOR_GAP = 10;
+  // Points per path of a stroke. Rewriting one path's d on every move costs
+  // time with the whole stroke's length, so a long stroke stalled the pointer;
+  // a stroke drawn as short paths rewrites only the last one.
+  var STROKE_CHUNK_POINTS = 64;
 
   try {
     var stale = document.querySelector('[' + OVERLAY_ATTR + ']');
@@ -91,8 +142,24 @@ export const buildAnnotationOverlayScript = (
   var selected = null;
   var regions = [];
   var strokes = [];
-  var tool = 'select';
   var settled = false;
+
+  /**
+   * Chromium draws a PDF in a viewer frame of its own, so the pointer and keys
+   * over it never reach this document. A transparent layer over the viewer
+   * takes them instead, and takes focus for Escape. A PDF has no elements to
+   * pick, so it offers Region and Draw only. The wheel still reaches the
+   * viewer: Chromium routes it past the layer, so the PDF scrolls as usual.
+   */
+  var isPdf = document.contentType === 'application/pdf';
+  var inputLayer = null;
+  if (isPdf) {
+    inputLayer = document.createElement('div');
+    inputLayer.setAttribute('data-openchamber-annotation-input', '');
+    inputLayer.tabIndex = -1;
+    inputLayer.style.cssText = 'position:fixed !important;inset:0 !important;z-index:' + (Z_OVERLAY - 1) + ' !important;outline:none !important;background:transparent !important';
+  }
+  var tool = isPdf ? 'marquee' : 'select';
 
   // ---------------------------------------------------------------- geometry
 
@@ -234,7 +301,20 @@ export const buildAnnotationOverlayScript = (
     '.editor textarea::placeholder{color:' + THEME.mutedText + '}',
     '.editor button{appearance:none;border:none;background:' + THEME.primary + ';color:' + THEME.primaryContrast + ';border-radius:999px;width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}',
     '.editor button svg{width:16px;height:16px;display:block}',
-    '.editor button[disabled]{opacity:.5;cursor:default}'
+    '.editor button[disabled]{opacity:.5;cursor:default}',
+    '.editor button.ghost{background:transparent;color:' + THEME.mutedText + ';width:28px;height:28px}',
+    '.editor button.ghost:hover{background:' + THEME.primaryFaint + ';color:' + THEME.text + '}',
+    '.editor button.ghost.confirm{color:' + THEME.primary + '}',
+    '.voice{display:flex;align-items:center;gap:2px;flex-shrink:0}',
+    '.rec{display:flex;align-items:center;gap:6px;padding:0 4px;font-size:12px;line-height:18px;color:' + THEME.mutedText + ';white-space:nowrap;font-variant-numeric:tabular-nums}',
+    // A status such as a model download is cut short, so the comment keeps its room.
+    '.rec span:last-child{max-width:120px;overflow:hidden;text-overflow:ellipsis}',
+    '.wave{display:block;width:48px;height:16px}',
+    // Recording already has a live meter and elapsed time; phase icons stay still.
+    '.dot{width:6px;height:6px;border-radius:50%;background:' + THEME.danger + '}',
+    '.spin{display:flex;width:28px;height:28px;align-items:center;justify-content:center;color:' + THEME.mutedText + '}',
+    '.spin svg{width:16px;height:16px}',
+    '[hidden]{display:none !important}'
   ].join('');
   shadow.appendChild(style);
 
@@ -271,7 +351,8 @@ export const buildAnnotationOverlayScript = (
   shadow.appendChild(tools);
 
   var toolButtons = {};
-  [['select', LABELS.select], ['marquee', LABELS.marquee], ['draw', LABELS.draw]].forEach(function (entry) {
+  var TOOLS = [['select', LABELS.select], ['marquee', LABELS.marquee], ['draw', LABELS.draw]];
+  TOOLS.filter(function (entry) { return !isPdf || entry[0] !== 'select'; }).forEach(function (entry) {
     var button = document.createElement('button');
     button.type = 'button';
     button.textContent = entry[1];
@@ -296,11 +377,204 @@ export const buildAnnotationOverlayScript = (
   submit.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.8287 7.75737L9.1718 13.4142C8.78127 13.8047 8.78127 14.4379 9.1718 14.8284C9.56232 15.219 10.1955 15.219 10.586 14.8284L16.2429 9.17158C17.4144 8.00001 17.4144 6.10052 16.2429 4.92894C15.0713 3.75737 13.1718 3.75737 12.0002 4.92894L6.34337 10.5858C4.39075 12.5384 4.39075 15.7042 6.34337 17.6569C8.29599 19.6095 11.4618 19.6095 13.4144 17.6569L19.0713 12L20.4855 13.4142L14.8287 19.0711C12.095 21.8047 7.66283 21.8047 4.92916 19.0711C2.19549 16.3374 2.19549 11.9053 4.92916 9.17158L10.586 3.51473C12.5386 1.56211 15.7045 1.56211 17.6571 3.51473C19.6097 5.46735 19.6097 8.63317 17.6571 10.5858L12.0002 16.2427C10.8287 17.4142 8.92916 17.4142 7.75759 16.2427C6.58601 15.0711 6.58601 13.1716 7.75759 12L13.4144 6.34316L14.8287 7.75737Z" fill="currentColor"/></svg>';
   editor.append(comment, submit);
 
+  // ------------------------------------------------------------------- voice
+
+  var voicePhase = 'idle';
+  var voiceNote = '';
+  var voiceStartedAt = 0;
+  var voiceTimer = null;
+  // Enter while the recording runs finishes it, and the annotation goes once
+  // the words are in the comment.
+  var submitAfterVoice = false;
+
+  var iconButton = function (path, label, className) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + path + '</svg>';
+    return button;
+  };
+
+  var voiceBox = null, micButton = null, voiceStatus = null, voiceText = null, voiceCancel = null, voiceFinish = null, voiceBusy = null;
+  var wave = null;
+  if (sendToApp) {
+    voiceBox = document.createElement('div');
+    voiceBox.className = 'voice';
+    micButton = iconButton(VOICE.icons.mic, VOICE.labels.start, 'ghost');
+    voiceStatus = document.createElement('div');
+    voiceStatus.className = 'rec';
+    voiceStatus.setAttribute('role', 'status');
+    voiceStatus.setAttribute('aria-label', VOICE.labels.listening);
+    var dot = document.createElement('span');
+    dot.className = 'dot';
+    wave = document.createElement('canvas');
+    wave.className = 'wave';
+    wave.setAttribute('aria-hidden', 'true');
+    voiceText = document.createElement('span');
+    voiceStatus.append(dot, wave, voiceText);
+    voiceBusy = document.createElement('span');
+    voiceBusy.className = 'spin';
+    voiceBusy.setAttribute('role', 'status');
+    voiceBusy.setAttribute('aria-label', VOICE.labels.processing);
+    voiceBusy.title = VOICE.labels.processing;
+    voiceBusy.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + VOICE.icons.loader + '</svg>';
+    voiceCancel = iconButton(VOICE.icons.close, VOICE.labels.cancel, 'ghost');
+    voiceFinish = iconButton(VOICE.icons.check, VOICE.labels.insert, 'ghost confirm');
+    voiceBox.append(micButton, voiceStatus, voiceBusy, voiceCancel, voiceFinish);
+    editor.insertBefore(voiceBox, submit);
+  }
+
+  /**
+   * Asks the app for its microphone. Only for the user's own input: the page
+   * shares this document and can dispatch events at it, but cannot make them
+   * trusted.
+   */
+  var askApp = function (event, action) {
+    if (!sendToApp || settled || !event || !event.isTrusted) return;
+    try { sendToApp(JSON.stringify({ type: 'voice', action: action })); } catch (error) { /* shell went away */ }
+  };
+
+  // The microphone level as the composer draws it: newest bar on the right,
+  // silence a dot, speech a rounded bar, quiet speech raised to use the height.
+  var waveBars = [];
+  var WAVE_BAR = 2, WAVE_PITCH = 5, WAVE_CURVE = 0.65;
+  var voiceVisible = function () {
+    return !settled && host.isConnected && !document.hidden && editor.style.display !== 'none';
+  };
+  var drawWave = function (level) {
+    if (!wave || !voiceVisible() || voicePhase !== 'recording' || voiceNote) return;
+    var width = 48, height = 16, ratio = window.devicePixelRatio || 1;
+    if (wave.width !== width * ratio) {
+      wave.width = width * ratio;
+      wave.height = height * ratio;
+    }
+    waveBars.push(Math.max(0, Math.min(1, level)));
+    var capacity = Math.floor(width / WAVE_PITCH);
+    while (waveBars.length > capacity) waveBars.shift();
+    var context = wave.getContext('2d');
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = THEME.mutedText;
+    context.fillStyle = THEME.mutedText;
+    context.lineWidth = WAVE_BAR;
+    context.lineCap = 'round';
+    var right = width - WAVE_BAR / 2;
+    for (var i = 0; i < waveBars.length; i += 1) {
+      var x = right - (waveBars.length - 1 - i) * WAVE_PITCH;
+      var half = (WAVE_BAR + (height - WAVE_BAR) * Math.pow(waveBars[i], WAVE_CURVE) - WAVE_BAR) / 2;
+      context.beginPath();
+      if (half < 0.25) {
+        context.arc(x, height / 2, WAVE_BAR / 2, 0, Math.PI * 2);
+        context.fill();
+      } else {
+        context.moveTo(x, height / 2 - half);
+        context.lineTo(x, height / 2 + half);
+        context.stroke();
+      }
+    }
+  };
+
+  var renderVoiceTime = function () {
+    if (!voiceText || voicePhase !== 'recording' || !voiceVisible()) return;
+    if (voiceNote) {
+      voiceText.textContent = voiceNote;
+      return;
+    }
+    var seconds = Math.max(0, Math.floor((Date.now() - voiceStartedAt) / 1000));
+    voiceText.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+  };
+
+  // The injected world cannot use React's shared clock. Its only timer updates
+  // the visible recording counter; status notes and processing need no ticks.
+  var syncVoiceTimer = function () {
+    var active = voicePhase === 'recording' && !voiceNote && voiceVisible();
+    if (active && voiceTimer === null) voiceTimer = setInterval(renderVoiceTime, 1000);
+    else if (!active && voiceTimer !== null) {
+      clearInterval(voiceTimer);
+      voiceTimer = null;
+    }
+    renderVoiceTime();
+  };
+
+  var renderVoice = function () {
+    if (!voiceBox) return;
+    // A status such as a model download takes the wave's place.
+    wave.hidden = Boolean(voiceNote);
+    micButton.hidden = voicePhase !== 'idle';
+    voiceStatus.hidden = voicePhase !== 'recording';
+    voiceBusy.hidden = voicePhase !== 'processing';
+    voiceCancel.hidden = voicePhase === 'idle';
+    voiceFinish.hidden = voicePhase !== 'recording';
+    syncVoiceTimer();
+  };
+
+  /** Puts the transcript where the caret is, with a space before it when the text runs on. */
+  var insertTranscript = function (text) {
+    var start = comment.selectionStart == null ? comment.value.length : comment.selectionStart;
+    var end = comment.selectionEnd == null ? start : comment.selectionEnd;
+    var before = comment.value.slice(0, start);
+    var spacer = before && !/\s$/.test(before) ? ' ' : '';
+    comment.value = before + spacer + text + comment.value.slice(end);
+    var caret = before.length + spacer.length + text.length;
+    resizeComment();
+    try { comment.setSelectionRange(caret, caret); } catch (error) { /* field went away */ }
+  };
+
+  var applyVoice = function (message) {
+    var was = voicePhase;
+    voicePhase = message.phase === 'recording' || message.phase === 'processing' ? message.phase : 'idle';
+    voiceNote = typeof message.note === 'string' ? message.note : '';
+    if (voicePhase === 'recording' && was !== 'recording') {
+      voiceStartedAt = Date.now();
+      waveBars = [];
+      drawWave(0);
+    }
+    renderVoice();
+    if (voicePhase !== 'idle') return;
+    var submitNow = submitAfterVoice && !message.failed;
+    submitAfterVoice = false;
+    if (submitNow) attach();
+    else if (was !== 'idle') comment.focus({ preventScroll: true });
+  };
+
+  if (voiceBox) {
+    micButton.addEventListener('click', function (event) { askApp(event, 'start'); });
+    voiceFinish.addEventListener('click', function (event) { askApp(event, 'finish'); });
+    voiceCancel.addEventListener('click', function (event) {
+      submitAfterVoice = false;
+      askApp(event, 'cancel');
+    });
+    window['${ANNOTATION_RECEIVER}'] = function (message) {
+      if (settled || !message) return;
+      if (message.type === 'insert' && typeof message.text === 'string') insertTranscript(message.text);
+      else if (message.type === 'voice') applyVoice(message);
+      else if (message.type === 'level' && typeof message.level === 'number' && voicePhase === 'recording') drawWave(message.level);
+    };
+    document.addEventListener('visibilitychange', syncVoiceTimer);
+    renderVoice();
+  }
+
+  /** The app's dictation shortcut, matched by physical key so Option and other layouts still hit it. */
+  var isVoiceShortcut = function (event) {
+    var shortcut = VOICE && VOICE.shortcut;
+    if (!sendToApp || !shortcut) return false;
+    if (event.metaKey !== shortcut.meta || event.ctrlKey !== shortcut.ctrl) return false;
+    if (event.altKey !== shortcut.alt || event.shiftKey !== shortcut.shift) return false;
+    var code = String(event.code || '');
+    var key = code.indexOf('Key') === 0 || code.indexOf('Digit') === 0
+      ? code.slice(code.indexOf('Key') === 0 ? 3 : 5).toLowerCase()
+      : String(event.key || '').toLowerCase();
+    return key === shortcut.key;
+  };
+
   /**
    * Grows the box with its content.
    *
    * A hidden element reports scrollHeight 0, so measuring one collapses the
-   * field to nothing — which is what left a sliver of a click target and an
+   * field to nothing, which is what left a sliver of a click target and an
    * invisible caret. Measuring only while visible, and never below the CSS
    * min-height, keeps it usable.
    */
@@ -319,10 +593,12 @@ export const buildAnnotationOverlayScript = (
   var positionEditor = function () {
     if (!lastTargetRect) {
       editor.style.display = 'none';
+      syncVoiceTimer();
       return;
     }
     var wasHidden = editor.style.display === 'none';
     editor.style.display = 'flex';
+    syncVoiceTimer();
     // Measured now that it is laid out, not while it was still hidden.
     if (wasHidden) resizeComment();
     var box = editor.getBoundingClientRect();
@@ -355,8 +631,6 @@ export const buildAnnotationOverlayScript = (
     submit.disabled = !hasTargets();
     if (!hasTargets()) {
       lastTargetRect = null;
-      editor.style.display = 'none';
-      return;
     }
     positionEditor();
   };
@@ -427,10 +701,18 @@ export const buildAnnotationOverlayScript = (
         drag.rect = normalizeRect(drag.startX, drag.startY, event.clientX, event.clientY);
         positionBox(marqueeBox, drag.rect);
       } else if (drag.kind === 'draw') {
+        if (drag.chunkPoints >= STROKE_CHUNK_POINTS) {
+          // The next path starts where this one ends, so the line stays whole.
+          var last = drag.points[drag.points.length - 1];
+          drag.path = document.createElementNS(svgNS, 'path');
+          drag.group.appendChild(drag.path);
+          drag.d = 'M' + last.x + ' ' + last.y;
+          drag.chunkPoints = 1;
+        }
         drag.points.push({ x: event.clientX, y: event.clientY });
-        drag.path.setAttribute('d', drag.points.map(function (point, index) {
-          return (index === 0 ? 'M' : 'L') + point.x + ' ' + point.y;
-        }).join(' '));
+        drag.d += ' L' + event.clientX + ' ' + event.clientY;
+        drag.chunkPoints += 1;
+        drag.path.setAttribute('d', drag.d);
       }
       return;
     }
@@ -466,14 +748,23 @@ export const buildAnnotationOverlayScript = (
       return;
     }
 
+    var group = document.createElementNS(svgNS, 'g');
+    group.setAttribute('fill', 'none');
+    group.setAttribute('stroke', THEME.primary);
+    group.setAttribute('stroke-width', '2.5');
+    group.setAttribute('stroke-linecap', 'round');
+    group.setAttribute('stroke-linejoin', 'round');
     var path = document.createElementNS(svgNS, 'path');
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', THEME.primary);
-    path.setAttribute('stroke-width', '2.5');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    svg.appendChild(path);
-    drag = { kind: 'draw', path: path, points: [{ x: event.clientX, y: event.clientY }] };
+    group.appendChild(path);
+    svg.appendChild(group);
+    drag = {
+      kind: 'draw',
+      group: group,
+      path: path,
+      d: 'M' + event.clientX + ' ' + event.clientY,
+      chunkPoints: 1,
+      points: [{ x: event.clientX, y: event.clientY }]
+    };
   };
 
   var onPointerUp = function () {
@@ -507,7 +798,7 @@ export const buildAnnotationOverlayScript = (
 
     var points = finished.points;
     if (points.length < 2) {
-      if (finished.path.parentNode) finished.path.parentNode.removeChild(finished.path);
+      if (finished.group.parentNode) finished.group.parentNode.removeChild(finished.group);
       return;
     }
     var minX = points[0].x, minY = points[0].y, maxX = points[0].x, maxY = points[0].y;
@@ -546,6 +837,21 @@ export const buildAnnotationOverlayScript = (
 
   var onKeyDown = function (event) {
     if (event.isComposing || event.keyCode === 229) return;
+    if (isVoiceShortcut(event)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (voicePhase === 'idle') askApp(event, 'start');
+      else if (voicePhase === 'recording') askApp(event, 'finish');
+      return;
+    }
+    if (event.key === 'Escape' && voicePhase !== 'idle') {
+      // Escape ends the recording first, and the annotation only after.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      submitAfterVoice = false;
+      askApp(event, 'cancel');
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -560,7 +866,7 @@ export const buildAnnotationOverlayScript = (
     if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      attach();
+      attach(event);
     }
   };
 
@@ -697,6 +1003,12 @@ export const buildAnnotationOverlayScript = (
     setCursor('');
     if (cursorStyle.parentNode) cursorStyle.parentNode.removeChild(cursorStyle);
     if (host.parentNode) host.parentNode.removeChild(host);
+    if (inputLayer && inputLayer.parentNode) inputLayer.parentNode.removeChild(inputLayer);
+    if (voiceTimer) clearInterval(voiceTimer);
+    if (voiceBox) {
+      document.removeEventListener('visibilitychange', syncVoiceTimer);
+      try { delete window['${ANNOTATION_RECEIVER}']; } catch (error) { /* non-configurable */ }
+    }
     try { delete window['${ANNOTATION_ACTIVE_FLAG}']; } catch (error) { /* non-configurable */ }
   };
 
@@ -712,8 +1024,14 @@ export const buildAnnotationOverlayScript = (
     });
   };
 
-  var attach = function () {
+  var attach = function (event) {
     if (!hasTargets()) return;
+    if (voicePhase !== 'idle') {
+      if (!event || !event.isTrusted) return;
+      submitAfterVoice = true;
+      if (voicePhase === 'recording') askApp(event, 'finish');
+      return;
+    }
     finish({
       id: 'annotation-' + Date.now(),
       pageUrl: String(location.href),
@@ -733,8 +1051,12 @@ export const buildAnnotationOverlayScript = (
 
   submit.addEventListener('click', attach);
 
+  if (inputLayer) {
+    document.documentElement.appendChild(inputLayer);
+    inputLayer.focus({ preventScroll: true });
+  }
   startTopLayer();
-  setTool('select');
+  setTool(tool);
   syncChrome();
 });`;
 };

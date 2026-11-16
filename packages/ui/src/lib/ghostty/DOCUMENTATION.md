@@ -7,7 +7,7 @@ This directory is OpenChamber's browser adapter for the official `libghostty-vt`
 - `runtime.ts` owns the single WebAssembly instance per page, the C struct layouts read from `ghostty_type_json`, allocation helpers, and the PTY write callback trampoline (embedded bytes compiled from `../../../scripts/ghostty-write-pty.zig`).
 - `core.ts` owns one terminal's Ghostty handles: VT writes, resize, theme and 256-color palette, selection, key/mouse/paste encoding, and the render-state snapshot (`GhosttySnapshot`) the renderer draws.
 - `renderer.ts` paints a snapshot into a Canvas 2D context: background runs, text runs, decorations, cursor. It measures the cell from the faces that will render.
-- `surface.ts` owns the DOM: canvas, hidden textarea (keyboard, IME, clipboard), scrollbar, pointer selection, link hover/activation, mouse reporting, wheel scrolling, cursor blink, DPR changes, and the fit/notify cycle toward the PTY.
+- `surface.ts` owns the DOM: canvas, hidden textarea (keyboard, IME, clipboard), the composed-text overlay, scrollbar, pointer selection, link hover/activation, mouse reporting, wheel scrolling, cursor blink, DPR changes, and the fit/notify cycle toward the PTY.
 - `boxDrawing.ts` draws Box Drawing (U+2500–U+257F), Block Elements (U+2580–U+259F) and Powerline arrows (U+E0B0–U+E0B3) procedurally to the exact cell; the renderer never sends those to the font.
 - `keyCodes.ts` mirrors the `GhosttyKey` enum of the pinned revision. `terminalLinks.ts` matches URLs across soft-wrapped rows. `fonts.ts` normalizes family lists for the canvas font shorthand and probes for monospace advances.
 - `vendor/` holds the reproducible artifact (`ghostty-vt.wasm`), the pinned upstream revision (`VERSION`) and Ghostty's license. `fonts/` vendors the symbols-only Nerd Font (MIT) so prompt glyphs render without a locally installed Nerd Font and without a CDN.
@@ -23,6 +23,7 @@ Touch-owned viewports have no menu and no paste shortcut, so `TerminalView` puts
 ## Invariants
 
 - On Android the hidden textarea rests at one space with the caret after it; elsewhere it rests empty. Every deletion a soft keyboard makes there fires an `input` event of type `deleteContentBackward`, and `onInput` sends exactly one Backspace for it through the key encoder (with a release for Kitty report-all programs) and puts the space back. Every keydown first returns the caret to after the space, because Gboard's space-bar swipe moves it without an event. Typed and composed text reaches the PTY without the space. Deletion is handled on `input` only, never on `beforeinput`. Other platforms leave deletion edits alone, as before.
+- While an IME composes, the overlay shows the `compositionupdate` text underlined at the cursor, one line, in the terminal's own colors. `compositionend` clears it, and the composed text reaches the PTY only there, once. The overlay sits on the cursor's cell even when the program hides the cursor, and draws nothing while the cursor is scrolled out of the viewport. It moves left as far as the terminal's right edge requires, and text wider than the terminal shows its end. It takes no pointer events and is hidden from assistive technology.
 - The paste shortcut starts a clipboard read and keeps the browser's native paste event; `TerminalPasteArbiter` lets exactly one deliver. Chromium fires the native event first and it cancels the read. WebKit resolves the read first, so the native event of the same keystroke is swallowed when it arrives within one second.
 - A terminal selection is copied to the regular clipboard only by an explicit Copy. In local Linux Electron, selection changes publish PRIMARY; Copy uses the regular clipboard. Middle-click paste stays with the editable surface or terminal under the pointer. A mouse-reporting application owns the plain middle click, Shift bypasses that reporting and pastes PRIMARY, and a terminal without an application claiming the mouse pastes on a plain click. The surface suppresses Chromium's follow-up paste only when its own branch consumes the click.
 - On macOS, unshifted Option+Left/Right sends ESC+b/f and Option+Backspace sends Ctrl+W at legacy prompts. `core.encodeMacWordShortcut` checks the active screen and Kitty keyboard flags before translating; alternate-screen and Kitty-enabled programs receive the original keys. `surface.ts` consumes the matching keyup for translated shortcuts. Other platforms, extra modifiers and Option character input retain normal encoding.
@@ -41,6 +42,10 @@ Touch-owned viewports have no menu and no paste shortcut, so `TerminalView` puts
 
 ## Decisions
 
+### Why composed text is a separate overlay and not the textarea
+
+Showing the textarea itself would leave the underline to the engine: its color comes from the input method, so it can vanish on a dark terminal, and Android's resting space would show in front of the text. The textarea also holds parked copy selections and must stay out of sight for them. An element of its own draws the same text in the terminal's colors and leaves everything the textarea does for keyboards and the clipboard unchanged. The canvas was rejected too: rows repaint only when marked dirty and cursor cells are snapshot-driven, so painting uncommitted text there would add a second input to the render state.
+
 ### Why Android keeps a space in the textarea and not an empty field
 
 Gboard deletes the characters it typed through the field (`deleteSurroundingText`), and in an empty field Chrome fires only a `keydown`/`keyup` pair with key code 229 and no edit. Once Gboard has nothing of its own left to delete, it sends a Backspace keydown whose `code` is empty, which the encoder cannot map. Both cases were measured on an Android 15 emulator with Gboard 14.2, Chrome 124 and Chromium 158. Reading an empty 229 pair as Backspace was rejected: Gboard sends the same empty pair before every Enter, so the last character of each command would be erased. With a space resting in the field, both cases become an ordinary deletion edit, which is authoritative. A keyboard that replaces several characters in one edit, such as tapping the suggestion "each" after typing "ech", removes only the space, so one character is deleted.
@@ -52,6 +57,10 @@ On the same emulator, Chromium 158 ignored `preventDefault` on the `beforeinput`
 ### Why shell shortcuts yield to alternate-screen and Kitty programs
 
 OpenChamber applies Ghostty-style line editing and viewport bindings only at plain shell prompts to preserve application keyboard handling. Active screen and negotiated Kitty flags are authoritative; application cursor mode alone does not disable shell editing because shells can enable it too.
+
+### Why Option symbols go through consumed modifiers and not the encoder's option-as-alt setting
+
+The vendored artifact is built for `wasm32-freestanding`, and Ghostty's key encoder (`src/input/key_encode.zig`) reads `macos_option_as_alt` only under `comptime builtin.os.tag == .macos`. `GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT` (option id 6 in `encoder.h`) is accepted and does nothing here: this encoder always treats Option as Alt and sends ESC before an Option character. What works is the consumed-modifier set: `KeyEvent.effectiveMods()` drops consumed bits when the event carries text, so passing the Alt bit (`1 << 2`) to `ghostty_key_event_set_consumed_mods` makes the encoder write the composed text without ESC. `ghosttyConsumedMods` (`keyCodes.ts`) decides per key which Option input counts as consumed (see Invariants). Meta for every other Option key is the deliberate default, the same the terminal had before Ghostty.
 
 ### Why Cmd+K remains unhandled
 

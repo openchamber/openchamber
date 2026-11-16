@@ -8,6 +8,7 @@ import { BusyDots } from '@/components/ui/busy-dots';
 import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useI18n } from '@/lib/i18n';
@@ -23,6 +24,7 @@ import { useProjectWorkflowRuns, useWorkflowRunsStore } from '@/lib/workflows/st
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { WorkflowAgentsView } from './WorkflowAgentsView';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { WorkflowAnswerBlock } from './WorkflowAnswerBlock';
 import { useWorkflowRunAction, workflowRunLook } from './workflowRunPresentation';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -37,11 +39,11 @@ const WORKFLOWS_HEADER_FIT = {
   steps: ['data-workflows-header-compact', 'data-workflows-header-tight', 'data-workflows-header-narrow'],
 } as const;
 
-const VIEWS: readonly { id: View; icon: IconName; labelKey: I18nKey }[] = [
-  { id: 'agents', icon: 'flow-chart', labelKey: 'workflows.panel.view.agents' },
-  { id: 'log', icon: 'file-list-2', labelKey: 'workflows.panel.view.log' },
-  { id: 'result', icon: 'checkbox-circle', labelKey: 'workflows.panel.view.result' },
-  { id: 'script', icon: 'code-sslash', labelKey: 'workflows.panel.view.script' },
+const VIEWS: readonly { id: View; icon: IconName; labelKey: I18nKey; tooltipKey: I18nKey }[] = [
+  { id: 'agents', icon: 'flow-chart', labelKey: 'workflows.panel.view.agents', tooltipKey: 'contextTooltips.workspace.workflow.view.agents' },
+  { id: 'log', icon: 'file-list-2', labelKey: 'workflows.panel.view.log', tooltipKey: 'contextTooltips.workspace.workflow.view.log' },
+  { id: 'result', icon: 'checkbox-circle', labelKey: 'workflows.panel.view.result', tooltipKey: 'contextTooltips.workspace.workflow.view.result' },
+  { id: 'script', icon: 'code-sslash', labelKey: 'workflows.panel.view.script', tooltipKey: 'contextTooltips.workspace.workflow.view.script' },
 ];
 
 // A running run's log refreshes at most this often, however fast its lines come.
@@ -116,7 +118,7 @@ const ResultView: React.FC<{ run: WorkflowRun; detail: WorkflowRunDetail | null;
   const { t } = useI18n();
   if (run.error && (run.state === 'failed' || run.state === 'stopped')) {
     return (
-      <p className="px-4 py-6 typography-meta" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
+      <p dir="auto" className="px-4 py-6 typography-meta" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
         {run.error}
       </p>
     );
@@ -170,31 +172,39 @@ const RunAction: React.FC<{ run: WorkflowRun }> = ({ run }) => {
   if (run.state === 'awaiting-approval') {
     return (
       <>
-        <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')} aria-label={t('chat.workflow.action.run')}>
-          <Icon name="play" className="size-3.5" />
-          <span className="workflows-header__action-label">{t('chat.workflow.action.run')}</span>
-        </Button>
-        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'decline')} aria-label={t('chat.workflow.action.decline')}>
-          <Icon name="close" className="size-3.5" />
-          <span className="workflows-header__action-label">{t('chat.workflow.action.decline')}</span>
-        </Button>
+        <ButtonTooltip label={t('contextTooltips.workspace.workflow.approve')} side="bottom" className="shrink-0">
+          <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')} aria-label={t('chat.workflow.action.run')}>
+            <Icon name="play" className="size-3.5" />
+            <span className="workflows-header__action-label">{t('chat.workflow.action.run')}</span>
+          </Button>
+        </ButtonTooltip>
+        <ButtonTooltip label={t('contextTooltips.workspace.workflow.decline')} side="bottom" className="shrink-0">
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'decline')} aria-label={t('chat.workflow.action.decline')}>
+            <Icon name="close" className="size-3.5" />
+            <span className="workflows-header__action-label">{t('chat.workflow.action.decline')}</span>
+          </Button>
+        </ButtonTooltip>
       </>
     );
   }
   if (run.state === 'running') {
     return (
-      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'stop')} aria-label={t('chat.workflow.action.stop')}>
-        <Icon name="stop" className="size-3.5" />
-        <span className="workflows-header__action-label">{t('chat.workflow.action.stop')}</span>
-      </Button>
+      <ButtonTooltip label={t('contextTooltips.workspace.workflow.stop')} side="bottom" className="shrink-0">
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'stop')} aria-label={t('chat.workflow.action.stop')}>
+          <Icon name="stop" className="size-3.5" />
+          <span className="workflows-header__action-label">{t('chat.workflow.action.stop')}</span>
+        </Button>
+      </ButtonTooltip>
     );
   }
   if (run.state === 'failed' || run.state === 'stopped') {
     return (
-      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'resume')} aria-label={t('chat.workflow.action.resume')}>
-        <Icon name="restart" className="size-3.5" />
-        <span className="workflows-header__action-label">{t('chat.workflow.action.resume')}</span>
-      </Button>
+      <ButtonTooltip label={t('contextTooltips.workspace.workflow.resume')} side="bottom" className="shrink-0">
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'resume')} aria-label={t('chat.workflow.action.resume')}>
+          <Icon name="restart" className="size-3.5" />
+          <span className="workflows-header__action-label">{t('chat.workflow.action.resume')}</span>
+        </Button>
+      </ButtonTooltip>
     );
   }
   return null;
@@ -249,13 +259,18 @@ const RunPicker: React.FC<{
   const others = newestFirst.filter((run) => run.parentSessionId !== sessionId);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" aria-label={t('workflows.panel.runPicker')} className={cn(dropdownTriggerVariants(), 'max-w-[14rem] shrink-0')}>
-          <Icon name={look.icon} className="size-3.5" style={look.color ? { color: look.color } : undefined} />
-          <span className="workflows-header__run-name min-w-0 truncate" dir="auto">{selected.name}</span>
-          <Icon name="arrow-down-s" className="size-4" />
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button type="button" aria-label={t('workflows.panel.runPicker')} className={cn(dropdownTriggerVariants(), 'max-w-[14rem] shrink-0')}>
+              <Icon name={look.icon} className="size-3.5" style={look.color ? { color: look.color } : undefined} />
+              <span className="workflows-header__run-name min-w-0 truncate" dir="auto">{selected.name}</span>
+              <Icon name="arrow-down-s" className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.workspace.workflow.pickRun')}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" className="max-h-[min(var(--available-height),28rem)] w-[18rem] max-w-[calc(100vw-2rem)] overflow-y-auto">
         {own.length > 0 ? (
           <>
@@ -354,10 +369,12 @@ const EmptyState: React.FC<{ saved: SavedWorkflow[]; onRunSaved: (name: string) 
               <div className="truncate typography-micro text-muted-foreground" dir="auto" title={workflow.error ?? workflow.description}>{workflow.error ?? workflow.description}</div>
             ) : null}
           </div>
-          <Button type="button" size="sm" variant="outline" disabled={Boolean(workflow.error)} onClick={() => onRunSaved(workflow.name)} aria-label={t('workflows.panel.saved.runAria', { name: workflow.name })}>
-            <Icon name="play" className="size-3.5" />
-            {t('workflows.panel.saved.confirmAction')}
-          </Button>
+          <ButtonTooltip label={t('workflows.panel.saved.runAria', { name: workflow.name })} className="shrink-0">
+            <Button type="button" size="sm" variant="outline" disabled={Boolean(workflow.error)} onClick={() => onRunSaved(workflow.name)} aria-label={t('workflows.panel.saved.runAria', { name: workflow.name })}>
+              <Icon name="play" className="size-3.5" />
+              {t('workflows.panel.saved.confirmAction')}
+            </Button>
+          </ButtonTooltip>
         </div>
       ))}
     </div>
@@ -459,37 +476,44 @@ const WorkflowRunView: React.FC<{
             {VIEWS.map((entry) => {
               const active = entry.id === view;
               return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setView(entry.id)}
-                  aria-current={active ? 'page' : undefined}
-                  title={t(entry.labelKey)}
-                  aria-label={t(entry.labelKey)}
-                  className={cn(
-                    'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 transition-colors',
-                    active ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Icon name={entry.icon} className="size-3.5 shrink-0" />
-                  <span className="workflows-header__label whitespace-nowrap typography-meta">{t(entry.labelKey)}</span>
-                </button>
+                <Tooltip key={entry.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setView(entry.id)}
+                      aria-current={active ? 'page' : undefined}
+                      aria-label={t(entry.labelKey)}
+                      className={cn(
+                        'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 transition-colors',
+                        active ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <Icon name={entry.icon} className="size-3.5 shrink-0" />
+                      <span className="workflows-header__label whitespace-nowrap typography-meta">{t(entry.labelKey)}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>{t(entry.tooltipKey)}</TooltipContent>
+                </Tooltip>
               );
             })}
           </nav>
           <div aria-hidden className="min-w-0 flex-1" />
           {foreign ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={openOwnerSession}
-              aria-label={t('workflows.panel.agent.openSession')}
-              title={sessionTitles.get(run.parentSessionId) || t('workflows.panel.picker.untitledSession')}
-            >
-              <Icon name="chat-4" className="size-3.5" />
-              <span className="workflows-header__action-label">{t('workflows.panel.agent.openSession')}</span>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={openOwnerSession}
+                  aria-label={t('workflows.panel.agent.openSession')}
+                >
+                  <Icon name="chat-4" className="size-3.5" />
+                  <span className="workflows-header__action-label">{t('workflows.panel.agent.openSession')}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{sessionTitles.get(run.parentSessionId) || t('workflows.panel.picker.untitledSession')}</TooltipContent>
+            </Tooltip>
           ) : null}
           <RunAction run={run} />
         </div>

@@ -20,6 +20,19 @@
  *   environment (`core/environment`), which changes when the session moves to
  *   a worktree, a project or back from a removed worktree. The folder is the
  *   `Working directory` line of the text OpenCode gave the model.
+ * - A pull request watch waking the agent (`source: "openchamber-pr-watch"`,
+ *   `web/server/lib/pr-watch`): the row says what changed and opens the pull
+ *   request. It does not expand, because the text only repeats that in an
+ *   envelope and tells the agent what to do next.
+ * - A timer or an extension wait waking the agent
+ *   (`source: "openchamber-wait"`, `web/server/lib/extension-waits`): the row
+ *   names the wait and opens to its report, the extension's or the host's own
+ *   for a timer, which can run longer than the description's one line.
+ * - The answer to a page the agent showed with `answerLater`
+ *   (`source: "openchamber-page-answer"`, `web/server/lib/openchamber-control/later-pages`):
+ *   the row names the page and the user's choice and opens to what the page
+ *   sent. The envelope around it is instructions to the agent, so the row
+ *   reads the JSON line inside it instead.
  *
  * Hidden, and why:
  * - The rest about the session's instructions, as noise the maintainer saw in
@@ -29,11 +42,12 @@
  *   (`metadata.instruction.paths`, an AGENTS.md of a folder the agent entered).
  * - Composer context (an inline comment, terminal output, a linked issue):
  *   it folds into the user message as context chips.
- * - A background subagent's report and a dispatched session's result: they
- *   render as their own rows already (`subagent-run`, `dispatched-session`).
- * - OpenChamber waking a session (a resume after a managed OpenCode restart,
- *   the answer to an interrupted question, a PR fix-loop message): each opens
- *   a turn of its own with its own row (`openchamber-resume`).
+ * - A background subagent's report, a dispatched session's result, a
+ *   workflow run's report and a shared page's answer: they render as their
+ *   own rows already (`subagent-run`, `dispatched-session`,
+ *   `workflows/report`, `share-pages/answer`).
+ * - OpenChamber resume, interrupted-question answers and fix-loop messages:
+ *   each opens its own turn with an `openchamber-resume` row.
  * - A background shell command's completion: it finishes the shell call's
  *   own row (`background-shell`).
  * - OpenChamber's notes to the agent that the user stopped a subagent or a
@@ -49,15 +63,56 @@ import { readContextPart } from "@/lib/messages/contextParts"
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
+import { readShareAnswer } from "@/lib/share-pages/answer"
 import type { Message, Metadata, Part, ToolPart } from "./model"
 import { readOpenChamberResume } from "./openchamber-resume"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
+
+const pullRequestNoticeSchema = z.object({
+  kind: z.literal("pull-request"),
+  url: z.string().min(1),
+  number: z.number(),
+  events: z.array(z.enum(["merged", "closed", "checks-failed", "checks-passed", "conflict", "behind", "activity"])).min(1),
+  failedChecks: z.array(z.string()),
+  authors: z.array(z.string()),
+  text: z.string(),
+})
+
+export type PullRequestNotice = z.infer<typeof pullRequestNoticeSchema>
+
+const extensionWaitNoticeSchema = z.object({
+  kind: z.literal("extension-wait"),
+  subject: z.string().min(1),
+  outcome: z.enum(["fired", "ended"]),
+  summary: z.string(),
+  text: z.string(),
+})
+
+export type ExtensionWaitNotice = z.infer<typeof extensionWaitNoticeSchema>
+
+const pageAnswerOutcomeSchema = z.enum(["answered", "declined", "ui-not-drawn"])
+
+const pageAnswerNoticeSchema = z.object({
+  kind: z.literal("page-answer"),
+  title: z.string(),
+  outcome: pageAnswerOutcomeSchema,
+  /** The user's choice in words; empty unless answered. */
+  summary: z.string(),
+  /** What the row opens to: the data the page sent or the parser's errors; empty when there is nothing to open. */
+  details: z.string(),
+  text: z.string(),
+})
+
+export type PageAnswerNotice = z.infer<typeof pageAnswerNoticeSchema>
 
 export type SessionNotice =
   | { kind: "plugin"; label: string; text: string }
   | { kind: "restart"; text: string }
   | { kind: "command-failed"; command: string; text: string }
   | { kind: "moved"; folder: string | null; text: string }
+  | PullRequestNotice
+  | ExtensionWaitNotice
+  | PageAnswerNotice
 
 const HIDDEN_DESCRIPTIONS = new Set(["ACP embedded context"])
 
@@ -76,6 +131,72 @@ const readMove = (message: Extract<Message, { role: "system" }>): SessionNotice 
   return { kind: "moved", folder, text: message.text }
 }
 
+// A message from before the wake carried its names has none, and reads without them.
+const pullRequestWakeSchema = pullRequestNoticeSchema.pick({ url: true, events: true }).extend({
+  source: z.literal("openchamber-pr-watch"),
+  failedChecks: z.array(z.string()).default([]),
+  authors: z.array(z.string()).default([]),
+})
+const PULL_REQUEST_NUMBER = /^\s*<openchamber-pull-request\b[^>]*\bnumber="(\d+)"/
+
+const readPullRequestWake = (text: string, metadata: Metadata): PullRequestNotice | undefined => {
+  const parsed = pullRequestWakeSchema.safeParse(metadata)
+  const number = text.match(PULL_REQUEST_NUMBER)?.[1]
+  if (!parsed.success || !number) return undefined
+  const { url, events, failedChecks, authors } = parsed.data
+  return { kind: "pull-request", url, number: Number(number), events, failedChecks, authors, text }
+}
+
+const extensionWaitWakeSchema = extensionWaitNoticeSchema.pick({ subject: true, outcome: true, summary: true }).extend({
+  source: z.literal("openchamber-wait"),
+})
+
+const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitNotice | undefined => {
+  const parsed = extensionWaitWakeSchema.safeParse(metadata)
+  if (!parsed.success) return undefined
+  const { subject, outcome, summary } = parsed.data
+  return { kind: "extension-wait", subject, outcome, summary, text }
+}
+
+const pageAnswerWakeSchema = z.object({
+  source: z.literal("openchamber-page-answer"),
+  title: z.string(),
+  outcome: pageAnswerOutcomeSchema,
+})
+// The server writes every field from the page or the user as one JSON line
+// inside the envelope. Split on "\n" only: JSON keeps U+2028/U+2029 raw, and a
+// regex `.` would stop at them.
+const findPageAnswerFieldsLine = (text: string) => text.split("\n").find((line) => line.startsWith("{") && line.endsWith("}"))
+const pageAnswerFieldsSchema = z.object({
+  page: z.string().catch(""),
+  summary: z.string().catch(""),
+  data: z.json().optional().catch(undefined),
+  errors: z.array(z.string()).catch([]),
+})
+
+const readPageAnswerFields = (text: string) => {
+  const line = findPageAnswerFieldsLine(text)
+  if (!line) return pageAnswerFieldsSchema.parse({})
+  try {
+    return pageAnswerFieldsSchema.parse(JSON.parse(line))
+  } catch {
+    return pageAnswerFieldsSchema.parse({})
+  }
+}
+
+const readPageAnswerWake = (text: string, metadata: Metadata): PageAnswerNotice | undefined => {
+  const parsed = pageAnswerWakeSchema.safeParse(metadata)
+  if (!parsed.success) return undefined
+  const { title, outcome } = parsed.data
+  const fields = readPageAnswerFields(text)
+  const summary = outcome === "answered" ? fields.summary.replace(/\s+/g, " ").trim() : ""
+  // A declined page has nothing to open to: the row says it all.
+  const details = outcome === "answered"
+    ? (fields.data === undefined || fields.data === null ? fields.summary : `\`\`\`json\n${JSON.stringify(fields.data, null, 2)}\n\`\`\``)
+    : outcome === "ui-not-drawn" ? fields.errors.map((error) => `- ${error}`).join("\n") : ""
+  return { kind: "page-answer", title, outcome, summary, details, text }
+}
+
 /** The notice a message carries, or undefined when the timeline does not show it. */
 export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (message.role === "system") return readMove(message)
@@ -84,13 +205,16 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (!description) return undefined
   const metadata = message.metadata ?? {}
   if (readContextPart({ type: "text", metadata: message.metadata })) return undefined
-  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message) || readOpenChamberResume(message)) return undefined
+  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message) || readShareAnswer(message) || readOpenChamberResume(message)) return undefined
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text
   if (restartSchema.safeParse(metadata).success) return { kind: "restart", text }
   if (failedCommandSchema.safeParse(metadata).success) return { kind: "command-failed", command: description, text }
-  return { kind: "plugin", label: description, text }
+  return readPullRequestWake(text, metadata)
+    ?? readExtensionWaitWake(text, metadata)
+    ?? readPageAnswerWake(text, metadata)
+    ?? { kind: "plugin", label: description, text }
 }
 
 // --- Notice rows inside a turn's Activity -----------------------------------
@@ -109,6 +233,9 @@ const noticeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("restart"), text: z.string() }),
   z.object({ kind: z.literal("command-failed"), command: z.string(), text: z.string() }),
   z.object({ kind: z.literal("moved"), folder: z.string().nullable(), text: z.string() }),
+  pullRequestNoticeSchema,
+  extensionWaitNoticeSchema,
+  pageAnswerNoticeSchema,
 ])
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })

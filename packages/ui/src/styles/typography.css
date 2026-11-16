@@ -91,18 +91,10 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
-  .wide-chat-layout .chat-column {
-    width: min(100%, 64rem);
-  }
-
   .chat-input-column {
     width: min(100%, 48rem);
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
-  }
-
-  .wide-chat-layout .chat-input-column {
-    width: min(100%, 64rem);
   }
 
   .chat-message-column {
@@ -111,11 +103,33 @@
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
   }
 
-  /* Wide layout: the transcript uses the whole chat width; the composer and
-     the rows docked above it (.chat-input-column, .chat-column cards) keep a
-     readable column. */
-  .wide-chat-layout .chat-message-column {
+  /* Chat width (`data-chat-width` on the root, see useChatWidthAttribute).
+     Wider: every column takes the same wider cap. Full: the transcript uses
+     the whole chat width; the composer and the rows docked above it
+     (.chat-input-column, .chat-column cards) keep the wider cap. */
+  [data-chat-width] .chat-column,
+  [data-chat-width] .chat-input-column,
+  [data-chat-width="wider"] .chat-message-column {
+    width: min(100%, 64rem);
+  }
+
+  [data-chat-width="full"] .chat-message-column {
     width: 100%;
+  }
+
+  /* The prompt navigator's end edge is the message column's, so its
+     indicator stands in the column's side padding; a chat narrower than the
+     column, or the full width, keeps the 12px inset. */
+  .oc-prompt-navigator {
+    inset-inline-end: max(0.75rem, calc((100% - 48rem) / 2));
+  }
+
+  [data-chat-width="wider"] .oc-prompt-navigator {
+    inset-inline-end: max(0.75rem, calc((100% - 64rem) / 2));
+  }
+
+  [data-chat-width="full"] .oc-prompt-navigator {
+    inset-inline-end: 0.75rem;
   }
 
   /* On a wide window the side padding follows the chat's own width (a
@@ -238,7 +252,11 @@
   width: min(100%, 48rem);
 }
 
-.wide-chat-layout .chat-message-column {
+[data-chat-width="wider"] .chat-message-column {
+  width: min(100%, 64rem);
+}
+
+[data-chat-width="full"] .chat-message-column {
   width: 100%;
 }
 

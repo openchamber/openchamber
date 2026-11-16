@@ -17,7 +17,7 @@ import {
   uninstallGuest,
 } from './install.js';
 import { guestCopiesDir, readExtensionStore } from './persist.js';
-import { runGuestStorage } from './storage.js';
+import { guestDataDir, runGuestStorage } from './storage.js';
 
 const writeGuest = async (root, id) => {
   await fs.mkdir(path.join(root, 'panel'), { recursive: true });
@@ -98,10 +98,19 @@ describe('installGuestFromPath', () => {
     const badIdRoot = path.join(dir, 'bad-id');
     await writeGuest(badIdRoot, 'Not Kebab');
     const badId = await installGuestFromPath(badIdRoot, persistPath);
-    expect(badId).toEqual({ ok: false, code: 'invalid-manifest' });
+    // The parser's reason travels with the refusal, so the author learns which field broke.
+    expect(badId).toEqual({ ok: false, code: 'invalid-manifest', reason: expect.stringContaining('kebab-case') });
+
+    const serviceFile = path.join(guestDataDir(persistPath, 'clone-hello'), 'state.json');
+    await fs.mkdir(path.dirname(serviceFile), { recursive: true });
+    await fs.writeFile(serviceFile, '{}');
+    expect(await uninstallGuest('clone-hello', persistPath, { preserveStorageId: true })).toEqual({ ok: true });
+    await expect(fs.stat(serviceFile)).resolves.toBeTruthy();
+    expect((await installGuestFromPath(otherRoot, persistPath)).ok).toBe(true);
 
     const removed = await uninstallGuest('clone-hello', persistPath);
     expect(removed).toEqual({ ok: true });
+    await expect(fs.stat(path.dirname(serviceFile))).rejects.toMatchObject({ code: 'ENOENT' });
     const after = await listInstalledGuests({ persistPath });
     expect(after.some((guest) => guest.id === 'clone-hello')).toBe(false);
     expect((await readExtensionStore(persistPath)).storageIds?.['clone-hello']).toBeUndefined();

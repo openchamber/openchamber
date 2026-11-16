@@ -63,7 +63,7 @@ const todoPart: ToolPartData = {
   },
 };
 
-test('a todowrite result is drawn as the todo list grouped by status', async () => {
+for (const tool of ['todowrite', 'todoread'] as const) test(`${tool} uses its current or legacy checklist presentation`, async () => {
   const happyWindow = new Window({ url: 'http://localhost' });
   const globals = {
     window: happyWindow,
@@ -82,6 +82,8 @@ test('a todowrite result is drawn as the todo list grouped by status', async () 
     getComputedStyle: happyWindow.getComputedStyle.bind(happyWindow),
     ResizeObserver: happyWindow.ResizeObserver,
     MutationObserver: happyWindow.MutationObserver,
+    Event: happyWindow.Event,
+    CustomEvent: happyWindow.CustomEvent,
     IS_REACT_ACT_ENVIRONMENT: true,
   };
   const previous = Object.keys(globals).map(
@@ -103,7 +105,7 @@ test('a todowrite result is drawn as the todo list grouped by status', async () 
         <SyncProvider sdk={sdk} directory="">
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart part={todoPart} isExpanded isMobile={false} onToggle={() => {}} />
+              <ToolPart part={{ ...todoPart, tool }} isExpanded isMobile={false} onToggle={() => {}} />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,
@@ -114,18 +116,25 @@ test('a todowrite result is drawn as the todo list grouped by status', async () 
   try {
     useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
     await render();
-    const list = container.querySelector('[data-todo-list]');
-    expect(list).not.toBeNull();
-    const text = list?.textContent ?? '';
-    expect(text).toContain('Total: 4');
-    expect(text).toContain('In Progress: 1');
-    expect(text).toContain('Pending: 1');
-    expect(text).toContain('Completed: 1');
-    expect(text).toContain('Cancelled: 1');
-    // Groups come in status order, not in list order.
-    expect(text.indexOf('Ship the fix')).toBeLessThan(text.indexOf('Open the PR'));
-    expect(text.indexOf('Open the PR')).toBeLessThan(text.indexOf('Write the test'));
-    expect(container.querySelector('.line-through')?.textContent).toBe('Old idea');
+    if (tool === 'todowrite') {
+      // The upstream writer records the list this call set, in its input order.
+      expect([...container.querySelectorAll('ul li')].map((item) => item.textContent)).toEqual(['Ship the fix']);
+      expect(container.textContent).not.toContain('Open the PR');
+      expect(container.querySelector('[data-todo-list]')).toBeNull();
+    } else {
+      const list = container.querySelector('[data-todo-list]');
+      expect(list).not.toBeNull();
+      const text = list?.textContent ?? '';
+      expect(text).toContain('Total: 4');
+      expect(text).toContain('In Progress: 1');
+      expect(text).toContain('Pending: 1');
+      expect(text).toContain('Completed: 1');
+      expect(text).toContain('Cancelled: 1');
+      // Groups come in status order, not in list order.
+      expect(text.indexOf('Ship the fix')).toBeLessThan(text.indexOf('Open the PR'));
+      expect(text.indexOf('Open the PR')).toBeLessThan(text.indexOf('Write the test'));
+      expect(container.querySelector('.line-through')?.textContent).toBe('Old idea');
+    }
     expect(container.querySelector('table')).toBeNull();
     // The input is the same list; it is not repeated as JSON above the result.
     expect(container.querySelector('.tool-input-text')).toBeNull();

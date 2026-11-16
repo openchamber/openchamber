@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useI18n } from '@/lib/i18n';
@@ -133,41 +134,57 @@ export const DiffFindBar: React.FC<DiffFindBarProps> = ({
               ? `${currentIndex + 1}/${total}${isSearching ? '+' : ''}`
               : ''}
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="size-6 p-0 text-muted-foreground"
-          onClick={onPrevious}
-          title={t('diffFind.previousAria')}
-          aria-label={t('diffFind.previousAria')}
-          disabled={total === 0}
-        >
-          <Icon name="arrow-up" className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="size-6 p-0 text-muted-foreground"
-          onClick={onNext}
-          title={t('diffFind.nextAria')}
-          aria-label={t('diffFind.nextAria')}
-          disabled={total === 0}
-        >
-          <Icon name="arrow-down" className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="size-6 p-0 text-muted-foreground"
-          onClick={onClose}
-          title={t('diffFind.closeAria')}
-          aria-label={t('diffFind.closeAria')}
-        >
-          <Icon name="close" className="size-3.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="size-6 p-0 text-muted-foreground"
+                onClick={onPrevious}
+                aria-label={t('diffFind.previousAria')}
+                disabled={total === 0}
+              >
+                <Icon name="arrow-up" className="size-3.5" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('diffFind.previousAria')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="size-6 p-0 text-muted-foreground"
+                onClick={onNext}
+                aria-label={t('diffFind.nextAria')}
+                disabled={total === 0}
+              >
+                <Icon name="arrow-down" className="size-3.5" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('diffFind.nextAria')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="size-6 p-0 text-muted-foreground"
+              onClick={onClose}
+              aria-label={t('diffFind.closeAria')}
+            >
+              <Icon name="close" className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('diffFind.closeAria')}</TooltipContent>
+        </Tooltip>
       </div>
       {/* `w-0 min-w-full`: the note wraps inside the row's width instead of widening the bar. */}
       {failedCount > 0 && (

@@ -24,6 +24,9 @@ const JWT_TTL_MS = 50 * 60 * 1000;
 const DEFAULT_BUNDLE_ID = 'com.openchamber.app';
 const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
+// What one clearing push carries (`tag@nid` entries); the relay accepts as much.
+const MAX_CLEAR_TAGS = 20;
+const MAX_CLEAR_ENTRY_LENGTH = 100;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
 // The relay answers a send in 0.1-0.4 s, its FCM/APNs call included. Without a limit a stalled
@@ -403,15 +406,26 @@ export const createApnsRuntime = (deps) => {
     });
   };
 
+  // A clearing push wakes the app in the background, shows nothing and carries
+  // the tags to remove; the app also sets the icon badge from `badge`. APNs
+  // wants a background push to hold only `content-available` in `aps`, at
+  // priority 5.
+  const buildClearBody = ({ tags, badge }) => JSON.stringify({
+    aps: { 'content-available': 1 },
+    clear: tags.join(','),
+    badge: Number.isFinite(badge) && badge >= 0 ? Math.trunc(badge) : undefined,
+  });
+
   const sendOne = (client, deviceToken, body, jwt, config) =>
     new Promise((resolve) => {
+      const background = config.pushType === 'background';
       const headers = {
         ':method': 'POST',
         ':path': `/3/device/${deviceToken}`,
         authorization: `bearer ${jwt}`,
         'apns-topic': config.bundleId,
-        'apns-push-type': 'alert',
-        'apns-priority': '10',
+        'apns-push-type': background ? 'background' : 'alert',
+        'apns-priority': background ? '5' : '10',
       };
       // collapse-id dedups like web-push tags; APNs caps it at 64 bytes.
       const collapseId = typeof config.tag === 'string' ? config.tag.slice(0, 64) : undefined;
@@ -471,6 +485,7 @@ export const createApnsRuntime = (deps) => {
     return {
       url,
       registerUrl: url.replace(/\/send$/, '/register-token'),
+      clearUrl: url.replace(/\/send$/, '/clear'),
       // Explicit OPENCHAMBER_APNS_ENVIRONMENT forces every send to that environment; when
       // unset (null), each token is delivered to the environment it registered with.
       environment: override === 'sandbox' ? 'sandbox' : override === 'production' ? 'production' : null,
@@ -514,7 +529,8 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  const sendViaDirectApns = async (tokenGroups, payload) => {
+  // `request`: the push body and how APNs takes it (`tag`, `pushType`).
+  const sendViaDirectApns = async (tokenGroups, { body, tag, pushType }) => {
     const config = await resolveApnsConfig();
     if (!config) {
       if (!warnedUnconfigured) {
@@ -527,8 +543,7 @@ export const createApnsRuntime = (deps) => {
     }
 
     const jwt = getJwt(config);
-    const body = buildBody(payload);
-    const sendConfig = { ...config, tag: typeof payload?.tag === 'string' ? payload.tag : undefined };
+    const sendConfig = { ...config, tag, pushType };
 
     // One HTTP/2 session per APNs environment; a sandbox token sent to the production host
     // (or vice versa) gets BadDeviceToken and would be wrongly dropped as dead.
@@ -574,35 +589,59 @@ export const createApnsRuntime = (deps) => {
   // capacitor.config) — so there is no notification when the app is active, with no race.
   // `sealed` is the `{ title, body }` a phone with a key shows; without it the
   // phone opens the same text an app without a key gets in the clear.
-  const sendApnsToAllUiSessions = async ({ sealed, ...payload } = {}, _options = {}) => {
-    const sealedContent = sealed ?? { title: payload.title, body: payload.body };
+  // Every registered device a send may reach, once each. Rejects when the client list cannot
+  // be read: that send is lost with a log line in the fanout, since sending would reach a
+  // revoked device.
+  const readDeliverableDevices = async () => {
     const store = await readTokensFromDisk();
-    // Rejects when the client list cannot be read: this notification is lost with a log line
-    // in the fanout, since sending would reach a revoked device.
     const invalidSessionKeys = await getInvalidSessionKeys();
-    // Tokens are grouped by their registered APNs environment so each batch goes to the
-    // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
-    // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
-    const tokensByEnvironment = new Map();
-    // Devices that gave a push key get their text sealed for them alone, so
-    // each is its own send; the rest share one batch per environment.
-    const sealedDevices = [];
+    const devices = [];
     const seen = new Set();
     for (const [sessionKey, record] of Object.entries(store.tokensBySession || {})) {
       if (invalidSessionKeys.has(sessionKey)) continue;
       for (const entry of normalizeTokens(record)) {
         if (seen.has(entry.deviceToken)) continue;
         seen.add(entry.deviceToken);
-        if (entry.pushKey) {
-          sealedDevices.push(entry);
-          continue;
-        }
-        const group = tokensByEnvironment.get(entry.environment) || [];
-        group.push(entry.deviceToken);
-        tokensByEnvironment.set(entry.environment, group);
+        devices.push(entry);
       }
     }
-    if (seen.size === 0) return;
+    return devices;
+  };
+
+  // Tokens are grouped by their registered APNs environment so each batch goes to the
+  // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
+  // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
+  const groupByEnvironment = (devices) => {
+    const tokensByEnvironment = new Map();
+    for (const entry of devices) {
+      const group = tokensByEnvironment.get(entry.environment) || [];
+      group.push(entry.deviceToken);
+      tokensByEnvironment.set(entry.environment, group);
+    }
+    return tokensByEnvironment;
+  };
+
+  const directAlertRequest = (payload) => ({
+    body: buildBody(payload),
+    tag: payload?.tag,
+    pushType: 'alert',
+  });
+
+  // NOT gated on UI visibility (unlike web push). A backgrounded WKWebView can't reliably
+  // report "hidden" before iOS suspends it, so a visibility gate wrongly suppressed
+  // background push for short responses. Instead we always send, and rely on iOS to NOT
+  // display the alert while the app is foreground (presentationOptions: [] in
+  // capacitor.config) — so there is no notification when the app is active, with no race.
+  // `sealed` is the `{ title, body }` a phone with a key shows; without it the
+  // phone opens the same text an app without a key gets in the clear.
+  const sendApnsToAllUiSessions = async ({ sealed, ...payload } = {}, _options = {}) => {
+    const sealedContent = sealed ?? { title: payload.title, body: payload.body };
+    const devices = await readDeliverableDevices();
+    if (devices.length === 0) return;
+    // Devices that gave a push key get their text sealed for them alone, so
+    // each is its own send; the rest share one batch per environment.
+    const sealedDevices = devices.filter((entry) => entry.pushKey);
+    const tokensByEnvironment = groupByEnvironment(devices.filter((entry) => !entry.pushKey));
 
     const relay = resolveRelayConfig();
     if (relay) {
@@ -615,10 +654,80 @@ export const createApnsRuntime = (deps) => {
       ]);
       return;
     }
-    await sendViaDirectApns(tokensByEnvironment, payload);
+    await sendViaDirectApns(tokensByEnvironment, directAlertRequest(payload));
     for (const entry of sealedDevices) {
-      await sendViaDirectApns(new Map([[entry.environment, [entry.deviceToken]]]), sealedPayloadFor(payload, sealedContent, entry.pushKey));
+      await sendViaDirectApns(
+        new Map([[entry.environment, [entry.deviceToken]]]),
+        directAlertRequest(sealedPayloadFor(payload, sealedContent, entry.pushKey)),
+      );
     }
+  };
+
+  // A relay from before clearing answers 404; said once, since every clear would repeat it.
+  let warnedRelayCannotClear = false;
+
+  const clearViaRelay = async (deviceTokens, { tags, badge }, relay, environment) => {
+    const tokens = deviceTokens.slice(0, 100);
+    const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
+    const ts = Date.now();
+    // Signed like a send, with the tags in place of the title.
+    const sig = signRelayMessage(privateKey, `${ts}.${[...tokens].sort().join(',')}.clear.${tags.join(',')}`);
+    const requestBody = JSON.stringify({
+      tokens,
+      tags,
+      badge: Number.isFinite(badge) && badge >= 0 ? Math.trunc(badge) : undefined,
+      env: environment,
+      publicKeyJwk: relayPublicJwk(publicJwk),
+      ts,
+      sig,
+    });
+    try {
+      const res = await postToRelay(relay.clearUrl, requestBody, '[APNs relay] clear');
+      if (res.status === 404) {
+        if (!warnedRelayCannotClear) {
+          warnedRelayCannotClear = true;
+          console.warn('[APNs relay] the relay cannot clear notifications yet; phones drop them with the next push');
+        }
+        return;
+      }
+      if (!res.ok) {
+        console.warn(`[APNs relay] clear failed status=${res.status}`);
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      for (const result of Array.isArray(data?.results) ? data.results : []) {
+        if (result?.drop === true && result.token) {
+          await removeApnsTokenFromAllSessions(result.token);
+        }
+      }
+    } catch (error) {
+      console.warn('[APNs relay] clear request failed:', describeRelayError(error));
+    }
+  };
+
+  /**
+   * Removes the notifications with these tags from every phone, with a push that shows
+   * nothing: a background push on iOS, a data message on Android. Each entry is `tag@nid`,
+   * so a newer push under the tag stays. `badge` is the icon count that remains. Tags are
+   * opaque ids (`ready-<sessionId>`), so nothing here is sealed.
+   */
+  const clearApnsNotifications = async ({ tags, badge } = {}) => {
+    const clearTags = (Array.isArray(tags) ? tags : [])
+      .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH)
+      .slice(0, MAX_CLEAR_TAGS);
+    if (clearTags.length === 0) return;
+    const devices = await readDeliverableDevices();
+    if (devices.length === 0) return;
+    const tokensByEnvironment = groupByEnvironment(devices);
+    const request = { tags: clearTags, badge };
+
+    const relay = resolveRelayConfig();
+    if (relay) {
+      await Promise.all([...tokensByEnvironment].map(([environment, deviceTokens]) =>
+        clearViaRelay(deviceTokens, request, relay, relay.environment ?? environment)));
+      return;
+    }
+    await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
   };
 
   // What the relay and the push service see for a device with a key: the
@@ -639,6 +748,7 @@ export const createApnsRuntime = (deps) => {
     removeApnsTokenFromAllSessions,
     removeApnsDevicesOfSessions,
     sendApnsToAllUiSessions,
+    clearApnsNotifications,
     resolveApnsConfig,
     // exposed for tests
     signApnsJwt,

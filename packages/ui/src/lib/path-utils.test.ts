@@ -1,16 +1,49 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  findRepoFile,
   getDirectoryForFilePath,
   getDisambiguatingFolders,
   getRelativeFilePath,
   isAbsoluteFilePath,
   isFilePathWithinDirectory,
+  isSameRepoFile,
   normalizeFilePath,
   toAbsoluteFilePath,
 } from './path-utils';
 
 describe('path-utils', () => {
+  test('a path git lists names a file only when all of the file\'s path under the directory matches', () => {
+    // Project in a subfolder: git answers from the repository's top.
+    expect(isSameRepoFile('/repo/sub/in-sub.md', '/repo/sub', 'sub/in-sub.md')).toBe(true);
+    expect(isSameRepoFile('/repo/sub/in-sub.md', '/repo', 'sub/in-sub.md')).toBe(true);
+    // Same name, other folder.
+    expect(isSameRepoFile('/proj/vendor/README.md', '/proj', 'README.md')).toBe(false);
+    expect(isSameRepoFile('/proj/vendor/docs/a.md', '/proj/vendor', 'a.md')).toBe(false);
+    expect(isSameRepoFile('/repo/my-a.md', '/repo', 'a.md')).toBe(false);
+    // A file outside the directory, and nothing to compare.
+    expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'top.md')).toBe(true);
+    expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'other.md')).toBe(false);
+    expect(isSameRepoFile('/repo/a.md', '/repo', undefined)).toBe(false);
+  });
+
+  test('finds the listing entry of an absolute file, picking the exact one among same names', () => {
+    const listing = ['docs/a.md', 'a.md', 'sub/in-sub.md'];
+    expect(findRepoFile('/repo/a.md', '/repo', listing)).toBe('a.md');
+    expect(findRepoFile('/repo/docs/a.md', '/repo', listing)).toBe('docs/a.md');
+    expect(findRepoFile('/repo/sub/in-sub.md', '/repo/sub', listing)).toBe('sub/in-sub.md');
+    expect(findRepoFile('/repo/missing.md', '/repo', listing)).toBeUndefined();
+    // Project in a subfolder, the same name elsewhere in the repository.
+    expect(findRepoFile('/repo/pkg/a.md', '/repo/pkg', ['b/a.md', 'pkg/a.md'])).toBe('pkg/a.md');
+    // The listing does not end the file's path, as through a symlink.
+    expect(findRepoFile('/link/a.md', '/link', ['z/a.md', 'y/x/a.md'])).toBe('z/a.md');
+  });
+
+  test('Windows paths compare in any case, Unix paths do not', () => {
+    expect(isSameRepoFile('C:\\Repo\\SRC\\a.ts', 'c:/repo', 'src/a.ts')).toBe(true);
+    expect(isSameRepoFile('/repo/SRC/a.ts', '/repo', 'src/a.ts')).toBe(false);
+  });
+
   test('preserves filename whitespace only when requested', () => {
     const options = { preserveWhitespace: true };
     expect(normalizeFilePath('  report.md  ')).toBe('report.md');

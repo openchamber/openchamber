@@ -37,6 +37,9 @@ OpenChamber はそれらをリポジトリ直下の `.openchamber/project.json` 
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ OpenChamber はそれらをリポジトリ直下の `.openchamber/project.json` 
 必須なのは `version` だけです。ほかのキーはすべて省略可能で、OpenChamber は中身のあるキーだけを書き込みます。
 
 `setupWorktree` は、新しいワークツリーを作成した直後にその中で OpenChamber が順番に実行するシェルコマンドの一覧です。メインのチェックアウトのパスには `$ROOT_PROJECT_PATH` を使います。`setupWorktreeWait: true` にすると、OpenChamber はこれらのコマンドの完了を待ってからワークツリーでセッションを開始します。
+
+`teardownWorktree` は、ワークツリーを削除またはアーカイブする直前に、その中で OpenChamber が順番に実行するシェルコマンドの一覧です。たとえば、ワークツリーが起動したスタックを止める `docker compose down` などです。いずれかが失敗するとワークツリーは残り、OpenChamber がコマンドのエラーを表示します。リポジトリのものが先に、その後にあなたのものが実行されます。自分のセットアップコマンドだけを使う設定にしていても同じです。セットアップコマンドと同じ信頼の確認を経て実行されます。
 
 `projectActions` はプロジェクトのアクション一覧で、Work Status、プロジェクトアクションのダイアログ、コマンドパレットから実行するアクションです。`id`、`name`、`command` は必須です。`icon` は省略可能で、省略時は play アイコンになります。OpenChamber が認識する名前は `play`、`build`、`lint`、`terminal`、`tools`、`bug`、`flask`、`rocket`、`code`、`server`、`branch`、`search`、`settings`、`brain`、`stack`、`robot`、`command`、`file` です。`autoOpenUrl: true` はコマンドが出力したアドレスを開きます（[プレビューと開発サーバー](/preview/) を参照）。`platforms` はアクションを `macos`、`linux`、`windows` に限定します。`runIn: "parent"` は現在のワークツリーではなくメインのチェックアウトでアクションを実行します。
 

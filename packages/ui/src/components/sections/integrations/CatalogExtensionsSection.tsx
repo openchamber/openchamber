@@ -22,6 +22,7 @@ import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { updateGuest } from '@/lib/guests/updates';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openExternalUrl } from '@/lib/url';
 import { useUIStore } from '@/stores/useUIStore';
 import {
@@ -36,17 +37,13 @@ type PendingAction = 'install' | 'update' | 'enable' | 'remove';
 
 type CardStatus = { status: string; tone: IntegrationCatalogStatusTone };
 
-interface CatalogExtensionsSectionProps {
-  divider?: boolean;
-}
-
 /**
  * OpenChamber extensions the team publishes (Excalidraw, Resource Monitor), offered with a
  * one-click Git install. The installed extension is an ordinary entry in
  * Settings → Extensions; these cards read the same catalog. Hidden where the
- * runtime loads no extensions (VS Code, mobile).
+ * runtime loads no extensions (VS Code) and on the phone, which shows neither.
  */
-export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> = ({ divider = true }) => {
+export const CatalogExtensionsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const catalogStatus = useGuestsStore((state) => state.status);
@@ -210,14 +207,14 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
     );
   };
 
-  if (catalogStatus === 'unsupported') return null;
+  // These extensions are desktop panels and editors, which the phone does not show.
+  if (catalogStatus === 'unsupported' || isMobileSurfaceRuntime()) return null;
 
   return (
     <>
       <SettingsSection
         title={t('settings.integrations.extensionCatalog.title')}
         info={t('settings.integrations.extensionCatalog.info')}
-        divider={divider}
         settingsItem="integrations.extensions"
         contentClassName="space-y-3"
       >

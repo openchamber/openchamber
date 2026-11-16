@@ -12,11 +12,10 @@ OpenChamber läuft auf einem OpenCode-Server auf. Standardmäßig startet es ein
 Wenn OpenChamber startet, sucht es in dieser Reihenfolge nach einem Server:
 
 1. einen Server wiederverwenden, den es bereits gestartet hat
-2. zu einem externen verbinden, wenn du es so angegeben hast (siehe unten)
-3. einen Server am Standard-Port automatisch erkennen (`4096`)
-4. andernfalls den eigenen starten und verwalten
+2. sich mit einem externen Server verbinden, wenn du einen konfiguriert hast
+3. andernfalls den eigenen Server starten und verwalten
 
-Wenn nichts konfiguriert ist, geschieht Schritt 4 automatisch und du bist startklar.
+Standardmäßig verwaltet OpenChamber einen eigenen Server auf einem zugewiesenen Port. Nach einem Neustart kann sich der Port ändern. OpenChamber verbindet sich nicht automatisch mit einem anderen OpenCode-Server auf Port `4096`.
 
 ## Mit einem Server verbinden, den du bereits betreibst
 

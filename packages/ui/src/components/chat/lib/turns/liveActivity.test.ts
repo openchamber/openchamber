@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
 import { attachSyntheticContext } from '../attachSyntheticContext';
-import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
+import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity, uiPageMessageId } from './liveActivity';
 import { projectTurnRecords } from './projectTurnRecords';
 import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
@@ -303,6 +303,17 @@ describe('live activity report', () => {
 });
 
 describe('getShownPages', () => {
+    test('a rendered page maps to the final row only when the collapsed turn has a final answer', () => {
+        const page = { ...tool('page', 'openchamber_render', { input: { action: 'render.page', parameters: { ui: 'root = Stack([])' } }, metadata: { openchamber: { ok: true } } }), messageID: 'source' };
+        const source = assistant('source', [page], { finish: 'tool-calls' });
+        const answer = assistant('answer', [text('Done')], { finish: 'stop' });
+        const pending = projectTurnRecords([user(), source], { showTurnChangedFiles: false }).turns[0];
+        const complete = projectTurnRecords([user(), source, answer], { showTurnChangedFiles: false }).turns[0];
+        expect(uiPageMessageId(pending, false, 'source', 'page')).toBe('source');
+        expect(uiPageMessageId(complete, false, 'source', 'page')).toBe('answer');
+        expect(uiPageMessageId(complete, true, 'source', 'page')).toBe('source');
+    });
+
     test('keeps text with a UI block in view, except the final answer and code samples', () => {
         const block = text('Overview:\n```openui-lang\nroot = Stack([])\n```');
         const sample = text('```openui-lang literal\nroot = Stack([])\n```');
@@ -321,5 +332,19 @@ describe('getShownPages', () => {
         const shown = tool('shown', 'openchamber_render', { input: page, metadata: { openchamber: { ok: true } } });
         const step = assistant('step', [waiting, answered, inChat, stopped, shown], { finish: 'tool-calls' });
         expect(getShownPages([step]).map((part) => part.id)).toEqual(['waiting', 'shown']);
+    });
+
+    test('a settled form after shown text stays between it and the reply; a secret card still folds', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const answer = { metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } };
+        const lead = text('Overview:\n```openui-lang\nroot = Stack([])\n```\nThe one decision:');
+        const asked = tool('asked', 'openchamber_render', { input: form, ...answer });
+        const again = tool('again', 'openchamber_render', { input: form, ...answer });
+        const reply = assistant('reply', [text('It stayed scoped.')], { finish: 'stop' });
+        const step = assistant('step', [lead, asked, again], { finish: 'tool-calls' });
+        expect(getShownPages([step, reply], reply)).toEqual([lead, asked, again]);
+
+        const secret = tool('secret', 'openchamber_secret', { input: { action: 'secret.request', parameters: { name: 'TOKEN' } } });
+        expect(getShownPages([assistant('step', [lead, secret], { finish: 'tool-calls' })])).toEqual([lead]);
     });
 });

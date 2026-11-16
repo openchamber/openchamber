@@ -299,7 +299,6 @@ export const CommandsPage: React.FC = () => {
       )}
       <SettingsSection
         title={t('settings.commands.page.section.identity')}
-        divider={false}
         contentClassName="space-y-0"
       >
         {isNewCommand && (

@@ -47,6 +47,7 @@ export const gerritDescriptor = Object.freeze({
     changeRequests: true,
     // Work in progress; ready is `POST /changes/{id}/ready`.
     draftChangeRequests: true,
+    draftConversion: true,
     merge: Object.freeze({ methods: Object.freeze(['submit']) }),
     // A Verified label is a vote, not a CI run.
     ci: false,

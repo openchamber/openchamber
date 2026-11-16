@@ -90,6 +90,12 @@ export interface ComposerEditorHandle {
 
 export interface ComposerEditorProps {
     value: string;
+    /**
+     * Bumped by a caller that does not re-render on every edit, whenever it
+     * puts text in: the editor then writes `value` even when it equals the
+     * value it last rendered with, while the document moved on since.
+     */
+    valueRevision?: number;
     onChange: (change: ComposerChange) => void;
     /** Caret or selection moved without the document changing. */
     onSelectionChange?: (selection: ComposerSelection) => void;
@@ -235,6 +241,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
     function ComposerEditor(props, ref) {
         const {
             value,
+            valueRevision,
             languageContext,
             placeholder,
             editable = true,
@@ -490,7 +497,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
                 });
             });
-        }, [value]);
+        }, [value, valueRevision]);
 
         React.useEffect(() => {
             viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });

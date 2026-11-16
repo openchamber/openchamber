@@ -23,6 +23,9 @@
     "packages/ui": {
       "entry": [
         "src/apps/renderVSCodeApp.tsx",
+        "src/share-document/entry.tsx",
+        "src/share-document/shims/*.{ts,tsx}",
+        "src/test/preload.ts",
         "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
@@ -34,6 +37,7 @@
     "packages/web": {
       "entry": [
         "bin/cli.js",
+        "server/lib/opencode/login-shell-env.js",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
@@ -82,6 +86,7 @@
     "packages/sdk": {
       "entry": [
         "src/index.ts",
+        "scripts/check-guest.ts",
         "src/ui/index.ts",
         "src/schemas.ts",
         "src/**/*.{test,spec}.ts",

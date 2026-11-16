@@ -70,8 +70,34 @@ export const OPENROUTER_JEV_MODEL = 'jev-latest';
 export const VERCEL_JEV_API_URL = 'https://ai-gateway.vercel.sh/typesafe/v1/systemone';
 export const VERCEL_JEV_MODEL = 'typesafe-ai/jev';
 
+/**
+ * Google's Decisions API on the Gemini Developer API, billed to the Google
+ * account behind the key. Not a System One endpoint: `jev.js` maps the request
+ * to Google's shape (`toGeminiDecisionsRequest`); the answers come back in the
+ * same shape. It answers 401 to a bearer key, so the key goes in
+ * `x-goog-api-key` (checked live 2026-11-14).
+ */
+export const GEMINI_DECISIONS_API_URL = 'https://generativelanguage.googleapis.com/v1beta/decisions';
+export const GEMINI_DECISIONS_MODEL = 'gemini-decision-1';
+
 /** Per-attempt timeout; the lab measured 250–700 ms warm, ~1 s on a cold TLS handshake. */
 export const JEV_TIMEOUT_MS = 4000;
+
+/**
+ * The timeout for the checks that run after a turn (session work, goals),
+ * where nobody waits for the answer. Their request is larger than a routing
+ * one: the reporter of #6743 measured 5.7 to 6.6 s on a loaded local model,
+ * so 4 s failed the check on almost every turn.
+ */
+export const JEV_BACKGROUND_TIMEOUT_MS = 15_000;
+
+/**
+ * How long one timed-out request per endpoint keeps running before it is
+ * aborted. A local model loads on its first request and Ollama cancels the
+ * load when the client disconnects, so a 4 s abort kept a 5-7 s cold load
+ * from ever finishing (#6743).
+ */
+export const JEV_LINGER_MS = 5 * 60_000;
 
 /**
  * The third line keeps a hard turn from dragging its follow-ups up. With a
@@ -80,12 +106,12 @@ export const JEV_TIMEOUT_MS = 4000;
  * so the fallback model took them. Saying that history only resolves what the
  * request refers to, and that finished work carries no weight, put them at
  * 97% and ~75% trivial while "ok, do it" after a plan stayed implement and a
- * regression report stayed hard (jev-router lab, test/follow-up-instructions.js).
+ * regression report stayed hard (a private routing lab outside this repository).
  *
  * The fourth line covers a bare approval, which the third would otherwise
  * read as trivial: "go" after a plan carries no work of its own, so it takes
  * the category of the work it approves (the #4374 author measured this on
- * their own prompts; not yet replayed in the jev-router lab).
+ * their own prompts; not yet replayed in the routing lab).
  * It does not let finished work raise a follow-up; a follow-up that only
  * looks cheap because it reuses a warm context is the router's concern, not
  * the classifier's.

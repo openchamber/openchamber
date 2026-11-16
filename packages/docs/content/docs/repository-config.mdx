@@ -37,6 +37,9 @@ Items from the repository show an **In repo** badge. Repository actions can also
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Items from the repository show an **In repo** badge. Repository actions can also
 Only `version` is required. Every other key is optional, and OpenChamber writes only the keys that carry something.
 
 `setupWorktree` is the list of shell commands OpenChamber runs inside a new worktree right after creating it, in order. Use `$ROOT_PROJECT_PATH` for the main checkout's path. `setupWorktreeWait: true` makes OpenChamber wait for these commands before it starts a session in the worktree.
+
+`teardownWorktree` is the list of shell commands OpenChamber runs inside a worktree right before it deletes or archives it, in order, such as `docker compose down` for a stack the worktree started. If one fails, the worktree stays and OpenChamber shows the command's error. Repository teardown commands run first, then your own, also when you use only your own setup commands. They go through the same trust question as setup commands.
 
 `projectActions` is the project's list of actions, the ones you run from Work Status, the project actions dialog, and the command palette. `id`, `name`, and `command` are required. `icon` is optional and falls back to a play icon; the names OpenChamber knows are `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command`, and `file`. `autoOpenUrl: true` opens the address the command prints, see [Preview & Dev Servers](/preview/). `platforms` limits the action to `macos`, `linux`, or `windows`. `runIn: "parent"` runs the action in the main checkout instead of the current worktree.
 

@@ -2,13 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import {
-  buildClickScript,
+  buildFieldValueScript,
+  buildFileInputScript,
+  buildFindByTextScript,
+  buildFocusFieldScript,
   buildInspectScript,
+  buildPointScript,
   buildQuietScript,
   buildScrollScript,
+  buildScrollToScript,
   buildSelectScript,
   buildSnapshotScript,
-  buildTypeScript,
+  buildWaitConditionScript,
 } from './pageActions';
 
 /**
@@ -26,32 +31,50 @@ const parses = (source: string): boolean => {
 };
 
 const runInWindow = (win: Window, source: string): string => (
-  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', `return ${source}`)(
+  // The page's own event constructors, as in a browser tab: the DOM refuses
+  // events built by another realm.
+  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', 'Event', 'KeyboardEvent', `return ${source}`)(
     win,
     win.document,
     win.navigator,
     win.CSS,
     win.location,
+    win.Event,
+    win.KeyboardEvent,
   ))
 );
+
+/** Gives an element a box, which happy-dom does not lay out. */
+const drawn = <T extends { setAttribute: (name: string, value: string) => void }>(element: T): T => {
+  // happy-dom computes no opacity, which reads as 0, which reads as hidden.
+  element.setAttribute('style', 'opacity: 1');
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    value: () => ({ x: 16, y: 20, width: 80, height: 32, top: 20, right: 96, bottom: 52, left: 16 }),
+  });
+  return element;
+};
 
 describe('page action scripts', () => {
   test('every script parses', () => {
     expect(parses(buildSnapshotScript())).toBe(true);
     expect(parses(buildSnapshotScript({ selector: '#main' }))).toBe(true);
-    expect(parses(buildClickScript({ selector: '#save' }))).toBe(true);
-    expect(parses(buildClickScript({ text: 'Save' }))).toBe(true);
-    expect(parses(buildTypeScript({ selector: '#q', value: 'hello', submit: true }))).toBe(true);
-    expect(parses(buildSelectScript({ selector: '#country', label: 'Canada' }))).toBe(true);
-    expect(parses(buildSelectScript({ selector: '#country', value: 'ca' }))).toBe(true);
+    expect(parses(buildPointScript({ selector: '#save' }))).toBe(true);
+    expect(parses(buildPointScript({ id: 3, doc: 'd' }))).toBe(true);
+    expect(parses(buildFindByTextScript('Save'))).toBe(true);
+    expect(parses(buildFocusFieldScript({ selector: '#q' }))).toBe(true);
+    expect(parses(buildFieldValueScript({ id: 1, doc: 'd' }))).toBe(true);
+    expect(parses(buildFileInputScript({ id: 1, doc: 'd' }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country' }, { label: 'Canada' }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country' }, { value: 'ca' }))).toBe(true);
     expect(parses(buildInspectScript({ selector: '#save' }))).toBe(true);
     expect(parses(buildScrollScript({ direction: 'bottom' }))).toBe(true);
-    expect(parses(buildScrollScript({ selector: 'footer' }))).toBe(true);
+    expect(parses(buildScrollToScript({ selector: 'footer' }))).toBe(true);
+    expect(parses(buildWaitConditionScript({ text: 'Saved' }))).toBe(true);
   });
 
   test('a hostile selector is embedded as data, not as code', () => {
     const hostile = `'); window.__owned = true; ('`;
-    const script = buildClickScript({ selector: hostile });
+    const script = buildPointScript({ selector: hostile });
     expect(parses(script)).toBe(true);
     // Present only inside a quoted literal: that is what makes it inert.
     expect(script).toContain(JSON.stringify(hostile));
@@ -59,7 +82,7 @@ describe('page action scripts', () => {
 
   test('a typed value is embedded as data too', () => {
     const value = '"); alert(1); ("';
-    const script = buildTypeScript({ selector: '#q', value, submit: false });
+    const script = buildWaitConditionScript({ text: value });
     expect(parses(script)).toBe(true);
     expect(script).toContain(JSON.stringify(value));
   });
@@ -70,11 +93,11 @@ describe('page action scripts', () => {
     const value = `\\'); window.__owned = true; ('`;
 
     for (const script of [
-      buildSelectScript({ selector, label }),
-      buildSelectScript({ selector, value }),
+      buildSelectScript({ selector }, { label }),
+      buildSelectScript({ selector }, { value }),
     ]) {
       expect(parses(script)).toBe(true);
-      expect(script).toContain(JSON.stringify(selector));
+      expect(script).toContain(JSON.stringify({ selector }));
     }
   });
 
@@ -88,7 +111,7 @@ describe('page action scripts', () => {
     // A page with scroll-behavior: smooth would otherwise still be animating
     // when the position is read.
     expect(buildScrollScript({ direction: 'bottom' })).toContain("behavior: 'instant'");
-    expect(buildScrollScript({ selector: 'footer' })).toContain("behavior: 'instant'");
+    expect(buildScrollToScript({ selector: 'footer' })).toContain("behavior: 'instant'");
   });
 
   test('scrolling answers on a page that gets no paint frames', async () => {
@@ -220,7 +243,7 @@ describe('page action scripts', () => {
     expect(entry.optionsTruncated).toBeUndefined();
 
     const snapshotLabel = entry.options[0].label;
-    const selectResult = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: snapshotLabel })));
+    const selectResult = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: snapshotLabel })));
     expect(selectResult).toMatchObject({ ok: true, label: snapshotLabel, value: 'us' });
   });
 
@@ -274,6 +297,7 @@ describe('page action scripts', () => {
     const entry = result.elements.find((element: { selector: string }) => element.selector === '#save');
 
     expect(entry).toEqual({
+      id: 1,
       selector: '#save',
       tag: 'button',
       bounds: { x: 16, y: 20, width: 80, height: 32 },
@@ -324,49 +348,6 @@ describe('page action scripts', () => {
     expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
   });
 
-  test('a click opens a widget that listens for mousedown or focus', () => {
-    // VueMultiselect and many custom selects open on the first half of a
-    // click; a bare click event reported success while they stayed shut.
-    const win = new Window({ url: 'http://localhost:3000/' });
-    win.document.body.innerHTML = `
-      <div id="by-mousedown"><span class="placeholder">Add a monitor</span></div>
-      <div id="by-focus" tabindex="-1">Pick one</div>`;
-    const opened: string[] = [];
-    win.document.querySelector('#by-mousedown')?.addEventListener('mousedown', () => opened.push('mousedown'));
-    win.document.querySelector('#by-focus')?.addEventListener('focus', () => opened.push('focus'));
-
-    expect(runInWindow(win, buildClickScript({ selector: '#by-mousedown' }))).toContain('"ok":true');
-    expect(runInWindow(win, buildClickScript({ selector: '#by-focus' }))).toContain('"ok":true');
-
-    expect(opened).toEqual(['mousedown', 'focus']);
-  });
-
-  test('a click sends the sequence a mouse sends, once each', () => {
-    const win = new Window({ url: 'http://localhost:3000/' });
-    win.document.body.innerHTML = '<button id="save">Save</button>';
-    const seen: string[] = [];
-    for (const type of ['pointerdown', 'mousedown', 'focus', 'pointerup', 'mouseup', 'click']) {
-      win.document.querySelector('#save')?.addEventListener(type, () => seen.push(type));
-    }
-
-    runInWindow(win, buildClickScript({ selector: '#save' }));
-
-    expect(seen).toEqual(['pointerdown', 'mousedown', 'focus', 'pointerup', 'mouseup', 'click']);
-  });
-
-  test('a page that prevents mousedown keeps its focus where it was', () => {
-    // Dropdown options do this so picking one does not blur the search field.
-    const win = new Window({ url: 'http://localhost:3000/' });
-    win.document.body.innerHTML = '<input id="search"><div id="option" tabindex="-1">Website</div>';
-    const search = win.document.querySelector('input');
-    search?.focus();
-    win.document.querySelector('#option')?.addEventListener('mousedown', (event) => event.preventDefault());
-
-    runInWindow(win, buildClickScript({ selector: '#option' }));
-
-    expect(win.document.activeElement).toBe(search);
-  });
-
   test('selects a native option by its exact visible label and delivers events', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
     win.document.body.innerHTML = `
@@ -380,7 +361,7 @@ describe('page action scripts', () => {
     select?.addEventListener('input', () => seen.push('input'));
     select?.addEventListener('change', () => seen.push('change'));
 
-    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })));
 
     expect(result).toEqual({ ok: true, selector: '#country', label: 'Canada', value: 'ca', url: 'http://localhost:3000/' });
     expect(select?.value).toBe('ca');
@@ -396,7 +377,7 @@ describe('page action scripts', () => {
         <option value="ca">Canada</option>
       </select>`;
 
-    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })));
 
     expect(result).toMatchObject({ ok: true, selector: '#country', label: 'Canada', value: 'ca' });
     const select = win.document.querySelector('#country');
@@ -411,7 +392,7 @@ describe('page action scripts', () => {
         <option value="ca">\n          Canada\n        </option>
       </select>`;
 
-    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })));
 
     expect(result).toMatchObject({ ok: true, label: 'Canada', value: 'ca' });
   });
@@ -424,27 +405,27 @@ describe('page action scripts', () => {
         <option value="ca">Canada</option>
       </select>`;
 
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, {})))).toEqual({
       ok: false,
       error: 'browser.select requires exactly one of label or value',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada', value: 'ca' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada', value: 'ca' })))).toEqual({
       ok: false,
       error: 'browser.select requires exactly one of label or value',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Missing' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Missing' })))).toEqual({
       ok: false,
       error: 'No option in #country has the exact label Missing',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })))).toEqual({
       ok: false,
       error: 'More than one option in #country has the exact label Canada',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })))).toEqual({
       ok: false,
       error: 'More than one option in #country has the exact value ca',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '[', value: 'ca' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '[' }, { value: 'ca' })))).toEqual({
       ok: false,
       error: 'Invalid selector: [',
     });
@@ -458,19 +439,19 @@ describe('page action scripts', () => {
       <select id="disabled-select" disabled><option value="ca">Canada</option></select>
       <select id="multiple" multiple><option value="ca">Canada</option></select>`;
 
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#custom', label: 'Canada' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#custom' }, { label: 'Canada' })))).toEqual({
       ok: false,
       error: '#custom is not a native HTML select',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-option', label: 'Canada' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-option' }, { label: 'Canada' })))).toEqual({
       ok: false,
       error: 'The matching option in #disabled-option is disabled',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-select', value: 'ca' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-select' }, { value: 'ca' })))).toEqual({
       ok: false,
       error: 'The select #disabled-select is disabled',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#multiple', value: 'ca' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#multiple' }, { value: 'ca' })))).toEqual({
       ok: false,
       error: 'Multiple selects are not supported for browser.select',
     });
@@ -484,11 +465,11 @@ describe('page action scripts', () => {
         <optgroup label="Americas"><option value="ca">Canada</option></optgroup>
       </select>`;
 
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'de' })))).toEqual({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'de' })))).toEqual({
       ok: false,
       error: 'The matching option in #country is disabled',
     });
-    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })))).toMatchObject({
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })))).toMatchObject({
       ok: true,
       label: 'Canada',
       value: 'ca',
@@ -506,71 +487,123 @@ describe('page action scripts', () => {
     select.append(option);
     win.document.body.append(select);
 
-    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#safe', value: hostile })));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#safe' }, { value: hostile })));
 
     expect(result).toMatchObject({ ok: true, label: hostile, value: hostile });
     expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
   });
 
-  test('copies and pastes through the browser clipboard in one tab', async () => {
-    const fixture = 'test_secret_not_real_123';
-    let clipboard = '';
+  test('numbers the elements it lists, and a number then reaches its element', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
-    Object.defineProperty(win.navigator, 'clipboard', {
-      value: {
-        writeText: async (value: string) => { clipboard = value; },
-        readText: async () => clipboard,
-      },
-    });
-    win.document.body.innerHTML = '<button id="copy">Copy API key</button><button id="paste">Paste</button><input id="target">';
-    win.document.querySelector('#copy')?.addEventListener('click', () => {
-      void win.navigator.clipboard.writeText(fixture);
-    });
-    win.document.querySelector('#paste')?.addEventListener('click', () => {
-      void win.navigator.clipboard.readText().then((value) => {
-        const target = win.document.querySelector('input');
-        if (target) target.value = value;
-      });
-    });
+    win.document.body.innerHTML = '<button id="save">Save</button><a href="/next">Next</a>';
+    for (const element of win.document.querySelectorAll('button, a')) drawn(element);
 
-    const copyResult = runInWindow(win, buildClickScript({ selector: '#copy' }));
-    runInWindow(win, buildClickScript({ selector: '#paste' }));
-    await Promise.resolve();
+    const snapshot = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const save = snapshot.elements.find((element: { selector?: string }) => element.selector === '#save');
+    expect(Number.isInteger(save.id)).toBe(true);
 
-    expect(win.document.querySelector('input')?.value).toBe(fixture);
-    expect(copyResult).not.toContain(fixture);
+    const point = JSON.parse(runInWindow(win, buildPointScript({ id: save.id, doc: snapshot.doc })));
+    expect(point).toMatchObject({ ok: true, x: 56, y: 36, label: 'Save', selector: '#save' });
   });
 
-  test('copies in one tab and pastes in another without serializing the value', async () => {
-    const fixture = 'test_secret_not_real_123';
-    let clipboard = '';
-    const source = new Window({ url: 'https://example.test/account' });
-    const destination = new Window({ url: 'http://localhost:3000/' });
-    Object.defineProperty(source.navigator, 'clipboard', {
-      value: { writeText: async (value: string) => { clipboard = value; } },
-    });
-    Object.defineProperty(destination.navigator, 'clipboard', {
-      value: { readText: async () => clipboard },
-    });
-    source.document.body.innerHTML = '<button id="copy">Copy API key</button>';
-    destination.document.body.innerHTML = '<button id="paste">Paste</button><input id="target">';
-    source.document.querySelector('#copy')?.addEventListener('click', () => {
-      void source.navigator.clipboard.writeText(fixture);
-    });
-    destination.document.querySelector('#paste')?.addEventListener('click', () => {
-      void destination.navigator.clipboard.readText().then((value) => {
-        const target = destination.document.querySelector('input');
-        if (target) target.value = value;
-      });
-    });
+  test('a new snapshot retires the numbers of the last one', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    drawn(win.document.querySelector('#save')!);
+    const first = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    runInWindow(win, buildSnapshotScript());
 
-    const copyResult = runInWindow(source, buildClickScript({ selector: '#copy' }));
-    const pasteResult = runInWindow(destination, buildClickScript({ selector: '#paste' }));
-    await Promise.resolve();
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: first.elements[0].id, doc: first.doc })))).toMatchObject({ ok: false, code: 'stale' });
+  });
 
-    expect(destination.document.querySelector('input')?.value).toBe(fixture);
-    expect(copyResult).not.toContain(fixture);
-    expect(pasteResult).not.toContain(fixture);
-    expect(runInWindow(destination, buildSnapshotScript())).not.toContain(fixture);
+  test('a number from a replaced document reaches nothing, even where the new one reuses it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    drawn(win.document.querySelector('#save')!);
+    const old = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    // A navigation gives the frame a new document, and with it a new registry.
+    Reflect.deleteProperty(win, '__openchamberAgent');
+    win.document.body.innerHTML = '<button id="delete">Delete</button>';
+    drawn(win.document.querySelector('#delete')!);
+    runInWindow(win, buildSnapshotScript());
+
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: old.elements[0].id, doc: old.doc })))).toMatchObject({ ok: false, code: 'stale' });
+  });
+
+  test('lists controls inside an open shadow root by number, without a selector', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<div id="host"></div>';
+    const shadow = win.document.querySelector('#host')!.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<button>Inside</button>';
+    drawn(shadow.querySelector('button')!);
+
+    const entry = JSON.parse(runInWindow(win, buildSnapshotScript())).elements.find((element: { label?: string }) => element.label === 'Inside');
+    expect(entry).toMatchObject({ tag: 'button', inShadowRoot: true });
+    expect(entry.selector).toBeUndefined();
+  });
+
+  test('lists a hidden file input, marked hidden, so an upload can reach it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<input id="avatar" type="file" accept="image/*" style="display:none">';
+
+    const snapshot = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = snapshot.elements.find((element: { selector?: string }) => element.selector === '#avatar');
+    expect(entry).toMatchObject({ tag: 'input', type: 'file', hidden: true, accept: 'image/*' });
+    expect(entry.inViewport).toBeUndefined();
+    expect(JSON.parse(runInWindow(win, buildFileInputScript({ id: entry.id, doc: snapshot.doc })))).toEqual({ ok: true, multiple: false });
+    expect(JSON.parse(runInWindow(win, buildFileInputScript({ selector: 'body' }))).error).toContain('is not a file input');
+  });
+
+  test('refuses to press an element something else is drawn over, naming the cover', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button><div id="banner">Accept cookies</div>';
+    const save = drawn(win.document.querySelector('#save')!);
+    const banner = win.document.querySelector('#banner')!;
+    Object.defineProperty(win.document, 'elementFromPoint', { value: () => banner });
+
+    const result = JSON.parse(runInWindow(win, buildPointScript({ selector: '#save' })));
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('#banner "Accept cookies" is drawn over #save "Save"');
+    expect(save.isConnected).toBe(true);
+  });
+
+  test('refuses a disabled control for a click', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save" disabled>Save</button>';
+    drawn(win.document.querySelector('#save')!);
+
+    expect(JSON.parse(runInWindow(win, buildPointScript({ selector: '#save' }))).error).toBe('#save "Save" is disabled');
+  });
+
+  test('finds a button by its label, an exact match before a containing one', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="all">Save all</button><button id="one">Save</button>';
+    for (const element of win.document.querySelectorAll('button')) drawn(element);
+
+    const found = JSON.parse(runInWindow(win, buildFindByTextScript('save')));
+    expect(found).toMatchObject({ ok: true, found: true, exact: true });
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: found.id, doc: found.doc }))).selector).toBe('#one');
+    expect(JSON.parse(runInWindow(win, buildFindByTextScript('Delete')))).toEqual({ ok: true, found: false });
+  });
+
+  test('selects the whole field before typing, so the typed text replaces it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<input id="q" value="old text"><button id="b">B</button>';
+
+    expect(JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: '#q' })))).toMatchObject({ ok: true, selector: '#q' });
+    const input = win.document.querySelector('input')!;
+    expect(win.document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'old text'.length]);
+    expect(JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: '#b' }))).error).toContain('is not a text field');
+  });
+
+  test('waits on text in the page and in shadow roots', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<p>Loading</p><div id="host"></div>';
+    win.document.querySelector('#host')!.attachShadow({ mode: 'open' }).innerHTML = '<span>Saved   changes</span>';
+
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ text: 'saved changes' })))).toEqual({ ok: true, present: true });
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ text: 'Done' })))).toEqual({ ok: true, present: false });
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ target: { selector: '#missing' } })))).toMatchObject({ ok: true, present: false });
   });
 });

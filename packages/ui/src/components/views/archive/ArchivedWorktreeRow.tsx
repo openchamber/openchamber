@@ -29,7 +29,7 @@ export function ArchivedWorktreeRow({ archive, busy, onRestore, onDelete, touch 
   if (touch) {
     return (
       <div className="flex min-w-0 items-center gap-2 py-1 ps-3 pe-1">
-        <Icon name="git-branch" className="size-3.5 shrink-0 self-start mt-[0.1875rem] text-muted-foreground" />
+        <Icon name="worktree" className="size-3.5 shrink-0 self-start mt-[0.1875rem] text-muted-foreground" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span dir="auto" className="truncate oc-ui-start-align typography-ui-label font-medium text-foreground">{label}</span>
           <span className="truncate typography-micro text-muted-foreground">
@@ -68,7 +68,7 @@ export function ArchivedWorktreeRow({ archive, busy, onRestore, onDelete, touch 
   }
   return (
     <div className="group/worktree flex min-w-0 items-center gap-2 py-1 ps-2 pe-1">
-      <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
+      <Icon name="worktree" className="size-3.5 shrink-0 text-muted-foreground" />
       <span dir="auto" className="min-w-0 truncate oc-ui-start-align typography-ui-label font-medium text-foreground" title={archive.path}>{label}</span>
       <span className="min-w-0 shrink truncate typography-micro text-muted-foreground">
         {showBranch ? <span className="font-mono">{archive.branch}</span> : null}

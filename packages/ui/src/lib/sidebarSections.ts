@@ -14,7 +14,8 @@ import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
  * does not claim them shows them and lets them through.
  */
 
-const BUILTIN_SIDEBAR_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'] as const;
+// Pages (the app's own screens) leads by default, above the sections of works.
+const BUILTIN_SIDEBAR_SECTION_IDS = ['pages', 'chats', 'pinned', 'work', 'projects'] as const;
 export type BuiltinSidebarSectionId = typeof BUILTIN_SIDEBAR_SECTION_IDS[number];
 
 export const SIDEBAR_SECTION_STATES = ['running', 'needs-answer', 'unread', 'failed', 'looks-done'] as const;
@@ -42,6 +43,8 @@ export type SidebarSectionFilter = {
   kinds: readonly SidebarSectionKind[];
   links: readonly SidebarSectionLink[];
   projectIds: readonly string[];
+  /** Folders of a project's root, by id; a filed worktree counts as a work in its folder. */
+  folders: readonly string[];
   activity: SidebarSectionActivity;
   /**
    * Phrases to find in the work's title or branch, any one of them: each
@@ -78,8 +81,16 @@ export const SIDEBAR_PIN_LISTS_MAX = 24;
 export const SIDEBAR_SECTION_TEXT_MAX = 100;
 export const SIDEBAR_SECTION_PHRASES_MAX = 12;
 
+/** How many works a list shows before Show more (`sidebarSessionBatchSize`); the server holds the same range. */
+export const SIDEBAR_SESSION_BATCH_DEFAULT = 7;
+export const SIDEBAR_SESSION_BATCH_MIN = 3;
+export const SIDEBAR_SESSION_BATCH_MAX = 50;
+export const clampSessionBatchSize = (size: number): number => (
+  Math.max(SIDEBAR_SESSION_BATCH_MIN, Math.min(SIDEBAR_SESSION_BATCH_MAX, Math.round(size)))
+);
+
 export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze({
-  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any', text: [],
+  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], folders: [], activity: 'any', text: [],
 });
 
 
@@ -112,6 +123,7 @@ const filterSchema = z.object({
   kinds: chips(SIDEBAR_SECTION_KINDS).catch([]),
   links: chips(SIDEBAR_SECTION_LINKS).catch([]),
   projectIds: projectIds.catch([]),
+  folders: ids.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
   // A list of phrases; a build before lists kept one phrase as a string.
   text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
@@ -146,6 +158,7 @@ const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'proj
       kinds: filter.kinds ?? [],
       links: filter.links ?? [],
       projectIds: filter.projectIds ?? [],
+      folders: filter.folders ?? [],
       activity: filter.activity ?? 'any',
       text: filter.text ?? [],
     }
@@ -221,6 +234,7 @@ export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boole
   || filter.kinds.length > 0
   || filter.links.length > 0
   || filter.projectIds.length > 0
+  || filter.folders.length > 0
   || filter.activity !== 'any'
   || filter.text.length > 0
 );
@@ -240,6 +254,8 @@ export type SidebarWorkFacts = {
   /** A scheduled task started one of its top-level sessions. */
   scheduled: boolean;
   projectId: string | null;
+  /** The folder of the project's root the work is filed in, or null. */
+  folderId: string | null;
   /** The pin list the work is filed in (`DEFAULT_PIN_LIST` for Pinned), or null. */
   pin: string | null;
   inWork: boolean;
@@ -311,12 +327,13 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
+  if (filter.folders.length > 0 && (facts.folderId === null || !filter.folders.includes(facts.folderId))) return false;
   if (filter.text.length > 0 && !filter.text.some((phrase) => matchesRankQuery(facts.texts, phrase, SIDEBAR_SEARCH))) return false;
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
 
 /** The starting points the section editor offers; names are set by the editor, translated. */
-const SIDEBAR_SECTION_TEMPLATES = ['waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
+const SIDEBAR_SECTION_TEMPLATES = ['recent', 'waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
 export type SidebarSectionTemplate = typeof SIDEBAR_SECTION_TEMPLATES[number];
 
 export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplate, name: string): CustomSidebarSection => {
@@ -324,6 +341,9 @@ export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplat
     kind: 'custom', id: createSidebarSectionId(), name, grouping: 'time', filter: EMPTY_SIDEBAR_SECTION_FILTER, claims: false, hideWhenEmpty: true,
   };
   switch (template) {
+    // A section asks something to list anything, so Recent asks for the last
+    // 7 days; Show more pages through them.
+    case 'recent': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, activity: 'week' } };
     case 'waiting': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['needs-answer', 'unread'] } };
     case 'running': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } };
     case 'prs': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, links: ['pr'] } };

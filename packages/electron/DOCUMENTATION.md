@@ -10,9 +10,13 @@ extension owns its separate server-side browser.
 
 ## Invariants
 
-- Human pages use `persist:openchamber-browser`. Agent pages use exactly
-  `persist:openchamber-agent-browser`. Neither shares OpenChamber's app session.
-- Only the agent session has the front-door request filter. Every resource type,
+- Human pages use `persist:openchamber-browser`. Agent pages default to
+  `persist:openchamber-browser-agent`, matching upstream's agent profile. Neither shares OpenChamber's app session.
+  The upstream `agentBrowserSharesLogins` opt-in lets agent-owned tabs use the
+  human profile. Browser control still refuses tabs the human opened.
+- Only the separate agent session has the front-door request filter. Sharing the
+  human profile explicitly grants that profile's logins and network access.
+  Every resource type,
   redirect destination and WebSocket handshake goes through `onBeforeRequest`.
 - Agent requests cannot reach known OpenChamber endpoints, loopback aliases or
   local interfaces on known server ports. File, DevTools, Chrome and packaged UI

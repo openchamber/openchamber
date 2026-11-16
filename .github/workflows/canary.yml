@@ -106,7 +106,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -188,7 +188,19 @@ jobs:
           fi
           codesign -vv --deep --strict "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "flags=.*runtime"
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
           # The same app as the release, at the Canary version.
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleIdentifier)" = "dev.openchamber.desktop"
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
@@ -238,7 +250,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -355,7 +367,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Verify native Linux architecture
         env:
@@ -456,7 +468,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -521,6 +533,7 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: true
       build_ios: false
+      retention_days: '3'
     secrets: inherit
 
   # Not needed by the publish job: a failed TestFlight upload does not hold
@@ -540,13 +553,13 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: false
       build_ios: true
+      retention_days: '3'
     secrets: inherit
 
   # Publish only after every supported build and the server packages succeed.
-  # macOS is deliberately skipped on forks; iOS never blocks publication.
   publish:
-    needs: [prepare, build-macos, build-windows, build-linux, build-android, package-tarball]
-    if: ${{ !cancelled() && !failure() && needs.prepare.outputs.build == 'true' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' && needs.build-android.result == 'success' && needs.package-tarball.result == 'success' && (needs.build-macos.result == 'success' || (github.repository != 'openchamber/openchamber' && needs.build-macos.result == 'skipped')) }}
+    needs: [prepare, build-windows, build-linux, build-android, package-tarball]
+    if: ${{ !cancelled() && !failure() && needs.prepare.outputs.build == 'true' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' && needs.build-android.result == 'success' && needs.package-tarball.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -565,7 +578,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24'
+          node-version: '26'
 
       - name: Download update manifests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -603,7 +616,7 @@ jobs:
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/manifests
           OPENCHAMBER_VERSION: ${{ needs.prepare.outputs.version }}
-          WINDOWS_ONLY: ${{ github.repository != 'openchamber/openchamber' && '1' || '0' }}
+          WINDOWS_ONLY: '1'
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
       # What changed since the build the release notes name (or, for the
@@ -640,9 +653,7 @@ jobs:
             gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "OpenChamber Canary: the first build is being published."
           fi
           OLD_ASSETS=$(gh release view canary --json assets --jq '.assets[].name')
-          # The newest earlier build's files stay one more night: an app that
-          # found that build before this run downloads it from the addresses
-          # it read. Taken from the files, so a re-run of this version keeps it too.
+          # Keep the newest previous build for clients holding its download URLs.
           PREVIOUS=$(printf '%s\n' "$OLD_ASSETS" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+\.[0-9]+' | grep -vxF "$VERSION" | sort -uV | tail -1 || true)
           PREVIOUS=${PREVIOUS:-$VERSION}
           # New files first, then the manifests that name them, then the old
@@ -650,12 +661,8 @@ jobs:
           # The SDK asset is available before any web tarball that depends on it.
           gh release upload canary "files/openchamber-sdk-${VERSION}.tgz" --clobber
           gh release upload canary files/OpenChamber-* "files/openchamber-web-${VERSION}.tgz" "$RUNNER_TEMP/canary-notes.json" --clobber
-          mac_manifests=()
-          if [ -f "$RUNNER_TEMP/latest-mac.yml" ]; then
-            mac_manifests+=("$RUNNER_TEMP/latest-mac.yml")
-          fi
           gh release upload canary \
-            "${mac_manifests[@]}" "$RUNNER_TEMP/latest.yml" "$RUNNER_TEMP/latest-arm64.yml" \
+            "$RUNNER_TEMP/latest.yml" "$RUNNER_TEMP/latest-arm64.yml" \
             files/latest-linux.yml files/latest-linux-arm64.yml --clobber
           for asset in $OLD_ASSETS; do
             case "$asset" in

@@ -36,4 +36,8 @@ describe('resolveConfigApiKey', () => {
   it('keeps a plain key as it is', () => {
     expect(resolveConfigApiKey(' plain-key ', options)).toBe('plain-key');
   });
+
+  it('resolves default runtime options without an explicit home directory', () => {
+    expect(resolveConfigApiKey(' plain-key ')).toBe('plain-key');
+  });
 });

@@ -10,6 +10,7 @@
 import { forkRemoteName } from './contributor-remote.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { asNonEmptyString } from '../shared/guards.js';
+import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 
 /** A refusal with the HTTP status and body fields the route answers with. */
 export class WorktreeCreationError extends Error {
@@ -135,6 +136,35 @@ export const createWorktreeCreation = ({
         409,
         'INVALID_REQUEST',
       );
+    }
+    const authMethods = sourceControlProviderDescriptors.get(source.context.provider)?.authMethods;
+    if (authMethods?.cli?.kind === 'service' && !authMethods.pat) {
+      if (source.classification !== 'same-repository') {
+        throw new WorktreeCreationError('Service-login worktrees require a head in the primary remote repository', 501, 'RUNTIME_UNSUPPORTED');
+      }
+      const { repository, binding } = await getSourceControlBinding(directory);
+      const remote = source.context.primaryRemote;
+      const planned = await networkOperations.plan({
+        operation: 'fetch', directory,
+        repositoryId: source.context.repositoryId,
+        bindingRevision: source.context.bindingRevision,
+        configRevision: repository.configRevision,
+        remote: { name: remote, endpoint: {
+          displayUrl: redactRemoteUrl(source.remoteUrl),
+          fingerprint: fingerprintRemoteUrl(source.remoteUrl),
+        } },
+        transportMode: binding ? binding.remotes.find((entry) => entry.name === remote)?.mode : 'system',
+        sourceRef: source.headRef, destinationRef,
+      });
+      const transfer = await networkOperations.execute(planned.operationId);
+      if (transfer.state !== 'succeeded') {
+        throw new WorktreeCreationError(transfer.error?.message || 'Change request head fetch failed', 409, transfer.error?.code || 'UNKNOWN');
+      }
+      await resolveChangeRequestSource(input.changeRequestSource);
+      return {
+        source: { ...source, endpoint: source.remoteUrl },
+        input: { ...transferInput, contributorTransferComplete: true },
+      };
     }
     const account = await resolveSourceControlAccount(source.context);
     if (account?.credentialId !== source.context.accountId || account?.status !== 'valid'

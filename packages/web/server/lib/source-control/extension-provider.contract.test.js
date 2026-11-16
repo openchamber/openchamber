@@ -33,6 +33,7 @@ const exampleDir = fileURLToPath(new URL('../../../../sdk/examples/source-contro
 const GUEST = 'source-control-provider';
 const PROVIDER = `ext-${GUEST}`;
 const TOKEN = 'forge-secret-token';
+const USER_ID = 'member:mona';
 
 let dataDir;
 let repository;
@@ -173,14 +174,21 @@ describe('an extension as a Git host, end to end', () => {
   });
 
   it('connects a personal access token, verified through the service', async () => {
-    const connected = await request('POST', `/api/source-control/${PROVIDER}/auth/token?${instanceQuery()}`, { token: TOKEN });
-    expect(connected).toMatchObject({ status: 200, body: { connected: true, user: { id: 7, login: 'mona' } } });
+    tamper = (body) => ({ ...body, body: JSON.stringify({ ...JSON.parse(body.body), id: USER_ID }) });
+    try {
+      const connected = await request('POST', `/api/source-control/${PROVIDER}/auth/token?${instanceQuery()}`, { token: TOKEN });
+      expect(connected).toMatchObject({ status: 200, body: { connected: true, user: { id: USER_ID, login: 'mona' } } });
+    } finally {
+      tamper = null;
+    }
     const status = await request('GET', `/api/source-control/${PROVIDER}/auth/status?${instanceQuery()}`);
     expect(status.body).toMatchObject({ status: 'connected', user: { login: 'mona' } });
     const accounts = await request('GET', `/api/source-control/${PROVIDER}/auth/accounts?${instanceQuery()}`);
     expect(accounts.body.accounts).toHaveLength(1);
     state.accountId = accounts.body.accounts[0].id;
     expect(JSON.stringify([status.body, accounts.body])).not.toContain(TOKEN);
+    const reopened = createSourceControlAuthStore({ filePath: path.join(dataDir, 'source-control-auth.json') });
+    expect(await reopened.section(PROVIDER).readAccount(forge.origin, state.accountId)).toMatchObject({ user: { id: USER_ID } });
   });
 
   it('binds a repository whose remote is on the forge', async () => {
@@ -238,7 +246,9 @@ describe('an extension as a Git host, end to end', () => {
   it('writes a change request once, replays it, and refuses the same key with other input', async () => {
     const writes = forge.writes.length;
     const created = await mutate('/pr/create', 'create-docs', { head: 'docs', base: 'main' }, { title: 'Docs', body: 'Adds docs' });
-    expect(created).toMatchObject({ status: 200, body: { status: 'succeeded', replayed: false, target: { number: 3 } } });
+    expect(created).toMatchObject({ status: 200, body: {
+      status: 'succeeded', replayed: false, target: { number: 3 }, actor: { providerAccountId: `${forge.origin}#${USER_ID}` },
+    } });
     const replayed = await mutate('/pr/create', 'create-docs', { head: 'docs', base: 'main' }, { title: 'Docs', body: 'Adds docs' });
     expect(replayed).toMatchObject({ status: 200, body: { status: 'succeeded', replayed: true, target: { number: 3 } } });
     expect(forge.writes.length).toBe(writes + 1);
@@ -312,7 +322,7 @@ describe('an extension as a Git host, end to end', () => {
 
   it('hands Git transport the stored secret with the declared username', async () => {
     const credential = await providers.readTransportCredential({ provider: PROVIDER, instance: forge.origin, credentialId: state.accountId });
-    expect(credential).toMatchObject({ secret: TOKEN, user: { id: 7, login: 'mona' }, providerUserId: `${forge.origin}#7`, status: 'valid' });
+    expect(credential).toMatchObject({ secret: TOKEN, user: { id: USER_ID, login: 'mona' }, providerUserId: `${forge.origin}#${USER_ID}`, status: 'valid' });
     expect(providers.describe(PROVIDER).transport.httpsUsername).toEqual({ kind: 'login' });
   });
 
@@ -360,5 +370,91 @@ describe('an extension as a Git host, end to end', () => {
     const after = JSON.parse(fs.readFileSync(path.join(dataDir, 'source-control-auth.json'), 'utf8'));
     expect(JSON.stringify(after)).not.toContain(PROVIDER);
     expect((await request('GET', '/api/source-control/providers')).body.providers.map(({ id }) => id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit', 'forgejo']);
+  });
+});
+
+describe('a service-owned source-control login through the running host', () => {
+  it('installs, discovers identity, reads a bound repository and invalidates only a confirmed changed account', async () => {
+    const guestId = 'service-login-fixture';
+    const providerId = `ext-${guestId}`;
+    const packageRoot = path.join(dataDir, 'service-login-fixture');
+    fs.mkdirSync(packageRoot);
+    const manifest = JSON.parse(fs.readFileSync(path.join(exampleDir, 'package.json'), 'utf8'));
+    manifest.openchamber.engines.openchamber = '>=2.7.0';
+    manifest.openchamber.contributes.panel.id = guestId;
+    manifest.openchamber.contributes.service.entry = 'main.js';
+    const contribution = manifest.openchamber.contributes.sourceControl;
+    delete contribution.token;
+    contribution.login = { kind: 'service', hint: 'Run forge auth login on the OpenChamber server' };
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify(manifest));
+    const build = spawnSync('bun', [fileURLToPath(new URL('../../../../sdk/scripts/bundle-guest.ts', import.meta.url)), '--node',
+      fileURLToPath(new URL('./test-support/service-login.js', import.meta.url)), path.join(packageRoot, 'main.js')], { encoding: 'utf8' });
+    if (build.status !== 0) throw new Error(build.stderr);
+    const user = { id: '90071992547409931234567', login: 'mona' };
+    const writeState = (patch = {}) => fs.writeFileSync(path.join(packageRoot, 'login-state.json'), JSON.stringify({ origin: forge.origin, user, ...patch }));
+    writeState();
+    const installed = await request('POST', '/api/guests', { path: packageRoot });
+    expect(installed.status).toBe(201);
+    expect((await request('PUT', `/api/guests/${guestId}/capabilities`, { granted: installed.body.guest.capabilities.requested })).status).toBe(200);
+    const authStatus = () => request('GET', `/api/source-control/${providerId}/auth/status?${instanceQuery()}`);
+    const accountId = `${forge.origin}#cli:${user.id}`;
+    expect(await authStatus()).toMatchObject({ status: 200, body: { connected: true, user, accounts: [{ id: accountId, source: 'cli', current: true }] } });
+    const context = await request('GET', `/api/source-control/repository-context?directory=${encodeURIComponent(repository)}`);
+    const before = await request('GET', `/api/source-control/binding?directory=${encodeURIComponent(repository)}`);
+    const bound = await request('POST', '/api/source-control/binding/provider', {
+      directory: repository, expectedRepositoryId: context.body.repositoryId, expectedRevision: before.body.revision, operation: 'add',
+      provider: { provider: providerId, instance: forge.origin, accountId, primaryRemote: 'origin' },
+    });
+    expect(bound.status).toBe(200);
+    const query = new URLSearchParams({
+      directory: repository, repositoryId: context.body.repositoryId, instance: forge.origin,
+      accountId, bindingRevision: String(bound.body.revision), primaryRemote: 'origin', number: '2',
+    });
+    const boundRead = (suffix) => request('GET', `/api/source-control/${providerId}${suffix}?${query}`);
+    expect(await boundRead('/pulls/list')).toMatchObject({ status: 200, body: { items: [{ number: 2 }] } });
+    expect(await boundRead('/pulls/context')).toMatchObject({ status: 200, body: { changeRequest: { head: 'feature' } } });
+    const impl = await providers.implementation(providerId);
+    const session = await impl.auth.resolveAccount({ instance: forge.origin, accountId });
+    expect(await impl.resources.readChangeRequestHead({ session, context: {}, directory: repository, remote: 'origin', number: 2 }))
+      .toMatchObject({ headSha: 'b'.repeat(40) });
+    expect(await providers.readTransportCredential({ provider: providerId, instance: forge.origin, credentialId: accountId })).toBeNull();
+    expect(JSON.stringify(await authStore.section(providerId).readInstance(forge.origin))).not.toContain('#cli:');
+    expect(await request('POST', `/api/source-control/${providerId}/issues/comment`, {
+      directory: repository, repositoryId: context.body.repositoryId, provider: providerId, instance: forge.origin,
+      accountId, bindingRevision: bound.body.revision, primaryRemote: 'origin', idempotencyKey: 'cli-comment',
+      target: { project: { owner: 'mona', name: 'teapot' }, number: 1 }, body: 'Synthetic comment',
+    })).toMatchObject({ status: 200, body: { status: 'succeeded', actor: { providerAccountId: `${forge.origin}#${user.id}` } } });
+
+    writeState({ unavailable: true });
+    expect((await authStatus()).status).not.toBe(200);
+    expect((await boundRead('/pulls/list')).status).toBe(503);
+    const retained = await request('GET', `/api/source-control/binding?directory=${encodeURIComponent(repository)}`);
+    expect(retained.body.binding.providers.find((item) => item.provider === providerId).readiness).toBe('ready');
+
+    writeState({ unreachable: true });
+    expect((await authStatus()).status).toBeGreaterThanOrEqual(500);
+    expect((await request('GET', `/api/source-control/binding?directory=${encodeURIComponent(repository)}`)).body.binding.providers
+      .find((item) => item.provider === providerId).readiness).toBe('ready');
+
+    writeState({ user: null });
+    expect(await authStatus()).toMatchObject({ status: 200, body: { connected: false, accounts: [] } });
+    writeState();
+    expect((await boundRead('/pulls/list')).status).toBe(200);
+    writeState({ changedDuringRead: true });
+    expect((await boundRead('/pulls/list')).status).toBe(401);
+    const invalid = await request('GET', `/api/source-control/binding?directory=${encodeURIComponent(repository)}`);
+    expect(invalid.body.binding.providers.find((item) => item.provider === providerId).readiness).toBe('account-unavailable');
+    // Reconfirm the exact provider association, then exercise the tracked-items entrypoint.
+    const repaired = await request('POST', '/api/source-control/binding/provider', {
+      directory: repository, expectedRepositoryId: context.body.repositoryId, expectedRevision: invalid.body.revision, operation: 'replace',
+      target: { provider: providerId, instance: forge.origin, accountId, primaryRemote: 'origin' },
+      provider: { provider: providerId, instance: forge.origin, accountId, primaryRemote: 'origin' },
+    });
+    expect(repaired.status).toBe(200);
+    await expect(shell.readLiveSummaries({ provider: providerId, instance: forge.origin, accountId, refs: [], issueRefs: [] }))
+      .rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' });
+    const trackedInvalid = await request('GET', `/api/source-control/binding?directory=${encodeURIComponent(repository)}`);
+    expect(trackedInvalid.body.binding.providers.find((item) => item.provider === providerId).readiness).toBe('account-unavailable');
+    expect((await request('DELETE', `/api/guests/${guestId}`)).status).toBe(204);
   });
 });

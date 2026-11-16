@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { parseMetadata } from '@/lib/metadataParse';
 import type { Session } from '@/lib/opencode/model';
 
 const workflowAgentMarkSchema = z.object({ openchamber: z.object({ kind: z.literal('workflow-agent') }) });
@@ -13,5 +14,5 @@ const workflowAgentMarkSchema = z.object({ openchamber: z.object({ kind: z.liter
  * Workflows panel open them.
  */
 export const isWorkflowAgentSession = (session: Session | null | undefined): boolean => (
-  workflowAgentMarkSchema.safeParse(session?.metadata).success
+  parseMetadata(workflowAgentMarkSchema, session?.metadata).success
 );

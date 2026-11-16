@@ -29,6 +29,24 @@ export const isGroupWork = (group: SessionGroup): boolean => (
   !group.isMain && group.isArchivedBucket !== true && (Boolean(group.space) || group.worktree !== null)
 );
 
+/** The root folder holding a session or a worktree, and the project of that folder. */
+export type SidebarFolderMembership = { folderId: string; projectId: string };
+
+/**
+ * The folder of the work's own project that holds it. A work that changed
+ * project (a nested folder added as one) keeps its stored membership in the
+ * old project, whose folders no longer list it.
+ */
+export const findWorkFolderId = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): string | null => {
+  const memberId = ref.kind === 'group' ? worktreeFolderMemberId(ref.group.directory) : ref.rootSessionId;
+  const membership = memberId ? folderByMember.get(memberId) : undefined;
+  return membership?.projectId === ref.projectId ? membership?.folderId ?? null : null;
+};
+
+export const isFiledInFolder = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): boolean => (
+  findWorkFolderId(ref, folderByMember) !== null
+);
+
 /**
  * The sessions in work of a root session's work: the root and what nests
  * under it, past subagents, whose own state never counts. The work is in work

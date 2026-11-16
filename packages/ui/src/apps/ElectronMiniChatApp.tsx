@@ -14,7 +14,6 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
-import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -23,6 +22,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
+import { refreshRecentGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { SyncRuntimeEffects } from './AppEffects';
@@ -38,17 +40,9 @@ import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { openSessionInOwningHostWindow } from '@/lib/desktop';
+import { readMiniChatConfig, type MiniChatConfig } from './miniChatConfig';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
-
-type MiniChatMode = 'session' | 'draft';
-
-type MiniChatConfig = {
-  mode: MiniChatMode;
-  sessionId: string | null;
-  directory: string | null;
-  projectId: string | null;
-};
 
 type ElectronMiniChatAppProps = {
   apis: RuntimeAPIs;
@@ -63,15 +57,6 @@ const openSessionDetailSchema = z.object({
   messageId: optionalTrimmedString,
   runtimeKey: optionalTrimmedString,
 });
-
-const readMiniChatConfig = (): MiniChatConfig => {
-  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  const mode = params.get('mode') === 'session' ? 'session' : 'draft';
-  const sessionId = params.get('sessionId')?.trim() || null;
-  const directory = params.get('directory')?.trim() || null;
-  const projectId = params.get('projectId')?.trim() || null;
-  return { mode, sessionId, directory, projectId };
-};
 
 const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => {
   const sessions = useSessions();
@@ -260,29 +245,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     };
   }, [projects]);
 
-  // Dismiss the HTML splash (see mini-chat.html) once the real content is ready,
-  // so the window doesn't flash through white/connecting states. Fades out when
-  // the target session is active (or the draft is open); a grace timer ensures
-  // it never hangs (e.g. an unavailable session renders its own state).
-  const splashDismissedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (splashDismissedRef.current || !isInitialized) return;
-    const dismiss = () => {
-      if (splashDismissedRef.current) return;
-      splashDismissedRef.current = true;
-      const el = typeof document !== 'undefined' ? document.getElementById('initial-loading') : null;
-      if (el) {
-        el.classList.add('fade-out');
-        window.setTimeout(() => el.remove(), 300);
-      }
-    };
-    const ready = config.mode === 'session'
-      ? currentSessionId === config.sessionId
-      : draftOpen;
-    const timer = window.setTimeout(dismiss, ready ? 100 : 1500);
-    return () => window.clearTimeout(timer);
-  }, [isInitialized, config.mode, config.sessionId, currentSessionId, draftOpen]);
-
   return null;
 };
 
@@ -341,6 +303,22 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
   return timedOut;
 };
 
+/**
+ * The header switcher lists the newest sessions, so this window reads that
+ * page and not the complete list, which the main window owns. The switcher
+ * reads it again each time it opens; live session events arrive meanwhile.
+ * The host status then marks the turns already running in other directories.
+ */
+const useRecentSessions = (): void => {
+  React.useEffect(() => {
+    const load = () => {
+      void refreshRecentGlobalSessions().then(() => seedGlobalSessionStatusFromHost()).catch(() => undefined);
+    };
+    load();
+    return subscribeRuntimeEndpointChanged(load);
+  }, []);
+};
+
 export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   const config = React.useMemo(() => readMiniChatConfig(), []);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -355,14 +333,11 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   }, [apis]);
 
   useAppFontEffects();
-  useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
   useRoutingSync();
   useRootScrollLock();
-  // The header session switcher lists the global session list; this window
-  // is its own app root, so it loads that list itself.
-  useGlobalSessionsPolling(true);
+  useRecentSessions();
 
   return (
     <ErrorBoundary>
@@ -384,11 +359,20 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   );
 }
 
+// Under SyncProvider: the shortcuts read the session's activity (double Escape
+// stops a running turn), which needs the sync runtime. Called in the app root
+// above the provider, opening Mini Chat threw.
+const MiniChatKeyboardShortcuts: React.FC = () => {
+  useMiniChatKeyboardShortcuts();
+  return null;
+};
+
 const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config }) => {
   const sessionUnavailable = useSessionUnavailable(config);
 
   return (
     <>
+      <MiniChatKeyboardShortcuts />
       <MiniChatBootstrap config={config} />
       <MiniChatPresencePublisher />
       <SyncRuntimeEffects backgroundWorkEnabled={true} />

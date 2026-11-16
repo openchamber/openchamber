@@ -12,7 +12,7 @@
  *   name: daily-digest
  *   schedule: "0 9 * * *"
  *   enabled: true
- *   model: anthropic/claude-sonnet-4-5
+ *   model: opencode/big-pickle
  *   agent: plan
  *   timezone: Europe/Kyiv
  *   ---

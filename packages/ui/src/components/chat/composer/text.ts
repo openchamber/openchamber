@@ -8,6 +8,8 @@
  * string functions.
  */
 
+import { isFenceClose, matchFenceOpen } from '../composerHighlight';
+
 /**
  * Append `next` as its own block, separated by a blank line, and leave a blank
  * line after it so the user's caret starts on a fresh paragraph. Used when the
@@ -47,6 +49,20 @@ export function appendInlineText(base: string, next: string): string {
     }
     const separator = /[\s\n]$/.test(base) ? '' : ' ';
     return `${base}${separator}${nextTrimmed} `;
+}
+
+/**
+ * Start the prompt with the slash command `/name`, the draft after it
+ * becoming the command's argument, and leave a space after a bare command so
+ * the user can type one. A draft that already starts with that command keeps
+ * its text. Used when the command palette picks an extension command.
+ */
+export function withLeadingSlashCommand(base: string, name: string): string {
+    const draft = base.trimStart();
+    const command = `/${name}`;
+    if (draft === command) return `${command} `;
+    if (draft.startsWith(command) && /\s/.test(draft[command.length] ?? '')) return base;
+    return `${command} ${draft}`;
 }
 
 /**
@@ -161,4 +177,71 @@ export function getMarkdownAutoPairEdit(
     }
 
     return null;
+}
+
+/** `1.` and `1)` are both numbered-list markers; a bare number is not. */
+const ORDERED_LIST_MARKER = /^([ \t]*)(\d+)([.)])(?:[ \t]+.*)?$/;
+
+/** Whether the line at `lineStart` sits in a code fence; an unclosed fence runs to the end. */
+function isInsideFencedCode(value: string, lineStart: number): boolean {
+    let openMarker: string | null = null;
+    for (const line of value.slice(0, lineStart).split('\n')) {
+        if (openMarker !== null) {
+            if (isFenceClose(line, openMarker)) {
+                openMarker = null;
+            }
+            continue;
+        }
+        openMarker = matchFenceOpen(line)?.marker ?? null;
+    }
+    return openMarker !== null;
+}
+
+/**
+ * Shift+Enter on a numbered list item continues the list instead of adding a
+ * plain line: the next line gets the following number and the same indentation
+ * and delimiter. Anywhere else the key keeps its newline behavior, so the
+ * caret has to sit at the end of the line, outside fenced code, for this to
+ * apply.
+ */
+export function getOrderedListContinuationEdit(
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+): {
+    from: number;
+    to: number;
+    insert: string;
+    selectionStart: number;
+    selectionEnd: number;
+} | null {
+    if (selectionStart !== selectionEnd) {
+        return null;
+    }
+
+    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
+    const lineBreak = value.indexOf('\n', selectionStart);
+    const lineEnd = lineBreak === -1 ? value.length : lineBreak;
+    if (selectionStart !== lineEnd) {
+        return null;
+    }
+
+    const match = ORDERED_LIST_MARKER.exec(value.slice(lineStart, lineEnd));
+    if (!match) {
+        return null;
+    }
+
+    const number = Number(match[2]);
+    if (!Number.isSafeInteger(number) || isInsideFencedCode(value, lineStart)) {
+        return null;
+    }
+
+    const insert = `\n${match[1]}${number + 1}${match[3]} `;
+    return {
+        from: selectionStart,
+        to: selectionStart,
+        insert,
+        selectionStart: selectionStart + insert.length,
+        selectionEnd: selectionStart + insert.length,
+    };
 }

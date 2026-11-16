@@ -308,6 +308,38 @@ describe('custom provider config persistence', () => {
     });
   });
 
+  test('the client certificate is written beside other settings, kept when the payload has none, and removed by null', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        gw: {
+          name: 'Gateway',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['GW_KEY'],
+          settings: { baseURL: 'https://gw.example.com/v1', timeout: 60000 },
+          models: { m: { modelID: 'm', name: 'M' } },
+        },
+      },
+    });
+    const save = (settings) => upsertProviderConfig('gw', {
+      name: 'Gateway', env: ['GW_KEY'], settings, models: { m: { name: 'M' } },
+    }, projectDir, 'project');
+
+    const tls = { cert: '{file:/etc/client.pem}', key: '{file:/etc/client.key}', passphrase: ' two words ' };
+    save({ baseURL: 'https://gw.example.com/v1', tls: { ...tls, cert: ` ${tls.cert} ` } });
+    expect(readJson(configPath).providers.gw.settings).toEqual({ baseURL: 'https://gw.example.com/v1', timeout: 60000, tls });
+
+    // A form that never read the stored entry sends no certificate.
+    save({ baseURL: 'https://gw.example.com/v1' });
+    expect(readJson(configPath).providers.gw.settings).toEqual({ baseURL: 'https://gw.example.com/v1', timeout: 60000, tls });
+
+    save({ baseURL: 'https://gw.example.com/v1', tls: null });
+    expect(readJson(configPath).providers.gw.settings).toEqual({ baseURL: 'https://gw.example.com/v1', timeout: 60000 });
+
+    expect(() => save({ baseURL: 'https://gw.example.com/v1', tls: { cert: '{file:/etc/client.pem}' } }))
+      .toThrow('A client certificate needs both the certificate and the key');
+  });
+
   test('a form save keeps the type of a hand-marked image model', () => {
     const configPath = path.join(projectDir, '.opencode', 'opencode.json');
     writeJson(configPath, {

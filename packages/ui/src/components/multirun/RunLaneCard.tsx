@@ -12,6 +12,7 @@ import { getSessionGoal, type SessionGoalStatus } from '@/lib/sessionGoalMetadat
 import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { LaneStatusIcon } from './LaneStatusIcon';
+import { DiffCount } from '@/components/ui/diff-count';
 
 const costFormatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -129,8 +130,7 @@ export function RunLaneCard({
       ? <span>{t('multirun.overview.card.noChanges')}</span>
       : (
         <span className="inline-flex items-center gap-1">
-          <span className="text-[var(--status-success)]">+{diff.stat.insertions}</span>
-          <span className="text-[var(--status-error)]">−{diff.stat.deletions}</span>
+          <DiffCount added={diff.stat.insertions} removed={diff.stat.deletions} />
           <span>· {diff.stat.files === 1
             ? t('multirun.overview.card.filesSingle', { count: diff.stat.files })
             : t('multirun.overview.card.filesPlural', { count: diff.stat.files })}</span>

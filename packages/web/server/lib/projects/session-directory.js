@@ -23,9 +23,14 @@ const findLinkedWorktreeRoot = async (directory) => {
   }
 };
 
-/** Register one session destination without changing any window's selection. */
+/**
+ * Register one session destination without changing any window's selection.
+ * The answer names the session's canonical folder: a session OpenCode recorded
+ * under a symlinked spelling of that folder (`/tmp` for `/private/tmp`) is
+ * moved there first, since clients match sessions to projects by that path.
+ */
 export const registerSessionProjectRoutes = (app, {
-  validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, emitWorktreeChanged,
+  validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, moveSession, emitWorktreeChanged,
   linkedWorktreeRoot = findLinkedWorktreeRoot,
 }) => {
   app.post('/api/projects/session-directory', async (req, res) => {
@@ -37,7 +42,9 @@ export const registerSessionProjectRoutes = (app, {
       const validated = await validateDirectoryPath(parsed.data.directory);
       if (!validated.ok) return res.status(400).json({ error: validated.error });
       const directory = validated.directory;
-      if (await resolveSessionDirectory(parsed.data.sessionId) !== directory) {
+      const recorded = await resolveSessionDirectory(parsed.data.sessionId);
+      const respelled = recorded !== directory;
+      if (respelled && !(recorded && (await validateDirectoryPath(recorded)).directory === directory)) {
         return res.status(409).json({ error: 'The session directory changed' });
       }
       // Finish one-time trust seeding before acquiring the settings write queue.
@@ -72,9 +79,17 @@ export const registerSessionProjectRoutes = (app, {
         }
         return { id: createProjectIdFromPath(directory), path: directory, label: path.basename(directory) || directory, addedAt: Date.now(), lastOpenedAt: Date.now() };
       });
+      if (respelled) {
+        // A move made during registration wins; this one would undo it.
+        if (await resolveSessionDirectory(parsed.data.sessionId) !== recorded) {
+          return res.status(409).json({ error: 'The session directory changed' });
+        }
+        // A running session takes the move at its next step boundary.
+        await moveSession(parsed.data.sessionId, directory);
+      }
       // Clients list the new worktree under its project on this event.
       if (worktreeOf) emitWorktreeChanged?.({ directories: [worktreeOf.path, directory], at: Date.now() });
-      return res.json({ project });
+      return res.json({ project, directory });
     } catch (error) {
       if (error?.code === OPENCODE_TRUST_REQUIRED) {
         return res.status(403).json({ code: OPENCODE_TRUST_REQUIRED, directory: parsed.data.directory });

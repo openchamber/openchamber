@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Agent } from '@/lib/opencode/model';
-import { getCycledPrimaryAgentName, getShortAgentLabel, getShortModelLabel } from './mobileControlsUtils';
+import { getCycledPrimaryAgentName, getEffortTone } from './mobileControlsUtils';
 
 const agent = (name: string, mode: Agent['mode'] = 'primary'): Pick<Agent, 'name' | 'mode'> => ({ name, mode });
 const agents = [agent('build'), agent('plan'), agent('incident'), agent('review'), agent('helper', 'subagent')];
@@ -31,23 +31,21 @@ describe('getCycledPrimaryAgentName', () => {
   });
 });
 
-describe('getShortModelLabel', () => {
-  test('drops the family word before a named tier', () => {
-    expect(getShortModelLabel('Claude Opus 5.5')).toBe('Opus 5.5');
-    expect(getShortModelLabel('Claude Sonnet 4')).toBe('Sonnet 4');
+describe('getEffortTone', () => {
+  test('only the default level, or no level, stays grey', () => {
+    expect(getEffortTone(undefined)).toBe('default');
+    expect(getEffortTone('default')).toBe('default');
+    expect(getEffortTone('Default')).toBe('default');
   });
 
-  test('keeps names whose next word is a version, short names and hyphenated families', () => {
-    expect(getShortModelLabel('Gemini 2.5 Pro')).toBe('Gemini 2.5 Pro');
-    expect(getShortModelLabel('Sol 6.1')).toBe('Sol 6.1');
-    expect(getShortModelLabel('GPT-5 mini high')).toBe('GPT-5 mini high');
+  test('tints each OpenCode level by how hard it thinks', () => {
+    for (const level of ['none', 'minimal', 'low', 'thinking']) expect(getEffortTone(level)).toBe('info');
+    for (const level of ['medium', 'High']) expect(getEffortTone(level)).toBe('warning');
+    for (const level of ['xhigh', 'max']) expect(getEffortTone(level)).toBe('error');
   });
-});
 
-describe('getShortAgentLabel', () => {
-  test('keeps the part before " - "', () => {
-    expect(getShortAgentLabel('Sisyphus - ultraworker')).toBe('Sisyphus');
-    expect(getShortAgentLabel('Build')).toBe('Build');
-    expect(getShortAgentLabel('Code-reviewer')).toBe('Code-reviewer');
+  test('an unknown level reads as info', () => {
+    expect(getEffortTone('turbo')).toBe('info');
+    expect(getEffortTone('8000')).toBe('info');
   });
 });

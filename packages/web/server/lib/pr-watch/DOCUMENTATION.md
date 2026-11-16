@@ -20,8 +20,11 @@ creates them, routes registered there, stopped by
 
 ## Watch
 
-`{ sessionID, directory, url, item, startedAt, last, wake }`, one per session; a
-new `pr.watch` replaces the session's previous one. `item` is the tracked item
+`{ sessionID, directory, url, item, startedAt, last, wake }`, one per session
+and pull request: a session waits on as many as it watches, and `pr.watch` on
+one it already waits on starts that watch over. `pr.unwatch` with `url` stops
+that one, without it every one of the session; a supplied `url` that names no
+pull request (empty, null, not a string) is a 400 that stops nothing. `item` is the tracked item
 the address names (`parsePullRequestUrl`): a GitHub pull request, on another
 host a GitHub Enterprise one, or a GitLab merge request read on its own
 origin. Other providers are refused. `last` is the last state seen (state,
@@ -71,12 +74,22 @@ with its sessions, and a woken turn would run in a session on its way out.
 
 ## Wake
 
-A wake ends the watch: the item leaves the interest, and the agent calls
+A wake ends its watch: the item leaves the interest, and the agent calls
 `pr.watch` again when it needs to wait once more. The message waits until the
 session is not running and none of its subagents runs (a user may be talking
 to the agent), checked against OpenCode (`../opencode/session-activity.js`);
 the session's next idle event re-arms it. An archived session is not woken,
-its watch ends. The message id is minted and saved before the first attempt,
+its watches end.
+
+A session's wakes are admitted one at a time: an attempt that comes up while
+another is in flight runs once that one is over, after the quiet delay
+(`QUIET_MS`, 500 ms). A second pull request's wake waits for the turn the
+first one started only when OpenCode already reports that turn as running at
+the next probe. A change to another pull request arms its attempt at once
+(`onStatesChanged`), and OpenCode may report the turn busy later than that, so
+the second message can be steered into the first wake's turn. Nothing is lost
+either way: each message keeps its own id and is admitted once, and the agent
+reads both, at worst in one turn. The message id is minted and saved before the first attempt,
 and OpenCode answering 409 to a second admission counts as delivered, so a
 crash or a lost response never wakes twice. A 404 ends the watch; other
 failures retry with backoff and are given up after eight attempts.
@@ -94,9 +107,11 @@ revision or persistence write.
 
 The message is a `synthetic` admitted with `delivery: steer` and `resume: true`:
 an `<openchamber-pull-request url number>` envelope naming what changed and
-telling the agent the watch ended, `description` `Pull request #N: …` (the
-chat shows it as a notice row, `packages/ui/src/lib/opencode/session-notices.ts`)
-and `metadata.source: "openchamber-pr-watch"`.
+telling the agent the watch ended, `description` `Pull request #N: …` and
+`metadata` with `source: "openchamber-pr-watch"`, `url`, `events`,
+`failedChecks` and `authors`. The chat builds its row from the metadata in the
+user's language and never shows the envelope
+(`packages/ui/src/lib/opencode/session-notices.ts`).
 
 A failed check or new activity names what to start with: the failed checks
 (`a check failed (lint, tests)`) and the authors of the new comments and
@@ -107,18 +122,19 @@ wake is not delivered until that read is over, and a read that fails sends it
 without names. At most eight names per event; check names are workflow
 authors' text, so `<`, `>` and line breaks are dropped from them.
 
-`session.deleted` ends the session's watch.
+`session.deleted` ends the session's watches.
 
 ## Routes and events
 
 | Route | Purpose |
 |---|---|
 | `GET /api/pr-watch` | `{ revision, watches[] }`: `sessionID`, `directory`, `url`, `number`, `title`, `status` (`unknown`, `pending`, `passed`, `failed`, `open`, `waking`), `startedAt` |
-| `DELETE /api/pr-watch/sessions/:sessionID` | The user's stop: the session is not woken |
+| `DELETE /api/pr-watch/sessions/:sessionID` | The user's stop, of the pull request at `?url=` or of every one: what it stops does not wake the session |
 
 Every change broadcasts `openchamber:pr-watch.updated`
-`{ revision, sessionID, watch | null }` on the control stream. The UI
-projection is `packages/ui/src/sync/pr-watch.ts`.
+`{ revision, sessionID, watches[], watch | null }` on the control stream:
+`watches` is the session's whole list, `watch` its newest entry for clients
+that know only one. The UI projection is `packages/ui/src/sync/pr-watch.ts`.
 
 ## Runtime parity
 
@@ -129,6 +145,15 @@ isolated space refuses `pr.watch`: it has no source-control accounts to read
 with.
 
 ## Decisions
+
+### Why each pull request is its own watch
+
+An agent often opens several pull requests in one task (a stack, one per
+repository) and waits on all of them. One watch per session replaced the
+earlier pull request without telling the agent, which went on believing
+something would wake it. Each pull request keeps its own baseline and wakes
+on its own; delivery stays one at a time per session, so wakes usually arrive
+between turns, and a second one may share the first one's turn (see *Wake*).
 
 ### Why one wake ends the watch
 

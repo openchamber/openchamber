@@ -714,3 +714,39 @@ describe('OpenCode env runtime', () => {
     });
   });
 });
+
+describe('resolveGitBinaryForSpawn', () => {
+  const originalGitBinary = process.env.GIT_BINARY;
+  const originalOpenChamberGitBinary = process.env.OPENCHAMBER_GIT_BINARY;
+  afterEach(() => {
+    if (originalGitBinary === undefined) delete process.env.GIT_BINARY;
+    else process.env.GIT_BINARY = originalGitBinary;
+    if (originalOpenChamberGitBinary === undefined) delete process.env.OPENCHAMBER_GIT_BINARY;
+    else process.env.OPENCHAMBER_GIT_BINARY = originalOpenChamberGitBinary;
+  });
+
+  it.each(['linux', 'darwin'])('uses an executable override on %s and PATH git otherwise', (platform) => {
+    setPlatform(platform);
+    delete process.env.GIT_BINARY;
+    const { runtime } = createRuntime({}, { isExecutable: (candidate) => candidate === '/opt/git/bin/git' });
+
+    process.env.OPENCHAMBER_GIT_BINARY = '/opt/git/bin/git';
+    expect(runtime.resolveGitBinaryForSpawn()).toBe('/opt/git/bin/git');
+    process.env.OPENCHAMBER_GIT_BINARY = '/missing/git';
+    expect(runtime.resolveGitBinaryForSpawn()).toBe('git');
+    delete process.env.OPENCHAMBER_GIT_BINARY;
+    process.env.GIT_BINARY = '/opt/git/bin/git';
+    expect(runtime.resolveGitBinaryForSpawn()).toBe('/opt/git/bin/git');
+  });
+
+  it('keeps the first Windows resolution', () => {
+    setPlatform('win32');
+    delete process.env.GIT_BINARY;
+    const { runtime } = createRuntime({}, { isExecutable: (candidate) => candidate.startsWith('C:\\Git') });
+
+    process.env.OPENCHAMBER_GIT_BINARY = 'C:\\Git\\git.exe';
+    expect(runtime.resolveGitBinaryForSpawn()).toBe('C:\\Git\\git.exe');
+    process.env.OPENCHAMBER_GIT_BINARY = 'C:\\Git\\other.exe';
+    expect(runtime.resolveGitBinaryForSpawn()).toBe('C:\\Git\\git.exe');
+  });
+});

@@ -299,6 +299,35 @@ describe('settings normalization runtime - case-insensitive filesystem casing (#
     expect(result.settings.projects[0].path).toBe('/Users/me/Desktop/VcFiles/app');
   });
 
+  it('reads each shared ancestor once per projects pass (#6084)', () => {
+    // `Locked` is listed but cannot be read.
+    const tree = { '/': ['Users'], '/Users': ['me'], '/Users/me': ['Code'], '/Users/me/Code': ['a', 'b', 'Locked'] };
+    const reads = [];
+    const runtime = createTestRuntime({
+      path: posixPath,
+      processLike: { platform: 'darwin', env: {} },
+      realpathSync: (p) => p,
+      readdirSync: (dir) => {
+        reads.push(dir);
+        if (!Object.prototype.hasOwnProperty.call(tree, dir)) throw new Error('ENOENT');
+        return tree[dir];
+      },
+    });
+    const projects = runtime.sanitizeProjects([
+      { id: 'a', path: '/users/me/code/a' },
+      { id: 'b', path: '/Users/me/Code/b' },
+      { id: 'c', path: '/users/me/code/locked/c' },
+      { id: 'd', path: '/Users/me/Code/Locked/d' },
+    ]);
+    expect(projects.map((project) => project.path)).toEqual([
+      '/Users/me/Code/a',
+      '/Users/me/Code/b',
+      '/users/me/code/locked/c',
+      '/Users/me/Code/Locked/d',
+    ]);
+    expect(reads).toEqual(['/', '/Users', '/Users/me', '/Users/me/Code', '/Users/me/Code/Locked']);
+  });
+
   it('recovers on-disk casing and drive-letter case on Windows (win32)', () => {
     const winPath = {
       resolve: (...args) => args[args.length - 1],

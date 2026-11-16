@@ -103,16 +103,16 @@ function getLanAddresses() {
   return addresses;
 }
 
-function clearViteCache() {
-  const cacheDirs = [
-    path.join(webRoot, 'node_modules/.vite'),
-    path.join(webRoot, 'node_modules/.vite-temp'),
-  ];
+// One dependency cache per UI port. Dev servers often run side by side (the
+// maintainer's own, agents' isolated instances), and with one shared cache a
+// newly started server re-optimizes it under the running ones: their next
+// lazy chunk answers 504 "Outdated Optimize Dep" and that part of the page
+// never loads.
+const viteCacheDir = path.join(webRoot, `node_modules/.vite-dev-${uiPort}`);
 
-  for (const cacheDir of cacheDirs) {
-    if (!existsSync(cacheDir)) continue;
-    rmSync(cacheDir, { recursive: true, force: true });
-  }
+function clearViteCache() {
+  if (!existsSync(viteCacheDir)) return;
+  rmSync(viteCacheDir, { recursive: true, force: true });
 }
 
 clearViteCache();
@@ -167,6 +167,7 @@ function startVite() {
     {
       OPENCHAMBER_PORT: backendPort,
       OPENCHAMBER_DISABLE_PWA_DEV: '1',
+      OPENCHAMBER_VITE_CACHE_DIR: viteCacheDir,
     },
     { cwd: webRoot },
   );

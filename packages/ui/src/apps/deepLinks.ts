@@ -27,7 +27,7 @@ export type DeepLinkIntent =
   | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
   | { type: 'status' }
-  | { type: 'settings'; section?: string }
+  | { type: 'settings'; section?: string; providerId?: string }
   | { type: 'changes'; path?: string; staged?: boolean }
   | { type: 'view'; target: ViewTarget };
 
@@ -107,8 +107,17 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
     case 'status':
       return { type: 'status' };
 
-    case 'settings':
-      return { type: 'settings', section: rest[0] || query.get('section') || undefined };
+    case 'settings': {
+      const section = rest[0] || query.get('section') || undefined;
+      const provider = query.get('provider')?.trim();
+      // Only the Usage section interprets provider deep-links. Extension quota
+      // providers use the same id format (ext-...) as built-in providers.
+      const intent: DeepLinkIntent = { type: 'settings', section };
+      if (section === 'usage' && provider && /^[a-z0-9][a-z0-9-]{0,79}$/.test(provider)) {
+        intent.providerId = provider;
+      }
+      return intent;
+    }
 
     case 'changes':
       return {

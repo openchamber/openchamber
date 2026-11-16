@@ -26,6 +26,7 @@ const projectSetupReads: Array<{ id: string; path: string }> = [];
 const uiState = {
   terminalShell: 'zsh',
   terminalLoginShells: ['zsh'],
+  terminalOpenOnProjectAction: true,
   setSettingsPage: () => undefined,
   setSettingsDialogOpen: () => undefined,
   setSettingsProjectsSelectedId: () => undefined,
@@ -250,6 +251,7 @@ describe('HeaderProjectAction lifecycle', () => {
     detectedDevServer.previewUrlHint = null;
     detectedDevServer.actionId = undefined;
     mockedDeviceInfo.isMobile = true;
+    uiState.terminalOpenOnProjectAction = true;
     effectiveDirectory = '/repo';
     projectSetupReads.length = 0;
     sessionCounter = 0;
@@ -557,6 +559,22 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(useTerminalStore.getState().getDirectoryState('/repo-worktree')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
     expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action') ?? false).toBe(false);
     expect(openContextPanelTabCalls).toEqual([{ directory: '/repo-worktree', mode: 'terminal', targetDirectory: null }]);
+  });
+
+  test('an action keeps its terminal closed when the user disabled automatic reveal', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    await renderButton();
+    const button = runButton();
+    if (!button) throw new Error('expected primary button');
+
+    await act(async () => {
+      button.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
   });
 
   test('parent action runs in the parent checkout, stores its tab there, and reveals it from the live worktree host', async () => {

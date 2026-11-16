@@ -14,6 +14,9 @@ const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean
  * generation to `POST /api/experimental/generate/text`, 2.1.0 added
  * `archived` to `PATCH /api/session/{id}`, 2.0.20 `GET /api/credential`,
  * 2.0.15 `PATCH /api/session` metadata.)
+ *
+ * `engines.opencode` in packages/web/package.json repeats it, so the release
+ * published to npm says what it needs before a server installs it.
  */
 const MINIMUM_OPENCODE_VERSION = '2.2.4';
 
@@ -28,8 +31,11 @@ const compareRelease = (left, right) => {
   return 0;
 };
 
-const isOlderThanMinimum = (version) => versionSchema.safeParse(version).success
-  && compareRelease(version, MINIMUM_OPENCODE_VERSION) < 0;
+/** Whether OpenCode `version` is older than `minimum`, by release numbers. */
+export const isOpenCodeOlderThan = (version, minimum) => versionSchema.safeParse(version).success
+  && compareRelease(version, minimum) < 0;
+
+const isOlderThanMinimum = (version) => isOpenCodeOlderThan(version, MINIMUM_OPENCODE_VERSION);
 
 /** 2.x at or above the minimum. A future major is a contract OpenChamber has not met yet. */
 export const isSupportedOpenCodeVersion = (version) => versionSchema.safeParse(version).success

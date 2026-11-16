@@ -1,5 +1,4 @@
 import React from 'react';
-import { useComposerStatusChip } from '@/components/chat/composer/state/composerStatusChips';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -152,8 +151,6 @@ export const SessionRestartInterruptionRow: React.FC<SessionRestartInterruptionR
   // the dock show it have loaded; the notice must not flash in between.
   const answeredInDock = interruption?.tool?.name === 'question' && (questionAnswerable || pendingQuestion !== null);
   const visible = Boolean(sessionId && interruption && !answeredInDock && (!status || status.type === 'idle'));
-
-  useComposerStatusChip('interrupted', visible ? { icon: 'error-warning', label: t('chat.composerStatus.chip.interrupted') } : null);
 
   if (!visible || !sessionId || !interruption) return null;
 

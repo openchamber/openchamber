@@ -27,6 +27,7 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   let ignoreNextFocus = false;
   let pointerActive = false;
   let focusActive = false;
+  let touchPointerDown = false;
   let observer: MutationObserver | null = null;
   const previousExpanded = element.getAttribute('aria-expanded');
   const previousPopup = element.getAttribute('aria-haspopup');
@@ -117,6 +118,24 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
     clearTimer();
     reportAnchorActivity();
   };
+  // A touch screen has no hover: a tap is how its user asks for the preview.
+  // The tap opens it (a phone host shows it as a sheet) and is the whole
+  // click, so the element's own click handler does not also run under it.
+  const onPointerDown = (event: Event): void => {
+    touchPointerDown = 'pointerType' in event && typeof event.pointerType === 'string'
+      && event.pointerType !== '' && event.pointerType !== 'mouse';
+  };
+  const onPointerCancel = (): void => { touchPointerDown = false; };
+  const onClick = (event: Event): void => {
+    const tapped = touchPointerDown;
+    touchPointerDown = false;
+    // A keyboard click (detail 0) after a cancelled touch stays the element's click.
+    if (!tapped || ('detail' in event && event.detail === 0)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (activeId) close();
+    else open(false);
+  };
   const onFocus = (): void => {
     focusActive = true;
     if (activeId) reportAnchorActivity();
@@ -159,6 +178,10 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
   // pointer move over this element still establishes a new hover intent.
   element.addEventListener('pointermove', onPointerEnter);
   element.addEventListener('pointerleave', onPointerLeave);
+  element.addEventListener('pointerdown', onPointerDown);
+  element.addEventListener('pointercancel', onPointerCancel);
+  // Capture runs at the target before the element's own click listeners.
+  element.addEventListener('click', onClick, true);
   element.addEventListener('focus', onFocus);
   element.addEventListener('focusout', onFocusOut);
   element.addEventListener('keydown', onKeyDown);
@@ -180,6 +203,9 @@ export const mountPopoverAnchor = (element: HTMLElement, options: PopoverAnchorO
     element.removeEventListener('pointerenter', onPointerEnter);
     element.removeEventListener('pointermove', onPointerEnter);
     element.removeEventListener('pointerleave', onPointerLeave);
+    element.removeEventListener('pointerdown', onPointerDown);
+    element.removeEventListener('pointercancel', onPointerCancel);
+    element.removeEventListener('click', onClick, true);
     element.removeEventListener('focus', onFocus);
     element.removeEventListener('focusout', onFocusOut);
     element.removeEventListener('keydown', onKeyDown);

@@ -1,3 +1,4 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import { createHash } from 'node:crypto';
 import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
@@ -1032,6 +1033,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         if (!request.draft) return { state: 'succeeded', result: { ready: true } };
         return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
       }
+      if (kind === 'change-request-draft') {
+        if (request.draft) return { state: 'succeeded', result: { draft: true } };
+        return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
+      }
       return { state: 'outcome-unknown' };
     },
 
@@ -1165,6 +1170,17 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (!current.draft) return { ready: true };
       const request = validate(await client.MergeRequests.edit(projectId, number, { title: asReadyTitle(current.title) }));
       return { ready: !request.draft };
+    },
+
+    async draftChangeRequest(payload) {
+      const { target, projectId, number } = await resolveMutationActionTarget(payload);
+      const validate = (raw) => (payload.providerTarget
+        ? requireMutationResponse(raw, target.project, payload.providerTarget, payload.expectedTarget)
+        : requireMapped(mapGitLabMergeRequest(raw, identity, target.project), 'GitLab returned an invalid merge request'));
+      const current = validate(await client.MergeRequests.show(projectId, number));
+      if (current.draft) return { draft: true };
+      const request = validate(await client.MergeRequests.edit(projectId, number, { title: asDraftTitle(current.title) }));
+      return { draft: request.draft };
     },
 
     async listChangeRequests(directory, options = {}) {
@@ -1328,7 +1344,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * diff was taken against, never the target branch tip. A fork's head
      * commit is reachable from the target project, so every read goes there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, binary, linked }) {
       const { target, raw } = await findByNumber(directory, number, project, {
         constrainToPrimary: true, remote, requireNetwork: true, linked,
       });
@@ -1339,6 +1355,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       }
       const readFile = async (filePath, ref) => {
         const content = await client.RepositoryFiles.showRaw(target.project.id, filePath, ref);
+        if (binary) {
+          if (!(content instanceof Blob)) throw new Error('GitLab returned invalid file contents');
+          return documentDataUrl(Buffer.from(await content.arrayBuffer()));
+        }
         const value = content instanceof Blob ? await content.text() : content;
         if (!isString(value)) throw new Error('GitLab returned invalid file contents');
         if (Buffer.byteLength(value) > MAX_FULL_FILE_BYTES) {

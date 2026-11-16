@@ -27,6 +27,14 @@ describe('a namespace the tool name already implies', () => {
     expect(resolveAgentToolAction('knowledge.list', 'openchamber').error).toBeDefined();
   });
 
+  test('resolves read inside the usage tool', () => {
+    expect(resolveAgentToolAction('read', 'openchamber_usage')).toEqual({ action: 'usage.read' });
+    expect(resolveAgentToolAction('usage.read', 'openchamber_usage')).toEqual({ action: 'usage.read' });
+    expect(resolveAgentToolAction('get', 'openchamber_usage').error).toContain('usage.read');
+    // The memory tool's `read` stays its own.
+    expect(resolveAgentToolAction('read', 'openchamber_memory')).toEqual({ action: 'memory.read' });
+  });
+
   test('keeps a fully qualified action as it is', () => {
     expect(resolveAgentToolAction('memory.read', 'openchamber_memory')).toEqual({ action: 'memory.read' });
   });

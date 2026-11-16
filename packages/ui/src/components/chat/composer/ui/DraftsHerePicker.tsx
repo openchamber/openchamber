@@ -21,6 +21,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -95,18 +97,23 @@ const DraftsHerePickerView: React.FC = () => {
 
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="ms-auto h-7 w-fit shrink-0 gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent"
-                >
-                    <Icon name="edit" className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="typography-ui-label">{countLabel}</span>
-                    <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
-                </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="ms-auto h-7 w-fit shrink-0 gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent"
+                        >
+                            <Icon name="edit" className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="typography-ui-label">{countLabel}</span>
+                            <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{t('chat.draftTarget.drafts.heading')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" constrainToMain className="max-h-80 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto">
                 <DropdownMenuLabel>{t('chat.draftTarget.drafts.heading')}</DropdownMenuLabel>
                 {drafts.map((draft) => <DraftMenuItem key={draft.id} draft={draft} />)}
@@ -121,14 +128,9 @@ export const DraftsHerePicker = React.memo(DraftsHerePickerView);
 const DraftSheetRow: React.FC<{ draft: SessionDraft; onClose: () => void }> = ({ draft, onClose }) => {
     const { label, open } = useSessionDraftRow(draft, onClose);
     return (
-        <button
-            type="button"
-            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-            onClick={open}
-        >
-            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate italic">{label}</span>
-            <DraftTime draft={draft} />
-        </button>
+        <MobileSheetRow meta={<DraftTime draft={draft} />} onClick={open}>
+            <span dir="auto" className="oc-ui-start-align font-normal italic">{label}</span>
+        </MobileSheetRow>
     );
 };
 
@@ -153,9 +155,7 @@ const MobileDraftsHerePickerView: React.FC = () => {
                 <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             </button>
             <MobileOverlayPanel open={open} title={t('chat.draftTarget.drafts.heading')} onClose={close}>
-                <div className="flex flex-col px-3 pb-4 pt-1">
-                    {drafts.map((draft) => <DraftSheetRow key={draft.id} draft={draft} onClose={close} />)}
-                </div>
+                {drafts.map((draft) => <DraftSheetRow key={draft.id} draft={draft} onClose={close} />)}
             </MobileOverlayPanel>
         </>
     );

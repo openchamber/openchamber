@@ -13,14 +13,14 @@ import { Icon } from '@/components/icon/Icon';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import {
   findSwitcherItemAncestorIds,
   useSwitcherItems,
   type SwitcherItem,
 } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useUIStore } from '@/stores/useUIStore';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessions, refreshRecentGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { formatSessionCompactDateLabel } from './sidebar/utils';
 import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
@@ -31,12 +31,18 @@ type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
 type SwitcherVariant = 'default' | 'compact';
 const NEW_SESSION_SWITCHER_TARGET = 'new-session';
+const RECENT_SESSIONS_LIMIT = 10;
 
 type SessionSwitcherDropdownProps = {
   children: React.ReactNode;
   variant?: SwitcherVariant;
   scopeProjectId?: string | null;
   align?: 'start' | 'center' | 'end';
+  /**
+   * The surface keeps no complete session list (Mini Chat): opening reads the
+   * newest page, which covers the rows shown, not every session.
+   */
+  recentOnly?: boolean;
 };
 
 export function SessionSwitcherDropdown({
@@ -44,6 +50,7 @@ export function SessionSwitcherDropdown({
   variant = 'default',
   scopeProjectId = null,
   align = 'start',
+  recentOnly = false,
 }: SessionSwitcherDropdownProps): React.ReactElement {
   const isOpen = useUIStore((state) => state.isSessionDropdownOpen);
   const setOpen = useUIStore((state) => state.setSessionDropdownOpen);
@@ -64,6 +71,7 @@ export function SessionSwitcherDropdown({
             onSelect={() => setOpen(false)}
             variant={variant}
             scopeProjectId={scopeProjectId}
+            recentOnly={recentOnly}
           />
         ) : null}
       </DropdownMenuContent>
@@ -75,12 +83,22 @@ type SwitcherContentProps = {
   onSelect: () => void;
   variant: SwitcherVariant;
   scopeProjectId: string | null;
+  recentOnly: boolean;
 };
 
-function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
+function SwitcherContent({ onSelect, variant, scopeProjectId, recentOnly }: SwitcherContentProps): React.ReactElement {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
-  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId });
+  // Plain recency, same as the mobile switcher: with pins first, a few pinned
+  // sessions (ordered by creation) fill every slot and hide the recent ones.
+  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId, maxParents: RECENT_SESSIONS_LIMIT, ignorePins: true });
+
+  React.useEffect(() => {
+    // Fresh records on open: updated stamps re-sort recents (see
+    // raiseSessionOrderingBaselines) while the cached list shows first. The
+    // complete snapshot, or the newest page where that is all the surface keeps.
+    void (recentOnly ? refreshRecentGlobalSessions() : refreshGlobalSessions());
+  }, [recentOnly]);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const { t } = useI18n();
 
@@ -233,13 +251,14 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
 
   const isUnread = useSessionUnread(session.id);
+  const markedUnread = useSessionMarkedUnread(session.id);
 
   const isActive = currentSessionId === session.id;
   const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
   const runningBlink = useWaitingBlink(isStreaming);
-  const showUnreadDot = !isStreaming && isUnread && !isActive;
+  const showUnreadDot = !isStreaming && isUnread && (!isActive || markedUnread);
 
   const timestamp = getSessionActivityTime(session) || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
@@ -338,6 +357,10 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
             runningClassName={cn('h-2 w-2', runningBlink)}
           />
         </span>
+      ) : null}
+      {/* Compact rows have no meta line; the time sits on the right, as on mobile. */}
+      {variant === 'compact' ? (
+        <span className="shrink-0 self-center typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
       ) : null}
     </BaseMenu.Item>
   );

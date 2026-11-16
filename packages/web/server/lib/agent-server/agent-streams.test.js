@@ -136,6 +136,25 @@ describe('agent server streams', () => {
     expect(broadcastGlobalUiEvent.mock.calls[1][0].properties.modes).toEqual({ ses_agent: 'ask' });
   });
 
+  it('preserves bounded share-answer toast and clearing fields on its owning stream', async () => {
+    const { send, broadcastGlobalUiEvent, broadcastUiEvent } = setup();
+    const properties = {
+      kind: 'share-answer', sessionId: 'ses_agent', title: 'Answered', body: 'Chosen', tag: 'share-ses_agent',
+      toastOnly: true, showWhenFocused: true, skipTurnStart: true, action: 'system.shutdown',
+    };
+    await send('openchamber:notification', properties);
+    await send('openchamber:notification', properties, 'notifications');
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    expect(broadcastGlobalUiEvent).toHaveBeenCalledExactlyOnceWith({
+      type: 'openchamber:notification', origin: 'agent', spaceId: null,
+      properties: {
+        kind: 'share-answer', sessionId: 'ses_agent', title: 'Answered', body: 'Chosen', tag: 'share-ses_agent',
+        toastOnly: true, showWhenFocused: true, skipTurnStart: true,
+        desktopNotificationDelivered: false, desktopStdoutActive: false, origin: 'agent', spaceId: null,
+      },
+    });
+  });
+
   it('reconstructs metadata and tracked-item states without carrying nested authority claims', async () => {
     const { send, broadcastUiEvent } = setup();
     await send('openchamber:session-metadata', { sessionID: 'ses_agent', metadata: {
