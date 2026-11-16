@@ -19,31 +19,12 @@ import { SourceBoardVotes } from './SourceBoardVotes';
 
 type Busy = 'comment' | 'thread' | 'vote' | ReviewVerdict | null;
 
-/**
- * Below an issue's, discussion's or pull request's activity: write a comment, or on an
- * open pull request review it with the text as the review's body. A verdict
- * host approves or requests changes; a votes host votes on the labels the
- * change names (`SourceBoardVotes`), and only on its latest revision. The
- * text stays in the box until the host has it.
- */
 export const SourceBoardReply: React.FC<{
     reference: RepositoryReference;
     context: SourceControlReadContext;
-    /**
-     * The item's feed and the list read again: after a write so it shows, and
-     * after a refused review, which is most often a push since the preview
-     * was read.
-     */
     onRefresh: () => void;
-    /** A votes host's labels, from the change's latest context; absent until it is read. */
     voteLabels?: ChangeRequestVoteLabel[];
-    /** False while an older revision is shown: hosts take votes on the latest one only. */
     onLatestRevision?: boolean;
-    /**
-     * The latest revision's SHA, from the same context as `voteLabels`: the
-     * votes go on it rather than on `reference`'s head, which a listed item
-     * may have read before the latest upload.
-     */
     latestRevision?: string;
 }> = ({ reference, context, onRefresh, voteLabels, onLatestRevision = true, latestRevision }) => {
     const { t } = useI18n();
@@ -57,8 +38,7 @@ export const SourceBoardReply: React.FC<{
     const label = referenceNumberLabel(reference, descriptor);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const openPull = reference.kind === 'pull' && reference.state === 'open' ? reference : null;
-    // Some hosts thread any change request comment (GitLab); others start a
-    // thread only from a line in a review (GitHub).
+    // external: https://docs.gitlab.com/api/discussions/#create-a-new-thread-in-the-merge-request GitLab threads general MR comments; GitHub starts review threads on diff lines.
     const canStartThread = reference.kind === 'pull' && descriptor.features.startThread;
     const body = text.trim() ? text : null;
     const shortcut = formatShortcutForDisplay('mod+enter');
@@ -104,7 +84,6 @@ export const SourceBoardReply: React.FC<{
             const input: ReviewChangeRequestInput = {
                 ...context,
                 idempotencyKey: newMutationKey(),
-                // The verdict is for the commit shown; a push since refuses it.
                 target: { project, number: openPull.number, headSha: openPull.headSha },
                 verdict,
             };
@@ -112,8 +91,7 @@ export const SourceBoardReply: React.FC<{
             const receipt = await sourceControl.changeRequestReview(input);
             const doneKey = verdict === 'approve' ? 'sourceBoard.reply.toast.approved' : 'sourceBoard.reply.toast.changesRequested';
             if (body && !receipt.result.commented) {
-                // GitLab posts the verdict and its text separately: the verdict
-                // stands, the text stays here to post again.
+                // external: https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request GitLab posts the verdict separately from its text; a failed text post leaves the verdict in place.
                 toast.warning(t(doneKey, { reference: label }), { description: t('sourceBoard.reply.toast.textNotPosted') });
             } else {
                 setText('');
@@ -135,7 +113,6 @@ export const SourceBoardReply: React.FC<{
             const input: ReviewChangeRequestInput = {
                 ...context,
                 idempotencyKey: newMutationKey(),
-                // Votes are for the revision shown, the latest; an upload since refuses them.
                 target: { project, number: openPull.number, headSha: latestRevision ?? openPull.headSha },
                 votes,
             };

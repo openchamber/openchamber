@@ -2,21 +2,14 @@ import type { RepositoryReference, SourceControlAPI, SourceControlExistingMutati
 
 import { newMutationKey } from './mutationKey';
 
-/** The three edits this helper makes; the whole runtime API satisfies it. */
 export type ItemTextWriteAPI = Pick<SourceControlAPI, 'issueUpdate' | 'changeRequestUpdate' | 'discussionUpdate'>;
 
-/** The host target a write names, with a change request's head as the preview shows it. */
 const repositoryMutationTarget = (reference: RepositoryReference): SourceControlExistingMutationTarget => {
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind !== 'pull') return { project, number: reference.number };
-    // The head the preview shows: a push since refuses the write.
     return { project, number: reference.number, head: reference.head, base: reference.base, headSha: reference.headSha };
 };
 
-/**
- * Replaces a repository item's title and description on its host, through the
- * provider's own edit: an issue's, a discussion's or a change request's.
- */
 export const updateRepositoryItemText = async (
     sourceControl: ItemTextWriteAPI,
     context: SourceControlReadContext,

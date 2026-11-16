@@ -13,7 +13,6 @@ import { formatChangeRequestLabel } from '@/lib/source-control/providers/termino
 import type { CIRun } from '@/lib/source-control/types';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 
-/** A failed run as the agent reads it: what failed, where, and what the host said. */
 const failedRunText = (run: CIRun): string => {
     const annotations = (run.annotations ?? []).map((annotation) => [
         [annotation.level, annotation.title].filter(Boolean).join(' '),
@@ -35,11 +34,6 @@ const failedRunText = (run: CIRun): string => {
     ].filter(Boolean).join('\n\n');
 };
 
-/**
- * Parts of an issue or PR pinned above the composer, as the PR panel always
- * did: the user decides what to ask and when to send. They go to the session
- * in view, or to a new session's draft.
- */
 export function usePullAttachments(reference: RepositoryReference | null) {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
@@ -53,8 +47,6 @@ export function usePullAttachments(reference: RepositoryReference | null) {
         return into;
     }, [directory, t]);
 
-    // How the chip names what it came from: a change request by its provider's
-    // label (`PR #N`, `!N`), an issue by its number (`#N`).
     const descriptor = useSourceControlProvider(reference?.provider);
     const label = !reference
         ? ''
@@ -62,9 +54,7 @@ export function usePullAttachments(reference: RepositoryReference | null) {
     const provider = reference?.provider;
 
     const pin = React.useCallback((into: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>) => {
-        // The chip names the host only when it is known.
         if (provider) draft.provider = provider;
-        // One toast for a whole batch of refused comments.
         if (!useInlineCommentDraftStore.getState().addDraft(into, draft)) {
             toast.error(t('inlineComment.toast.noRoom'), { id: 'inline-comment-no-room' });
         }

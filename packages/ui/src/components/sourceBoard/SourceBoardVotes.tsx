@@ -8,15 +8,8 @@ import { formatVoteValue } from '@/lib/source-control/reviewLabels';
 import type { ChangeRequestVoteLabel } from '@/lib/source-control/types';
 import { cn } from '@/lib/utils';
 
-/**
- * The labels a votes host lets this account vote on, one row each: the
- * label's name, the values it may cast, and who voted what. A value is
- * picked or unpicked in place; nothing is sent until the reply's Vote. Labels
- * the account may not vote on are left out.
- */
 export const SourceBoardVotes: React.FC<{
     labels: ChangeRequestVoteLabel[];
-    /** The picked value per label name. */
     votes: Record<string, number>;
     onChange: (votes: Record<string, number>) => void;
     disabled: boolean;
