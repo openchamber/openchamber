@@ -1,6 +1,5 @@
 import type { ProviderEntity, ProviderModelEntity } from './config-v2.js';
 
-/** A custom provider as Settings saves it, in v2 shape. */
 export interface CustomProviderConfig {
   package: string;
   name: string;

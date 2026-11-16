@@ -1,25 +1,7 @@
-/**
- * Canonical OpenCode 2.x config shapes for every OpenChamber entity surface.
- *
- * OpenChamber reads user-authored OpenCode config, so it must accept the v1
- * spellings OpenCode 2 still decodes (section key `agent`, permission maps,
- * `npm`/`api` providers, plugin tuples, ...). Everything OpenChamber WRITES is
- * native v2. These conversions are pure so the web server and the VS Code
- * extension host cannot drift: `packages/vscode/src/opencode-config-v2.ts`
- * re-exports this module.
- *
- * Reference: OpenCode `packages/core/src/config/normalize.ts`,
- * `packages/core/src/v1/config/migrate.ts`, and `services/www` migrate-v1 docs.
- */
 import { z } from 'zod';
 import { isRecord } from '../shared/guards.js';
 
-// ============== SECTIONS ==============
 
-/**
- * Config section keys per entity. `v2` is what OpenChamber writes; `v1` is the
- * legacy key OpenCode still decodes and OpenChamber still reads.
- */
 
 const SECTIONS = {
   agents: { v2: 'agents', v1: 'agent' },
@@ -33,11 +15,6 @@ function sectionKeys(kind) {
   return section;
 }
 
-/**
- * Read one entry from a config object, preferring the v2 section key.
- * Returns the section key the entry was found under so writers can rewrite the
- * same file in place.
- */
 function readSectionEntry(config, kind, name) {
   const { v2, v1 } = sectionKeys(kind);
   if (isRecord(config?.[v2]) && config[v2][name] !== undefined) {
@@ -49,11 +26,6 @@ function readSectionEntry(config, kind, name) {
   return { value: undefined, key: null, legacy: false };
 }
 
-/**
- * Write an entry in native v2 shape. When the name currently lives under the v1
- * key in this same file, the legacy entry is dropped so the two spellings can
- * never disagree; unrelated v1 siblings are left untouched.
- */
 function writeSectionEntry(config, kind, name, value) {
   const { v2, v1 } = sectionKeys(kind);
   if (!isRecord(config[v2])) config[v2] = {};
@@ -65,7 +37,6 @@ function writeSectionEntry(config, kind, name, value) {
   return v2;
 }
 
-/** Remove an entry from both spellings. Returns true when anything was removed. */
 function deleteSectionEntry(config, kind, name) {
   const { v2, v1 } = sectionKeys(kind);
   let removed = false;
@@ -78,14 +49,9 @@ function deleteSectionEntry(config, kind, name) {
   return removed;
 }
 
-// ============== PERMISSIONS ==============
 
 const PERMISSION_EFFECTS = new Set(['allow', 'deny', 'ask']);
 
-/**
- * v1 permission/tool keys renamed in v2. Mirrors
- * `ConfigMigrateV1.normalizeAction`, so migrated rules keep matching.
- */
 function normalizePermissionAction(action) {
   if (action === 'write' || action === 'patch') return 'edit';
   if (action === 'task') return 'subagent';
@@ -97,10 +63,6 @@ function makeRule(action, resource, effect) {
   return { action: String(action), resource: String(resource), effect };
 }
 
-/**
- * Translate a v1 `permission` value (`"ask"`, `{edit: "allow"}`, or
- * `{bash: {"git push *": "ask"}}`) into the ordered v2 rule array.
- */
 function permissionMapToRules(value) {
   if (value === undefined || value === null) return [];
   if (typeof value === 'string') {
@@ -122,7 +84,6 @@ function permissionMapToRules(value) {
   return rules;
 }
 
-/** v1 `tools: {websearch: false}` becomes deny/allow rules, as the normalizer does. */
 function toolsToRules(value) {
   if (!isRecord(value)) return [];
   return Object.entries(value)
@@ -139,20 +100,11 @@ function isPermissionRule(value) {
   );
 }
 
-/**
- * Accept either shape and always answer the ordered v2 rule array: v2
- * `permissions` arrays pass through, v1 `permission` maps/strings translate.
- */
 function normalizePermissionRules(value) {
   if (Array.isArray(value)) return value.filter(isPermissionRule).map((rule) => makeRule(rule.action, rule.resource, rule.effect));
   return permissionMapToRules(value);
 }
 
-/**
- * Rules that apply to an agent, in evaluation order (global first, agent last;
- * last match wins). `source` marks where each rule came from so an editor can
- * show which are inherited.
- */
 function effectiveAgentRules(globalRules, agentRules) {
   return [
     ...normalizePermissionRules(globalRules).map((rule) => ({ ...rule, source: 'global' })),
@@ -160,10 +112,6 @@ function effectiveAgentRules(globalRules, agentRules) {
   ];
 }
 
-/**
- * Global permission rules of a config object: v1 `tools`, then v1 `permission`,
- * then native `permissions` — the order `normalize.ts` concatenates them in.
- */
 function readGlobalPermissionRules(config) {
   if (!isRecord(config)) return [];
   return [
@@ -173,13 +121,7 @@ function readGlobalPermissionRules(config) {
   ];
 }
 
-// ============== MODEL SELECTION ==============
 
-/**
- * Split `provider/model#variant` (or a v1 `{model, variant}` pair) into parts.
- * Returns null when the reference is not a valid v2 selection, matching
- * `Model.Ref.parse`.
- */
 function parseModelSelection(model, variant) {
   if (isRecord(model)) {
     return parseModelSelection(
@@ -204,7 +146,6 @@ function parseModelSelection(model, variant) {
   return chosen ? { providerID, modelID, variant: chosen } : { providerID, modelID };
 }
 
-/** Join a selection back into the v2 `provider/model#variant` string. */
 function formatModelSelection(selection) {
   if (typeof selection === 'string') {
     const parsed = parseModelSelection(selection);
@@ -220,13 +161,7 @@ function formatModelSelection(selection) {
   return variant ? `${providerID}/${modelID}#${variant}` : `${providerID}/${modelID}`;
 }
 
-// ============== AGENTS ==============
 
-/**
- * Frontmatter keys OpenCode 2 treats as native. Any other key in an agent file
- * routes the WHOLE file through the v1 decoder (`config/plugin/agent.ts`), so a
- * writer must never mix native and legacy keys in one file.
- */
 const AGENT_NATIVE_KEYS = new Set([
   'model',
   'request',
@@ -245,12 +180,6 @@ const AGENT_REQUEST_BODY_KEYS = ['temperature', 'top_p'];
 const AGENT_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const AGENT_COLOR_FALLBACK = '#aaaaaa';
 
-/**
- * v2 accepts only a six-digit hex color (`schema/src/config/agent.ts`). v1
- * also allowed theme names (`primary`, ...); OpenCode's own migration
- * (`core/src/v1/config/migrate.ts`) turns those into `#aaaaaa`, so a record
- * OpenChamber rewrites stays decodable instead of being skipped.
- */
 function toAgentColor(value) {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -277,11 +206,6 @@ function normalizeRequest(value, legacy) {
   return Object.keys(request).length ? request : undefined;
 }
 
-/**
- * Read an agent from either spelling into the canonical API shape.
- * `body` is the markdown body for .md agents; it always wins over a frontmatter
- * `system` key, because OpenCode overrides `system` with the body.
- */
 function toAgentEntity(raw, body) {
   const source = isRecord(raw) ? raw : {};
   const system = typeof body === 'string' && body.length > 0
@@ -313,23 +237,17 @@ function toAgentEntity(raw, body) {
   ]);
 }
 
-/**
- * Native v2 agent fields for persistence. `system` is returned separately
- * because a markdown agent carries it as the body, never as frontmatter.
- */
 function fromAgentEntity(entity) {
   const canonical = toAgentEntity(entity);
   const { system, ...fields } = canonical;
   return { fields, system: typeof system === 'string' ? system : '' };
 }
 
-/** True when frontmatter uses a v1-only agent key and OpenChamber must rewrite it. */
 function isLegacyAgentFrontmatter(frontmatter) {
   if (!isRecord(frontmatter)) return false;
   return Object.keys(frontmatter).some((key) => key !== 'variant' && !AGENT_NATIVE_KEYS.has(key));
 }
 
-// ============== COMMANDS ==============
 
 function toCommandEntity(raw, body) {
   const source = isRecord(raw) ? raw : {};
@@ -361,7 +279,6 @@ function isLegacyCommandFrontmatter(frontmatter) {
   return Object.keys(frontmatter).some((key) => !COMMAND_NATIVE_KEYS.has(key));
 }
 
-// ============== MCP ==============
 
 function cleanStringMap(value) {
   if (!isRecord(value)) return undefined;
@@ -376,7 +293,6 @@ function positiveInt(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 }
 
-/** v1 `timeout: 30000` becomes `{catalog, execution}`; a v2 object passes through. */
 function toMcpTimeout(value) {
   if (isRecord(value)) {
     const timeout = pickDefined([
@@ -392,12 +308,10 @@ function toMcpTimeout(value) {
 
 const MCP_PROTOCOLS = new Set(['legacy', 'auto', '2026-07-28']);
 
-/** MCP protocol negotiation, added in OpenCode 2.0.8. Unknown values are dropped. */
 function toMcpProtocol(value) {
   return MCP_PROTOCOLS.has(value) ? value : undefined;
 }
 
-/** v1 OAuth camelCase becomes v2 snake_case. */
 function toMcpOAuth(value) {
   if (value === false) return false;
   if (!isRecord(value)) return undefined;
@@ -407,8 +321,6 @@ function toMcpOAuth(value) {
     ['scope', trimmedString(value.scope)],
     ['callback_port', positiveInt(value.callback_port ?? value.callbackPort)],
     ['redirect_uri', trimmedString(value.redirect_uri ?? value.redirectUri)],
-    // OpenCode 2.0.8 addition. OpenChamber has no UI for it; it is carried
-    // through so a hand-written value survives an edit made here.
     ['auth_server_metadata_url', trimmedString(value.auth_server_metadata_url)],
   ]);
   return Object.keys(oauth).length ? oauth : undefined;
@@ -420,10 +332,6 @@ function trimmedString(value) {
   return trimmed ? trimmed : undefined;
 }
 
-/**
- * Canonical v2 MCP server entry. `type` is required (v2 drops enabled-only v1
- * entries entirely), `enabled` inverts into `disabled`, timeouts split.
- */
 function toMcpEntity(raw) {
   const source = isRecord(raw) ? raw : {};
   const type = source.type === 'remote' ? 'remote' : 'local';
@@ -434,8 +342,6 @@ function toMcpEntity(raw) {
     ['disabled', disabled],
     ['codemode', typeof source.codemode === 'boolean' ? source.codemode : undefined],
     ['timeout', toMcpTimeout(source.timeout)],
-    // OpenCode 2.0.8 addition, on both local and remote entries. No OpenChamber
-    // UI for it yet; carried through so a hand-written value is not dropped.
     ['protocol', toMcpProtocol(source.protocol)],
   ]);
   if (type === 'local') {
@@ -459,11 +365,6 @@ function toMcpEntity(raw) {
   ]);
 }
 
-/**
- * MCP servers live at `mcp.servers` in v2 and directly under `mcp` in v1.
- * Anything without a `type` is not a server entry (`mcp.timeout`, and the
- * enabled-only v1 entries v2 drops outright).
- */
 function isMcpServerValue(value) {
   return isRecord(value) && (value.type === 'local' || value.type === 'remote');
 }
@@ -495,12 +396,6 @@ function readMcpEntries(config) {
   return result;
 }
 
-/**
- * MCP entries across config layers, lowest precedence first. Each layer is
- * normalized on its own before precedence applies: merging the raw objects
- * first would let a v2 `mcp.servers.<name>` in the user file shadow a v1
- * `mcp.<name>` override in the project file.
- */
 function readLayeredMcpEntries(configs) {
   const result = new Map();
   for (const config of configs) {
@@ -534,15 +429,12 @@ function deleteMcpEntry(config, name) {
   return removed;
 }
 
-// ============== PROVIDERS ==============
 
 const AISDK_PREFIX = 'aisdk:';
 
-/** v1 `npm: "@ai-sdk/x"` becomes v2 `package: "aisdk:@ai-sdk/x"`. */
 function toProviderPackage(value) {
   const trimmed = trimmedString(value);
   if (!trimmed) return undefined;
-  // OpenCode bundles this namespace; `aisdk:` would select its installation path.
   if (trimmed.startsWith('@opencode/ai/')) return trimmed;
   return trimmed.includes(':') ? trimmed : `${AISDK_PREFIX}${trimmed}`;
 }
@@ -600,11 +492,6 @@ function toModelCost(value) {
   ]);
 }
 
-/**
- * v2 `compatibility` passes through; v1 `interleaved` migrates the way
- * OpenCode does (`core/src/model.ts` `compatibility()`): a string or
- * `{field}` names the reasoning field, a boolean carries nothing.
- */
 function toModelCompatibility(source) {
   if (isRecord(source.compatibility)) {
     return Object.keys(source.compatibility).length ? { ...source.compatibility } : undefined;
@@ -615,7 +502,6 @@ function toModelCompatibility(source) {
   return undefined;
 }
 
-/** Canonical v2 model entry: `modelID`, `capabilities`, `cache.read/write`, variants array. */
 function toProviderModelEntity(raw) {
   const source = isRecord(raw) ? raw : {};
   const legacyOptions = isRecord(source.options) ? { ...source.options } : undefined;
@@ -623,7 +509,6 @@ function toProviderModelEntity(raw) {
   return pickDefined([
     ['modelID', trimmedString(source.modelID ?? source.id)],
     ['name', trimmedString(source.name)],
-    // `chat` (the default when unset), `image`, ...: decides which pickers offer the model.
     ['type', trimmedString(source.type)],
     ['family', trimmedString(source.family)],
     ['compatibility', toModelCompatibility(source)],
@@ -639,7 +524,6 @@ function toProviderModelEntity(raw) {
   ]);
 }
 
-/** Canonical v2 provider entry: `package`, `settings.baseURL`, split overlays. */
 function toProviderEntity(raw) {
   const source = isRecord(raw) ? raw : {};
   const legacyOptions = isRecord(source.options) ? { ...source.options } : {};
@@ -652,7 +536,6 @@ function toProviderEntity(raw) {
     ? Object.fromEntries(Object.entries(source.models).map(([id, model]) => [id, toProviderModelEntity(model)]))
     : undefined;
   return pickDefined([
-    // v2-only: the built-in provider this entry inherits models/defaults from.
     ['canonical', trimmedString(source.canonical)],
     ['name', trimmedString(source.name)],
     ['package', toProviderPackage(source.package ?? source.npm)],
@@ -664,13 +547,6 @@ function toProviderEntity(raw) {
   ]);
 }
 
-/**
- * The provider entry an editor should start from: the winning config layer's
- * stored entry (layers passed highest precedence first) in v2 shape, without
- * the literal `settings.apiKey` secret. Returns null when no layer defines it.
- * Unlike the live provider OpenCode serves, this carries `env` and only the
- * reasoning levels the user wrote.
- */
 function readStoredProviderEntry(configs, providerId) {
   for (const config of configs) {
     const { value } = readSectionEntry(config, 'providers', providerId);
@@ -686,11 +562,9 @@ function readStoredProviderEntry(configs, providerId) {
   return null;
 }
 
-// ============== PLUGINS ==============
 
 const PLUGIN_SECTION = { v2: 'plugins', v1: 'plugin' };
 
-/** Accept a v1 string/tuple or a v2 `{package, options}` object. */
 function toPluginEntity(raw) {
   if (typeof raw === 'string') {
     const spec = raw.trim();
@@ -711,17 +585,12 @@ function toPluginEntity(raw) {
   return null;
 }
 
-/**
- * v2 serialization: a bare string when there are no options, otherwise
- * `{package, options}`. Never a tuple.
- */
 function fromPluginEntity(entity) {
   const normalized = toPluginEntity(entity);
   if (!normalized) return null;
   return normalized.options ? { package: normalized.package, options: normalized.options } : normalized.package;
 }
 
-/** Plugin list of a config object, v1 entries first (the normalizer's order). */
 function readPluginList(config) {
   const legacy = Array.isArray(config?.[PLUGIN_SECTION.v1]) ? config[PLUGIN_SECTION.v1] : [];
   const native = Array.isArray(config?.[PLUGIN_SECTION.v2]) ? config[PLUGIN_SECTION.v2] : [];
@@ -731,15 +600,7 @@ function readPluginList(config) {
   ].filter((item) => item.entry !== null);
 }
 
-// ============== WEB SEARCH ==============
 
-/**
- * The `websearch` key: `false` turns search off, `{ provider }` names a
- * provider id or `"random"`. OpenChamber takes the choice flat (`false`, a
- * string, or `null` to remove the key so OpenCode falls back to the answer
- * given in chat, asking only when there is none).
- * Returns `undefined` for anything else.
- */
 function parseWebSearchSelection(value) {
   if (value === null || value === false) return value;
   if (typeof value !== 'string') return undefined;
@@ -747,7 +608,6 @@ function parseWebSearchSelection(value) {
   return trimmed ? trimmed : undefined;
 }
 
-/** Applies a parsed choice to a config object; returns whether it changed. */
 function writeWebSearchSelection(config, selection) {
   const before = JSON.stringify(config.websearch);
   if (selection === null) {
@@ -760,14 +620,7 @@ function writeWebSearchSelection(config, selection) {
   return JSON.stringify(config.websearch) !== before;
 }
 
-// ============== SESSION WARMING ==============
 
-/**
- * The `warming` key: `true` keeps idle sessions' prompt cache warm with
- * OpenCode's defaults, an object tunes prompt/interval/duration. Turning it on
- * keeps a hand-tuned object as is; turning it off removes the key (OpenCode's
- * default is off). Returns whether the config changed.
- */
 function writeWarmingEnabled(config, enabled) {
   const before = JSON.stringify(config.warming);
   if (!enabled) {
@@ -778,12 +631,6 @@ function writeWarmingEnabled(config, enabled) {
   return JSON.stringify(config.warming) !== before;
 }
 
-/**
- * Sets how long OpenCode keeps a session warm after its last turn, while
- * warming is on; leaves the key alone while it is off. OpenCode's default (30
- * minutes) goes back to the plain `true` when nothing else was tuned. Returns
- * whether the config changed.
- */
 function writeWarmingDuration(config, minutes) {
   if (!config.warming) return false;
   const before = JSON.stringify(config.warming);
@@ -794,20 +641,11 @@ function writeWarmingDuration(config, minutes) {
   return JSON.stringify(config.warming) !== before;
 }
 
-// ============== COMPACTION ==============
 
 const tokenCount = z.number().int().min(0).max(10_000_000);
 const compactionTokens = tokenCount.nullable().optional();
-/** OpenCode's `Config.Compaction.Percent`: a share of the window from "1%" up to but not including "100%". */
 const compactionPercent = z.string().regex(/^([1-9]\d?(\.\d+)?)%$/u);
 
-/**
- * A `PUT /api/config/compaction` body: `auto` sets `compaction.auto`,
- * `buffer` and `keepTokens` set `compaction.buffer` (a share such as `"20%"`
- * or a token count) and `compaction.keep.tokens` (`null` removes the key, so
- * OpenCode's default applies), `background` sets
- * `experimental.background_compaction`. An omitted field is left as it is.
- */
 const compactionUpdateSchema = z.object({
   auto: z.boolean().optional(),
   buffer: z.union([compactionPercent, tokenCount]).nullable().optional(),
@@ -815,7 +653,6 @@ const compactionUpdateSchema = z.object({
   background: z.boolean().optional(),
 }).strict();
 
-/** Sets `owner[key]`, or removes it for `null`. */
 const setOrDelete = (owner, key, value) => {
   if (value === null) delete owner[key];
   else owner[key] = value;
@@ -828,13 +665,6 @@ const assignOrDrop = (owner, key, record) => {
   else delete owner[key];
 };
 
-/**
- * Applies a parsed compaction update to a config object, in place. Other keys
- * under `compaction` and `experimental` stay; a section left empty is
- * removed. The booleans are written as they are, `false` included: the target
- * can be `OPENCODE_CONFIG`, and removing the key there would let a `true` in
- * the user config underneath apply. Returns whether the config changed.
- */
 function writeCompactionSettings(config, update) {
   const before = JSON.stringify([config.compaction, config.experimental]);
   if (update.auto !== undefined || update.buffer !== undefined || update.keepTokens !== undefined) {
@@ -856,17 +686,6 @@ function writeCompactionSettings(config, update) {
   return JSON.stringify([config.compaction, config.experimental]) !== before;
 }
 
-/**
- * The project config path whose `websearch` wins over the file the Settings
- * choice is written to, or `null`. OpenCode loads the user config, then
- * `OPENCODE_CONFIG`, then the project files (`getFolderConfigPaths` order),
- * and the last file that sets a key wins, so any project file with the key
- * beats both files Settings can write to. `OPENCODE_CONFIG` can name a project
- * file too; when that file is the winner, the Settings write lands in it and
- * applies. `layers` is what `readConfigLayers(directory)` returns;
- * `projectFiles` lists the project config files the winning one first, as
- * `{ path, config }`.
- */
 function findWebSearchProjectOverride(layers, projectFiles) {
   const userPath = layers?.paths?.userPath ?? null;
   const winner = (projectFiles ?? [])
@@ -874,37 +693,23 @@ function findWebSearchProjectOverride(layers, projectFiles) {
   return winner && winner.path !== layers?.paths?.customPath ? winner.path : null;
 }
 
-// ============== SKILL SWITCHES ==============
 
-/**
- * A `PUT /api/config/skill-switch` body. The id is OpenCode's id for a skill,
- * the folder of its `SKILL.md`; wildcard characters and path separators are
- * refused, so the statement a switch writes can only ever match that one skill.
- */
 const skillSwitchRequestSchema = z.object({
   id: z.string().min(1).max(200).refine((id) => id.trim() === id && !/[*?/\\\n\r]/.test(id)),
   enabled: z.boolean(),
   scope: z.enum(['user', 'project']),
 });
 
-/**
- * An exact deny for the skill in either spelling OpenCode reads: `skill.use`
- * with the bare id, or the legacy `integration.use` with `skill:<id>`, which
- * OpenCode decodes into the first and an older OpenChamber wrote.
- */
 const isSkillDeny = (statement, id) => isRecord(statement)
   && statement.effect === 'deny'
   && ((statement.action === 'skill.use' && statement.resource === id)
     || (statement.action === 'integration.use' && statement.resource === `skill:${id}`));
 
-// OpenCode reads `integration.use` with `skill:<id>` as `skill.use` with `<id>`.
 const isSkillAllow = (statement, id) => isRecord(statement)
   && statement.effect === 'allow'
   && ((statement.action === 'skill.use' && statement.resource === id)
     || (statement.action === 'integration.use' && statement.resource === `skill:${id}`));
 
-// The last matching statement wins in OpenCode, so an exact deny keeps the
-// skill off only when no exact allow for it comes later.
 const endsWithSkillDeny = (statements, id) => {
   for (let index = statements.length - 1; index >= 0; index -= 1) {
     if (isSkillDeny(statements[index], id)) return true;
@@ -913,15 +718,6 @@ const endsWithSkillDeny = (statements, id) => {
   return false;
 };
 
-/**
- * Turns a skill off or back on in one config object, in place, through
- * OpenCode's `skill.use` policy. Off appends an exact deny to the top-level
- * `policies` unless the file already ends its exact statements for the id
- * with a deny in either spelling; on removes every exact deny for that id, in
- * either spelling, from `policies` and the deprecated `experimental.policies`,
- * and nothing else: wildcards, allows and other statements stay. A list it
- * empties is removed. Returns whether the config changed.
- */
 function writeSkillDisabled(config, id, disabled) {
   const lists = [
     { owner: config, key: 'policies' },
@@ -929,7 +725,6 @@ function writeSkillDisabled(config, id, disabled) {
   ].filter(({ owner, key }) => Array.isArray(owner[key]));
 
   if (disabled) {
-    // OpenCode reads the deprecated `experimental.policies` before `policies`.
     const statements = [...lists].reverse().flatMap(({ owner, key }) => owner[key]);
     if (endsWithSkillDeny(statements, id)) return false;
     const policies = Array.isArray(config.policies) ? config.policies : [];

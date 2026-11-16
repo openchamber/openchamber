@@ -13,7 +13,6 @@ export const resolveOpenCodeUpgradeCapability = ({
     };
   }
 
-  // The administrator pinned the CLI in the policy file and owns its updates.
   if (pinnedByPolicy) {
     return {
       supported: false,

@@ -18,9 +18,6 @@ import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 import { canonicalPluginPath, resolveLocalPluginPath } from './plugin-paths.js';
 
-// OpenCode 2 reads `plugins` (bare string or `{package, options}`) and still
-// decodes the v1 `plugin` array with its `[spec, options]` tuples. OpenChamber
-// reads both and always writes `plugins` with v2 entries.
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
@@ -80,21 +77,12 @@ function hasOptions(options) {
 }
 
 
-/**
- * The configs OpenCode loads ahead of the layer that carries the switch denials,
- * earliest first. OpenCode lets the earliest-loaded policy win, so a matching
- * statement in one of them beats the denial. The managed file is
- * `OPENCODE_CONFIG`, right after the global files; when the user owns that
- * variable the denials go to `OPENCODE_CONFIG_CONTENT`, which loads after every
- * file.
- */
 function configsAheadOfManagedLayer(layers, workingDirectory) {
   return layers.paths.customPath
     ? configSources(layers, workingDirectory).map((source) => source.config)
     : [layers.userConfig, layers.userOverrideConfig];
 }
 
-/** What a listing needs to report switches; null when this runtime has none. */
 function readSwitchContext(switchStore, layers, workingDirectory) {
   if (!switchStore) return null;
   return { read: switchStore.read(), configsAhead: configsAheadOfManagedLayer(layers, workingDirectory) };
@@ -119,13 +107,6 @@ function ensureProjectConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
-/**
- * Every config file OpenCode 2 takes plugins from, in its load order: the
- * global `opencode.json` and `opencode.jsonc`, then `OPENCODE_CONFIG`, then the
- * files found walking up from the project folder. Each file adds its own
- * entries; none replaces another's. A parent folder's file reaches every
- * project below it, so it counts as user scope, like the global file.
- */
 function configSources(layers, workingDirectory) {
   const { userPath, userOverridePath, customPath } = layers.paths;
   const projectFiles = getProjectConfigCandidates(workingDirectory);
@@ -136,8 +117,6 @@ function configSources(layers, workingDirectory) {
   if (customPath) {
     sources.push({ config: layers.customConfig, filePath: customPath, scope: AGENT_SCOPE.USER });
   }
-  // A folder file that is also `OPENCODE_CONFIG` stays the user entry, so the
-  // list, edits and duplicate checks all see one declaration.
   const seenFiles = new Set(sources.map((source) => canonicalPluginPath(source.filePath)));
   for (const filePath of getFolderConfigPaths(workingDirectory)) {
     if (seenFiles.has(canonicalPluginPath(filePath))) continue;
@@ -168,8 +147,6 @@ function getPluginTarget(id, workingDirectory) {
   }
   const { scope, value: spec } = splitScopedValue(decoded.value);
   validateScope(scope);
-  // Two files can both declare the spec; the later one is the entry the list
-  // shows, so it is the one edited.
   const source = configSources(readConfigLayers(workingDirectory), workingDirectory).reverse().find((candidate) => (
     candidate.scope === scope
     && readPluginList(candidate.config).some((item) => item.entry.package === spec)
@@ -196,15 +173,8 @@ function pluginDirForScope(scope, workingDirectory) {
   return path.join(OPENCODE_CONFIG_DIR, 'plugins');
 }
 
-/**
- * The directories OpenCode 2 scans for local plugins in a scope: `plugins/`
- * (where OpenChamber writes) and the v1 `plugin/`. Each holds `.ts`/`.js`
- * files and plugin package directories.
- */
 const PLUGIN_DIR_KINDS = { v2: 'plugins', v1: 'plugin' };
 
-/** One of the two plugin directories, by kind. An id names its kind, so a name
- * that exists in both directories still resolves to the row the user picked. */
 function pluginDirForKind(scope, workingDirectory, kind) {
   const v2Dir = pluginDirForScope(scope, workingDirectory);
   return kind === 'v1' ? path.join(path.dirname(v2Dir), PLUGIN_DIR_KINDS.v1) : v2Dir;
@@ -245,8 +215,7 @@ function decodePluginId(id) {
   return { prefix: decoded.slice(0, separator), value: decoded.slice(separator + 1) };
 }
 
-/** Accept a v1 string/tuple or a v2 `{package, options}` object. */
-/** @public Exposed to tests that dynamically import the plugins module. */
+/** @public */
 export function parsePluginRaw(raw) {
   const entity = toPluginEntity(raw);
   if (!entity) {
@@ -257,12 +226,9 @@ export function parsePluginRaw(raw) {
   return parsed;
 }
 
-/** Always v2: a bare string, or `{package, options}`. Never a tuple. */
-/** @public Exposed to tests that dynamically import the plugins module. */
+/** @public */
 export function serializePluginEntry(entry) {
   const spec = validatePluginSpec(entry?.spec);
-  // OpenCode reads only a bare `-name` string as a control entry; written as
-  // `{package, options}` it becomes a package to install.
   if (isPluginControlSpec(spec) && hasOptions(entry?.options)) {
     throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
   }
@@ -281,19 +247,11 @@ function migratePluginRaw(raw) {
   }
 }
 
-/**
- * The plugin array a write should target. Prefer the v2 `plugins` key; when the
- * file only has the v1 `plugin` array, migrate the whole array into `plugins`
- * in place so the two spellings cannot disagree.
- */
 function pluginArrayForWrite(config) {
   const legacy = Array.isArray(config[PLUGIN_SECTION.v1]) ? config[PLUGIN_SECTION.v1] : null;
   if (!Array.isArray(config[PLUGIN_SECTION.v2])) config[PLUGIN_SECTION.v2] = [];
   if (legacy) {
     config[PLUGIN_SECTION.v2] = [
-      // An entry we cannot parse is carried over untouched rather than dropped:
-      // it is the user's config, and losing it would be worse than leaving it
-      // in a shape OpenCode already refuses.
       ...legacy.map((raw) => migratePluginRaw(raw)),
       ...config[PLUGIN_SECTION.v2],
     ];
@@ -327,8 +285,6 @@ function listPluginEntries(workingDirectory, switchStore) {
       return entry;
     })
   ));
-  // A spec in two files of one scope shares one id; the later file's entry is
-  // listed, matching `getPluginTarget`.
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 }
 
@@ -409,8 +365,6 @@ function updatePluginEntry(id, updates, workingDirectory) {
   }
   const existing = parsePluginRaw(target.plugin[target.index]);
   let nextSpec = updates?.spec === undefined ? existing.spec : validatePluginSpec(updates.spec);
-  // An entry already in the config keeps its spec as written; only a changed
-  // spec has to be one OpenCode loads.
   if (nextSpec !== existing.spec) nextSpec = requireLoadablePluginSpec(nextSpec);
   const nextOptions = updates?.options === undefined ? existing.options : updates.options;
   target.plugin[target.index] = serializePluginEntry({ spec: nextSpec, options: nextOptions });
@@ -429,12 +383,6 @@ function deletePluginEntry(id, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-/**
- * Record one switch in OpenChamber's own store. The managed config layer of the
- * OpenCode OpenChamber starts carries the deny; the user's config is not
- * written. A rule of theirs that would beat the deny refuses the change, so the
- * page never reports a plugin as off while OpenCode keeps loading it.
- */
 function recordPluginSwitch(switchStore, resource, enabled, workingDirectory) {
   if (!enabled) {
     const configsAhead = configsAheadOfManagedLayer(readConfigLayers(workingDirectory), workingDirectory);
@@ -461,10 +409,6 @@ function setPluginEntryEnabled(id, enabled, workingDirectory, switchStore) {
   return recordPluginSwitch(switchStore, resource, enabled, workingDirectory);
 }
 
-/**
- * A local plugin is switched off by its absolute path: OpenCode matches
- * `plugin:<absolute path>` for a plugin file or package directory.
- */
 function pluginPathTargetFromId(id, workingDirectory) {
   const decoded = decodePluginId(id);
   const isLegacy = decoded.prefix === 'legacy' || decoded.prefix === 'legacyPackage';
@@ -480,8 +424,6 @@ function pluginPathTargetFromId(id, workingDirectory) {
   } else if (!name || name.includes('..') || /[\\/]/.test(name)) {
     throw codedError('Plugin package name is invalid', 'INVALID_FILENAME');
   }
-  // The prefix names the directory the row came from. Searching both would let
-  // a name that exists in `plugins/` and `plugin/` deny the wrong one.
   const candidate = path.join(pluginDirForKind(scope, workingDirectory, isLegacy ? 'v1' : 'v2'), name);
   if (isPackage && !fs.existsSync(candidate)) {
     throw codedError(`Plugin file "${name}" not found`, 'NOT_FOUND');
@@ -513,15 +455,11 @@ function listPluginDirFiles(workingDirectory, switchStore) {
       .flatMap((entry) => {
         const absolutePath = path.join(dir, entry.name);
         if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
-          // Only files in the v2 `plugins/` directory are editable through
-          // the file id; a v1 `plugin/` file is listed for what it is.
           return editable
             ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
             : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         if (entry.isDirectory()) {
-          // A plugin package (a directory with its own entry point): OpenCode
-          // loads it, OpenChamber only lists it.
           return [{ id: encodePluginId(editable ? 'package' : 'legacyPackage', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         return [];

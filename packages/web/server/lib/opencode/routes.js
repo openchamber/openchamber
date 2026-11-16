@@ -23,7 +23,6 @@ import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
-// Version reads use the same short deadline as the health probe of `/api/info`.
 const OPENCODE_INFO_TIMEOUT_MS = 3_000;
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
@@ -77,8 +76,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return 0;
   };
 
-  // OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub
-  // release assets, so the registry is the one source of "latest".
   const fetchLatestOpenCodeVersion = async () => {
     const request = resolveNpmRegistryRequest('@opencode/cli', 'latest');
     const response = await fetch(request.url, {
@@ -96,7 +93,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/config/settings', async (req, res) => {
     try {
-      // The surface kind resolves the per-surface profile keys; absent means base.
       const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
       res.json(formatSettingsResponse(settings));
     } catch (error) {
@@ -157,8 +153,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       });
     }
     try {
-      // Multiple tabs share one installation. Clear both success and failure so
-      // a later explicit attempt can run again.
       if (!upgradeInFlight) {
         upgradeInFlight = upgradeOpenCodeCli().finally(() => { upgradeInFlight = null; });
       }
@@ -171,9 +165,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/opencode/upgrade-status', async (_req, res) => {
     try {
-      // Whether a newer OpenCode exists and whether OpenChamber can install it
-      // are two answers: the UI announces the version either way and offers
-      // the Update action only when `upgrade.supported` is true.
       const capability = getOpenCodeUpgradeCapability();
       const [healthResponse, latestVersion] = await Promise.all([
         fetch(buildOpenCodeUrl('/api/info', ''), {
@@ -194,9 +185,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (!currentVersion || !latestVersion) {
         return res.json({ available: null, currentVersion, latestVersion: latestVersion || null, upgrade: capability });
       }
-      // A bundled binary updates together with the desktop app, and a pinned
-      // one with the administrator's rollout, so a newer OpenCode is not
-      // something the user can act on: never announce it.
       const available = capability.reason === 'bundled' || capability.reason === 'policy'
         ? false
         : compareVersions(latestVersion, currentVersion) > 0;
@@ -214,9 +202,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // OpenCode 2.0.8 removed `GET /api/health`; `GET /api/info` replaces it and a
-  // 200 from it is the readiness signal (there is no `healthy` field any more).
-  // OpenChamber's own `{ healthy }` response shape stays as its clients know it.
   const probeOpenCodeHealth = async () => {
     try {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
@@ -234,7 +219,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
       const parsed = await readOpenCodeInfo(Response.json(info));
       const healthy = parsed !== null && isSupportedOpenCodeVersion(parsed.version);
-      // OpenCode answered: an unsupported version stays unsupported however long a client waits.
       return { healthy, final: true, status: 200, body: { healthy } };
     } catch (error) {
       return {
@@ -245,12 +229,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   };
 
-  // Concurrent waiters (several windows, tabs or devices starting together)
-  // share one probe per interval.
   const sharedOpenCodeHealthProbe = createSharedHealthProbe({ probe: probeOpenCodeHealth });
 
-  // `?wait=<ms>` holds an unhealthy answer until OpenCode is ready or the wait
-  // runs out (capped), so a starting client learns of readiness at once.
   app.get('/api/opencode/health', async (req, res) => {
     let clientGone = false;
     res.on('close', () => { clientGone = true; });
@@ -298,8 +278,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // Providers turned off in the user's OpenCode config. OpenCode leaves them
-  // out of its provider list, so Settings reads them here to offer them back.
   app.get('/api/provider/disabled', (_req, res) => {
     try {
       return res.json({ providers: readDisabledProviders(null) });
@@ -361,11 +339,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // Enterprise mode: model providers come from the OpenCode config the
-  // administrator controls, so nothing in the app may connect a new one or
-  // add a key. These OpenCode routes otherwise reach it through the generic
-  // proxy; removing or switching an existing account stays allowed, it only
-  // narrows access. The real lock is OpenCode's `provider.use` policy.
   const refuseInEnterpriseMode = (_req, res, next) => (
     isEnterpriseMode() ? res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }) : next()
   );
@@ -373,16 +346,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     isProviderConnectRequest(req.method, req.path) ? refuseInEnterpriseMode(req, res, next) : next()
   ));
 
-  // Every stored key, secrets included (OpenCode 2.0.20): this server reads it
-  // for itself through `auth.js`, and no client gets it through the proxy.
   app.use((req, res, next) => (
     isCredentialListRequest(req.method, req.path)
       ? res.status(403).json({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' })
       : next()
   ));
 
-  // `git init` in home or at a disk root makes a repository Git surfaces then
-  // ignore; refuse it here so no client can create one through the proxy.
   app.use((req, res, next) => {
     const refusal = vcsInitRefusal(req.method, req.originalUrl, req.headers);
     return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
@@ -426,8 +395,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         }
       }
 
-      // OpenCode 2 keeps credentials in its own store, out of this server's
-      // sight, so the form states whether one exists or follows this write.
       const { getProviderAuth } = await getAuthLibrary();
       const hasStoredAuth = req.body?.hasCredential === true || Boolean(await getProviderAuth(providerID));
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
@@ -450,7 +417,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   app.post('/api/provider/discover-models', refuseInEnterpriseMode, async (req, res) => {
     try {
       const providerID = typeof req.body?.providerID === 'string' ? req.body.providerID.trim() : '';
-      // A stored key that cannot be read leaves discovery to the key in the form.
       let storedApiKey = null;
       let storedBaseURL;
       if (providerID) {
@@ -462,12 +428,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           const providerEntity = rawProvider ? toProviderEntity(rawProvider) : null;
           storedBaseURL = providerEntity?.settings?.baseURL;
           if (!storedApiKey) {
-            // OpenCode tries each `env` name in order, so pick the first one
-            // that is set; when none is, keep the first so discovery can name
-            // it in the error instead of failing as an anonymous 401. This
-            // reads the server's environment: a variable that exists only in
-            // the managed OpenCode launch environment (Settings user env) is
-            // not visible here.
             const envName = providerEntity?.env?.find((name) => process.env[name]) ?? providerEntity?.env?.[0];
             storedApiKey = providerEntity?.settings?.apiKey || (envName ? `{env:${envName}}` : null);
           }
@@ -485,10 +445,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // The web search choice (`websearch` in OpenCode config). OpenCode watches
-  // the file and announces `config.updated`, so nothing restarts.
-  // Whether a project config decides `websearch` for the directory, so
-  // Settings can say so instead of letting a write snap back.
   app.get('/api/config/websearch', async (req, res) => {
     try {
       const resolved = await resolveProjectDirectory(req);
@@ -513,8 +469,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // Session warming (`warming` in OpenCode config), written like the web
-  // search choice above. Settings reads the effective value from OpenCode.
   app.put('/api/config/warming', (req, res) => {
     const enabled = req.body?.enabled;
     if (typeof enabled !== 'boolean') {
@@ -529,8 +483,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // Compaction settings (`compaction` and `experimental.background_compaction`
-  // in OpenCode config), written the same way. Settings reads them from OpenCode.
   app.put('/api/config/compaction', (req, res) => {
     const parsed = compactionUpdateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -573,10 +525,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         }
       }
 
-      // OpenCode 2.x owns credentials: it imported `auth.json` once and now
-      // keeps them in its own store behind `/api/credential`. OpenChamber can
-      // still remove a provider's CONFIG (those files are ours), but a
-      // credential has to be removed where it lives.
       let removed = false;
       if (scope === 'auth') {
         return res.status(409).json({
@@ -614,9 +562,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  // Behavior / Global AGENTS.md endpoints
   const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
-  const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024; // 1 MB
+  const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
   app.get('/api/behavior/agents-md', async (_req, res) => {
     try {
@@ -641,8 +588,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return res.status(413).json({ error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
       }
 
-      // `expectedContent` is what the editor loaded (null: no file). A file
-      // changed on disk since then is not overwritten with the stale copy.
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'expectedContent')) {
         const expected = req.body.expectedContent;
         let current = null;
@@ -659,7 +604,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         }
       }
 
-      // Ensure parent directory exists
       const parentDir = path.dirname(AGENTS_MD_PATH);
       try {
         await fs.promises.access(parentDir);

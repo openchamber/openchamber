@@ -5,6 +5,114 @@ This module provides OpenCode server integration utilities for the web server ru
 
 Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycle journal, the local diagnostics route in `core-routes.js`) is described in `../diagnostics/DOCUMENTATION.md`.
 
+## Ownership
+
+This module owns the web server's OpenCode connection, managed process, configuration adapters, and settings persistence. Feature runtimes own the services composed here; UI sessions and passkeys belong to `../ui-auth`, and folder trust belongs to `../opencode-trust`. Shared configuration adapters also serve the VS Code extension host.
+
+## Invariants
+
+- Credential sources resolve URL and authentication headers on each call because a managed restart can change both. Browser-login renewal creates the active replacement before deleting the old row, so host requests retain a login throughout; a row changed during token exchange wins over the exchanged tokens. Refresh tokens remain with OpenCode and the issuer exchange.
+- Authorization-header redaction runs before generic key/value redaction. An unquoted authorization value contains a scheme and a credential separated by whitespace, so redacting only its first word exposes the credential.
+- Disabled agents and providers remain discoverable from their configuration files because OpenCode omits them from its live catalogs and Settings must offer a way to enable them again.
+- Partial agent updates preserve the caller's entity and translate cleared legacy fields to their native locations. A file-backed system prompt retains its reference while the referenced file receives the edit.
+- Agent and command names are relative paths inside their owned directories. Express decodes encoded separators, so validation accepts nested names while refusing absolute paths and traversal. The disabled-agent catalog has a separate route so an agent named `disabled` remains addressable.
+- MCP conversion preserves handwritten protocol and startup-timeout fields even though the editor has no controls for them. Agent markdown bodies override frontmatter `system`, matching OpenCode's reader.
+- The minimum OpenCode version agrees with `engines.opencode` in the web package manifest. A future major remains unsupported until its contract is checked.
+- An external connection requires explicit host, port, or skip-start configuration. Automatic attachment to a default port can take over a user's independent OpenCode instance and couple unrelated lifecycles.
+- A pending restart with a stopped-process task runs that task in its own restart, even if another restart is already in flight. Task failure is reported after the managed server starts again so a failed upgrade does not leave it stopped.
+- Process-registry cleanup considers only recorded children, verifies their current executable and known port against PID reuse, and requires evidence that the owner is gone. EPERM means a PID still exists; an identity that cannot be verified stays untouched.
+- Instance-directory cleanup assumes a shared PID namespace. Registry storage and reaping also have a VS Code implementation that must retain the same on-disk contract.
+- Private diagnostic exports check the socket peer and reject relayed requests because forwarding headers do not prove that the caller is on this machine. Pairing redemption rate limits also use the socket peer because that endpoint is unauthenticated and forwarding headers can change a bucket.
+- Learned server addresses carry the stable signing-key identity so clients can verify an address before sending it a bearer token. Reachable non-loopback browser origins supplement interface discovery because a reverse-proxy domain may be the only usable direct address.
+- UI sessions and the desktop shell's local client can manage all devices; other client tokens are limited to their own record. Push registrations are removed before revoked device rows, while their ownership can still be identified; cleanup failure preserves rows for retry. A revocation already persisted remains successful if its later push cleanup fails.
+- The repository credential helper authenticates with its own per-start secret and same-machine restriction. It cannot obtain a UI session, so the common session guard exempts its exact route and leaves authority checking to the helper route. Sandboxed preview and extension reads similarly rely on path grants, and OAuth callbacks rely on issued state.
+- An explicit project directory retains its pre-realpath spelling alongside the canonical directory because file-tree requests can name paths under a symlinked project root. With no explicit directory, the UI's `lastDirectory` precedes the sidebar's active project because navigation can leave that project selection stale.
+- Project-icon discovery resolves its settings update inside the write queue. A search can outlast project removal or a manual icon selection and must preserve the latest project list and chosen icon. Uploaded SVGs remain inert when opened as documents on the app origin.
+- Message shells keep subagent results whole because older OpenCode versions put the child-session reference there. File-edit results also stay whole because their useful diff is already in metadata and shelling their short text saves no meaningful bytes. Shelled OpenChamber envelopes retain the outcome as well as the action so failed calls cannot read as successful actions.
+- Pending permissions and forms are seeded from the upstream stream because reading a directory's pending list can initialize that location. Replies without a request ID clear that kind's unverifiable pending request; turn end clears permissions and waiting pages, and restart clears all pending requests.
+- Running-image checks stop counting jobs older than OpenCode's image timeout plus a minute. An interrupted generation can remain listed after an OpenCode restart and otherwise hold a goal indefinitely.
+- Settings callers that regenerate persisted identity use the strict reader: only ENOENT means first run. Corrupt JSON, non-object content, and I/O errors throw so a transient read failure cannot replace pairing keys and orphan devices.
+- Settings writes replace complete files atomically because Electron and SSH readers can treat a partial JSON read as an empty document and then overwrite the user's settings. Only directories created by the write receive tightened permissions; existing administrator permissions and ACLs remain intact.
+- Project validation preserves entries after permission or transient filesystem failures. Project context reconciliation merges lists by identity across ID changes because a directory move cannot merge two existing `context.json` files; version-1 string conversion stays owned by `project-context`, and the destination wins when both values remain strings.
+- Project-folder migration also checks raw names that the filesystem can hold because older IDs can still have data there. Orphan recovery uses a unique setup-command match against an otherwise empty canonical project; an orphan's folder is named by its actual raw filename.
+- Empty notification templates select language-aware defaults. Migration clears only the old seeded English set and preserves user-authored text. Splitting scheduled tasks from the control tool preserves an earlier choice to disable that tool.
+- Settings logs contain changed field names only because values can include credentials. Device keys remain local to the client, and each failed queued save rejects only its own caller so later saves can still run.
+- A missing model-variant entry means the client never sent a selection; explicit null means Default. A variant without its model is discarded, and an empty dreaming-model selection remains a choice of the default model. Model IDs can contain slashes after the provider separator.
+- Sidebar-order saves from older clients preserve omitted built-in sections beside their stored neighbours. The generated settings registry remains authoritative for writable keys; its JSON snapshot is loaded with `createRequire` because the server runs plain ESM across Node versions with differing import-attribute support.
+- Skill-list fetch failure remains distinct from an authoritative empty list. Partial local discovery reports its incompleteness, and process-level discovery flags travel with the list because browsers cannot infer which external roots OpenCode enables. Built-in skill IDs remain separate from display names because policy statements use IDs.
+- Skill installation provenance refines the Installed badge; provenance-write failure cannot fail a completed installation or deletion. Roots discovered in both user and project scope share disk reads while retaining discovery order and project precedence.
+- Skill supporting-file walks and repeated ancestor probes stay out of list enrichment because bundled environments can contain thousands of files. Skill mutation serialization and exclusive creation protect the check-then-write interval against concurrent requests and processes.
+- Shutdown closes guest admission and stops event subscribers and wait checks in the same tick. Otherwise a healthy service can receive a shutdown refusal through a still-active subscriber and be classified as broken or backed off.
+- Installer options come only from host-owned callers. Commands, destinations, versions, URLs, and environments are never request-controlled, and installer output is discarded because it can contain registry or environment secrets. Windows extraction uses the system `tar.exe` because Git Bash tar interprets a drive-letter path as a remote host.
+- Restarted OpenChamber servers receive the existing UI password through the update child's environment because flags appear in process lists and logs. Batch log text escapes command syntax and percent expansion, and restart commands double literal percent characters so cmd preserves them.
+- Tunnel-locality checks account for forwarded client addresses even when the Host header says localhost. Tailscale passes Host through, so a remote caller can choose it; forwarded non-loopback addresses can only reduce trust. Login rate-limit buckets use Express's trusted-proxy resolution.
+
+## Decisions
+
+### Why process records are per child and not one shared file
+
+Concurrent web, desktop, and VS Code hosts share the registry. One file per spawned PID avoids a shared read-modify-write race that can erase another live host's ownership record.
+
+### Why registry operations are asynchronous and not synchronous
+
+The server can run inside Electron's main event loop, which also serves UI assets and event traffic. Reaping several records can require slow Windows process commands, so asynchronous filesystem and process operations keep that loop responsive.
+
+### Why orphan recovery runs once and not on every settings read
+
+Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.
+
+### Why settings project validation runs only on project updates
+
+Validation probes every project's filesystem path. Theme and window-state saves need no such work, so unrelated updates preserve the project list without revalidating it.
+
+### Why PATH discovery keeps explicit configuration and not WSL auto-detection
+
+A user-configured PATH retains its ordering and gains only missing fallback entries; a minimal system PATH prefers the login-shell toolchain. Windows auto-detection stays on Windows because WSL paths identify different server-visible directories and can create duplicate or missing project state.
+
+### Why binary probes are bounded and not allowed to wait indefinitely
+
+Login-shell rc files, PowerShell profiles, and PATH entries on unavailable network drives can block startup. Probe deadlines allow resolution to continue, and injectable candidate and executable checks let a missing-install result remain testable on hosts with system-wide installs.
+
+### Why clearing a binary setting preserves a user's environment override
+
+The empty-string setting clears only a previously applied settings selection. An `OPENCODE_BINARY` supplied by the user's environment remains explicit configuration and survives that clear.
+
+### Why Windows binary resolution prefers a baseline executable
+
+Bypassing package-manager wrappers still needs to support CPUs without AVX2. Resolution prefers the baseline platform package and unwraps shims to native executables or explicit runtime/script pairs because raw cmd shims cannot run through `spawn` with `shell: false`.
+
+### Why frontmatter parsing retries permissively and not only through strict YAML
+
+OpenCode accepts unquoted colons inside scalar values, so the reader retries with those values expressed as block scalars. A BOM and a closing frontmatter delimiter at EOF also remain valid; rejecting them would turn existing frontmatter into body text and duplicate it on save.
+
+### Why config removal uses scanned separators and not parser removal edits
+
+Removing a property or array element also removes one adjacent separator while preserving comments in surrounding gaps. The scanner distinguishes commas in comments, avoiding parser removals that leave a trailing comma or discard a neighbour's comment; the write boundary JSON-normalizes desired values so undefined fields behave like serialized removals.
+
+### Why proxy pools resolve at request time and not during registration
+
+Proxy registration precedes OpenCode bootstrap, so an external HTTPS target may still look like the default HTTP loopback target. A lazy agent getter shares one pool per resolved scheme; its agent class matches TLS, concurrency remains unbounded, and the free-socket cap stays at 256 because a cap of 32 churns connections under 64 concurrent requests. Idle pooled sockets expire before upstream keep-alive deadlines to avoid reusing a closed connection.
+
+### Why proxy responses hold readiness and not immediately return 503
+
+A bounded readiness hold lets the first request succeed when OpenCode finishes starting. Immediate 503s put clients into retry backoff and delay bootstrap; a genuinely unavailable server still receives a bounded failure.
+
+### Why streaming request framing survives header filtering
+
+A stream without content length needs transfer encoding or OpenCode can read an empty prompt body. A parsed body replay instead sets content length and removes transfer encoding because OpenCode rejects requests carrying both.
+
+### Why session lists use an allowlist and not a field blocklist
+
+OpenCode can add heavy session fields without a client change. An allowlist bounds repeatedly fetched list records, while dropping obsolete delivered-knowledge metadata avoids transferring signatures no consumer reads.
+
+### Why static assets and service workers use different cache lifetimes
+
+Vite asset filenames identify their content, so immutable caching avoids revalidation round trips for lazy chunks over remote connections. Service workers need short-lived responses so clients, including iOS, can discover updates.
+
+### Why isolated exceptions keep serving and not always stop the host
+
+A server embedded in Desktop or launched manually may have no supervisor to restart it after a stray socket exception. It logs isolated exceptions and keeps serving; a sustained exception storm triggers shutdown because continued operation is no longer reliable.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.

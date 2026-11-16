@@ -73,20 +73,8 @@ export const registerPluginRoutes = (app, dependencies) => {
     }
   };
 
-  /**
-   * The switch is applied through the config of the OpenCode OpenChamber
-   * starts. When that process is not ours, nothing reads the store, so every
-   * row reports the switch as unavailable instead of pretending it worked.
-   */
   const switchable = (item) => (isPluginSwitchAvailable() ? item : { ...item, switchState: 'unavailable' });
 
-  /**
-   * Answer a switch change after the store write. The store is the durable
-   * state; when the managed config cannot be rewritten (a user-owned
-   * `OPENCODE_CONFIG`, a failed write), the child still applies it at its next
-   * launch, so the change is reported as saved with a restart requirement
-   * rather than as a failure that would hide state that already landed.
-   */
   const answerSwitchChange = async (res, message, result) => {
     let refreshed;
     try {
@@ -191,8 +179,6 @@ export const registerPluginRoutes = (app, dependencies) => {
           continue;
         }
 
-        // A control entry (`-name`, `*`) names no package or path, so there
-        // is nothing to look up.
         if (parsedKindForSpec(spec) === 'control') continue;
 
         if (parsedKindForSpec(spec) === 'path') {
@@ -213,9 +199,6 @@ export const registerPluginRoutes = (app, dependencies) => {
           continue;
         }
 
-        // A Git spec is not an npm package: the registry cannot answer for it,
-        // and querying it would report a working plugin as an unreachable
-        // registry. OpenCode resolves it itself, so there is nothing to check.
         if (parsedKindForSpec(spec) === 'git') {
           results.push({ kind: 'git-ok', spec });
           continue;

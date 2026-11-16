@@ -47,8 +47,6 @@ export const createOpenCodeNetworkRuntime = (deps) => {
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), 3000);
-        // OpenCode 2.0.8 replaced `/api/health` with `/api/info`: a 200 is the
-        // readiness signal, the payload carries no `healthy` field.
         const response = await fetch(`${url.replace(/\/+$/, '')}/api/info`, {
           method: 'GET',
           headers: {
