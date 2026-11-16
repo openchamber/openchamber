@@ -103,6 +103,7 @@ import {
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { trackPreparedChatFolder } from "@/lib/unconfirmedSends"
 import type { SendMessageOptions } from "./send-message-options"
 export type { SendMessageOptions, SentMessage } from "./send-message-options"
 import { sessionGoalIntro, setSessionGoal } from "@/lib/sessionGoalActions"
@@ -1939,6 +1940,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         return null
       }
       set({ newSessionDraft: { ...current, preparedChatDirectory: directory } })
+      trackPreparedChatFolder(runtimeKey, directory)
       return directory
     })().finally(() => {
       pendingChatDirectoryByDraft.delete(key)

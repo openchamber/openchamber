@@ -12,6 +12,7 @@ import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { flushDeferredStorage, getSafeSessionStorage, getSafeStorage, listStorageKeys } from '@/stores/utils/safeStorage';
 
 export const UNCONFIRMED_SEND_KEY_PREFIX = 'openchamber.unconfirmedSend.v1.';
+export const PREPARED_CHAT_FOLDER_KEY_PREFIX = 'openchamber.preparedChatFolder.v1.';
 const PAGE_LOCK_PREFIX = 'openchamber.page.';
 const RECOVERY_LOCK = 'openchamber.unconfirmedSends.recovery';
 
@@ -31,6 +32,16 @@ const recordSchema = z.object({
 });
 
 export type UnconfirmedSend = z.infer<typeof recordSchema>;
+
+const folderSchema = z.object({
+  id: z.string(),
+  pageId: z.string(),
+  runtimeKey: z.string(),
+  directory: z.string(),
+  seen: z.boolean(),
+});
+
+type PreparedChatFolder = z.infer<typeof folderSchema>;
 
 type UnconfirmedSendComposer = {
   shown: () => ChatDraftIdentity | null;
@@ -75,6 +86,21 @@ const readRecords = (): UnconfirmedSend[] => listStorageKeys(storage)
   .filter((key) => key.startsWith(UNCONFIRMED_SEND_KEY_PREFIX))
   .flatMap((key) => readRecord(key) ?? []);
 
+const readFolders = (): PreparedChatFolder[] => listStorageKeys(storage)
+  .filter((key) => key.startsWith(PREPARED_CHAT_FOLDER_KEY_PREFIX))
+  .flatMap((key) => {
+    try {
+      const folder = folderSchema.safeParse(JSON.parse(storage.getItem(key) ?? 'null'));
+      return folder.success ? [folder.data] : [];
+    } catch {
+      return [];
+    }
+  });
+
+const writeFolder = (folder: PreparedChatFolder): void => {
+  storage.setItem(`${PREPARED_CHAT_FOLDER_KEY_PREFIX}${folder.id}`, JSON.stringify(folder));
+};
+
 const updateRecord = (id: string, change: (record: UnconfirmedSend) => UnconfirmedSend): void => {
   const record = readRecord(keyOf(id));
   if (record) storage.setItem(keyOf(id), JSON.stringify(change(record)));
@@ -96,12 +122,19 @@ const livePages = async (): Promise<Set<string>> => {
   )));
 };
 
+export const trackPreparedChatFolder = (runtimeKey: string, directory: string): void => {
+  if (!sharedAcrossPages) return;
+  holdPageLock();
+  writeFolder({ id: `${pageId}-${randomPart()}`, pageId, runtimeKey, directory, seen: false });
+};
+
 export const trackUnconfirmedSend = (input: {
   identity: ChatDraftIdentity;
   text: string;
   confirmedMentions: Iterable<string>;
   attachmentNames: readonly string[];
 }) => {
+  holdPageLock();
   const id = `${pageId}-${randomPart()}`;
   const record: UnconfirmedSend = {
     id,
@@ -176,6 +209,7 @@ const keepForFolderCleanup = (record: UnconfirmedSend): void => {
 };
 
 const removeOrphanChatDirectory = async (directory: string, server: UnconfirmedSendServer): Promise<'settled' | 'unknown'> => {
+  if (!sharedAcrossPages) return 'settled';
   try {
     if (await server.hasSessionsIn(directory)) return 'settled';
     if (!server.isCurrent()) return 'unknown';
@@ -186,11 +220,37 @@ const removeOrphanChatDirectory = async (directory: string, server: UnconfirmedS
   }
 };
 
+const cleanUpPreparedChatFolders = async (folders: PreparedChatFolder[], server: UnconfirmedSendServer): Promise<void> => {
+  for (const folder of folders) {
+    if (!server.isCurrent()) return;
+    if (readRecords().some((record) => record.chatDirectory === folder.directory)) continue;
+    if (!folder.seen) {
+      writeFolder({ ...folder, pageId, seen: true });
+      continue;
+    }
+    if (await removeOrphanChatDirectory(folder.directory, server) === 'settled') {
+      storage.removeItem(`${PREPARED_CHAT_FOLDER_KEY_PREFIX}${folder.id}`);
+    }
+  }
+};
+
 const recover = async (runtimeKey: string, composer: UnconfirmedSendComposer, server: UnconfirmedSendServer): Promise<void> => {
   const live = await livePages();
-  const interrupted = readRecords().filter((record) => (
-    record.identity.runtimeKey === runtimeKey && record.pageId !== pageId && !live.has(record.pageId)
-  ));
+  const isInterrupted = (owner: string, ownerRuntime: string) => ownerRuntime === runtimeKey && owner !== pageId && !live.has(owner);
+  const interrupted = readRecords().filter((record) => isInterrupted(record.pageId, record.identity.runtimeKey));
+  const folders = readFolders().filter((folder) => isInterrupted(folder.pageId, folder.runtimeKey));
+  await recoverSends(interrupted, composer, server);
+  if (folders.some((folder) => folder.seen)) {
+    try {
+      await server.ready();
+    } catch {
+      return;
+    }
+  }
+  await cleanUpPreparedChatFolders(folders, server);
+};
+
+const recoverSends = async (interrupted: UnconfirmedSend[], composer: UnconfirmedSendComposer, server: UnconfirmedSendServer): Promise<void> => {
   if (interrupted.length === 0) return;
   if (interrupted.some(needsServer)) {
     try {
