@@ -32,7 +32,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.browserProvider.label',
     descriptionKey: 'settings.openchamber.tools.browserProvider.info',
     keywords: ['agent', 'browser', 'provider', 'extension', 'chrome', 'server', 'headless'],
-    // Rendered only while its tool is on.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
   },
   {
@@ -41,7 +40,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.agentBrowserLogins.label',
     descriptionKey: 'settings.openchamber.tools.agentBrowserLogins.info',
     keywords: ['agent', 'browser', 'login', 'cookies', 'profile', 'session', 'security', 'privacy'],
-    // The desktop browser panel's profiles; rendered only while the web tool is on.
     isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
   },
   {
@@ -81,7 +79,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.tools.imageModel.label',
     keywords: ['agent', 'image', 'model', 'picture', 'generate', 'draw'],
-    // Rendered only while its tool is on.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentImageToolEnabled,
   },
   {
@@ -114,8 +111,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
     descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolSummary',
     keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
-    // Unreleased: searching for a setting that is not rendered would take the
-    // user to an empty spot on the page.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
@@ -124,7 +119,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.dreaming.label',
     descriptionKey: 'settings.openchamber.tools.dreaming.info',
     keywords: ['memory', 'organize', 'dream', 'dreaming', 'tidy', 'consolidate', 'clean up', 'background'],
-    // Rendered only while memory is on.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable && useUIStore.getState().agentMemoryToolEnabled,
   },
   {
@@ -141,7 +135,6 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
     descriptionKey: 'settings.openchamber.tools.field.agentWorkflowToolSummary',
     keywords: ['agent', 'tool', 'workflow', 'workflows', 'subagents', 'fan out', 'parallel', 'openchamber'],
-    // Only where an OpenChamber server backs workflows, like memory.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable,
   },
   {
