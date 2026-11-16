@@ -4,17 +4,11 @@ const MAX_PAGES = 8;
 const USER_CHAR_LIMIT = 8_000;
 const ANSWER_CHAR_LIMIT = 16_000;
 
-// Mirrors the persisted context contract owned by UI lib/messages/contextParts.ts.
-// Read only the fields needed for model context; malformed attached text fails
-// this generation instead of silently dropping the user's comment.
 const QUOTE_FIELDS = new Map([
   ['code-comment', 'code'], ['file-quote', 'quote'], ['chat-quote', 'quote'],
   ['browser-annotation', 'prompt'], ['pr-comment', 'body'], ['pr-check', 'output'],
   ['terminal', 'output'],
 ]);
-// Linked items whose message text is the whole context: the current kinds
-// (`repository-issue`, `repository-discussion`, `change-request`,
-// `tracker-item`) and the legacy names older messages carry.
 const LINK_KINDS = new Set([
   'repository-issue', 'repository-discussion', 'change-request', 'tracker-item', 'github-issue', 'github-pr', 'linear-issue',
 ]);
@@ -49,11 +43,6 @@ function attachedText(message) {
   return null;
 }
 
-// Records OpenCode appends around a turn that carry no conversation content:
-// the `idle` marker that closes every turn and the agent/model/location
-// switches. They are invisible to turn boundaries and to "what is the newest
-// message". An `idle` whose outcome is not `succeeded` is not transparent: it
-// is the evidence that the turn failed or was interrupted.
 const TRANSPARENT_TYPES = new Set(['agent-switched', 'model-switched', 'location-switched']);
 
 function isTransparent(record) {
@@ -61,12 +50,6 @@ function isTransparent(record) {
   return TRANSPARENT_TYPES.has(record?.type);
 }
 
-/**
- * The id of the newest record that is conversation content, given a page in
- * v2's newest-first order; null when the page holds only service records.
- * Both the assist reader and the pre-write re-check use it so they agree on
- * what "the last message" is.
- */
 export function newestContentId(records) {
   for (const record of Array.isArray(records) ? records : []) {
     if (!record?.id || isTransparent(record)) continue;
@@ -75,12 +58,6 @@ export function newestContentId(records) {
   return null;
 }
 
-/**
- * v2 message records are flat: an assistant message carries `content[]`, a user
- * message a single `text` plus its attachments, and context items that used to
- * ride along as `synthetic` text parts are their own `synthetic` messages now.
- * Tool payloads never enter this view.
- */
 function readMessage(message) {
   const role = message.type;
   const blocks = [];
@@ -93,7 +70,6 @@ function readMessage(message) {
       authored.push(attached.authored);
     } else if (typeof message.text === 'string') {
       blocks.push(message.text);
-      // Legacy terminal selections are source material, not a language sample.
       authored.push(message.text.replace(/\n*<terminal_context>\n[\s\S]*?\n<\/terminal_context>\s*$/, ''));
     }
   } else if (role === 'assistant') {
@@ -101,8 +77,6 @@ function readMessage(message) {
       if (part?.type === 'text' && typeof part.text === 'string') blocks.push(part.text);
     }
   } else if (role === 'synthetic') {
-    // Context the user attached to the message that follows: in v1 it was a
-    // `synthetic` text part inside the user message, in v2 it is its own turn.
     const attached = attachedText(message);
     if (attached) {
       blocks.push(attached.text);
@@ -118,14 +92,8 @@ function readMessage(message) {
     created: Number.isFinite(message.time?.created) ? message.time.created : null,
     completed: Number.isFinite(message.time?.completed) ? message.time.completed : null,
     transparent: isTransparent(message),
-    // v2 has no `parentID` on a message: a turn is the run of messages between
-    // one user message and the assistant reply that follows it, which is what
-    // `collectTurns` walks.
     providerID: message.model?.providerID,
     modelID: message.model?.id,
-    // Files OpenCode saw change in the folder during this step, or null when
-    // it took no snapshot (snapshots off, not a git folder). The folder is
-    // shared, so another session's edits can show up here too.
     snapshotFiles: role === 'assistant' && Array.isArray(message.snapshot?.files) ? message.snapshot.files : null,
     complete: role === 'assistant'
       && message.finish === 'stop'
@@ -136,15 +104,6 @@ function readMessage(message) {
   };
 }
 
-/**
- * A turn is one user message and the assistant reply that closes it. v2 dropped
- * `parentID`, so the boundary is positional: everything between two user
- * messages belongs to the turn the earlier one opened.
- *
- * Synthetic messages are the context the user attached to the message they are
- * about to send — v1 carried them as parts of that user message — so they are
- * folded into the next user message instead of opening a turn of their own.
- */
 function collectTurns(messages) {
   const turns = [];
   let active = null;
@@ -166,7 +125,6 @@ function collectTurns(messages) {
     }
     attached = [];
     if (!active || message.role !== 'assistant') continue;
-    // Every step of the turn counts, not only the one with the final text.
     if (message.snapshotFiles) active.changedFiles = new Set([...(active.changedFiles ?? []), ...message.snapshotFiles]);
     if (message.text) active.assistant = message;
     active.complete = message.complete && Boolean(message.text);
@@ -174,7 +132,6 @@ function collectTurns(messages) {
   return turns.slice(-TURN_LIMIT);
 }
 
-/** Failure is thrown; null means no eligible final answer within bounded history. */
 export async function loadAssistContext({ readPage, signal }) {
   let messages = [];
   let cursor;
@@ -182,7 +139,6 @@ export async function loadAssistContext({ readPage, signal }) {
   const ids = new Set();
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
     signal.throwIfAborted();
-    // v2 pages messages newest first and returns `{ data, cursor }`.
     const page = await readPage({ limit: PAGE_SIZE, cursor });
     signal.throwIfAborted();
     if (!Array.isArray(page?.data)) throw new Error('Session message page is unavailable');
@@ -195,8 +151,6 @@ export async function loadAssistContext({ readPage, signal }) {
     older.reverse();
     messages = older.concat(messages);
     const next = typeof page.cursor?.next === 'string' ? page.cursor.next : null;
-    // A successful turn ends with an `idle` marker after the answer; look past
-    // it and its siblings to the newest content record.
     const last = messages.findLast((message) => !message.transparent);
     if (!last) {
       if (!next || pageNumber === MAX_PAGES - 1) return null;
