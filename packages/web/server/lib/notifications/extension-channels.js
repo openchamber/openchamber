@@ -19,42 +19,13 @@ import { isProviderUsername } from '../source-control/provider-id.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { genericNotificationTitle } from './message.js';
 
-/**
- * Extension notification channels (`provides: ["notifications"]`): which
- * installed extensions deliver the user's notifications right now, the
- * account each one sends as, and the delivery itself.
- *
- * The catalog is the authority, never an event: `reconcile()` reads it and
- * keeps the registered set in step (after approval, enable, install, update,
- * pause, removal and withdrawn approval). A guest is a channel when it is
- * enabled, fully approved with an effective `service` grant, provides
- * `notifications` and has a parsed `contributes.notifications`. Approving the
- * extension and connecting an account is the whole switch; pausing it is the
- * off. Which kinds reach a channel is decided before `deliver` is called, by
- * the user's own notification toggles in `runtime.js`.
- *
- * Accounts are OpenChamber's (`channel-accounts.js`): the user connects one
- * through the routes in `channel-routes.js`, the token stays here, and the
- * service never sees it. Each forwarded call carries a fresh handle
- * (`../source-control/outbound-handles.js`) bound to the account's origin and
- * token; the service reaches the channel's server through the callback
- * listener with that handle, and the handle ends with the call. A 401 the
- * service reports writes the account off only when the proxy saw the server
- * answer 401 on that handle.
- *
- * Delivery is at most once: a channel whose service fails or whose account
- * is written off gets one warning a minute and nothing is retried. Nothing
- * here logs a notification's text.
- */
 
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
-/** Proxy failures where the service never answered the call: the channel is unavailable, not wrong. */
 const NOT_REACHED_CODES = new Set(['SERVICE_FAILED', 'NO_SERVICE', 'DISABLED', 'REQUEST_FAILED', 'CANCELLED']);
 const WARN_INTERVAL_MS = 60_000;
 const CHANNEL_PENDING_MAX = 200;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
-/** Whether a catalog row may deliver notifications; the runtime asks again on every call. */
 export const isNotificationChannelGuest = (guest) => {
   const granted = Array.isArray(guest?.capabilityGrants) ? guest.capabilityGrants : [];
   return Boolean(guest)
@@ -65,12 +36,6 @@ export const isNotificationChannelGuest = (guest) => {
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-/**
- * A server address the user typed for a `user` instance: an https origin, or
- * http on this machine so a development receiver can be connected. Anything
- * with a path, a query, a fragment or credentials is refused; the service
- * builds the paths.
- */
 export const normalizeChannelInstance = (value) => {
   if (String(value) !== value) return null;
   let url;
@@ -87,16 +52,10 @@ export const normalizeChannelInstance = (value) => {
 
 const routeError = (status, code, message) => Object.assign(new Error(message), { status, code });
 
-/**
- * The server a stored account's token belongs to. A `fixed` channel whose
- * manifest now names another server gets null: the token was given for the
- * old one and goes nowhere until the user connects again.
- */
 const accountInstanceOf = (contribution, stored) => (
   contribution.instances.kind === 'fixed' && stored.instance !== contribution.instances.origin ? null : stored.instance
 );
 
-/** `kind` says what a failed call means: `invalid-token`, `unavailable` (never reached), `malformed`, or `provider-error`. */
 const callError = (message, { status, code, kind = 'provider-error' } = {}) => {
   const error = new Error(message);
   if (status !== undefined) error.status = status;
@@ -105,7 +64,6 @@ const callError = (message, { status, code, kind = 'provider-error' } = {}) => {
   return error;
 };
 
-/** What a handle carries to the channel's server, per the contribution's token block; `basic` pairs it with the login. */
 const credentialOf = (contribution, token, login) => {
   const credential = { token, header: contribution.token.header, scheme: contribution.token.scheme };
   if (contribution.token.scheme === 'basic') credential.login = login;
@@ -136,7 +94,6 @@ export const createExtensionNotificationChannels = ({
   createId = () => crypto.randomUUID(),
   warn = (...args) => console.warn(...args),
 }) => {
-  /** Per provider id: the catalog row of the extension that serves the channel. */
   const registered = new Map();
   let queue = Promise.resolve();
   const lastWarnAt = new Map();
@@ -148,7 +105,6 @@ export const createExtensionNotificationChannels = ({
     accounts.cancelConnect(providerId);
   };
 
-  // Authentication and notification calls share the service's one-call-at-a-time contract.
   const callInOrder = (providerId, action) => {
     let state = calls.get(providerId);
     if (!state) {
@@ -177,7 +133,6 @@ export const createExtensionNotificationChannels = ({
     try {
       guests = await listGuests();
     } catch (error) {
-      // A catalog that cannot be read changes nothing: it is not an empty catalog.
       warn('[notifications] the extension catalog could not be read:', error?.message ?? error);
       return;
     }
@@ -193,7 +148,6 @@ export const createExtensionNotificationChannels = ({
     }
     registered.clear();
     for (const [providerId, guest] of next) registered.set(providerId, guest);
-    // An update that moved a fixed channel's server leaves the account on the old one: written off, so the card says so.
     for (const [providerId, guest] of registered) {
       let stored;
       try {
@@ -212,11 +166,6 @@ export const createExtensionNotificationChannels = ({
     return queue;
   };
 
-  /**
-   * One forwarded call. `credential` is what the handle carries to the
-   * channel's server (null for `auth.probe`), `account` who the call acts as
-   * (null before one exists). Answers the parsed data.
-   */
   const forward = async (providerId, guest, method, { instance, credential, account, input }, signal) => {
     if (signal?.aborted) throw callError('The channel is no longer active.', { code: 'CANCELLED', kind: 'unavailable' });
     const timeoutMs = notificationsProviderTimeoutMs(method);
@@ -273,7 +222,6 @@ export const createExtensionNotificationChannels = ({
       if (!envelope.data.ok) {
         const { message, status, code } = envelope.data.error;
         if (status === 401) {
-          // The service's word alone never writes an account off.
           if (!grant.outbound.some((request) => request.status === 401)) throw malformed('a 401 the server did not give');
           throw callError(message, { status, code, kind: 'invalid-token' });
         }
@@ -293,7 +241,6 @@ export const createExtensionNotificationChannels = ({
     return guest;
   };
 
-  /** A connect that failed in the service or at the server, as a route answers it. */
   const connectFailure = (error, label) => {
     if (error.kind === 'invalid-token') return routeError(401, 'TOKEN_REFUSED', `${label} refused this token.`);
     if (error.kind === 'unavailable') return routeError(503, 'CHANNEL_UNAVAILABLE', error.message);
@@ -301,11 +248,6 @@ export const createExtensionNotificationChannels = ({
     return routeError(Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 400, error.code ?? 'CONNECT_FAILED', error.message);
   };
 
-  /**
-   * Connect the channel's one account: probe a typed instance, verify the
-   * token through the service, store what the server said the account is.
-   * Nothing is stored unless both pass; connecting again replaces the account.
-   */
   const connect = async ({ providerId, instance, token, username }) => {
     const guest = registeredChannel(providerId);
     const contribution = guest.notifications;
@@ -313,7 +255,6 @@ export const createExtensionNotificationChannels = ({
     if (!secret) throw routeError(400, 'TOKEN_REQUIRED', 'A token is required.');
     const login = String(username) === username && username.trim() ? username.trim() : null;
     if (contribution.token.scheme === 'basic' && !login) throw routeError(400, 'USERNAME_REQUIRED', `${contribution.label} signs in with a username; enter it beside the token.`);
-    // The handle minter sends only a username it can put in a Basic header; refused here, in the channel's words.
     if (login && !isProviderUsername(login)) throw routeError(400, 'USERNAME_INVALID', `${contribution.label} cannot sign in with this username: use Latin letters, digits and punctuation other than ":".`);
     let origin;
     if (contribution.instances.kind === 'fixed') {
@@ -336,7 +277,6 @@ export const createExtensionNotificationChannels = ({
     }
     const account = {
       id: verified.account.id,
-      // A Basic-auth server's stored login is the username the user typed, the one Basic auth accepted.
       login: contribution.token.scheme === 'basic' ? login : verified.account.login,
     };
     if (verified.account.name) account.name = verified.account.name;
@@ -350,7 +290,6 @@ export const createExtensionNotificationChannels = ({
     return { removed: await accounts.remove(providerId) };
   };
 
-  /** Every registered channel with what the card shows: the channel's description and its account, never a token. */
   const list = async () => {
     const views = await accounts.list();
     return [...registered].map(([providerId, guest]) => ({
@@ -362,12 +301,6 @@ export const createExtensionNotificationChannels = ({
     }));
   };
 
-  /**
-   * One notification, already past the user's toggles and the runtime's
-   * suppressions, to every registered channel with a valid account.
-   * `requireHidden` is the push rule: nothing goes out while a client is
-   * visible, unless the user chose to be notified always.
-   */
   const deliver = async ({ notification, requireHidden }) => {
     if (registered.size === 0) return;
     if (requireHidden && isAnyUiVisible() === true) return;
@@ -384,7 +317,6 @@ export const createExtensionNotificationChannels = ({
       const instance = accountInstanceOf(guest.notifications, stored);
       if (!instance) return;
       try {
-        // Policy can change while this notification waits in the channel queue.
         const outgoing = isEnterpriseMode() ? {
           ...notification,
           title: genericNotificationTitle(notification.kind),
@@ -400,7 +332,6 @@ export const createExtensionNotificationChannels = ({
         }, signal);
       } catch (error) {
         if (INELIGIBLE_CODES.has(error.code)) {
-          // Paused, removed or withdrawn meanwhile: the catalog, not this call, says so.
           void reconcile();
           return;
         }
@@ -416,7 +347,6 @@ export const createExtensionNotificationChannels = ({
     })));
   };
 
-  /** After a pause, a removal or withdrawn approval. A removed extension's account goes with it. */
   const deactivated = async ({ guestId, removed = false }) => {
     const providerId = notificationProviderIdOf(guestId);
     registered.delete(providerId);

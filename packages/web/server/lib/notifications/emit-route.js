@@ -13,19 +13,9 @@ const emitBodySchema = z.object({
   tag: optionalText(128),
   sessionId: optionalText(128),
   directory: optionalText(4096),
-  // Opt-in for notices that matter even while OpenChamber is in front.
   showWhenFocused: z.boolean().optional(),
 }).refine((value) => value.title || value.body, { message: 'title or body required' });
 
-/**
- * Raises a notification on behalf of a plugin or the agent, through the same
- * live delivery the built-in triggers use. `kind` is always `plugin`, so a
- * caller cannot impersonate kinds the UI treats specially. One rate window is
- * shared by every caller, the HTTP route and the agent tool alike.
- *
- * `emit` resolves to `{ status, body }`: 200 delivered or skipped by settings,
- * 400 invalid input, 429 rate limited (with `retryAfter` seconds).
- */
 export const createPluginNotificationEmitter = (dependencies) => {
   const {
     readSettingsFromDiskMigrated,
@@ -84,11 +74,6 @@ export const createPluginNotificationEmitter = (dependencies) => {
   return { emit };
 };
 
-/**
- * `POST /api/notifications/emit`. Two callers are accepted: a plugin inside
- * the managed OpenCode (the agent-tool bearer token, checked before API auth)
- * and any client that passes the regular API auth.
- */
 export const registerNotificationEmitRoutes = (app, dependencies) => {
   const { express, isAgentToolRequestAuthorized, emitter } = dependencies;
 
@@ -105,13 +90,11 @@ export const registerNotificationEmitRoutes = (app, dependencies) => {
   };
 
   return {
-    // Registered before API auth: a managed plugin carries no UI session.
     registerPluginRoute: () => {
       app.post(NOTIFICATION_EMIT_PATH, jsonBody, (req, res, next) => (
         isAgentToolRequestAuthorized(req) ? respond(req, res, next) : next()
       ));
     },
-    // Registered after API auth: everything else is an ordinary API caller.
     registerApiRoute: () => {
       app.post(NOTIFICATION_EMIT_PATH, jsonBody, respond);
     },
