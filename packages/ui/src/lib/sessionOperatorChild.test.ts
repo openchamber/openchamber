@@ -30,11 +30,12 @@ describe('operator child sessions', () => {
     });
   });
 
-  test('taking a session over gives the question tool back and keeps every other rule', () => {
+  test('taking a session over gives the question and secret tools back and keeps every other rule', () => {
     const rules = [
       { action: 'bash', resource: '*', effect: 'ask' as const },
       { action: 'question', resource: '*', effect: 'deny' as const },
       { action: 'question', resource: 'x', effect: 'deny' as const },
+      { action: 'openchamber_secret', resource: '*', effect: 'deny' as const },
     ];
     expect(permissionsAfterTakeOver(rules)).toEqual([rules[0], rules[2]]);
     expect(permissionsAfterTakeOver(undefined)).toEqual([]);

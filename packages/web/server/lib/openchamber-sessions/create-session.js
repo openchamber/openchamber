@@ -3,16 +3,16 @@ import { asNonEmptyString } from '../shared/guards.js';
 
 export const OPERATOR_CHILD_NOTE_SOURCE = 'openchamber-operator-child';
 
-const QUESTION_DENIED_RULE = { action: 'question', resource: '*', effect: 'deny' };
+const OPERATOR_CHILD_DENIED_RULES = ['question', 'openchamber_secret'].map((action) => ({ action, resource: '*', effect: 'deny' }));
 
 const OPERATOR_CHILD_NOTE = [
   'The user does not interact with this session. Another agent started it as part of its own work, and your final answer goes to that agent, not to the user.',
   'Nobody answers questions here. When you need a decision, state the question in plain text in your answer and end your turn: do not use tools that wait for an answer, and do not draw openui-lang blocks with buttons or choices.',
 ].join('\n\n');
 
-export const withoutQuestionDenied = (permissions) => (Array.isArray(permissions) ? permissions : []).filter((rule) => !(
-  rule?.action === QUESTION_DENIED_RULE.action && rule?.resource === QUESTION_DENIED_RULE.resource && rule?.effect === QUESTION_DENIED_RULE.effect
-));
+export const withoutOperatorChildDenials = (permissions) => (Array.isArray(permissions) ? permissions : []).filter((rule) => !OPERATOR_CHILD_DENIED_RULES.some((denied) => (
+  rule?.action === denied.action && rule?.resource === denied.resource && rule?.effect === denied.effect
+)));
 
 const operatorChildMetadata = (parentSessionId) => ({ kind: OPERATOR_CHILD_KIND, parentID: parentSessionId });
 
@@ -25,7 +25,7 @@ export const createSession = async ({ client, directory, title, titleByUser = fa
   }
   if (startedByExtension) openchamberMetadata.startedByExtension = startedByExtension;
   if (Object.keys(openchamberMetadata).length > 0) input.metadata = { openchamber: openchamberMetadata };
-  if (operatorParentId) input.permissions = [QUESTION_DENIED_RULE];
+  if (operatorParentId) input.permissions = OPERATOR_CHILD_DENIED_RULES;
   const session = await client.session.create(input);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');

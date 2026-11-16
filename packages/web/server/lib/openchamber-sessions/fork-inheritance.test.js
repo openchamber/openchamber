@@ -37,12 +37,12 @@ describe('sourceOwnedLinksPatch', () => {
 });
 
 describe('a fork of an agent\'s worker session', () => {
-  it('drops the link to the agent and gives the question tool back', async () => {
+  it('drops the link to the agent and gives the question and secret tools back', async () => {
     const writes = [];
     const permissions = [];
     await applyForkInheritance({
       sourceSessionID: 'ses_worker',
-      fork: { id: 'ses_fork', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } }, permissions: [{ action: 'bash', resource: '*', effect: 'ask' }, { action: 'question', resource: '*', effect: 'deny' }] },
+      fork: { id: 'ses_fork', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } }, permissions: [{ action: 'bash', resource: '*', effect: 'ask' }, { action: 'question', resource: '*', effect: 'deny' }, { action: 'openchamber_secret', resource: '*', effect: 'deny' }] },
       readObjective: async () => null,
       writeObjective: async () => {},
       writeMetadata: async (id, patch) => { writes.push([id, patch]); },

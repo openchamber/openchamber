@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { OPERATOR_CHILD_KIND } from '../session-lineage.js';
-import { withoutQuestionDenied } from './create-session.js';
+import { withoutOperatorChildDenials } from './create-session.js';
 
 // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 OpenCode forks copy the source metadata wholesale.
 
@@ -81,8 +81,8 @@ export const applyForkInheritance = async ({ sourceSessionID, fork, readObjectiv
   }
 
   if (openChamberNamespace(metadata)?.kind === OPERATOR_CHILD_KIND && writePermissions) {
-    await writePermissions(fork.id, withoutQuestionDenied(fork.permissions))
-      .catch((error) => console.warn('[fork] failed to give the fork its question tool back', error?.message ?? error));
+    await writePermissions(fork.id, withoutOperatorChildDenials(fork.permissions))
+      .catch((error) => console.warn('[fork] failed to give the fork its question and secret tools back', error?.message ?? error));
   }
   const namespacePatch = sourceOwnedLinksPatch(metadata) ?? {};
   if (inlineObjective !== null) {
