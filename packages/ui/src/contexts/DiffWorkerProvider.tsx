@@ -56,12 +56,12 @@ let poolModulesPromise: Promise<PoolModules> | null = null;
 const loadPoolModules = (): Promise<PoolModules> => {
   poolModulesPromise ??= Promise.all([
     import('@pierre/diffs/worker'),
-    import('@/lib/diff/workerFactory'),
+    import('@/lib/diff/workerFactory').then(({ workerFactory }) => workerFactory),
     import('@/lib/shiki/appThemeRegistry'),
     import('@/lib/shiki/diffsHighlighter'),
-  ]).then(([workerModule, factoryModule, themeRegistryModule, highlighterModule]) => ({
+  ]).then(([workerModule, workerFactory, themeRegistryModule, highlighterModule]) => ({
     WorkerPoolManager: workerModule.WorkerPoolManager,
-    workerFactory: factoryModule.workerFactory,
+    workerFactory,
     ensurePierreThemeRegistered: themeRegistryModule.ensurePierreThemeRegistered,
     highlighter: highlighterModule.DIFFS_HIGHLIGHTER,
   }));
