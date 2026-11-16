@@ -3,7 +3,7 @@ import type { FileDiffMetadata, FileDiffOptions, OnDiffLineEnterLeaveProps } fro
 import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
 import type { DiffAnnotation, DiffHunkActions } from './types';
 
-export const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
+const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
 
 export const useHunkActionTargets = (hunkActions: DiffHunkActions | undefined) => {
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
