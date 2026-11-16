@@ -21,22 +21,22 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - If you want to change how `read/grep/perplexity/webfetch/...` look in compact mode, edit here.
 
 - `ToolPart.tsx`
-  - Renders expandable tool rows (shell/edit/write/question/subagent + fallback).
-  - Controls expandable header title/description/diff stats/timer and expanded output body.
-  - If you want to change expandable tool layout, edit here.
+  - The entry of expandable tool rows (shell/edit/write/question/subagent + fallback). It only composes: it picks the row for the call (`BackgroundShellToolPartContent`, `SubagentToolPartContent`, `ShellToolPartContent` or `ToolPartContent`) and wraps it in `ToolPartErrorBoundary`.
+  - The pieces live in `toolRow/`: `ToolPartContent.tsx` is the row (header title/description/diff stats/timer, with `useToolRowTiming` and `useToolRowOpenActions`), `ToolExpandedContent.tsx` is the expanded body, `toolDescriptions.ts` builds the row's text, and the output views (`ToolScrollableTextOutput`, `JsonToolOutput`, `CommandOutput`, `DiffPreview`, ...) are one file each.
+  - If you want to change expandable tool layout, edit in `toolRow/`.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
   - While the child runs, foreground or background, the row has a stop action. OpenCode 2.0.23 has no route that cancels a subagent job; interrupting the child ends the job as cancelled, which the agent reads as a failed subagent and tends to restart. `opencodeClient.stopSubagent` therefore first admits a non-resuming synthetic note (`subagentCancellationNote` in `@/lib/opencode/subagent-run`) that explains the cancellation as the user's stop without forbidding the work, and interrupts the child only once the note is in. A foreground call the note names reads `stopped` instead of failed (`toStoppedSubagentPart`). Drop the note once OpenCode reports a user cancel itself.
 
 - A `todowrite` call (OpenCode's experimental todo tool) is titled with the localized name of the Work Status section that keeps the session's list ("Tasks"), and its description is that section's count with the item in progress (`1/4 · ...`, cancelled items out of both). Opened, a finished call shows the list it set in the agent's order (`TodoWriteList.tsx`), with the section's status icons (`components/chat/todoStatus.ts`), in place of the input JSON and the text answer, which only counts the same items again. A running or failed call keeps the plain input.
 
 - `taskToolModel.ts`
-  - Owns subagent output preparation and child identity parsing. `ToolPart.tsx` resolves the call's child identity.
+  - Owns subagent output preparation and child identity parsing. `toolRow/subagentChildSession.ts` resolves the call's child identity.
   - A subagent's `state.metadata.sessionID` is the preferred child identity from progress/result updates. Legacy part metadata and output IDs remain readable, then a non-empty `state.input.sessionID` identifies a resumed child when those IDs are absent.
   - If none of those sources names a child, a running call may infer one from child sessions created at or after the call start. Candidates must belong to the parent, match the requested agent when the session has one, and remain unclaimed by sibling calls. A unique candidate is accepted; when several remain, the call description must uniquely match the child title. Ambiguous calls stay unlinked. Inference never pairs children by sibling order or status.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).
-  - Used by `ProgressiveGroup.tsx`, `ToolPart.tsx`, and `ToolOutputDialog.tsx`.
+  - Used by `ProgressiveGroup.tsx`, `toolRow/ToolPartContent.tsx`, and `ToolOutputDialog.tsx`.
   - Takes an optional extension rule (below) whose `icon` wins when the sprite carries it.
 
 - Tool names, per-tool input/metadata fields, and the row description are owned by `@/lib/opencode/tools`. Branch on its predicates (`isShellTool`, `isSubagentTool`, `isFileChangeTool`, ...) instead of comparing tool names here; v2 has no `state.title`, so a row's description comes from `toolDescription(tool, input, metadata)`. Every v2 built-in answers from its own input before its result lands: `patch` from the `*** Update File:` headers of its text until `metadata.files` arrives, `skill` from its `id`, and the `opencode.*` namespace tools (`session_rename`, `session_move`, `models`) from their title, directory or search; `getToolMetadata` resolves a namespaced name by its last segment.
@@ -83,7 +83,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `SecretRequestCard.tsx`
   - The card an agent asks for a secret on: label, reason, a masked field that password managers are told to skip, an eye that reveals the typed value for this client only, Save securely and Decline. The value goes to the server through `answerSecretRequest` (`@/lib/secretRequestAnswer`) and never into the call. A refused answer (answered elsewhere, turn ended) shows a toast and keeps the card. Once this client answered, the call shows as its tool row (below). The answer names the session's directory, so a card in an isolated space reaches the space's server, where the call waits and the agent's commands run. A card that waits is brought into view the way a waiting page is (`data-waiting-page`, `dispatchPageWaiting`).
   - `SecretRunCard` is the card of a `secret.run` call (`requestedSecretRun`): the command line as the user approved it (`secretRunCommandLine`, the server's rule mirrored), then one masked field per secret the server still needs, each with "Remember in this chat for 10 minutes", off by default, and Run and Decline. While the call runs, the call alone cannot tell its stage, so the card reads the live state: once the server announces the card as waiting (`useIsCallWaiting`, the global blocking-requests index), the card reads which fields to ask and which the chat reuses from the server (`readSecretRunFields`), so a reload or another device draws the same card.
-  - Whenever a secret card asks nothing (OpenCode asks to approve the command, the command runs, this client just answered), it draws the call's ordinary running tool row (`SecretCallRow`, the `ToolPart` component). A finished call is not drawn in place at all (`requestedSecret` and `requestedSecretRun` answer only while the call runs), so it is that row too. The subtitle says how it ended (`secretRowView` in `openChamberToolEnvelope.ts`): for a run, ran, the exit code when it was not 0, a time-limit stop, a program that did not start, declined, not run, then the command line; for a request, saved, declined or not given, then the label. The expanded run shows what the command printed in the shell row's output block (`CommandOutput` in `ToolPart.tsx`), read from the result envelope the agent got, so with the secret values already replaced; a saved request shows its file. A row loaded from history completes its result when it opens, as every tool row does. Secret cards once folded into lines of their own look, which read as a different kind of thing than the tool rows around them.
+  - Whenever a secret card asks nothing (OpenCode asks to approve the command, the command runs, this client just answered), it draws the call's ordinary running tool row (`SecretCallRow`, the `ToolPart` component). A finished call is not drawn in place at all (`requestedSecret` and `requestedSecretRun` answer only while the call runs), so it is that row too. The subtitle says how it ended (`secretRowView` in `openChamberToolEnvelope.ts`): for a run, ran, the exit code when it was not 0, a time-limit stop, a program that did not start, declined, not run, then the command line; for a request, saved, declined or not given, then the label. The expanded run shows what the command printed in the shell row's output block (`CommandOutput` in `toolRow/`), read from the result envelope the agent got, so with the secret values already replaced; a saved request shows its file. A row loaded from history completes its result when it opens, as every tool row does. Secret cards once folded into lines of their own look, which read as a different kind of thing than the tool rows around them.
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
@@ -827,7 +827,7 @@ If task is: "change text shown near Read or Skill in compact mode":
 
 1. Edit `ProgressiveGroup.tsx` -> `getToolShortDescription(activity)`.
 2. Update the branch that handles `read` or `skill` in `StaticToolRow`.
-3. Keep all other tool header/output behavior in `ToolPart.tsx`.
+3. Keep all other tool header/output behavior in `ToolPart.tsx` and `toolRow/`.
 4. Keep icon changes (if any) in `toolPresentation.tsx`.
 
 Why: only navigation tools use the compact static path; all other tools need observable input and output.
@@ -836,14 +836,14 @@ Why: only navigation tools use the compact static path; all other tools need obs
 
 1. Update `toolRenderUtils.ts`:
    - add/remove a tool name from `STATIC_TOOL_NAMES` only when it has a reliable direct in-app navigation action
-2. Ensure `ToolPart.tsx` supports desired header + expanded output format for that tool.
+2. Ensure `ToolPart.tsx` (`toolRow/`) supports desired header + expanded output format for that tool.
 3. Validate with Activity Default set to Expanded and to Collapsed.
 
 ## Safe editing checklist
 
 - Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
 - For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
-- For expanded output changes, edit `ToolPart.tsx`.
+- For expanded output changes, edit `toolRow/ToolExpandedContent.tsx`.
 - After edits run:
   - `bun run type-check`
   - `bun run lint`
@@ -903,7 +903,7 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
-- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
+- Tools: `ToolPart.tsx`, `toolRow/`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`
