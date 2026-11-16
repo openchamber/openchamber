@@ -8,7 +8,6 @@ const navigationRequest = z.object({
 
 let acceptNavigation: ((url: URL) => boolean) | null = null;
 
-/** Both browser notifications and worker messages use the mounted app router. */
 export function navigateFromNotification(url: string): boolean {
   if (!acceptNavigation) return false;
   try {
@@ -21,7 +20,6 @@ export function navigateFromNotification(url: string): boolean {
   }
 }
 
-/** Listen only while the app router is mounted and able to accept navigation. */
 export function listenForNotificationNavigation(accept: (url: URL) => boolean): () => void {
   acceptNavigation = accept;
   const serviceWorker = 'serviceWorker' in navigator ? navigator.serviceWorker : null;
@@ -37,7 +35,6 @@ export function listenForNotificationNavigation(accept: (url: URL) => boolean): 
         && navigateFromNotification(request.data.url);
       port.postMessage(accepted);
     } catch {
-      // A synchronous routing failure must leave document fallback available.
       port.postMessage(false);
     } finally {
       port.close();
