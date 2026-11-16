@@ -76,10 +76,7 @@ import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
 import { createOpenCodeEnvRuntime } from '../server/lib/opencode/env-runtime.js';
 import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js';
 
-// The CLI process performs provider fetches (quota/usage, update notes) under
-// Node/undici, whose happy-eyeballs default aborts each connect attempt after
-// 250ms — distant provider endpoints routinely need longer handshakes, surfacing
-// as "fetch failed" (#3399). No-op on runtimes without the setter.
+// external: #3399 provider fetches need a longer connect-attempt timeout than undici's 250ms default.
 applyConnectAttemptTimeout();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -126,9 +123,6 @@ function getBunBinary() {
     return process.env.BUN_BINARY.trim();
   }
   if (typeof process.env.BUN_INSTALL === 'string' && process.env.BUN_INSTALL.trim().length > 0) {
-    // The Windows installer places bun.exe there; spawnSync does not append
-    // the extension to an explicit path, so without it the probe fails and
-    // the CLI silently falls back to Node.
     return path.join(process.env.BUN_INSTALL.trim(), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun');
   }
   return 'bun';
@@ -154,8 +148,7 @@ function getInstalledBunVersion() {
   }
 }
 
-// On older Bun the terminal has no working PTY backend (#6322), so the server runs on Node there.
-// The update restart reruns this CLI with the server's own runtime, which can be that older Bun.
+// external: #6322 Bun before the PTY fix cannot back a terminal, so the server runs on Node there.
 function getServerRuntimeBinary() {
   if (bunVersionRunsBunPty(getInstalledBunVersion())) return BUN_BIN;
   if (!isBunRuntime() || bunVersionRunsBunPty(globalThis.Bun.version)) return process.execPath;
@@ -179,9 +172,6 @@ async function checkOpenCodeCLI(onNotice) {
 
   let resolvedFromPath = searchPathFor('opencode');
   if (!resolvedFromPath) {
-    // A startup service starts with the platform's default PATH (its saved
-    // environment holds none, see cli-startup.js); the user's tools are on
-    // the login shell's PATH, which the server would add only after this check.
     createOpenCodeEnvRuntime({ state: {} }).applyLoginShellEnvSnapshot();
     resolvedFromPath = searchPathFor('opencode');
   }

@@ -3,9 +3,7 @@ import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettin
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 
 const UI_SESSION_COOKIE_NAME = 'oc_ui_session';
-// The server folds the request port into the cookie name (oc_ui_session_<port>)
-// so LAN instances on different ports don't share one jar (issue #2377). Accept
-// both the bare name and any per-port variant when extracting.
+// external: #2377 the server names the UI session cookie per port, so accept the bare name and any per-port variant.
 const UI_SESSION_COOKIE_PATTERN = new RegExp(`(?:^|,\\s*)(${UI_SESSION_COOKIE_NAME}(?:_\\d+)?=[^;]+)`);
 
 function extractUiSessionCookie(response) {
@@ -106,8 +104,6 @@ async function requestJson(port, endpoint, options = {}) {
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? Math.trunc(options.timeoutMs)
     : 4000;
-  // Control commands pass their whole parsed CLI options here. Only the request
-  // fields may reach fetch: Bun rejects `session` (`--session`) as its own option.
   const { method, headers, body: requestBody } = options;
   const fetchOptions = { method, body: requestBody };
 

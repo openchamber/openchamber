@@ -156,7 +156,6 @@ const validateActionWaitOptions = (options, action) => {
   }
 };
 
-// A wait ends early when the session needs the user, and that is not a finish.
 const reportWaitingForUser = (options, sessionStatus) => {
   if (options.wait !== true || sessionStatus?.type !== 'waiting') return;
   process.exitCode = EXIT_CODE.GENERAL_ERROR;
