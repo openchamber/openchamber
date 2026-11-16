@@ -45,10 +45,10 @@ const stripComments = (source) =>
     .replace(/\/\/[^\n]*/g, '')
     .replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** Static `import { a, b as c } from 'spec'` — returns [{ specifier, names }]. */
+/** Static `import { a, b as c } from 'spec'` (an optional default binding before the braces is also matched) — returns [{ specifier, names }]. */
 const staticImports = (source) => {
   const out = [];
-  const re = /import\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+  const re = /import\s+(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
   let match;
   while ((match = re.exec(source)) !== null) {
     const names = match[1]
@@ -123,13 +123,23 @@ const sourceExports = (file, visited = new Set()) => {
     const [, list, from] = block;
     if (from) {
       if (from.startsWith('.')) {
-        // Resolve relative to the source file directly.
+        // Resolve relative to the source file directly, then expose only
+        // the bindings this re-export selects (under their declared
+        // aliases) — not everything the target module exports.
         const relTarget = path.resolve(path.dirname(real), from);
         const relCandidates = [relTarget, `${relTarget}.js`, `${relTarget}/index.js`];
         for (const candidate of relCandidates) {
           try {
             if (statSync(candidate).isFile()) {
-              for (const name of sourceExports(candidate, visited)) names.add(name);
+              const targetExports = sourceExports(candidate, visited);
+              for (const part of list.split(',')) {
+                const trimmed = part.trim();
+                if (!trimmed) continue;
+                const asMatch = trimmed.match(/^(\S+)\s+as\s+(\S+)$/);
+                const sourceName = asMatch ? asMatch[1] : trimmed.replace(/;$/, '');
+                const exposedName = asMatch ? asMatch[2].replace(/;$/, '') : sourceName;
+                if (targetExports.has(sourceName)) names.add(exposedName);
+              }
               break;
             }
           } catch {
