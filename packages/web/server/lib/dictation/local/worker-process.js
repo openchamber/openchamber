@@ -1,19 +1,3 @@
-/**
- * Dictation local-speech worker process.
- *
- * Hosts the sherpa-onnx native inference (speech-to-text and local TTS) in a
- * separate process so ONNX decoding never blocks the main OpenChamber server. Communicates
- * with the parent over child_process IPC (advanced serialization, so Buffers
- * survive the trip as Uint8Array).
- *
- * Request/response protocol (parent -> worker):
- *   { type: 'session.create', requestId, sessionId, modelsDir, modelId, language? }
- *   { type: 'session.append', requestId, sessionId, audio }
- *   { type: 'session.commit' | 'session.clear' | 'session.close', requestId, sessionId }
- * Worker -> parent:
- *   { type: 'response', requestId, ok, result?, error? }
- *   { type: 'session.committed' | 'session.transcript' | 'session.error', sessionId, ... }
- */
 
 import {
   SherpaOfflineRecognizerEngine,
@@ -55,16 +39,12 @@ function sendOk(requestId, result) {
 
 function getEngine(modelsDir, modelId, language) {
   const spec = getLocalSttModelSpec(modelId);
-  // A language hint is part of the recognizer, so a model loaded for another
-  // language is a different engine.
   const modelKey = `${modelsDir}:${modelId}`;
   const key = `${modelKey}:${resolveModelLanguage(modelId, spec.type, language)}`;
   const existing = engines.get(key);
   if (existing) {
     return existing;
   }
-  // The same model loaded for the previous language holds another gigabyte;
-  // free it unless a running dictation still uses it.
   const inUse = new Set(Array.from(sessions.values(), (session) => session.engine));
   for (const [otherKey, engine] of engines) {
     if (otherKey.startsWith(`${modelKey}:`) && !inUse.has(engine)) {
@@ -172,12 +152,6 @@ async function handleRequest(message) {
         sendOk(message.requestId);
         return;
       }
-      // The segment's decode is synchronous. Acknowledging only after it made
-      // the parent's worker-request timeout fire on long segments and blocked
-      // every following IPC packet (session.append) behind the decode. So:
-      // take the segment, ack the commit immediately, and decode on the next
-      // turn of the event loop — the transcript still arrives as a
-      // session.transcript event.
       const pending = session.takePendingSegment();
       sendOk(message.requestId);
       if (pending) {

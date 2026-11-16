@@ -1,12 +1,5 @@
-/**
- * Turns the language the user set for dictation (a BCP-47 tag such as `uk`
- * or `en-US`) into the hint a local model understands. Returns '' when the
- * model takes no hint or does not know the language, which leaves the model
- * to detect the language itself.
- */
 
-// Whisper's language codes. sherpa-onnx exits the whole process on a code
-// the model does not know, so a code is only passed on after this check.
+// external: https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/csrc/offline-whisper-model.cc Unknown Whisper language codes terminate the process, so validate hints first.
 const WHISPER_LANGUAGES = new Set([
   'en', 'zh', 'de', 'es', 'ru', 'ko', 'fr', 'ja', 'pt', 'tr', 'pl', 'ca', 'nl', 'ar', 'sv', 'it',
   'id', 'hi', 'fi', 'vi', 'he', 'uk', 'el', 'ms', 'cs', 'ro', 'da', 'hu', 'ta', 'no', 'th', 'ur',
@@ -16,10 +9,10 @@ const WHISPER_LANGUAGES = new Set([
   'ht', 'ps', 'tk', 'nn', 'mt', 'sa', 'lb', 'my', 'bo', 'tl', 'mg', 'as', 'tt', 'haw', 'ln', 'ha',
   'ba', 'jw', 'su',
 ]);
-// large-v3 and its turbo added Cantonese; tiny and other earlier exports lack it.
+// external: https://github.com/openai/whisper/blob/main/whisper/tokenizer.py Cantonese is available in large-v3 and turbo; earlier exports lack it.
 const WHISPER_V3_MODELS = new Set(['whisper-large-v3-turbo-int8']);
 
-// Qwen3-ASR names the language in its prompt ("language English").
+// external: https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/csrc/offline-recognizer-qwen3-asr-impl.h Qwen3-ASR uses language names in its prompt.
 const QWEN3_LANGUAGES = {
   zh: 'Chinese', en: 'English', yue: 'Cantonese', ar: 'Arabic', de: 'German', fr: 'French',
   es: 'Spanish', pt: 'Portuguese', id: 'Indonesian', it: 'Italian', ko: 'Korean', ru: 'Russian',

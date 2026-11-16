@@ -1,25 +1,3 @@
-/**
- * Dictation runtime: registers the streaming dictation WebSocket endpoint and
- * the HTTP status/model routes.
- *
- * WebSocket protocol (JSON text frames) on /api/dictation/ws:
- *   client -> server:
- *     { type: 'start',  dictationId, format, options? }
- *       options: { provider?, language?, localModel?, openaiCompatible?, correct? }
- *       correct: fix misheard words with the Small Model before `final`
- *     { type: 'chunk',  dictationId, seq, audio }   // audio: base64 PCM16LE
- *     { type: 'finish', dictationId, finalSeq }
- *     { type: 'cancel', dictationId }
- *     { type: 'ping' }
- *   server -> client:
- *     { type: 'ready' }
- *     { type: 'ack',             dictationId, ackSeq }
- *     { type: 'partial',         dictationId, text }
- *     { type: 'finish_accepted', dictationId, timeoutMs }
- *     { type: 'final',           dictationId, text }
- *     { type: 'error',           dictationId, error, retryable, reasonCode? }
- *     { type: 'pong' }
- */
 
 import { WebSocketServer } from 'ws';
 
@@ -55,8 +33,6 @@ export function createDictationRuntime({
     generate: async (args) => (await import('../small-model/index.js')).generateSmallModelText(args),
   });
 
-  // Local text-to-speech (Kokoro in the dictation worker). Returns WAV bytes;
-  // 503 with a reason code while the model is still downloading.
   app.post('/api/dictation/tts/speak', express.json({ limit: '1mb' }), async (req, res) => {
     try {
       const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
