@@ -6,6 +6,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createTierChooserAction } from './tier-chooser-action.js';
 import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -516,6 +517,17 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
+  // `render.tierChooser` (#14 slice 2): the tier card's production
+  // caller — catalog pricing assembled here, the card rendered
+  // through render.page's wait, the pick returned to the agent.
+  const tierChooser = createTierChooserAction({
+    listModels: async (directory) => {
+      const client = await getClient(asNonEmptyString(directory) || '');
+      const catalog = await client.model.list();
+      return catalog.data;
+    },
+    renderPage,
+  });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -1159,6 +1171,14 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'render.page') {
         return await renderPage(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
+      if (action === 'render.tierChooser') {
+        return await tierChooser(input, {
           sessionId: asNonEmptyString(options.contextSessionId),
           callId: asNonEmptyString(options.contextCallId),
           directory: asNonEmptyString(contextDirectory),
