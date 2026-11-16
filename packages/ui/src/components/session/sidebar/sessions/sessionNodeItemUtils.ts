@@ -5,6 +5,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
+import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
 import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
@@ -402,4 +403,30 @@ export const resolveMenuOpenSessionId = (
   };
   nodes.forEach((node) => visit(node));
   return result;
+};
+
+/** The ids of every session nested under a row, at any depth. */
+export const collectNodeDescendantIds = (root: SessionNode): string[] => {
+  const out: string[] = [];
+  const walk = (n: SessionNode) => {
+    n.children.forEach((child) => {
+      out.push(child.session.id);
+      walk(child);
+    });
+  };
+  walk(root);
+  return out;
+};
+
+/** Every session nested under a row, at any depth. */
+export const collectNodeDescendantSessions = (root: SessionNode): Session[] => {
+  const out: Session[] = [];
+  const walk = (current: SessionNode) => {
+    current.children.forEach((child) => {
+      out.push(child.session);
+      walk(child);
+    });
+  };
+  walk(root);
+  return out;
 };
