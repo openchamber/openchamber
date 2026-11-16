@@ -349,6 +349,59 @@
             {"do": "see", "on": "files.selectedRow", "path": "src/api/retry.ts"},
             {"do": "see", "on": "files.selectedRow", "path": "src/api/client.ts", "count": 0, "timeout": 1}
           ]
+        },
+        {
+          "id": "import-link",
+          "kind": "path",
+          "title": "Cmd/Ctrl+click on a relative import opens the file it names",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files import link"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.token", "text": "\"./retry\"", "exact": true, "mods": ["mod"]},
+            {"do": "see", "on": "files.line", "text": "export async function withRetry"}
+          ]
+        },
+        {
+          "id": "import-missing",
+          "kind": "break",
+          "title": "An import of a file that does not exist says so and opens nothing",
+          "steps": [
+            {"do": "file.write", "path": "src/api/broken.ts", "content": ["import { gone } from \"./missing\"", "", "export const broken = gone", ""]},
+            {"do": "session.create", "as": "s", "title": "Files import missing"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/broken.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const broken = gone"},
+            {"do": "click", "on": "files.token", "text": "\"./missing\"", "exact": true, "mods": ["mod"]},
+            {"do": "see", "on": "toast", "text": "No file found for ./missing"},
+            {"do": "see", "on": "files.line", "text": "export const broken = gone"}
+          ]
+        },
+        {
+          "id": "read-error",
+          "kind": "break",
+          "title": "A tab whose file is gone after a reload keeps its tab and says the file could not be read, with Retry",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files read error"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "file.delete", "path": "src/api/client.ts"},
+            {"do": "reload"},
+            {"do": "see", "on": "files.button", "text": "Retry", "timeout": 30},
+            {"do": "see", "on": "panel", "text": "Couldn't read client.ts"},
+            {"do": "see", "on": "files.tab", "text": "client.ts"}
+          ]
         }
       ]
     },
@@ -413,6 +466,90 @@
             {"do": "click", "on": "panel.surface", "surface": "editor"},
             {"do": "see", "on": "files.row", "path": "notes.md"},
             {"do": "gone", "on": "files.row", "path": "tsconfig.json"}
+          ]
+        },
+        {
+          "id": "autosave",
+          "kind": "path",
+          "title": "Typed text reaches the disk on its own a moment later, without Cmd/Ctrl+S",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files autosave"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.line", "text": "export const markRead"},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // autosaved"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) => // autosaved\n"}
+          ]
+        },
+        {
+          "id": "autosave-off",
+          "kind": "path",
+          "title": "With Auto-save off nothing is written until Save now",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files autosave off"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Auto-save"},
+            {"do": "click", "on": "files.line", "text": "export const markRead"},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // held back"},
+            {"do": "pause", "ms": 2500},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) =>\n"},
+            {"do": "click", "on": "files.action", "label": "Save now (⌘ + S)"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) => // held back\n"}
+          ]
+        },
+        {
+          "id": "outside-while-dirty",
+          "kind": "break",
+          "title": "A change on disk does not overwrite edits that are not saved yet",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files outside while dirty"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Auto-save"},
+            {"do": "click", "on": "files.line", "text": "export const markRead"},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // mine"},
+            {"do": "see", "on": "files.line", "text": "(id: string) => // mine"},
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["export const rewrittenOutside = true", ""]},
+            {"do": "pause", "ms": 3000},
+            {"do": "see", "on": "files.line", "text": "(id: string) => // mine"},
+            {"do": "see", "on": "files.line", "text": "rewrittenOutside", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "git-revert",
+          "kind": "path",
+          "title": "A change mark in the gutter opens the hunk, and Revert puts the committed line back",
+          "steps": [
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export interface Conversation {", "  id: string", "  subject: string", "  channel: \"email\" | \"chat\"", "  updatedAt: number", "  unread: number", "}", "", "const BASE_URL = import.meta.env.VITE_API_URL ?? \"/api\"", "", "async function request<T>(path: string, init: RequestInit = {}): Promise<T> {", "  const response = await withRetry(() => fetch(`${BASE_URL}${path}`, init), {", "    attempts: 4,", "    baseDelayMs: 250,", "    signal: init.signal ?? undefined,", "  })", "  if (!response.ok) throw new Error(`${init.method ?? \"GET\"} ${path} failed with ${response.status}`)", "  return response.json() as Promise<T>", "}", "", "export const listConversations = (signal?: AbortSignal) =>", "  request<Conversation[]>(\"/conversations\", { signal })", "", "export const markSeen = (id: string) =>", "  request<void>(`/conversations/${id}/read`, { method: \"POST\" })", ""]},
+            {"do": "session.create", "as": "s", "title": "Files git revert"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markSeen"},
+            {"do": "click", "on": "files.gitChange"},
+            {"do": "click", "on": "files.hunkButton", "text": "Revert"},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markRead = (id: string) =>\n"}
           ]
         }
       ]
@@ -879,6 +1016,295 @@
             {"do": "see", "on": "dialog", "text": "Replace existing files?"},
             {"do": "click", "on": "dialog.button", "text": "Replace"},
             {"do": "file.expect", "path": "README.md", "equals": "# Replaced\n"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "toolbar",
+      "name": "The open file's toolbar",
+      "what": "The bar above an open file switches how it shows (rendered or source, tree or text, table or text) and holds what is done with it: find, go to line, symbols, wrap, copy, save, export, a comment to the chat.",
+      "reach": "Open a file in Files; the buttons sit above it, the rest under More actions.",
+      "proof": "The file shows in the chosen mode; the cursor lands where find, go to line or a symbol put it; the clipboard, the download, the export on disk and the comment card hold what the action made.",
+      "scenarios": [
+        {
+          "id": "markdown-source",
+          "kind": "path",
+          "title": "Preview off shows a Markdown file's source, on shows it rendered; Outline lists its headings",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files markdown source"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "README.md", "clicks": 2},
+            {"do": "see", "on": "files.preview", "text": "A small support inbox"},
+            {"do": "click", "on": "files.action", "label": "Outline"},
+            {"do": "see", "on": "files.outline"},
+            {"do": "click", "on": "files.action", "label": "Outline"},
+            {"do": "gone", "on": "files.outline"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "see", "on": "files.line", "text": "# Relay Desk"},
+            {"do": "gone", "on": "files.preview"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "see", "on": "files.preview", "text": "A small support inbox"}
+          ]
+        },
+        {
+          "id": "find",
+          "kind": "path",
+          "title": "Find in file finds the text, and Replace all swaps it in the file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files find"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Find in file"},
+            {"do": "click", "on": "files.findField", "field": "search"},
+            {"do": "type", "text": "markRead"},
+            {"do": "click", "on": "files.findField", "field": "replace"},
+            {"do": "type", "text": "markSeen"},
+            {"do": "click", "on": "files.findButton", "button": "replaceAll"},
+            {"do": "see", "on": "files.line", "text": "export const markSeen"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "export const markSeen = (id: string) =>\n"}
+          ]
+        },
+        {
+          "id": "go-to-line",
+          "kind": "path",
+          "title": "Go to line puts the cursor on that line",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files go to line"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Go to line"},
+            {"do": "type", "text": "11"},
+            {"do": "press", "key": "Enter"},
+            {"do": "type", "text": "// line eleven\n"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "\n\n// line eleven\nconst BASE_URL"}
+          ]
+        },
+        {
+          "id": "symbols",
+          "kind": "path",
+          "title": "Symbols in file jumps to the symbol picked",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files symbols"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Symbols in file"},
+            {"do": "type", "text": "markRead"},
+            {"do": "press", "key": "Enter"},
+            {"do": "press", "key": "Home"},
+            {"do": "type", "text": "// picked\n"},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "// picked\nexport const markRead"}
+          ]
+        },
+        {
+          "id": "code-view",
+          "kind": "path",
+          "title": "Preview on shows a code file read-only, off brings the editor back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files code view"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "gone", "on": "files.line", "text": "export const markRead"},
+            {"do": "see", "on": "diff.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "see", "on": "files.line", "text": "export const markRead"}
+          ]
+        },
+        {
+          "id": "html",
+          "kind": "path",
+          "title": "An HTML file opens rendered, and Preview off shows its code",
+          "steps": [
+            {"do": "file.write", "path": "page.html", "content": ["<!doctype html>", "<h1>Hello page</h1>", ""]},
+            {"do": "session.create", "as": "s", "title": "Files html"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "page.html", "clicks": 2},
+            {"do": "see", "on": "files.htmlPreview"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "see", "on": "files.line", "text": "<h1>Hello page</h1>"},
+            {"do": "gone", "on": "files.htmlPreview"}
+          ]
+        },
+        {
+          "id": "svg",
+          "kind": "path",
+          "title": "An SVG file opens as a picture, and Preview off shows its source",
+          "steps": [
+            {"do": "file.write", "path": "icon.svg", "content": ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\" fill=\"red\"/></svg>", ""]},
+            {"do": "session.create", "as": "s", "title": "Files svg"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "icon.svg", "clicks": 2},
+            {"do": "see", "on": "files.image", "name": "icon.svg"},
+            {"do": "click", "on": "files.action", "label": "Preview"},
+            {"do": "see", "on": "files.line", "text": "<rect width=\"10\""},
+            {"do": "gone", "on": "files.image", "name": "icon.svg"}
+          ]
+        },
+        {
+          "id": "wrap",
+          "kind": "path",
+          "title": "Wrap lines turns line wrapping off and on",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files wrap"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "see", "on": "files.wrapped"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Wrap lines"},
+            {"do": "gone", "on": "files.wrapped"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Wrap lines"},
+            {"do": "see", "on": "files.wrapped"}
+          ]
+        },
+        {
+          "id": "copy-contents",
+          "kind": "path",
+          "title": "Copy file contents puts the whole file on the clipboard",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files copy contents"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Copy file contents"},
+            {"do": "see", "on": "toast", "text": "File contents copied"},
+            {"do": "clipboard", "contains": "export const markRead = (id: string) =>"}
+          ]
+        },
+        {
+          "id": "copy-path",
+          "kind": "path",
+          "title": "A click on the file's path above the editor copies the path",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files copy toolbar path"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "click", "on": "files.action", "label": "Copy file path (src/api/client.ts)"},
+            {"do": "clipboard", "contains": "src/api/client.ts"}
+          ]
+        },
+        {
+          "id": "save-file",
+          "kind": "path",
+          "title": "Save file downloads the open file through the browser",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files save file"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Save file"},
+            {"do": "download", "name": "client.ts", "contains": "export const markRead"}
+          ]
+        },
+        {
+          "id": "export-word",
+          "kind": "path",
+          "title": "Export to Word writes a .docx next to the Markdown file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files export word"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "README.md", "clicks": 2},
+            {"do": "see", "on": "files.preview", "text": "A small support inbox"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Export to Word"},
+            {"do": "see", "on": "toast", "text": "Saved README.docx next to the file"},
+            {"do": "file.expect", "path": "README.docx", "exists": true}
+          ]
+        },
+        {
+          "id": "json-tree",
+          "kind": "path",
+          "title": "A JSON file opens as a tree, and Tree view off shows its text",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files json tree"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "package.json", "clicks": 2},
+            {"do": "see", "on": "files.button", "text": "Collapse All"},
+            {"do": "see", "on": "panel", "text": "\"relay-desk\""},
+            {"do": "click", "on": "files.action", "label": "Tree view"},
+            {"do": "see", "on": "files.line", "text": "\"name\": \"relay-desk\","},
+            {"do": "gone", "on": "files.button", "text": "Collapse All"}
+          ]
+        },
+        {
+          "id": "table",
+          "kind": "path",
+          "title": "A CSV file opens as a table, Table view off shows its text, and Export to Excel writes a .xlsx",
+          "steps": [
+            {"do": "file.write", "path": "data.csv", "content": ["name,count", "alpha,1", "beta,2", ""]},
+            {"do": "session.create", "as": "s", "title": "Files table"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "data.csv", "clicks": 2},
+            {"do": "see", "on": "files.table", "text": "alpha"},
+            {"do": "click", "on": "files.action", "label": "Table view"},
+            {"do": "see", "on": "files.line", "text": "beta,2"},
+            {"do": "gone", "on": "files.table"},
+            {"do": "click", "on": "files.editorMore"},
+            {"do": "click", "on": "menu.item", "text": "Export to Excel"},
+            {"do": "file.expect", "path": "data.xlsx", "exists": true}
+          ]
+        },
+        {
+          "id": "comment",
+          "kind": "path",
+          "title": "Comment on the whole file attaches the comment to the chat",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files comment on file"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts", "clicks": 2},
+            {"do": "see", "on": "files.line", "text": "export const markRead"},
+            {"do": "click", "on": "files.action", "label": "Comment on the whole file"},
+            {"do": "click", "on": "diff.commentField"},
+            {"do": "type", "text": "Split this client"},
+            {"do": "click", "on": "diff.commentSave"},
+            {"do": "gone", "on": "diff.commentField"},
+            {"do": "see", "on": "diff.comment", "text": "Split this client"}
           ]
         }
       ]

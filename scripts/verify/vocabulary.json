@@ -210,5 +210,18 @@
   "composer.control": {"selector": "[data-chat-input-footer] [role=\"button\"][aria-haspopup=\"menu\"]", "means": "A menu of the composer footer: the model, thinking, the agent; pair it with its text (Build, Plan)."},
   "composer.permissions": {"selector": "[data-chat-input-footer] button[aria-label=\"Permissions: {mode}\"]", "means": "The shield in the composer footer, by the mode it names: ask every time, or the auto-accept one."},
   "composer.historySearch": {"selector": "[data-prompt-history-search-input]", "means": "The field of the prompt history search Cmd/Ctrl+Arrow Up opens over the composer."},
-  "composer.historyRow": {"selector": "[data-prompt-history-search-row]", "means": "A prompt in the prompt history search; pair it with its text."}
+  "composer.historyRow": {"selector": "[data-prompt-history-search-row]", "means": "A prompt in the prompt history search; pair it with its text."},
+  "files.action": {"selector": "[data-right-slot] button[aria-label=\"{label}\"]", "means": "A button in the file editor by its label: a toolbar action of the open file (Preview, Find in file, Outline) or the path label that copies the path."},
+  "files.editorMore": {"selector": "[data-right-slot] [data-toolbar-more] button:not(section:has(input[placeholder^=\"Search\"]) *)", "means": "More actions on the open file's toolbar, where the editor aids, the file's own actions and Auto-save wait."},
+  "files.token": {"selector": "[data-right-slot] .cm-content .cm-line span", "means": "A highlighted token inside a line of the file editor; pair it with text, such as an import's \"./retry\"."},
+  "files.wrapped": {"selector": "[data-right-slot] .cm-content.cm-lineWrapping", "means": "The file editor's text while Wrap lines is on: long lines wrap instead of scrolling sideways."},
+  "files.gitChange": {"selector": "[data-right-slot] .cm-git-gutter .cm-git-change", "means": "A git change mark in the file editor's gutter, beside lines that differ from the last commit; a click opens the hunk."},
+  "files.hunkButton": {"selector": "[data-right-slot] .cm-git-hunk-button", "means": "A button of an open git hunk in the file editor (Revert, Close); pair it with text."},
+  "files.table": {"selector": "[data-right-slot] table", "means": "A table the file editor renders, such as a CSV file in Table view; pair it with a cell's text."},
+  "files.button": {"selector": "[data-right-slot] button", "means": "A button in the file panel by its text, such as Retry on a file that could not be read or Collapse All over a JSON tree."},
+  "files.outline": {"selector": "[data-right-slot] input[placeholder^=\"Go to heading\"]", "means": "The search field of a Markdown file's Outline, over the list of its headings."},
+  "files.findField": {"selector": "[data-right-slot] .cm-search input[name=\"{field}\"]", "means": "A field of the file editor's find bar, opened by Find in file: search for Find, replace for Replace."},
+  "files.findButton": {"selector": "[data-right-slot] .cm-search button[name=\"{button}\"]", "means": "A button of the file editor's find bar: next, prev, select, replace, replaceAll, close."},
+  "files.htmlPreview": {"selector": "[data-right-slot] iframe[title=\"HTML Preview\"]", "means": "The rendered page of an HTML file open in the file editor."},
+  "files.image": {"selector": "[data-right-slot] img[alt=\"{name}\"]", "means": "An image file shown as a picture in the file editor, by its file name."}
 }
