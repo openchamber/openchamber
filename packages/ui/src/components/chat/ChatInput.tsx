@@ -4504,13 +4504,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (draftSubmitDraftId === null || pendingDraftContent.draftId !== draftSubmitDraftId) return;
         const content = useInputStore.getState().consumePendingDraftContent(draftSubmitDraftId);
         if (content === null) return;
-        if (content.text) {
-            const text = content.text;
+        if (content.files.length > 0) {
+            // The shared text rides along with the citation. Setting it first would be lost:
+            // the citation is inserted into the editor's document, which still holds the text
+            // from before this commit, and that document overwrites the store on the next edit.
+            void attachFilesWithCitation(content.files, content.text ?? '');
+        } else if (content.text) {
             const current = composerText.get();
-            setMessage(current.trim().length > 0 ? appendWithLineBreaks(current, text) : text);
+            setMessage(current.trim().length > 0 ? appendWithLineBreaks(current, content.text) : content.text);
         }
-        if (content.files.length > 0) void attachFiles(content.files);
-    }, [attachFiles, columnPinned, composerText, currentSessionId, draftSubmitDraftId, pendingDraftContent]);
+    }, [attachFilesWithCitation, columnPinned, composerText, currentSessionId, draftSubmitDraftId, pendingDraftContent, setMessage]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
