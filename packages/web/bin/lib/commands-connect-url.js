@@ -42,10 +42,6 @@ function isValidRelayUrl(value) {
   }
 }
 
-// Resolve the relay endpoint the same way the running host does (service.js):
-// the administrator's pinned relay (policy file, then OPENCHAMBER_RELAY_URL),
-// then the stored setting, then the default — so the pairing link points at
-// the same relay the host connects out to.
 function resolveRelayUrl(settings) {
   const pinned = pinnedRelayUrl();
   if (pinned) return pinned;
@@ -54,14 +50,6 @@ function resolveRelayUrl(settings) {
   return DEFAULT_RELAY_URL;
 }
 
-// Minimal settings.json read/write for the relay identity runtime. It reads the
-// whole object and writes it back with the relay keys added, so other settings
-// are preserved. Enough for the CLI without wiring the full settings runtime.
-//
-// Mirrors the settings runtime's guarantees: atomic writes (tmp + rename) so
-// concurrent readers in the running app never observe a half-written file, and
-// a STRICT reader gating relay identity regeneration so a swallowed read
-// failure can never mint a new serverId and orphan paired devices.
 function createSettingsAccessors() {
   return createSettingsAccessorsModule({
     fsPromises: fs.promises,
@@ -71,12 +59,6 @@ function createSettingsAccessors() {
   });
 }
 
-// Resolves the instance's relay identity (serverId + encryption public key,
-// generating it if the relay was never enabled) into a pairing-v2 relay
-// candidate. Relay is a transport, not a separate link format: the candidate
-// carries no token — the client redeems the one-time pairing secret over the
-// E2EE tunnel like any other candidate. `enabled` reports whether the host relay
-// is actually on (a relay candidate only connects when the host is relaying).
 async function buildRelayPairingCandidate() {
   const accessors = createSettingsAccessors();
   const settings = await accessors.readSettingsFromDiskMigrated();
@@ -103,9 +85,6 @@ async function buildRelayPairingCandidate() {
   };
 }
 
-// Pairing runtime backed by the same on-disk store the running host reads, so a
-// session created here is redeemable by the live server. createPairingSession
-// only writes the store (no server needed to mint); redeem is served by the host.
 function createCliPairingRuntime() {
   const dataDir = getOpenChamberDataDir();
   const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
@@ -123,9 +102,6 @@ function createCliPairingRuntime() {
   });
 }
 
-// Mirror of encodePairingConnectionPayload in @openchamber/ui (the bin cannot
-// import the UI package). Keep in sync: v2 payload → base64url(JSON) in the URL
-// query, so the one-time secret rides the link, never the network.
 function encodePairingConnectUrl(payload) {
   const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
   return `openchamber://connect?v=2&p=${encoded}`;
@@ -154,10 +130,6 @@ async function resolveConnectUrlServerUrl(options) {
 
   const bindHost = resolveConfiguredBindHost(hostOverride);
 
-  // A host that's already a full http(s) URL is a public/server URL, not a bind
-  // address (e.g. `--host https://devchamber.example.com` for a remote deploy
-  // behind a reverse proxy). Use it directly instead of feeding it to
-  // buildLocalUrl, which would produce `http://https://...:port`.
   const hostAsServerUrl = normalizeServerUrlForConnection(bindHost);
   if (hostAsServerUrl) {
     return { serverUrl: hostAsServerUrl, source: 'configured-host' };
@@ -261,19 +233,11 @@ function createConnectUrlCommand({ serveCommand }) {
     const serverUrl = resolvedServerUrl.serverUrl;
     const label = options.name || os.hostname();
 
-    // Direct candidate for the reachable server URL, plus the relay transport as
-    // a fallback candidate — one link that works both on the LAN and off-network.
-    // Candidate priorities make the client prefer the direct route and try the
-    // relay last, mirroring the UI's "Anywhere" pairing. `--relay` opts in even
-    // when the host relay is not up yet (the demand-driven lifecycle starts it);
-    // otherwise the relay rides along only when it is already enabled.
     const candidates = [{ type: serverUrl.startsWith('https://') ? 'tunnel' : 'lan', url: serverUrl, priority: 10 }];
     const relay = await buildRelayPairingCandidate();
     if (options.relay || relay.enabled) candidates.push(relay.candidate);
 
     const pairingRuntime = createCliPairingRuntime();
-    // Mark relay-carrying sessions like the server route does, so the host's
-    // demand-driven relay lifecycle keeps the relay up while the link is pending.
     const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
     const { pairing } = await pairingRuntime.createPairingSession({ label, usesRelay });
     const connectUrl = encodePairingConnectUrl(buildPairingPayload({ pairing, label, candidates }));
@@ -316,8 +280,6 @@ function createConnectUrlCommand({ serveCommand }) {
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
       clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
     } else if (isLoopbackServerUrl(serverUrl)) {
-      // The advertised address does not establish how the server is bound.
-      // Localhost can also be intentional, including Windows-to-WSL forwarding.
       logStatus('info', '[LOOPBACK_URL]', 'This link uses localhost for direct connections. For another device, use --server with a reachable address or include --relay.');
     }
     clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');

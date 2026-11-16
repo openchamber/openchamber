@@ -9,7 +9,7 @@ import {
 } from '../../server/lib/security/bind-host.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
-// Browser-unsafe ports (Fetch/Chromium restricted ports).
+// external: https://fetch.spec.whatwg.org/#port-blocking Fetch and Chromium refuse these ports for the UI.
 const UNSAFE_BROWSER_PORTS = new Set([
   0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69,
   77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119,
@@ -25,8 +25,6 @@ function isUnsafeBrowserPort(port) {
 }
 
 function resolveConfiguredBindHost(hostOverride) {
-  // A host OpenChamber itself put into this shell (the desktop app's, a
-  // running server's) is not a default for a new one.
   const configuredHost = injectedEnvKeys(process.env).has('OPENCHAMBER_HOST')
     ? undefined
     : process.env.OPENCHAMBER_HOST;
@@ -49,7 +47,6 @@ function resolveApiHost(hostOverride) {
     return '127.0.0.1';
   }
 
-  // Wildcard bind hosts are not valid destination hosts.
   if (configured === '0.0.0.0') {
     return '127.0.0.1';
   }
@@ -57,7 +54,6 @@ function resolveApiHost(hostOverride) {
     return '::1';
   }
 
-  // Strip brackets if user provided [::1]
   if (configured.startsWith('[') && configured.endsWith(']')) {
     return configured.slice(1, -1);
   }
@@ -67,7 +63,6 @@ function resolveApiHost(hostOverride) {
 
 function formatHostForUrl(host) {
   if (typeof host !== 'string') return '127.0.0.1';
-  // Bracket IPv6 for URL usage.
   return host.includes(':') ? `[${host}]` : host;
 }
 
@@ -132,8 +127,6 @@ function hasUiPasswordConfigured(password) {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
-// Ambiguous-character-free alphabet so the printed password is easy to type
-// from a phone or another machine. Mirrors the pre-refactor CLI alphabet.
 const UI_PASSWORD_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
 
 function generateUiPassword(length = 16) {
@@ -144,11 +137,6 @@ function generateUiPassword(length = 16) {
   return password;
 }
 
-// Resolves the effective UI password for a serve: a configured password wins;
-// an explicit `--ui-password` flag without a value gets a freshly generated
-// password so daemon/foreground serves never silently drop the requested
-// protection. The caller must surface `generated` passwords to the user once
-// and persist them in the instance state file the server-side reads.
 function resolveServeUiPassword({ uiPassword, explicitUiPassword }) {
   if (hasUiPasswordConfigured(uiPassword)) {
     return { password: uiPassword, generated: false };
