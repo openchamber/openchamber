@@ -9,6 +9,9 @@ import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionActivityTimingStore } from '@/sync/session-activity-timing';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import type { State } from '@/sync/types';
 import type { FormRequest, PermissionRequest, Session } from '@/lib/opencode/model';
 
@@ -71,6 +74,8 @@ describe('subagent status rows', () => {
     useUIStore.setState({ workStatusExpandedSections: {} });
     useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
     useGlobalSessionStatusStore.setState({ observedById: new Map(), statusById: new Map() });
+    useGlobalSessionsStore.getState().applySnapshot([], []);
+    useProjectsStore.setState({ projects: [] });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -146,6 +151,31 @@ describe('subagent status rows', () => {
     expect(titles()).toEqual(['Older', 'Newer']);
     await publish({ session_status: { older: { type: 'idle' }, newer: { type: 'idle' } } });
     expect(titles()).toEqual(['Newer', 'Older']);
+  });
+
+  test('shows a child that lives in a folder without a live store, with its agent and model from the session list', async () => {
+    const worker: Session = { ...child, id: 'worker', title: 'Worker', directory: '/elsewhere', agent: 'build', model: { providerID: 'claude-agent', id: 'opus' } };
+    await publish({ session: [parent] });
+    expect(rowButtons()).toEqual([]);
+    await act(async () => useGlobalSessionsStore.getState().applySnapshot([parent, worker], []));
+    expect(rowContent().textContent).toContain('Worker');
+    expect(rowContent().textContent).toContain('build · Opus');
+    // A folder outside every project dims the row; the parent's folder does not.
+    await act(async () => useProjectsStore.setState({ projects: [{ id: 'project', path: directory }] }));
+    expect(rowContent().className).toContain('opacity-50');
+    // Its requests sit in the cross-folder index, not in the parent's store.
+    await act(async () => useGlobalBlockingRequestsStore.setState({ bySession: new Map([['worker', {
+      directory: '/elsewhere',
+      permissions: [{ id: 'permission', sessionID: 'worker', action: 'bash', resources: ['*'] }],
+      forms: [],
+      pages: [],
+    }]]) }));
+    expect(rowContent().textContent).toContain('needs permission');
+    await act(async () => useGlobalBlockingRequestsStore.setState({ bySession: new Map() }));
+    // The live record wins once a store holds it, and keeps the model the list knows.
+    await publish({ session: [parent, { ...worker, title: 'Worker live', model: undefined }] });
+    expect(rowContent().textContent).toContain('Worker live');
+    expect(rowContent().textContent).toContain('build · Opus');
   });
 
   test('renders a child seeded from the session cache without usage counters', async () => {

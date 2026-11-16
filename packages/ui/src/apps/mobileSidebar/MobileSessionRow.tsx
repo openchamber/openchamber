@@ -27,7 +27,6 @@ import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
 import { takeOverSession } from '@/sync/session-take-over';
-import { OperatorChildrenCount } from '@/components/session/sidebar/sessions/OperatorChildrenCount';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
@@ -251,7 +250,6 @@ export const MobileSessionRow: React.FC<{
             {refMark(true)}
             {marks}
             <MobileSessionPendingBadges {...pendingRequests} />
-            <OperatorChildrenCount childNodes={node.children} />
           </span>
         </> : null}
       />
@@ -281,7 +279,6 @@ export const MobileSessionRow: React.FC<{
           {refMark(false)}
           {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
-          <OperatorChildrenCount childNodes={node.children} />
           {pinMarker}
           {liveState}
           {timeSlot}

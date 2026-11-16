@@ -191,7 +191,10 @@ from that bridge: it is shared by every session whose directory resolves to no
 configured root (non-git directories, `C:/`, subagent workspaces), so mapping it
 would file unrelated sessions under whichever project owns the id. This fallback
 changes display ownership, not the session's real directory used for routing.
-Records with no resolved owner have no guaranteed project group. VS Code keeps
+Records with no resolved owner have no guaranteed project group; a subsession
+among them still nests under a parent the sidebar shows
+(`keepKnownSessionsWithDescendants` in `list/sessionCollection.ts`), so an
+agent's worker whose worktree was removed stays under the agent. VS Code keeps
 exact workspace-directory scope and does not use the fallback. In work and
 the list by time use this same ownership resolver, on the phone too; rows keep
 the session's own directory while taking display ownership (project id,
@@ -404,21 +407,26 @@ caller's id as `parentID`, and `sessionParentID` projects that into
 `session.parentID`, as it does for workflow agents. Everything the tree reads
 from `parentID` follows: the worker renders under its agent wherever it lives
 (another worktree, another project), has no root row and no In work entry of
-its own, rolls its pending permissions and questions into the agent's row and
-chat, archives and restores with it, and leaves In work when the agent's work
+its own, rolls its pending permissions and questions into the agent's row and,
+when it lives in the agent's folder, its chat (the chat's docks read that
+folder's store only), archives and restores with it, and leaves In work when the agent's work
 is done. It gets a row under the agent, unlike a workflow agent, because it is
 one session the user may want to open.
 
-- **Count.** The agent's row shows how many of its direct workers run and how
-  many finished (`OperatorChildrenCount`, in the row's badges on desktop, web,
-  VS Code and the phone). Running is the live status index: the worker or a
-  subagent under it is active; every other worker counts as finished.
+- **No count on the agent's row.** A running worker keeps the agent's row
+  working through `parentID`, as a subagent does; the workers themselves sit
+  in the row's subtree. A separate running/finished counter was removed: its
+  spinner icon read as a reload button and repeated what the row already shows.
 - **Take over.** Only the session's menu (Take over) or its worktree's menu
   (Take over the agent's sessions, for every worker living in that worktree)
   hands a worker to the user. Opening it or writing in it changes nothing.
+  Its chat is read-only like a subagent's (the same `parentID` rule and
+  setting), and the banner says another agent runs it and points to Take over
+  (`ComposerSlot`).
   Taking over drops the link (`withSessionMetadata` re-derives `parentID` on
   every metadata change, so the row moves at once), removes the session's
-  rule that denies the `question` tool, and opens it in In work.
+  rules that deny the `question` and `openchamber_secret` tools, and opens it
+  in In work.
 - **Done while workers run.** Every Done the user starts (the row, its menu,
   the header, the composer's Mark done, a worktree's or space's Done, bulk
   Mark done, a run lane, the palette, the overview, the phone) first asks

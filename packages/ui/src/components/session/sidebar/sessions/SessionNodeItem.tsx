@@ -32,7 +32,6 @@ import { SessionRowPrBadge } from './SessionRowPrBadge';
 import { SessionRowRename } from './SessionRowRename';
 import { SessionRowTooltipBody } from './SessionRowTooltipBody';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
-import { withOperatorChildrenCount } from './operatorChildrenBadges';
 import { areSessionNodeItemPropsEqual } from './sessionNodeItemMemo';
 import type { SessionNodeItemProps } from './sessionNodeItemProps';
 import { resolveSessionRowActionLayout, resolveSessionRowLines } from './sessionRowLayout';
@@ -341,7 +340,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={goalMark}
       marks={guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
-      badges={withOperatorChildrenCount(rowBadges, node.children)}
+      badges={rowBadges}
       doneHint={showDoneHint ? <DoneHintMark /> : null}
       // Grouped rows reserve room for permanent actions on their button.
       metaPaddingClass={isTimelineRow && alwaysShowActions

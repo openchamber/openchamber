@@ -5,12 +5,20 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getAdmissionNavigationRevision, useSessionUIStore } from './session-ui-store';
 import { subscribeGlobalSessionMoves } from './session-moves';
-import { isSessionDirectoryAdmitted } from './session-admission-rule';
+import { isSessionDirectoryAdmitted, resolveAdmittedLineageDirectory } from './session-admission-rule';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 export const isSessionAdmitted = (directory: string | null | undefined): boolean => isSessionDirectoryAdmitted(
   directory, useProjectsStore.getState().projects, useSessionUIStore.getState().availableWorktreesByProject,
+);
+
+const admittedLineageDirectory = (sessionId: string): string | null => resolveAdmittedLineageDirectory(
+  sessionId, useGlobalSessionsStore.getState().entityById, isSessionAdmitted,
+);
+
+export const withAdmittedLineage = (sessionId: string, directory: string | null): string | null => (
+  directory && !isSessionAdmitted(directory) ? admittedLineageDirectory(sessionId) ?? directory : directory
 );
 
 const ADMISSION_WAIT_MS = 10_000;
@@ -174,7 +182,7 @@ export const subscribeSessionAdmission = (): (() => void) => {
     }
     const selectedRecord = ui.currentSessionId ? records.get(ui.currentSessionId) : null;
     const selectedDirectory = selectedRecord ? resolveGlobalSessionDirectory(selectedRecord) : ui.currentSessionDirectory;
-    if (ui.currentSessionId && selectedDirectory && !isSessionAdmitted(selectedDirectory)) {
+    if (ui.currentSessionId && selectedDirectory && !isSessionAdmitted(selectedDirectory) && !admittedLineageDirectory(ui.currentSessionId)) {
       const id = ui.currentSessionId;
       ui.setCurrentSession(null);
       parked = { id, revision: getAdmissionNavigationRevision() };

@@ -439,6 +439,20 @@ it. Sidebar projections, the switcher and tray never use pins or work state as
 admission. Pinned chat columns gate their rendered session identity and
 directory and never admit: pins persist across launches, so admitting from a
 column would register folders nobody opened.
+A subsession in a folder that is not admitted (an agent's worker in a worktree
+that was removed, or in a folder outside every project) is read through its
+nearest admitted ancestor's folder (`resolveAdmittedLineageDirectory` in
+`session-admission-rule.ts`): the sidebar lists it under that parent, opening
+it from the sidebar or Work Status selects it with the ancestor's folder,
+`gateSelection` keeps it, a pinned column reads it there, and `useSync` reads
+its transcript there. Its own folder is never registered and no OpenCode
+location starts in it, so its chat takes no prompts whatever the subagent
+setting says (`resolveChatPromptReadOnly`): a prompt runs in the session's own
+folder. Its banner names the folder and says whether it no longer exists
+(`useProjectFolderMissing`, a server confirmation) or lies outside the
+projects, and its Work Status and Subagents rows are dimmed (`detached`); OpenCode serves a session's messages by id from any
+folder. A root session in such a folder stays hidden as before (maintainer
+decision 2026-11-17).
 Archive rows filter admission without changing the raw archived cache. A session
 of a worktree that is gone stays listed: its folder matches no project, but
 OpenCode's project still places it in one and the server confirms the folder is
