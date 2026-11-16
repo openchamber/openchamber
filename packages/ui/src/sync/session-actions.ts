@@ -2322,7 +2322,7 @@ export async function optimisticSend(input: {
    */
   ready?: Promise<void>
   appendSubmissions?: () => void
-  onOptimisticInsert?: () => void
+  onOptimisticInsert?: (messageID: string) => void
   /**
    * Whether the insert marks the session busy (the default). A session that
    * does not exist yet is marked by its creator once the server has it.
@@ -2452,7 +2452,7 @@ export async function optimisticSend(input: {
     message: optimisticMessage,
     parts: optimisticParts,
   })
-  input.onOptimisticInsert?.()
+  input.onOptimisticInsert?.(messageID)
 
   if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 

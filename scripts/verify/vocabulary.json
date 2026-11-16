@@ -20,6 +20,8 @@
   "composer.popup": {"selector": ".oc-glass-popover", "means": "The autocomplete list over the composer: commands after /, skills after $."},
   "composer.mentionRow": {"selector": "[data-mention-list] [aria-label=\"{path}\"]", "means": "A file in the @ mention list."},
   "composer.mentionChip": {"selector": "[data-chat-input=\"true\"] [data-mention-name=\"{path}\"]", "means": "A file chip in the composer after picking it from the @ list."},
+  "composer.projectPicker": {"selector": "button[aria-haspopup=\"dialog\"]", "means": "The project picker above a new session's composer; pair it with its label, Choose project on a new Chat."},
+  "composer.projectOption": {"selector": "[role=\"dialog\"] [cmdk-item]", "means": "A project in the open project picker; pair it with the project's name."},
   "picker.search": {"selector": "input[role=\"combobox\"][placeholder=\"Search models\"]", "means": "The search field at the top of the model picker."},
   "picker.option": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"]", "means": "A model in the model picker; pair it with the model's name."},
   "composer.status": {"selector": "[role=\"status\"][aria-live=\"polite\"]", "means": "The status line above the composer: Retrying in Ns, Warming up."},

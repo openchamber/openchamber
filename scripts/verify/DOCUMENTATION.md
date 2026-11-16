@@ -77,7 +77,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `file.write` `path`, `content`; `file.delete` `path` | Changes the project on disk; `content` may be an array of lines |
 | `file.expect` `path`, `contains` or `equals` | Waits for the file's content |
 | `open` `session` | Loads the app, at that session when given |
-| `reload` | Reloads the page |
+| `reload` `ready` | Reloads the page and waits for the composer; `"ready": false` does not wait, for a reload while the server is stopped |
 | `click`, `hover` `on` | Moves the real mouse to the element's centre, once it stands still and nothing covers it |
 | `drag` `on`, `to` | Presses on the element, moves to the centre of `to` (an object with its own `on`, `text`, `index`) with the button held, and releases there; both ends must be on screen together |
 | `wheel` `on`, `dy`, `times` | Scrolls with the wheel over the element |

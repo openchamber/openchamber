@@ -117,6 +117,87 @@
             {"do": "see", "on": "sidebar.activeRow", "session": "s"},
             {"do": "editor", "equals": "keep me after a reload"}
           ]
+        },
+        {
+          "id": "reload-while-sending",
+          "kind": "break",
+          "title": "A prompt sent while the server is away comes back to its session after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Send then reload"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "do not lose this prompt"},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "editor", "equals": "do not lose this prompt"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "reload-after-send",
+          "kind": "path",
+          "title": "A prompt the server took stays in the chat only, not in the composer, after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Reload after send"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "sent exactly once"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "session.idle", "session": "s"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.activeRow", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "bytecode virtual machine"},
+            {"do": "editor", "empty": true}
+          ]
+        },
+        {
+          "id": "reload-while-sending-first",
+          "kind": "break",
+          "title": "A new session's first prompt sent while the server is away comes back after a reload",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "first prompt of a new session"},
+            {"do": "pause", "ms": 1200},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "reload"},
+            {"do": "editor", "equals": "first prompt of a new session"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
+        },
+        {
+          "id": "reload-while-sending-project",
+          "kind": "break",
+          "title": "A project draft's first prompt sent while the server is away comes back in the project's draft after a reload",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Project host"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "sidebar.newSession"},
+            {"do": "click", "on": "composer.projectPicker", "text": "Choose project"},
+            {"do": "click", "on": "composer.projectOption", "text": "relay-desk"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "first prompt of a project draft"},
+            {"do": "pause", "ms": 1200},
+            {"do": "server.stop"},
+            {"do": "press", "key": "Enter"},
+            {"do": "editor", "empty": true},
+            {"do": "reload", "ready": false},
+            {"do": "server.start"},
+            {"do": "reload"},
+            {"do": "see", "on": "composer.projectPicker", "text": "relay-desk"},
+            {"do": "editor", "equals": "first prompt of a project draft"},
+            {"do": "steady", "on": "chat.userBubble", "count": 0, "ms": 1500}
+          ]
         }
       ]
     },
