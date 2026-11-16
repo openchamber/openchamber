@@ -1,0 +1,171 @@
+{
+  "zone": "files",
+  "name": "Files",
+  "sources": ["packages/ui/src/components/views/FilesView.tsx", "packages/ui/src/components/views/files/", "packages/ui/src/components/layout/SidebarFilesTree.tsx"],
+  "features": [
+    {
+      "id": "tree",
+      "name": "The project's file tree",
+      "what": "The Files panel lists the project's folders and files; folders open in place, changed files carry an M.",
+      "reach": "Click Files on the right rail of a session.",
+      "proof": "The top-level entries show, a folder opens to its files, a file the agent edited is marked modified.",
+      "scenarios": [
+        {
+          "id": "browse",
+          "kind": "path",
+          "title": "The tree lists the project and a folder opens to its files",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files tree"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "src"},
+            {"do": "see", "on": "files.row", "path": "package.json"},
+            {"do": "see", "on": "files.row", "path": "README.md"},
+            {"do": "see", "on": "files.row", "path": "src/api", "count": 0, "timeout": 1},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "see", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "see", "on": "files.row", "path": "src/api/retry.ts"},
+            {"do": "see", "on": "files.row", "path": "src/api/client.ts"}
+          ]
+        },
+        {
+          "id": "modified",
+          "kind": "path",
+          "title": "A file the agent edited is marked modified, an untouched one is not",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files modified"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "see", "on": "files.modified", "path": "src/api/retry.ts"},
+            {"do": "see", "on": "files.modified", "path": "src/api/client.ts", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "search",
+          "kind": "path",
+          "title": "The search field finds a file by name",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files search"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.search"},
+            {"do": "type", "text": "client"},
+            {"do": "see", "on": "files.searchResult", "text": "client.ts"},
+            {"do": "see", "on": "files.searchResult", "text": "package.json", "count": 0, "timeout": 1},
+            {"do": "click", "on": "files.searchResult", "text": "client.ts"},
+            {"do": "see", "on": "files.tab", "text": "client.ts"},
+            {"do": "see", "on": "files.line", "text": "export const listConversations"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "open",
+      "name": "Opening a file",
+      "what": "A file opens in a tab of the editor beside the chat, from the tree or from a path in an answer.",
+      "reach": "Click a file in the Files tree, or click a file path the agent wrote in the chat.",
+      "proof": "A tab with the file's name, the editor shows its content, a Markdown file shows rendered.",
+      "scenarios": [
+        {
+          "id": "from-tree",
+          "kind": "path",
+          "title": "A click in the tree opens the file in a tab; Markdown opens rendered",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files open"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "see", "on": "files.tab", "text": "client.ts"},
+            {"do": "see", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "click", "on": "files.row", "path": "README.md"},
+            {"do": "see", "on": "files.tab", "text": "README.md"},
+            {"do": "see", "on": "files.preview", "text": "A small support inbox"}
+          ]
+        },
+        {
+          "id": "from-chat",
+          "kind": "path",
+          "title": "A file path in an answer opens that file",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files from chat"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.fileLink", "ref": "src/api/client.ts"},
+            {"do": "see", "on": "files.tab", "text": "client.ts"},
+            {"do": "see", "on": "files.line", "text": "export const markRead"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "edit",
+      "name": "Editing a file",
+      "what": "The editor saves what the user types to disk and shows a change made to the open file outside the app; the tree shows files added or removed outside the app the next time it is shown.",
+      "reach": "Open a file in Files, type, press Cmd/Ctrl+S; or change the file outside the app while it is open.",
+      "proof": "The file on disk holds the typed text after saving; the editor shows text written outside the app; after closing and opening the panel the tree matches the disk.",
+      "scenarios": [
+        {
+          "id": "save",
+          "kind": "path",
+          "title": "Typing and Cmd/Ctrl+S writes the file to disk",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files save"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "see", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "click", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // edited in verify"},
+            {"do": "see", "on": "files.line", "text": "from \"./retry\" // edited in verify"},
+            {"do": "press", "key": "s", "mods": ["mod"]},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "import { withRetry } from \"./retry\" // edited in verify\n"}
+          ]
+        },
+        {
+          "id": "outside-change",
+          "kind": "break",
+          "title": "A file changed on disk while open shows the new content",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files outside change"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "see", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "see", "on": "files.line", "text": "export const rewrittenOutside = true"},
+            {"do": "see", "on": "files.line", "text": "export const markRead", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "deleted",
+          "kind": "break",
+          "title": "Files deleted and added on disk show after the panel is opened again",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Files deleted"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "tsconfig.json"},
+            {"do": "file.delete", "path": "tsconfig.json"},
+            {"do": "file.write", "path": "notes.md", "content": "new file\n"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "gone", "on": "panel.surfaceOn", "surface": "editor"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "see", "on": "files.row", "path": "notes.md"},
+            {"do": "gone", "on": "files.row", "path": "tsconfig.json"}
+          ]
+        }
+      ]
+    }
+  ]
+}

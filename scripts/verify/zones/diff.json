@@ -1,0 +1,122 @@
+{
+  "zone": "diff",
+  "name": "Changes and diffs",
+  "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/PierreDiffViewer.tsx", "packages/ui/src/components/views/diffFileTree.ts"],
+  "features": [
+    {
+      "id": "changes",
+      "name": "The Changes panel",
+      "what": "Changes lists the project's uncommitted files with their added and removed line counts; a file opens to its diff. The list refreshes after the agent's edits, after a save in the editor and each time the panel is shown.",
+      "reach": "Click Changes on the right rail of a session.",
+      "proof": "The changed file is listed with its counts, its diff shows the added and removed lines, a clean project says so, a save or an outside change shows up at the moments above.",
+      "scenarios": [
+        {
+          "id": "agent-edit",
+          "kind": "path",
+          "title": "The file the agent edited is listed with +12 −2 and opens to its diff",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff agent edit"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 1"},
+            {"do": "see", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.file", "text": "+12"},
+            {"do": "see", "on": "diff.file", "text": "−2"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.added", "count": 12},
+            {"do": "see", "on": "diff.removed", "count": 2},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError = (error: unknown)"},
+            {"do": "see", "on": "diff.removed", "text": "await sleep(options.baseDelayMs * 2 ** attempt)"},
+            {"do": "screenshot", "name": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "gone", "on": "diff.added"}
+          ]
+        },
+        {
+          "id": "clean",
+          "kind": "break",
+          "title": "A project without changes says the working tree is clean",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff clean"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 0"},
+            {"do": "see", "on": "diff.added", "count": 0, "timeout": 1}
+          ]
+        },
+        {
+          "id": "outside-change",
+          "kind": "break",
+          "title": "Files changed and added outside the app show once the panel is opened again",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff outside change"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "panel", "text": "Working tree clean"},
+            {"do": "file.write", "path": "src/api/client.ts", "content": ["import { withRetry } from \"./retry\"", "", "export const rewrittenOutside = true", ""]},
+            {"do": "file.write", "path": "src/new-module.ts", "content": ["export const added = 1", ""]},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "gone", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "pause", "ms": 1500},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "client.ts"},
+            {"do": "see", "on": "diff.file", "text": "new-module.ts"},
+            {"do": "see", "on": "diff.mode", "text": "Changed: 2"}
+          ]
+        },
+        {
+          "id": "editor-save",
+          "kind": "path",
+          "title": "A save in the file editor shows up in Changes",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff editor save"},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "editor"},
+            {"do": "click", "on": "files.row", "path": "src"},
+            {"do": "click", "on": "files.row", "path": "src/api"},
+            {"do": "click", "on": "files.row", "path": "src/api/client.ts"},
+            {"do": "click", "on": "files.line", "text": "import { withRetry } from \"./retry\""},
+            {"do": "press", "key": "End"},
+            {"do": "type", "text": " // saved from the editor"},
+            {"do": "press", "key": "s", "mods": ["mod"]},
+            {"do": "file.expect", "path": "src/api/client.ts", "contains": "// saved from the editor"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "see", "on": "diff.file", "text": "client.ts"},
+            {"do": "click", "on": "diff.file", "text": "client.ts"},
+            {"do": "see", "on": "diff.added", "text": "// saved from the editor", "count": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout",
+      "name": "Diff layout",
+      "what": "A file's diff shows as one column or side by side.",
+      "reach": "Open a file in Changes, click the side-by-side button on its header.",
+      "proof": "The diff switches to two columns and back.",
+      "scenarios": [
+        {
+          "id": "side-by-side",
+          "kind": "path",
+          "title": "The side-by-side toggle splits the diff and joins it back",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Diff split"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "panel.surface", "surface": "diff"},
+            {"do": "click", "on": "diff.file", "text": "retry.ts"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.split"},
+            {"do": "see", "on": "diff.added", "text": "const isAbortError"},
+            {"do": "click", "on": "diff.sideBySide"},
+            {"do": "see", "on": "diff.unified"},
+            {"do": "gone", "on": "diff.split"}
+          ]
+        }
+      ]
+    }
+  ]
+}

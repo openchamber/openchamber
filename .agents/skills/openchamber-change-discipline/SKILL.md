@@ -123,13 +123,24 @@ Use `localhost`, never `127.0.0.1`, for the web server: the desktop app lifts Ch
 
 The panel's browser actions run in the app the agent itself works from, so they cannot reach a change to the panel's own code until that app is rebuilt; the `electron:dev` route above covers it before.
 
+## Refactoring under the behavior net
+
+A split, move or rewrite of a large file keeps behavior identical. `bun run verify` proves it for the zones its feature map covers: it starts its own isolated instance, plays each zone's user scenarios and exits non-zero on a red one. `bun run verify -- --list` prints every zone with its source files.
+
+1. Find the zones whose sources hold the files you change. A file no zone lists has no net yet.
+2. Before the first edit, run them on the unchanged code: `bun run verify -- composer chat`. All green. A red scenario on untouched code is a finding: report it before refactoring.
+3. Give each behavior your change touches and no scenario plays a scenario now, green on the old code (format in `scripts/verify/DOCUMENTATION.md`).
+4. After the change, run the same command. Done means the same scenarios green. A red one is a behavior change, so fix the code. Edit a scenario only when the markup it points at moved, and then the selector in `vocabulary.json`, with the step's meaning unchanged.
+
+While iterating, `--keep` holds the stand and `--attach <run>/stand.json` reruns against it in seconds. A run is one heavy job (a dev server and Chrome): one at a time per machine.
+
 ## Test Design
 
 - Prefer observable contracts, state transitions, failure handling, rollback, and operation counts.
 - Test private helpers through public/module behavior when that captures the risk clearly.
 - Assert internal map shape, helper calls, or call order only when that structure/order is itself a contract.
 - Keep refactor tests resilient to equivalent internal implementations.
-- For behavior-preserving refactors, establish the current behavior before changing structure.
+- For behavior-preserving refactors, establish the current behavior before changing structure (*Refactoring under the behavior net*).
 
 ## Module Documentation
 

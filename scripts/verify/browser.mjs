@@ -1,0 +1,253 @@
+import { rmSync, writeFileSync } from "node:fs"
+import process from "node:process"
+
+import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
+
+const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
+const MODIFIERS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
+const KEYS = {
+  Escape: { code: "Escape", keyCode: 27 },
+  Enter: { code: "Enter", keyCode: 13 },
+  Tab: { code: "Tab", keyCode: 9 },
+  Backspace: { code: "Backspace", keyCode: 8 },
+  ArrowDown: { code: "ArrowDown", keyCode: 40 },
+  ArrowUp: { code: "ArrowUp", keyCode: 38 },
+  End: { code: "End", keyCode: 35 },
+}
+export const MOD = process.platform === "darwin" ? "meta" : "ctrl"
+
+export const DEEP_QUERY = `((selector) => {
+  const roots = [document]
+  for (let index = 0; index < roots.length; index += 1) {
+    for (const element of roots[index].querySelectorAll("*")) if (element.shadowRoot) roots.push(element.shadowRoot)
+  }
+  return roots.flatMap((root) => [...root.querySelectorAll(selector)])
+})`
+
+const FIND_ELEMENTS = `(selector, text, exact, all, inView) => {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return false
+    const style = getComputedStyle(element)
+    return style.visibility !== "hidden" && style.display !== "none" && element.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+  }
+  const matches = []
+  for (const element of ${DEEP_QUERY}(selector)) {
+    const content = (element.innerText ?? element.textContent ?? "").trim()
+    if (text !== null && (exact ? content !== text : !content.includes(text))) continue
+    if (!all && !visible(element)) continue
+    if (inView) {
+      const holds = (node) => node.getClientRects().length > 0 && (node.innerText ?? "").includes(text)
+      const holders = text === null ? [element] : [element, ...element.querySelectorAll("*")].filter((node) => holds(node) && ![...node.children].some(holds))
+      const visibleBox = (node) => {
+        const rect = node.getBoundingClientRect()
+        let box = { top: Math.max(rect.top, 0), bottom: Math.min(rect.bottom, innerHeight), left: Math.max(rect.left, 0), right: Math.min(rect.right, innerWidth) }
+        for (let parent = node.parentElement ?? node.getRootNode().host; parent; parent = parent.parentElement ?? parent.getRootNode().host) {
+          if (getComputedStyle(parent).overflow === "visible") continue
+          const clip = parent.getBoundingClientRect()
+          box = { top: Math.max(box.top, clip.top), bottom: Math.min(box.bottom, clip.bottom), left: Math.max(box.left, clip.left), right: Math.min(box.right, clip.right) }
+        }
+        return box.bottom > box.top && box.right > box.left
+      }
+      const onScreen = holders.some(visibleBox)
+      if (!onScreen) continue
+    }
+    matches.push(element)
+  }
+  return matches
+}`
+
+export class Page {
+  constructor(client) {
+    this.client = client
+    this.consoleErrors = []
+    client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
+      this.consoleErrors.push(exceptionDetails.exception?.description?.split("\n")[0] ?? exceptionDetails.text)
+    })
+    this.sourceUpdates = []
+    this.expectedLoads = 0
+    client.on("Page.loadEventFired", () => {
+      if (this.expectedLoads > 0) this.expectedLoads -= 1
+      else this.sourceUpdates.push("the page reloaded on its own")
+    })
+    client.on("Runtime.consoleAPICalled", ({ type, args }) => {
+      const first = String(args[0]?.value ?? "")
+      if (/^\[vite\] (hot updated|page reload)/.test(first)) this.sourceUpdates.push(first.slice(7, 200))
+      if (type !== "error") return
+      const parts = args.map((arg) => String(arg.description ?? arg.value ?? "")).filter((part) => part && !/^%[os]/.test(part))
+      this.consoleErrors.push(parts.join(" ").split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 4).join(" | ").slice(0, 500))
+    })
+  }
+
+  static async open(chromePort, browserContextId) {
+    const version = await fetch(`http://127.0.0.1:${chromePort}/json/version`).then((response) => response.json())
+    const root = new CdpClient(version.webSocketDebuggerUrl)
+    await root.connect()
+    const { targetId } = await root.send("Target.createTarget", { url: "about:blank", browserContextId })
+    root.close()
+    const client = new CdpClient(`ws://127.0.0.1:${chromePort}/devtools/page/${targetId}`)
+    await client.connect()
+    const page = new Page(client)
+    await client.send("Page.enable")
+    await client.send("Runtime.enable")
+    await client.send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, mobile: false })
+    await client.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "dark" }, { name: "prefers-reduced-motion", value: "reduce" }] })
+    await client.send("Emulation.setFocusEmulationEnabled", { enabled: true })
+    return page
+  }
+
+  async evaluate(expression) {
+    const result = await this.client.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, { timeoutMs: 30_000 })
+    if (result.exceptionDetails) throw new Error(`Page script failed: ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`)
+    return result.result?.value ?? null
+  }
+
+  async navigate(url) {
+    this.expectedLoads += 1
+    const loaded = this.client.once("Page.loadEventFired", 90_000)
+    await this.client.send("Page.navigate", { url })
+    await loaded
+  }
+
+  async reload() {
+    this.expectedLoads += 1
+    const loaded = this.client.once("Page.loadEventFired", 90_000)
+    await this.client.send("Page.reload", { ignoreCache: false })
+    await loaded
+  }
+
+  async poll(expression, timeoutMs) {
+    const deadline = Date.now() + timeoutMs
+    let value = null
+    do {
+      value = await this.evaluate(`(() => { try { return ${expression} } catch (error) { return null } })()`)
+      if (value) return value
+      await wait(100)
+    } while (Date.now() < deadline)
+    return value
+  }
+
+  query({ selector, text = null, exact = false, all = false, inView = false }) {
+    return `(${FIND_ELEMENTS})(${JSON.stringify(selector)}, ${JSON.stringify(text)}, ${exact}, ${all}, ${inView})`
+  }
+
+  async point(target, timeoutMs) {
+    const locate = `(() => {
+      const element = ${this.query(target)}[${target.index ?? 0}]
+      if (!element) return null
+      if (!${Boolean(target.noScroll)}) element.scrollIntoView({ block: "nearest", inline: "nearest" })
+      const rect = element.getBoundingClientRect()
+      const x = rect.left + rect.width / 2
+      const y = rect.top + rect.height / 2
+      const hit = element.getRootNode().elementFromPoint?.(x, y) ?? document.elementFromPoint(x, y)
+      return { x, y, hits: Boolean(hit && (element === hit || element.contains(hit) || hit.contains(element))) }
+    })()`
+    const deadline = Date.now() + timeoutMs
+    let previous = null
+    while (Date.now() < deadline) {
+      const current = await this.poll(locate, Math.max(0, deadline - Date.now()))
+      if (!current) return null
+      if (current.hits && previous && Math.abs(previous.x - current.x) < 1 && Math.abs(previous.y - current.y) < 1) return current
+      previous = current
+      await wait(120)
+    }
+    return previous
+  }
+
+  async mouse(type, point, extra = {}) {
+    await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra })
+  }
+
+  async hover(target, timeoutMs) {
+    const point = await this.point(target, timeoutMs)
+    if (!point) return null
+    await this.mouse("mouseMoved", point)
+    return point
+  }
+
+  async click(target, timeoutMs) {
+    const point = await this.hover(target, timeoutMs)
+    if (!point) return null
+    await this.mouse("mousePressed", point, { button: "left", buttons: 1, clickCount: 1 })
+    await this.mouse("mouseReleased", point, { button: "left", buttons: 0, clickCount: 1 })
+    return point
+  }
+
+  async moveMouseAway() {
+    await this.mouse("mouseMoved", { x: 2, y: 2 })
+  }
+
+  async press(key, modifiers = []) {
+    const mask = modifiers.map((name) => (name === "mod" ? MOD : name)).reduce((sum, name) => sum | MODIFIERS[name], 0)
+    const known = KEYS[key]
+    const isChar = !known && key.length === 1
+    const code = known?.code ?? (isChar ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : `Digit${key}`) : key)
+    const keyCode = known?.keyCode ?? (isChar ? key.toUpperCase().charCodeAt(0) : 0)
+    const base = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers: mask }
+    const text = isChar && !(mask & (MODIFIERS.meta | MODIFIERS.ctrl)) ? key : key === "Enter" && !(mask & ~MODIFIERS.shift) ? "\r" : undefined
+    const down = { type: text ? "keyDown" : "rawKeyDown", ...base }
+    if (text) down.text = text
+    await this.client.send("Input.dispatchKeyEvent", down)
+    await this.client.send("Input.dispatchKeyEvent", { type: "keyUp", ...base })
+  }
+
+  async insertText(text) {
+    await this.client.send("Input.insertText", { text })
+  }
+
+  async screenshot(file) {
+    const { data } = await this.client.send("Page.captureScreenshot", { format: "png" }, { timeoutMs: 30_000 })
+    writeFileSync(file, Buffer.from(data, "base64"))
+  }
+
+  close() {
+    this.client.close()
+  }
+}
+
+const connectBrowser = async (port) => {
+  const deadline = Date.now() + 20_000
+  let version = null
+  while (!version && Date.now() < deadline) {
+    version = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json(), () => null)
+    if (!version) await wait(100)
+  }
+  if (!version) throw new Error("Chrome did not open its debugging port")
+  const root = new CdpClient(version.webSocketDebuggerUrl)
+  await root.connect()
+  return root
+}
+
+export const startBrowser = async ({ chrome, headed = false }) => {
+  const executable = resolveChrome(chrome)
+  const port = await reservePort()
+  const profile = resolveProfileDir(null, "verify")
+  const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] })
+  profile.removeAfter(child)
+  const spawnFailed = new Promise((_, reject) => child.once("error", (error) => reject(new Error(`Chrome did not start: ${error.message}`))))
+  const root = await Promise.race([connectBrowser(port), spawnFailed]).catch((error) => {
+    child.kill("SIGKILL")
+    rmSync(profile.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    throw error
+  })
+  spawnFailed.catch(() => undefined)
+  const newPage = async () => {
+    const { browserContextId } = await root.send("Target.createBrowserContext", { disposeOnDetach: false })
+    const page = await Page.open(port, browserContextId)
+    page.browserContextId = browserContextId
+    page.dispose = async () => {
+      page.close()
+      await root.send("Target.disposeBrowserContext", { browserContextId }).catch(() => undefined)
+    }
+    return page
+  }
+  const stop = async () => {
+    root.close()
+    if (child.exitCode !== null) return
+    const exited = new Promise((resolveExit) => child.once("exit", resolveExit))
+    child.kill("SIGTERM")
+    await Promise.race([exited, wait(3000)])
+    if (child.exitCode === null) child.kill("SIGKILL")
+  }
+  return { newPage, stop }
+}

@@ -1,0 +1,172 @@
+{
+  "zone": "chat",
+  "name": "Chat transcript and messages",
+  "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx"],
+  "features": [
+    {
+      "id": "history",
+      "name": "An agent turn in the transcript",
+      "what": "A finished turn shows the prompt, the agent's steps as tool rows and the final answer.",
+      "reach": "Open a session where the agent read, searched, edited files and ran a command.",
+      "proof": "The prompt bubble, one row per tool call with its target and edit counts, and the answer's Markdown.",
+      "scenarios": [
+        {
+          "id": "agent-turn",
+          "kind": "path",
+          "title": "Tool rows and the answer of an agent turn render",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat agent turn"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
+            {"do": "see", "on": "chat.tool", "text": "Search Files", "exact": true},
+            {"do": "see", "on": "chat.tool", "text": "Edit File", "count": 2, "exact": true},
+            {"do": "see", "on": "chat.toolRow", "text": "+9"},
+            {"do": "see", "on": "chat.tool", "text": "Shell Command", "exact": true},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "see", "on": "chat.fileLink", "ref": "src/api/retry.ts"}
+          ]
+        },
+        {
+          "id": "tool-expand",
+          "kind": "path",
+          "title": "Clicking an Edit File row shows the edit as a diff",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat tool expand"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "see", "on": "chat.toolDiffLine", "text": "isAbortError"},
+            {"do": "screenshot", "name": "expanded"},
+            {"do": "click", "on": "chat.toolRow", "text": "+3"},
+            {"do": "gone", "on": "chat.toolDiffLine", "text": "isAbortError"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "markdown",
+      "name": "Markdown in answers",
+      "what": "Answers render headings, numbered lists, tables and highlighted code in several languages.",
+      "reach": "A session whose answer has headings, a list, a table and fenced code.",
+      "proof": "Each construct is present as its own element with its text.",
+      "scenarios": [
+        {
+          "id": "document",
+          "kind": "path",
+          "title": "Headings, a numbered list, a table and code blocks render",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat markdown"},
+            {"do": "session.send", "session": "s", "prompt": "Explain a call"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.heading", "text": "3. Executing a call in a bytecode virtual machine"},
+            {"do": "see", "on": "chat.table", "text": "Register machine"},
+            {"do": "see", "on": "chat.code", "text": "fn call(&mut self, argc: usize)"},
+            {"do": "see", "on": "chat.code", "text": "function call(vm: Vm, argc: number): void"},
+            {"do": "see", "on": "chat.listItem", "text": "The dispatch loop continues at the callee's entry point."},
+            {"do": "see", "on": "chat.answer", "text": "**", "count": 0, "timeout": 1}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "name": "A streaming answer",
+      "what": "While the agent answers, the text grows in place and the composer shows Stop. A reply taller than the screen stops the follow at its start and offers Scroll to bottom.",
+      "reach": "Send a prompt to a model that streams for a few seconds, watch the open session.",
+      "proof": "Stop shows during the stream; after it the reply's start is on screen, Scroll to bottom is offered and brings the reply's last sentence into view.",
+      "scenarios": [
+        {
+          "id": "stream",
+          "kind": "path",
+          "title": "A long streamed reply stops at its start and Scroll to bottom reaches its end",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat stream"},
+            {"do": "open", "session": "s"},
+            {"do": "session.send", "session": "s", "prompt": "Stream something", "model": "perf/stream-300cps", "wait": false},
+            {"do": "see", "on": "chat.userBubble", "text": "Stream something"},
+            {"do": "see", "on": "composer.stop"},
+            {"do": "session.idle", "session": "s", "timeout": 60},
+            {"do": "gone", "on": "composer.stop"},
+            {"do": "see", "on": "chat.heading", "text": "1. Executing a call in a bytecode virtual machine", "inView": true},
+            {"do": "see", "on": "chat.scrollToBottom"},
+            {"do": "see", "on": "chat.message", "text": "Fixture stream", "inView": true, "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.scrollToBottom"},
+            {"do": "see", "on": "chat.message", "text": "Fixture stream", "inView": true},
+            {"do": "gone", "on": "chat.scrollToBottom"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scroll",
+      "name": "Scrolling a long chat",
+      "what": "A long session opens at its end; scrolled up, an arrow brings the reader back to the end.",
+      "reach": "Open a session with several turns, scroll up.",
+      "proof": "The last answer is on screen after opening, Scroll to bottom appears after scrolling up and brings the end back.",
+      "scenarios": [
+        {
+          "id": "to-bottom",
+          "kind": "path",
+          "title": "A long session opens at its end and Scroll to bottom returns there",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat scroll"},
+            {"do": "session.send", "session": "s", "prompt": "First turn"},
+            {"do": "session.send", "session": "s", "prompt": "Second turn"},
+            {"do": "session.send", "session": "s", "prompt": "Third turn", "model": "perf/code-20000cps"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
+            {"do": "wheel", "on": "chat.scroller", "dy": -1500, "times": 4},
+            {"do": "see", "on": "chat.scrollToBottom"},
+            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true, "count": 0, "timeout": 1},
+            {"do": "click", "on": "chat.scrollToBottom"},
+            {"do": "see", "on": "chat.message", "text": "Fixture code", "inView": true},
+            {"do": "gone", "on": "chat.scrollToBottom"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "name": "Message actions",
+      "what": "Under each message: copy its text; under a prompt: revert the session to before it.",
+      "reach": "Hover a message and use the buttons under it.",
+      "proof": "Copy puts the message text on the clipboard; Revert removes the prompt and its answer from the transcript and puts the prompt back in the composer.",
+      "scenarios": [
+        {
+          "id": "copy",
+          "kind": "path",
+          "title": "Copy puts the answer's text on the clipboard",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat copy"},
+            {"do": "session.send", "session": "s", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "clipboard", "set": "clipboard before the copy"},
+            {"do": "hover", "on": "chat.answer", "text": "Bumped. Two errors came up"},
+            {"do": "click", "on": "chat.copy"},
+            {"do": "clipboard", "contains": "Bumped. Two errors came up, both from stricter checks"}
+          ]
+        },
+        {
+          "id": "revert",
+          "kind": "path",
+          "title": "Revert removes the last prompt and its answer and returns the prompt to the composer",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat revert"},
+            {"do": "session.send", "session": "s", "prompt": "Add Cmd+K for the command palette, but don't break Cmd+K in the editor."},
+            {"do": "session.send", "session": "s", "prompt": "Attachments over 10 MB time out. Can we upload them in chunks?"},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "split the file into 5 MB parts"},
+            {"do": "hover", "on": "chat.userBubble", "text": "Attachments over 10 MB"},
+            {"do": "click", "on": "chat.revert"},
+            {"do": "gone", "on": "chat.userBubble", "text": "Attachments over 10 MB"},
+            {"do": "gone", "on": "chat.answer", "text": "split the file into 5 MB parts"},
+            {"do": "see", "on": "chat.answer", "text": "The palette shortcut is now registered"},
+            {"do": "editor", "contains": "Attachments over 10 MB time out"}
+          ]
+        }
+      ]
+    }
+  ]
+}
