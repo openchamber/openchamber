@@ -3,13 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
-/**
- * API keys for voice services the user typed in Settings: OpenAI read-aloud,
- * a custom OpenAI-compatible speech server, and a custom transcription
- * server. They live here, mode 0600, like every other credential the server
- * keeps; browsers hold only whether each one is set. Routes fill a request's
- * key from here, so a key never travels with a request from the UI.
- */
 const VOICE_KEY_KINDS = ['openai', 'openaiCompatible', 'stt'];
 
 const storedKey = z.string().trim().min(1).max(1024);
@@ -18,7 +11,6 @@ const storedKeysSchema = z.object({
   openaiCompatible: storedKey.optional().catch(undefined),
   stt: storedKey.optional().catch(undefined),
 });
-// A string sets the key, null or '' removes it, an absent kind stays as is.
 const patchValue = z.union([z.literal(''), z.null(), storedKey]);
 const patchSchema = z.object({
   openai: patchValue.optional(),
@@ -50,19 +42,13 @@ const readStoredKeys = () => {
   }
 };
 
-/** The stored key for one kind, or undefined. */
 export const readVoiceKey = (kind) => readStoredKeys()[kind];
 
-/** Which kinds have a key; never the keys themselves. */
 export const describeVoiceKeys = () => {
   const keys = readStoredKeys();
   return Object.fromEntries(VOICE_KEY_KINDS.map((kind) => [kind, Boolean(keys[kind])]));
 };
 
-/**
- * Apply a patch from `/api/voice/keys` and answer the new state. Throws on a
- * malformed patch before anything is written.
- */
 export const updateVoiceKeys = (body) => {
   const patch = patchSchema.parse(body);
   const next = { ...readStoredKeys() };
