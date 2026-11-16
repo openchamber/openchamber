@@ -9,37 +9,23 @@ import { cn } from '@/lib/utils';
 
 export const ROW_ACTION_SLOT_WIDTH = 48;
 
-// Four slots every session row has: archive, delete, rename and Copy ID.
-// Top-level rows add one slot each for Pin and Track / Done when enabled.
 export const ROW_ACTIONS_WIDTH = 4 * ROW_ACTION_SLOT_WIDTH;
 
 type MobileSessionWorkAction = { inWork: boolean; onToggle: () => void };
 type MobileSessionPinAction = { pinned: boolean; onToggle: () => void };
 const ROW_SWIPE_SNAP_MS = 180;
 
-// The actions are hidden while the row covers them. WebKit stops painting the
-// row over them while the list animates it (a header opening or closing slides
-// and fades the rows below), and they showed through the row's text.
 const setActionsShown = (actions: HTMLElement | null, shown: boolean) => {
   if (actions) actions.style.visibility = shown ? 'visible' : 'hidden';
 };
 
-/** Generic swipe-to-reveal wrapper for drawer rows (sessions, projects,
-    worktrees): horizontal intent detection, imperative transform during the
-    drag, snap on release. The actions sit at the row's start (left, or right
-    in RTL) and the row slides toward its end, so the opposite direction stays
-    free for the drawer's own close swipe. */
 export const MobileSwipeActionsRow: React.FC<{
   actionsWidth: number;
   actions: React.ReactNode;
   revealed: boolean;
   onRevealedChange: (revealed: boolean) => void;
-  /** Marks the row as the current session so the sheet's open-time
-      auto-scroll can find it. */
   dataActiveSession?: boolean;
   sessionId?: string;
-  /** Classes for the transformed content element. The default suits a plain
-      header row; session rows pass their own layout and active background. */
   contentClassName?: string;
   children: React.ReactNode;
 }> = ({
@@ -53,7 +39,6 @@ export const MobileSwipeActionsRow: React.FC<{
   children,
 }) => {
   const { direction } = useI18n();
-  // Offsets are measured toward the row's end; in RTL that is leftward.
   const sign = direction === 'rtl' ? -1 : 1;
   const contentRef = React.useRef<HTMLDivElement>(null);
   const actionsRef = React.useRef<HTMLDivElement>(null);
@@ -65,7 +50,6 @@ export const MobileSwipeActionsRow: React.FC<{
   const applyOffset = React.useCallback((px: number, animate: boolean) => {
     const el = contentRef.current;
     if (!el) return;
-    // A row sliding shut keeps its actions until the slide ends.
     setActionsShown(actionsRef.current, px !== 0 || (animate && px !== offsetRef.current));
     el.style.transition = animate ? `transform ${ROW_SWIPE_SNAP_MS}ms ease-out` : 'none';
     el.style.transform = px === 0 ? 'none' : `translateX(${px * sign}px)`;
@@ -76,8 +60,6 @@ export const MobileSwipeActionsRow: React.FC<{
     if (event.target === contentRef.current && event.propertyName === 'transform' && offsetRef.current === 0) setActionsShown(actionsRef.current, false);
   };
 
-  // Before paint: a row mounted in the middle of a list animation is drawn
-  // with its actions already hidden.
   React.useLayoutEffect(() => {
     revealedRef.current = revealed;
     applyOffset(revealed ? actionsWidth : 0, true);
@@ -116,23 +98,16 @@ export const MobileSwipeActionsRow: React.FC<{
     <div
       data-active-session={dataActiveSession || undefined}
       data-mobile-session-row={sessionId}
-      // Rounded as the desktop's rows are: the list is inset from the screen's
-      // edges, and the selection and a swipe's actions keep the row's shape.
-      // `oc-row-clip` and not `overflow-hidden`: on a phone that class becomes
-      // `overflow-y: auto` (see styles/mobile.css), so the row turned into a
-      // scroller of its own and swallowed a drag that started on it.
       className="relative oc-row-clip rounded-lg"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
-      // Vertical panning stays native; horizontal moves reach the swipe handler.
       style={{ touchAction: 'pan-y' }}
     >
       <div ref={actionsRef} className="absolute inset-y-0 inset-s-0 flex items-stretch" style={{ width: actionsWidth }} aria-hidden={!revealed}>
         {actions}
       </div>
-      {/* The row keeps its rounded shape while it slides away from its actions. */}
       <div ref={contentRef} className={`${contentClassName} rounded-[inherit]`} onTransitionEnd={handleTransitionEnd} onTransitionCancel={handleTransitionEnd}>
         {children}
       </div>
@@ -140,10 +115,6 @@ export const MobileSwipeActionsRow: React.FC<{
   );
 };
 
-/** The session swipe actions, shared by every mobile session row. Ordered
-    left to right by how often they are used on a phone: the leftmost slot is
-    the one a short drag exposes first, so archive leads and the destructive
-    delete never sits under a partial swipe. Copy ID stays in the final slot. */
 export const MobileSessionRowActions: React.FC<{
   sessionId: string;
   title: string;
@@ -154,9 +125,7 @@ export const MobileSessionRowActions: React.FC<{
   onConfirmDelete?: () => void;
   onRequestRename?: () => void;
   onRevealedChange?: (revealed: boolean) => void;
-  /** Track / Done, when the feature is on and the row is a top-level session. */
   work?: MobileSessionWorkAction;
-  /** Pin / Unpin, on top-level rows. */
   pin?: MobileSessionPinAction;
 }> = ({
   sessionId,
@@ -187,8 +156,6 @@ export const MobileSessionRowActions: React.FC<{
 
   return (
     <>
-      {/* Icon-only actions on the row's own background — they read as the row
-          extending to reveal extra controls, not a separate panel. */}
       <button
         type="button"
         tabIndex={tabIndex}
@@ -223,7 +190,6 @@ export const MobileSessionRowActions: React.FC<{
           onClick={() => { work.onToggle(); onRevealedChange?.(false); }}
           style={{ touchAction: 'manipulation' }}
         >
-          {/* The check glyph draws smaller than the others at the same box. */}
           <Icon name={work.inWork ? 'check' : 'eye'} className={work.inWork ? 'size-5' : 'size-[18px]'} />
         </button>
       ) : null}

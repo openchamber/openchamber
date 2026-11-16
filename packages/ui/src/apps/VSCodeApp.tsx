@@ -59,8 +59,6 @@ function VSCodeSettings() {
     const unsubscribe = useUIStore.subscribe((state, previous) => {
       if (!state.isSettingsDialogOpen && previous.isSettingsDialogOpen) close();
     });
-    // Navigation can arrive before the Settings chunk has loaded. The host
-    // waits for this mounted owner and retains only the newest request.
     void apis.vscode?.executeCommand('openchamber.settingsReady').catch((error: Error) => {
       toast.error(error.message);
     });
@@ -102,9 +100,6 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     });
   }, [apis.vscode, isSettingsPanel]);
 
-  // Same as the window-focus effect in App.tsx: when the user can see this
-  // webview again, the selected session counts as seen. VS Code learns that from
-  // the extension host, not from a DOM focus event.
   React.useEffect(() => {
     if (isSettingsPanel) return;
     return onHostSurfaceSeen(() => {

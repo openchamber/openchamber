@@ -1,13 +1,8 @@
-// Relay requests made while connecting a mobile device (health, session,
-// pairing redeem, login). Each returns the failure reason next to the response
-// so the connect trail says WHY a relay transport was rejected, and idempotent
-// probes survive one dropped relay socket inside their time budget.
 
 import type { RelayTunnelClient, RelayTunnelStatus } from '@/lib/relay/tunnel-client';
 
 type RelayFetchOutcome = {
   response: Response | null;
-  /** Why no response arrived: the tunnel error message or `timeout`. */
   failure: string | null;
 };
 
@@ -34,9 +29,6 @@ const settleWithin = async (
   }
 };
 
-// True once the tunnel's own reconnect brings a channel back; false when the
-// budget runs out, the tunnel is closed, or it parks in a terminal error that
-// only an online/foreground wake retries.
 const waitForReconnect = (tunnel: RelayFetchTunnel, timeoutMs: number): Promise<boolean> =>
   new Promise((resolve) => {
     const finish = (connected: boolean) => {
@@ -53,7 +45,6 @@ const waitForReconnect = (tunnel: RelayFetchTunnel, timeoutMs: number): Promise<
     check(tunnel.getStatus());
   });
 
-/** One request, no retry: for non-idempotent calls such as pairing redeem. */
 export const fetchThroughRelayOnce = (
   tunnel: RelayFetchTunnel,
   path: string,
@@ -61,11 +52,6 @@ export const fetchThroughRelayOnce = (
   budgetMs: number,
 ): Promise<RelayFetchOutcome> => settleWithin(budgetMs, tunnel.fetch(path, init));
 
-/**
- * An idempotent probe. When the relay socket drops before answering, the tunnel
- * reconnects on its own backoff; the probe waits for that and asks again, as
- * long as the budget lasts. A failure while the channel stays up is final.
- */
 export const fetchThroughRelayWithRetry = async (
   tunnel: RelayFetchTunnel,
   path: string,

@@ -10,12 +10,9 @@ import { selectVisibleModelEntries } from '@/components/usage/usageModelSelectio
 import type { ProviderResult, QuotaProviderId, UsageWindow } from '@/types';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 
-/** One window row, with every text already formatted the way the Usage page formats it. */
 type WidgetQuota = {
   label: string;
-  /** Right-hand value: the percentage, or the provider's own count or balance. */
   value: string;
-  /** Bar fill in the chosen display mode; absent for a window without a share (a balance). */
   percent?: number;
   tone: 'safe' | 'warn' | 'critical';
   reset?: string;
@@ -44,7 +41,6 @@ type WidgetFormat = {
   timeFormatPreference: TimeFormatPreference;
 };
 
-// Provider-supplied names such as Antigravity's "Google models · 5-Hour" pass through.
 const quotaLabel = (key: string): string => (key.includes(' · ') ? key : formatWindowLabel(key));
 
 const quota = (key: string, window: UsageWindow, mode: 'used' | 'remaining', format: WidgetFormat): WidgetQuota => {
@@ -62,11 +58,6 @@ const quota = (key: string, window: UsageWindow, mode: 'used' | 'remaining', for
   return entry;
 };
 
-/**
- * The quota readout as the Usage page shows it: the providers picked for the dropdown in their
- * order, the selected models, the page's value, tone and reset texts. Reads the quota store
- * only; the widget makes no provider calls of its own.
- */
 export const createWidgetUsageSnapshot = (state: WidgetQuotaInput, format: WidgetFormat): WidgetUsageSnapshot => {
   const mode = state.displayMode === 'usage' ? 'used' : 'remaining';
   const providers = state.dropdownProviderIds.flatMap((id): WidgetProvider[] => {

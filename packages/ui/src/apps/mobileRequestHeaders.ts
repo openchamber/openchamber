@@ -21,8 +21,6 @@ export const buildMobileHeaderValues = (drafts: Pick<MobileHeaderDraft, 'name' |
   return Object.fromEntries(headers);
 };
 
-// A saved instance may also have LAN and relay candidates. Proxy credentials
-// belong only to the address the user configured, including its base path.
 export const mobileHeadersForUrl = (url: string, config?: MobileRequestHeaders): Record<string, string> =>
   config && url.replace(/\/+$/, '') === config.url.replace(/\/+$/, '')
     ? buildMobileHeaderValues(Object.entries(config.values).map(([name, value]) => ({ name, value })))

@@ -7,7 +7,6 @@ import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { previewFramesIsolated } from '@/lib/browser/mobileDevTunnel';
 import { useI18n } from '@/lib/i18n';
 
-/** The phone's display-only browser, scoped to the open chat's directory. */
 export const MobileBrowserSurface: React.FC<{
   visible: boolean;
   registerBackHandler: (handler: (() => boolean) | null) => void;

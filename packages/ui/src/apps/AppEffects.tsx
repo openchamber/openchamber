@@ -68,8 +68,6 @@ export function SyncRuntimeEffects({ backgroundWorkEnabled }: {
   backgroundWorkEnabled: boolean;
 }) {
   useSessionAutoCleanup({ enabled: backgroundWorkEnabled });
-  // Web, desktop, and mobile hand the queue to the OpenChamber server, which
-  // delivers it with or without a UI; only VS Code still sends from the UI.
   useQueuedMessageAutoSend(backgroundWorkEnabled && !isServerOwnedMessageQueue());
 
   return <SyncOptimisticBridge />;
@@ -81,8 +79,6 @@ export function SyncAppEffects({ backgroundWorkEnabled }: {
   usePwaManifestSync();
   useWindowControlsOverlayLayout();
   useKeyboardShortcuts();
-  // The main window only: the mini chat sees neither what the main window has
-  // open nor its sidebar, and would archive a worktree open there.
   useMergedWorktreeCleanup({ enabled: backgroundWorkEnabled });
 
   return (

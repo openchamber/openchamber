@@ -1,9 +1,3 @@
-// In-memory capture of mobile connection lifecycle events, so device-only
-// connection failures (Capacitor iOS/Android) can be diagnosed without a
-// tethered debugger: the hidden debug panel renders this buffer and offers a
-// one-tap copy for bug reports. Console logging stays the primary sink — this
-// mirrors it. Never persisted; details are the already-masked logConnect
-// payloads (no tokens or secrets reach this module).
 
 import React from 'react';
 
@@ -17,10 +11,6 @@ type MobileConnectDebugEntry = {
 };
 
 const MAX_ENTRIES = 300;
-// The trail documents THE CURRENT app run only — it resets on every launch.
-// Days of accumulated history would bury the failure the panel exists to
-// expose. (An earlier revision persisted the log across launches; the storage
-// key is removed here so installs that ran it don't keep a stale blob around.)
 const LEGACY_STORAGE_KEY = 'openchamber.mobile.connectLog.v1';
 
 const entries: MobileConnectDebugEntry[] = [];
@@ -38,18 +28,10 @@ export const recordMobileConnectDebug = (step: string, detail: string): void => 
   if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
 };
 
-// Launch separator: makes "everything above happened in a previous run of the
-// app" readable at a glance in the persisted trail.
 if (typeof window !== 'undefined') {
-  // How long the WebView took to reach this module: the part of a cold launch
-  // that passes before the first connection step.
   recordMobileConnectDebug('app:launch', JSON.stringify({ sinceNavigationMs: Math.round(performance.now()) }));
 }
 
-// The requests of a cold launch, so a slow start can be told apart: the
-// connection, one slow request, or many requests in a row. Paths only, since a
-// query can carry a folder path. The app stops recording after the window, so
-// the trail stays a launch trail.
 const LAUNCH_REQUEST_WINDOW_MS = 30_000;
 const LAUNCH_REQUEST_LIMIT = 150;
 
@@ -83,10 +65,6 @@ export const formatMobileConnectDebugEntry = (entry: MobileConnectDebugEntry): s
 export const getMobileConnectDebugText = (): string =>
   entries.map(formatMobileConnectDebugEntry).join('\n');
 
-// Long-press detector for the hidden debug-panel triggers. Pointer-based with a
-// movement threshold so scrolling and normal taps never fire it; the synthetic
-// click that follows a long-press release is swallowed in the capture phase so
-// the host element's normal tap action does not also run.
 export const useDebugPanelLongPress = (onLongPress: () => void, delayMs = 700) => {
   const timerRef = React.useRef<number | null>(null);
   const originRef = React.useRef<{ x: number; y: number } | null>(null);

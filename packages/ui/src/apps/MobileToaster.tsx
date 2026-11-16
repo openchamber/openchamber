@@ -2,27 +2,14 @@ import React from 'react';
 
 import { Toaster } from '@/components/ui/sonner';
 
-// Below sonner's 600px breakpoint `mobileOffset` replaces `offset`, so both
-// carry the same top: under the notch, inside the visible part of the screen.
 const TOP_OFFSET = 'calc(var(--oc-safe-area-top, 0px) + var(--oc-visual-viewport-offset-top, 0px) + 16px)';
-// The sides clear the screen's insets: a landscape notch, the status bar
-// column of iPhone Duo. mobile.css lets the two sides differ.
 const MOBILE_OFFSET = {
   top: TOP_OFFSET,
   left: 'calc(var(--oc-safe-area-left, 0px) + 16px)',
   right: 'calc(var(--oc-safe-area-right, 0px) + 16px)',
 };
 
-/**
- * Sonner fixes its toaster to the layout viewport. iOS Safari does not shrink
- * that viewport for the keyboard; it pans the visible area down over it, so a
- * top-anchored toast ended up above the screen while the keyboard was open
- * (#3763). The pan is mirrored into a CSS variable the offset adds. Where
- * nothing pans (Capacitor moves its own shell, resizing browsers) it stays 0.
- *
- * The variable lives on the toaster's wrapper: written on the root, every
- * frame of the keyboard animation would restyle the whole chat.
- */
+// external: #3763 iOS Safari pans the visual viewport over the keyboard; the toaster offset tracks that pan on its wrapper to avoid restyling the chat.
 function useVisualViewportOffsetTop(wrapperRef: React.RefObject<HTMLDivElement | null>): void {
   React.useEffect(() => {
     const viewport = window.visualViewport;

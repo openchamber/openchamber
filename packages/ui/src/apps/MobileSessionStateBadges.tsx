@@ -7,7 +7,6 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import type { PendingRequests } from './usePendingRequests';
 
-/** The goal glyph the desktop sidebar shows, tinted by the goal's status. */
 export const MobileSessionGoalGlyph: React.FC<{ session: Session }> = ({ session }) => {
   const { t } = useI18n();
   const goal = getSessionGoal(session);
@@ -23,7 +22,6 @@ export const MobileSessionGoalGlyph: React.FC<{ session: Session }> = ({ session
   );
 };
 
-/** The permission and question badges the desktop sidebar shows. */
 export const MobileSessionPendingBadges: React.FC<PendingRequests> = ({ hasPermission, hasForm }) => {
   const { t } = useI18n();
   if (!hasPermission && !hasForm) return null;
