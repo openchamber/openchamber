@@ -1,24 +1,10 @@
 export const MESSAGE_STREAM_GLOBAL_WS_PATH = '/api/global/event/ws';
 export const MESSAGE_STREAM_DIRECTORY_WS_PATH = '/api/event/ws';
 export const MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
-// Per-client pending outbound WS buffer, not a payload or stream-size limit.
-// Healthy clients stay near 0; this only trips when a client is far behind.
-// Raised from 4 MB → 16 MB to tolerate bursts during long agent sessions
-// (e.g. ultrawork / multi-tool loops) where the browser briefly falls behind.
 export const MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 
-// Threshold at which we emit a backpressure warning frame so the client can
-// proactively start shedding low-priority updates before the hard disconnect.
 export const MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES = 12 * 1024 * 1024;
 
-/**
- * Parses one SSE block from OpenCode's `/api/event` stream.
- *
- * OpenCode v2 sends no `id:` lines: the event id lives in the JSON payload as
- * `payload.id` and the directory as `payload.location.directory`. Both are read
- * from the payload here so the replay buffer and the per-directory routing keep
- * working unchanged.
- */
 export function parseSseEventEnvelope(block) {
   if (!block || typeof block !== 'string') {
     return null;
@@ -111,10 +97,6 @@ export function sendSerializedMessageStreamWsFrame(socket, serializedFrame) {
       return false;
     }
 
-    // Emit a one-shot backpressure warning when the buffer is building up.
-    // The flag prevents sending repeated warnings that would themselves
-    // increase the buffer.  It resets once the buffer drains below the
-    // threshold.
     if (bufferedAfter > MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES) {
       if (!socket._ocBackpressureWarned) {
         socket._ocBackpressureWarned = true;
