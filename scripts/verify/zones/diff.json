@@ -1,7 +1,7 @@
 {
   "zone": "diff",
   "name": "Changes and diffs",
-  "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/PierreDiffViewer.tsx", "packages/ui/src/components/views/diffFileTree.ts"],
+  "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/PierreDiffViewer.tsx", "packages/ui/src/components/views/pierreDiff/", "packages/ui/src/components/views/diffFileTree.ts"],
   "features": [
     {
       "id": "changes",
