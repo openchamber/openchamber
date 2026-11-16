@@ -1,11 +1,3 @@
-/**
- * Capacitor's local TCP listener for a remote dev-server preview.
- *
- * The iframe owns the HTTP origin and its WebSocket connections. Native code
- * only accepts loopback TCP bytes; this trusted renderer carries each stream
- * over the same authenticated dev-tunnel socket used by desktop, including
- * through the active end-to-end encrypted relay.
- */
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { z } from 'zod';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -18,8 +10,6 @@ const eventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('connect'), id: z.string(), connectionId: z.string() }),
   z.object({ type: z.literal('data'), id: z.string(), connectionId: z.string(), data: z.string().max(60_000) }),
   z.object({ type: z.literal('close'), id: z.string(), connectionId: z.string() }),
-  // The listener itself is gone without a stop: iOS reclaims listening sockets
-  // of a suspended app.
   z.object({ type: z.literal('stopped'), id: z.string() }),
 ]);
 
@@ -42,7 +32,6 @@ type Tunnel = { id: string; path: string; connections: Map<string, Connection>; 
 const plugin = registerPlugin<MobileTunnelPlugin>('MobileDevTunnel');
 const tunnels = new Map<string, Tunnel>();
 let listener: Promise<PluginListenerHandle> | null = null;
-/** Bumped by every close-all, so an open that started before it gives up. */
 let generation = 0;
 const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 
@@ -125,19 +114,12 @@ const handleEvent = (raw: Event): void => {
         connection.pendingBytes -= data.byteLength;
       });
     };
-    // The dev server's last bytes can still be queued for the native socket,
-    // and a response that ends with the connection would lose its tail.
     const closeAfterWrites = () => void connection.writes.then(() => closeConnection(tunnel, connectionId));
     socket.onerror = closeAfterWrites;
     socket.onclose = closeAfterWrites;
   })().catch(() => closeConnection(tunnel, connectionId));
 };
 
-/**
- * Opens a phone-local listener for one remote dev-server port. `onStopped` runs
- * when the system takes the listener away, so the caller stops handing out its
- * port.
- */
 export const openMobileDevTunnel = async (path: string, onStopped: () => void): Promise<number> => {
   const opened = generation;
   if (!listener) {
@@ -147,7 +129,6 @@ export const openMobileDevTunnel = async (path: string, onStopped: () => void): 
     });
   }
   await listener;
-  // A runtime switch while the bridge attached must not leave a listener behind.
   if (opened !== generation) throw new Error('Runtime changed');
   const id = crypto.randomUUID();
   const tunnel: Tunnel = { id, path, connections: new Map(), onStopped };
@@ -165,10 +146,6 @@ export const openMobileDevTunnel = async (path: string, onStopped: () => void): 
   }
 };
 
-/**
- * Whether native plugins are closed to the preview's frame. Android's Capacitor
- * opens them to every frame on an old WebView; the preview then shows no pages.
- */
 export const previewFramesIsolated = (): Promise<boolean> => (
   plugin.isolatesFrames().then((result) => result.value === true, () => false)
 );

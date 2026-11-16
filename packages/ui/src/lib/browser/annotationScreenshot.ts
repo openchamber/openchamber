@@ -1,17 +1,3 @@
-/**
- * Turns a native page capture plus an annotation payload into the image the
- * agent receives.
- *
- * The image is the whole visible page, with the marked targets drawn on top —
- * not a crop around them. A tight crop answers "what does this element look
- * like" but destroys the answer to "where is it and what is it next to", which
- * is usually the more useful half of pointing at something.
- *
- * The capture arrives in device pixels while every rectangle in the payload is
- * in CSS pixels, so everything is scaled by the ratio between the two rather
- * than by `devicePixelRatio` — the page may be zoomed, and the measured ratio
- * stays correct when it is.
- */
 import type { BrowserAnnotationPayload, BrowserPoint, BrowserRect } from './contract';
 
 const MAX_OUTPUT_WIDTH = 1600;
@@ -41,17 +27,9 @@ export const renderAnnotationScreenshot = async ({
   captureHeight: number;
   cssWidth: number;
   cssHeight: number;
-  /** Where the captured area starts in the page's viewport, when the capture shows only part of it. */
   cssOrigin?: BrowserPoint;
   payload: BrowserAnnotationPayload;
-  /** Solid outline color. */
   accentColor: string;
-  /**
-   * Translucent fill, resolved by the caller. Never derive this by appending an
-   * alpha suffix to `accentColor`: theme colors are not necessarily hex, and an
-   * invalid value leaves canvas on its default opaque black, which paints over
-   * the very element the screenshot is meant to show.
-   */
   accentFill: string;
 }): Promise<File | null> => {
   if (!base64) return null;
@@ -73,7 +51,6 @@ export const renderAnnotationScreenshot = async ({
     context.scale(outputScale, outputScale);
     context.drawImage(image, 0, 0, pixelWidth, pixelHeight);
 
-    /** CSS pixels to capture pixels; the canvas transform handles the rest. */
     const toCanvas = (rect: BrowserRect): BrowserRect => ({
       x: (rect.x - cssOrigin.x) * scaleX,
       y: (rect.y - cssOrigin.y) * scaleY,
@@ -81,8 +58,6 @@ export const renderAnnotationScreenshot = async ({
       height: rect.height * scaleY,
     });
 
-    // Scale the outline with the image so it stays visible once a full page is
-    // shrunk to the output width; a hairline on a 1600px-wide page is lost.
     const outlineWidth = Math.max(2, 2.5 * scaleX / Math.max(outputScale, 0.2));
     context.strokeStyle = accentColor;
     context.fillStyle = accentFill;
