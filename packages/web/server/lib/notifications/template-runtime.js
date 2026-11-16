@@ -15,12 +15,8 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
   const GIT_TIMEOUT_MS = 3000;
-  // The sidebar's name for standalone chats; a chat's folder name is a generated id.
   const CHATS_PROJECT_LABEL = 'Chats';
 
-  // Where a session's record and messages are read: the host's OpenCode by default, the
-  // OpenCode inside a space for a session of that space (`runtime.js` builds that source
-  // and marks it `isSpace`).
   const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
   const isHostSource = (source) => !source?.isSpace;
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
@@ -41,7 +37,6 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const formatProjectLabel = (label) => {
     if (!label || typeof label !== 'string') return '';
-    // Folder names are shown exactly as they are on disk — no title-casing.
     return label.trim();
   };
 
@@ -162,8 +157,6 @@ export const createNotificationTemplateRuntime = (deps) => {
 
       if (!response.ok) return '';
 
-      // v2 pages messages as `{ data, cursor }`, newest first, and a message is
-      // a flat record: an assistant one carries `content[]`, not `parts`.
       const page = await response.json().catch(() => null);
       const messages = Array.isArray(page?.data) ? page.data : null;
       if (!messages) return '';
@@ -194,8 +187,6 @@ export const createNotificationTemplateRuntime = (deps) => {
     return sessionTitleCache.get(sessionId) ?? null;
   };
 
-  // The caches hold the host's sessions only. A space's chat is read inside the space every
-  // time: an id a space names is its claim, and must never become a host chat's title.
   const maybeCacheSessionInfoFromEvent = (payload, { spaceId = null } = {}) => {
     if (!payload || typeof payload !== 'object' || spaceId) return;
     const type = payload.type;
@@ -258,8 +249,6 @@ export const createNotificationTemplateRuntime = (deps) => {
     return projects.find((project) => typeof project?.path === 'string' && project.path.replace(/\/+$/, '') === normalized) ?? null;
   };
 
-  // A session in a worktree is named after the project the sidebar files it under: a directory
-  // registered as a project wins, else its repository's primary worktree is looked up.
   const resolveProjectNameForDirectory = async (projects, directory) => {
     if (isChatDirectory(directory)) return CHATS_PROJECT_LABEL;
     let project = findProjectByPath(projects, directory);
@@ -312,8 +301,6 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     let projectName = '';
     let branch = '';
-    // Turn-end events carry no location, so the session's record names the directory.
-    // A space's directory is a path inside the space: never matched or run git in on the host.
     let worktreeDir = '';
     if (isHost) {
       worktreeDir = typeof payload?.properties?.directory === 'string' ? payload.properties.directory.trim() : '';
@@ -355,8 +342,6 @@ export const createNotificationTemplateRuntime = (deps) => {
           baseDir: worktreeDir,
           spawnOptions: { windowsHide: true },
           binary: resolveGitBinaryForSpawn(),
-          // The binary comes from the server's own resolver; an override path
-          // with a space would otherwise be refused and leave {branch} empty.
           unsafe: { allowUnsafeCustomBinary: true },
         });
         branch = await withGitTimeout(git.revparse(['--abbrev-ref', 'HEAD'])).catch(() => '');

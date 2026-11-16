@@ -33,8 +33,6 @@ const normalizeNotificationPlainText = (text) => {
     .replace(/^[\t ]*[-*+]\s+/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
-    // Underscore and single-star emphasis only at word edges, so `user_id`,
-    // `snake_case` and `2 * 3` survive.
     .replace(/(^|\W)__(?!\s)(.+?)__(?=\W|$)/g, '$1$2')
     .replace(/(^|\W)\*(?!\s)(.+?)\*(?=\W|$)/g, '$1$2')
     .replace(/(^|\W)_(?!\s)(.+?)_(?=\W|$)/g, '$1$2')
