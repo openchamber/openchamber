@@ -39,7 +39,7 @@ const inspectProcess = async (pid, dependencies) => {
   try {
     if (platform === 'linux') {
       const raw = await readFileImpl(`/proc/${pid}/stat`, 'utf8');
-      // comm can contain spaces and parentheses. Field 22 follows its final ')'.
+      // external: https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html The parenthesized comm field can contain spaces and parentheses; starttime is field 22.
       const start = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\s+/)[19];
       if (!/^\d+$/.test(start ?? '')) throw new Error('Invalid Linux process start time');
       return `linux:${await boot()}:${start}`;
@@ -65,18 +65,14 @@ const inspectProcess = async (pid, dependencies) => {
     }
     throw new Error(`Process instance checks are unavailable on ${platform}`);
   } catch (error) {
-    // A process can exit between its existence check and the native read.
     if (!exists(pid)) return null;
     throw error;
   }
 };
 
-/** Null means the process is gone; an unreadable identity throws. */
 export const readProcessInstance = (pid, dependencies) => {
   if (pid === 0) return Promise.resolve(null);
   if (!Number.isSafeInteger(pid) || pid < 0) throw new Error('Invalid process id');
-  // This process and boot cannot change during this module's lifetime. Other
-  // PIDs are always read afresh because they can be reused.
   if (pid === process.pid && !dependencies) {
     ownIdentity ??= inspectProcess(pid).catch((error) => { ownIdentity = undefined; throw error; });
     return ownIdentity;
