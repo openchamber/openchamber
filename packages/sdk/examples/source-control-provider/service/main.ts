@@ -145,7 +145,7 @@ type User = Identity & { id: string; username: string; name?: string; avatarUrl?
 type Dated = { createdAt?: string; updatedAt?: string };
 type Issue = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
-  state: 'open' | 'closed'; author: User | null; labels: [];
+  state: 'open' | 'closed'; author: User | null; assignees?: User[]; labels: [];
 };
 type ChangeRequest = Identity & Dated & {
   id: string; number: number; project: Project; title: string; body?: string; url: string;
@@ -246,6 +246,7 @@ const mapIssue = (call: Call, raw: GiteaIssue, project: Project): Issue => {
     author: mapUser(call, raw.user),
     labels: [],
   };
+  if (raw.assignees?.length) issue.assignees = raw.assignees.flatMap((person) => mapUser(call, person) ?? []);
   if (raw.body !== undefined) issue.body = raw.body;
   stamp(issue, raw);
   return issue;

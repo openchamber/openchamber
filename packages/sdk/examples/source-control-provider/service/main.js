@@ -455,6 +455,8 @@ var mapIssue = (call, raw, project) => {
     author: mapUser(call, raw.user),
     labels: []
   };
+  if (raw.assignees?.length)
+    issue.assignees = raw.assignees.flatMap((person) => mapUser(call, person) ?? []);
   if (raw.body !== undefined)
     issue.body = raw.body;
   stamp(issue, raw);

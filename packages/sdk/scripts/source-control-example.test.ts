@@ -169,6 +169,17 @@ describe('source-control provider example', () => {
       .toEqual([{ id: '7', login: 'mona' }, { id: '8', login: 'octo' }]);
   });
 
+  test('an issue carries its assignees, and reports none as no key', async () => {
+    expect(field(await data('getIssue', { ...read(), number: 1 }), 'assignees'))
+      .toMatchObject([{ id: '8', username: 'octo' }]);
+    const patch = (assignees: string[]) => fetch(`${forge.origin}/api/v1/repos/mona/teapot/issues/1`, {
+      method: 'PATCH', headers: { authorization: 'token good' }, body: JSON.stringify({ assignees }),
+    });
+    await patch([]);
+    expect(Object.hasOwn(await data('getIssue', { ...read(), number: 1 }), 'assignees')).toBe(false);
+    await patch([FAKE_FORGE_FORK.owner]);
+  });
+
   test('a pull request\'s diff, split per file in its context, and both sides of a changed file', async () => {
     const patch = await data('readChangeRequestPatch', { ...read(), number: 2 });
     expect(field(patch, 'meta')).toEqual({ owner: 'mona', repo: 'teapot', number: 2 });

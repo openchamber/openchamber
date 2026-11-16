@@ -95,7 +95,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   const trees = new Map<string, Tree>([[SHA_A, MAIN_TREE], [SHA_B, FEATURE_TREE]]);
   const treeAt = (sha: string) => trees.get(sha) ?? MAIN_TREE;
   const items: ForgeItem[] = [
-    { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], assignees: [], pull: null },
+    { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], assignees: [FAKE_FORGE_FORK.owner], pull: null },
     { number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [], assignees: [], pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false } },
   ];
   let commentId = 100;
