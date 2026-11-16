@@ -1,23 +1,11 @@
 import type { SourceControlProviderId } from './providers/descriptor';
 
-/** Open: any id the connected server serves; an id the registry does not hold reads through the fallback descriptor. */
 export type SourceControlProvider = SourceControlProviderId;
 
 export interface SourceControlIdentity {
   provider: SourceControlProvider;
-  /** Stable provider installation or host identifier, such as `github.com`. */
   instance: string;
-  /**
-   * The instance's separate SSH address, where its Git SSH host is not its web
-   * address (`SSH_DOMAIN`). Remotes there are recognised as this instance.
-   * Named apart from a repository's own `sshUrl` clone address.
-   */
   instanceSshUrl?: string;
-  /**
-   * Other web addresses the instance is served under, in its own spelling (a
-   * host or an origin). A link on one names an item of this instance; reads
-   * still go to `instance`. Absent where none were added.
-   */
   instanceAliases?: string[];
 }
 
@@ -42,14 +30,9 @@ export interface SourceControlRepositoryContext {
 export interface SourceControlReadContext extends SourceControlIdentity {
   directory: string;
   repositoryId: string;
-  /** Exact immutable credential account identity selected by the binding. */
   accountId: string;
   bindingRevision: number;
   primaryRemote: string;
-  /**
-   * Reads an item a link named wherever its repository is, with this account.
-   * The server honours it on reads only, so such a context changes nothing.
-   */
   linked?: true;
 }
 
@@ -94,11 +77,6 @@ export interface SourceControlRepositoryBinding {
   }>; 
   remotes: Array<SourceControlRepositoryRemote & {
     readiness: 'ready' | 'confirmation-required' | 'config-changed';
-    /**
-     * Derived from the repository's identity rather than saved for this
-     * remote: the System identity reaches every remote, any other identity
-     * every remote on its own host and protocol. Never a mutation target.
-     */
     inherited?: true;
   } & (
     | { mode: 'managed'; credentialId: string; presentation?: SourceControlManagedCredentialPresentation }
@@ -128,14 +106,6 @@ export type SourceControlBindingRead =
   | (SourceControlBindingReadBase & { status: 'needs-attention'; binding: SourceControlRepositoryBinding })
   | (SourceControlBindingReadBase & { status: 'bound'; binding: SourceControlRepositoryBinding });
 
-/**
- * The binding a repository acts under, whether or not one was configured.
- *
- * A repository nobody configured uses the machine's own Git for every remote,
- * as it did before bindings existed: every remote is a ready System grant, and
- * the read's revision (the store's tombstone revision) pins the plan so a later
- * configuration still invalidates it.
- */
 export const effectiveRepositoryBinding = (read: SourceControlBindingRead): SourceControlRepositoryBinding => {
   if (read.binding) return read.binding;
   return {
@@ -149,7 +119,6 @@ export const effectiveRepositoryBinding = (read: SourceControlBindingRead): Sour
   };
 };
 
-/** Whether a bound remote moved or disappeared after the binding was saved. */
 export const hasConfigChangedGrant = (binding: SourceControlRepositoryBinding): boolean =>
   [...binding.providers, ...binding.remotes].some((entry) => entry.readiness === 'config-changed');
 
@@ -213,7 +182,6 @@ export type GitAuxiliaryBindingIntent = {
 export type GitAuxiliaryBindingResult = { status: 'configured'; binding: SourceControlBindingRead };
 
 export interface SourceControlUser extends SourceControlIdentity {
-  /** Provider-assigned user id. */
   id: string;
   username: string;
   avatarUrl?: string;
@@ -228,21 +196,14 @@ type SourceControlAuthError = {
 };
 
 export interface SourceControlAuthAccount {
-  /** Exact immutable credential/source identity used by actions and bindings. */
   id: string;
   credentialId: string;
   credentialRevision: number;
-  /** Stable provider user identity used for grouping and server-derived actor attribution. */
   providerUserId: string;
   providerUserStatus: 'available' | 'unavailable';
   user: SourceControlUser;
   scope?: string;
   current: boolean;
-  /**
-   * Whether a binding may pick this account now. Stored accounts are always
-   * usable; a gh login only while its host's switch is on. Absent from older
-   * servers and other providers, where `current` still decides a CLI login.
-   */
   usable?: boolean;
   source: 'oauth' | 'pat' | 'cli';
   status: 'valid' | 'invalid';
@@ -285,22 +246,15 @@ export interface SourceControlCapabilities {
   issues: boolean;
   changeRequests: boolean;
   draftChangeRequests: boolean;
-  /** The host also turns an open change request back into a draft; absent means it cannot. */
   draftConversion?: boolean;
   mergeChangeRequests: boolean;
   mergeMethods?: MergeMethod[];
   ci: boolean;
 }
 
-/**
- * How a change request lands: merge, squash or rebase on a forge, or
- * `submit` on a review host, which lands it the way the project is set up and
- * is then the only method.
- */
 export type MergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
 const MERGE_METHODS: readonly MergeMethod[] = ['merge', 'squash', 'rebase', 'submit'];
 
-/** Whether this version knows `value` as a method; a newer server may name others. */
 export const isKnownMergeMethod = (value: string): value is MergeMethod => MERGE_METHODS.some((method) => method === value);
 
 export interface SourceControlAuthMethodCapability {
@@ -347,22 +301,16 @@ export interface IssueComment extends SourceControlIdentity {
   author?: SourceControlUser | null;
   createdAt?: string;
   updatedAt?: string;
-  /** Whether this account may replace this comment; absent when the host does not say. */
   canUpdate?: boolean;
-  /** Whether this account may remove this comment; absent when the host does not say. */
   canDelete?: boolean;
-  /** The thread the comment is in, when read for the preview's timeline (GitLab merge requests). */
   thread?: CommentThreadRef;
 }
 
 export interface CommentThreadRef {
   id: string;
   resolved: boolean;
-  /** Whether the thread is one that waits to be resolved. */
   resolvable: boolean;
-  /** Whether this comment opened the thread; the others answer it. */
   first: boolean;
-  /** This account's permissions, when the host said; absent means unknown. */
   canResolve?: boolean;
   canReply?: boolean;
 }
@@ -390,15 +338,10 @@ export interface ChangeRequest extends SourceControlIdentity {
   mergeQueueEntry?: { state: string; position: number } | null;
   autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   labels?: Label[];
-  /** A review host's work-in-progress flag; `draft` carries the same meaning for gating. */
   workInProgress?: boolean;
-  /** Visible only to its owner and reviewers (a review host's private change). */
   private?: boolean;
-  /** The topic a review host groups related changes under. */
   topic?: string;
-  /** A review host's hashtags; read only, and also listed among `labels`. */
   hashtags?: string[];
-  /** The number of the revision (patchset) `headSha` is, where the host keeps revisions. */
   revisionNumber?: number;
 }
 
@@ -415,67 +358,50 @@ export interface ChangeRequestReviewComment extends IssueComment {
   path?: string;
   line?: number | null;
   position?: number | null;
-  /** The revision (patchset) the comment was made on, where the host keeps revisions. */
   revision?: number;
 }
 
-/** What a new revision changed against the one before it, as a review host classifies it. */
 export type ChangeRequestRevisionKind = 'rework' | 'trivial-rebase' | 'merge-first-parent-update' | 'no-code-change' | 'no-change';
 
-/** One revision (patchset) of a change: each upload makes a new one. */
 export interface ChangeRequestRevision {
   number: number;
   sha: string;
   createdAt: string | null;
   uploader?: SourceControlUser;
   kind?: ChangeRequestRevisionKind;
-  /** The ref the revision can be fetched from. */
   ref: string;
 }
 
-/** One value a vote label takes, with the host's description of it ("Looks good to me"). */
 export interface ChangeRequestVoteValue {
   value: number;
   description: string;
 }
 
-/** A vote someone cast on a label; `revision` is the patchset it was cast on, when the host says. */
 export interface ChangeRequestVote {
   user: SourceControlUser;
   value: number;
   revision?: number;
 }
 
-/**
- * A label a change is voted on (a review host's Code-Review, Verified, or a
- * project's own). Named `voteLabels` on the context: `labels` already means
- * tags on a change request.
- */
 export interface ChangeRequestVoteLabel {
   name: string;
   values: ChangeRequestVoteValue[];
   defaultValue: number;
-  /** The values this account may cast; empty when it may not vote on the label. */
   permitted: number[];
-  /** Whether the label holds submission back until it is satisfied. */
   blocking: boolean;
   status: 'approved' | 'rejected' | 'recommended' | 'disliked' | 'neutral';
   votes: ChangeRequestVote[];
 }
 
-/** One condition a change must meet before it can be submitted. */
 export interface ChangeRequestSubmitRequirement {
   name: string;
   status: 'satisfied' | 'unsatisfied' | 'overridden' | 'not-applicable' | 'error' | 'forced';
   description?: string;
 }
 
-/** The checked-out commit against a review host's change. */
 export interface ChangeRequestLocalRevision {
   sha: string;
-  /** The Change-Id trailer of the commit; null when it has none. */
   changeId: string | null;
-  /** The patchset whose commit is the local one; null when the local commits are not uploaded. */
   uploadedAs: number | null;
 }
 
@@ -545,7 +471,6 @@ export interface PageResult<TItem> {
   incompleteProjectIds?: string[];
 }
 
-/** A commit of a change request, as a timeline shows it. */
 export interface ChangeRequestCommit {
   sha: string;
   headline: string;
@@ -554,7 +479,6 @@ export interface ChangeRequestCommit {
   url: string | null;
 }
 
-/** A review verdict on a change request: an approval or a request for changes. */
 export interface ChangeRequestVerdict {
   state: 'approved' | 'changes_requested';
   author?: SourceControlUser;
@@ -562,15 +486,8 @@ export interface ChangeRequestVerdict {
   url: string;
 }
 
-/**
- * Pull requests stacked on one another, bottom layer first: each targets the
- * branch of the one below, and the bottom one targets `base`. GitHub keeps a
- * stack as its own object (`number`); on GitLab it is a chain of merge
- * requests by target branch, with no number.
- */
 export interface PullRequestStack {
   number: number | null;
-  /** The branch the whole stack lands on. */
   base: string;
   layers: PullRequestStackLayer[];
 }
@@ -581,7 +498,6 @@ export interface PullRequestStackLayer {
   url: string;
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
-  /** The layer's branch, which the layer above it targets. */
   head: string;
 }
 
@@ -595,25 +511,13 @@ export interface ChangeRequestContext {
   files: ChangeRequestFile[];
   diff?: string;
   ci?: CI | null;
-  /** With `includeTimeline`: the newest commits, oldest first. */
   commits?: ChangeRequestCommit[];
-  /** False when `commits` holds only the newest ones. */
   commitsComplete?: boolean;
-  /** With `includeTimeline`: the verdicts reviewers gave, as the host recorded them. */
   verdicts?: ChangeRequestVerdict[];
-  /** With `includeTimeline`: who is asked to review. */
   reviewers?: SourceControlUser[];
-  /**
-   * The stack the change request is a layer of: GitHub's own (sent only for
-   * a layer of one), or on GitLab the chain of open merge requests by branch
-   * (null in none). Absent when it could not be read.
-   */
   stack?: PullRequestStack | null;
-  /** The labels the change is voted on, where the host reviews by votes. */
   voteLabels?: ChangeRequestVoteLabel[];
-  /** What the change needs before it can be submitted, where the host says. */
   submitRequirements?: ChangeRequestSubmitRequirement[];
-  /** The change's revisions (patchsets), oldest first, where the host keeps them. */
   revisions?: ChangeRequestRevision[];
 }
 
@@ -627,9 +531,7 @@ export interface ChangeRequestStatus {
   canMerge?: boolean;
   defaultBranch?: string | null;
   resolvedRemoteName?: string | null;
-  /** Where changes are created by pushing for review: the checked-out commit against the change. */
   localRevision?: ChangeRequestLocalRevision;
-  /** Where changes are created by pushing for review: the chain the change is in, null when none. */
   stack?: PullRequestStack | null;
 }
 
@@ -699,7 +601,6 @@ export interface SourceControlResolvedMutationTarget {
 
 export interface SourceControlMutationReceipt<TResult> {
   status: 'succeeded';
-  /** Verified provider-user identity, never the credential account ID. */
   actor: SourceControlIdentity & { providerAccountId: string };
   target: SourceControlResolvedMutationTarget;
   replayed: boolean;
@@ -708,21 +609,11 @@ export interface SourceControlMutationReceipt<TResult> {
 
 export type SourceControlEmptyMutationResult = Record<string, never>;
 export interface SourceControlCreateMutationResult {
-  /**
-   * Set when the new pull request's base is another open one's branch: true
-   * once the host keeps the two as a stack, false when it refused, so the
-   * request stands on that base outside any stack.
-   */
   stacked?: boolean;
 }
 export interface SourceControlMergeMutationResult {
   merged: boolean;
   message?: string;
-  /**
-   * Set when the host accepted the merge without finishing it yet: added to a
-   * merge queue, or still merging in the background (GitHub, a stack's lower
-   * layers included). The PR's live state shows the outcome.
-   */
   outcome?: 'queued' | 'merging' | 'auto-merge' | 'cancelled';
 }
 export interface SourceControlReadyMutationResult {
@@ -735,7 +626,6 @@ export interface SourceControlStateMutationResult {
   state: 'open' | 'closed';
 }
 export interface SourceControlReviewMutationResult {
-  /** The review's text was posted with it; false when it had none or the text failed to post after the verdict. */
   commented: boolean;
 }
 
@@ -752,13 +642,11 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
   body?: string;
 }
 
-/** An issue's title and body, replaced together; an empty body clears it. */
 export interface UpdateIssueInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   title: string;
   body?: string;
 }
 
-/** A discussion's title and body, replaced together; an empty body clears it. */
 export interface UpdateDiscussionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   title: string;
   body?: string;
@@ -766,53 +654,42 @@ export interface UpdateDiscussionInput extends SourceControlMutationContext<Sour
 
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
-  /** GitHub only: remove from the queue or disable auto-merge. */
   cancel?: boolean;
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
-/** A draft and a ready-for-review change request carry the same target; the route says which way. */
 export type DraftChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
 
-/** A comment on a change request, or on an issue (the target names its number). */
 export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   body: string;
 }
 
-/** Replace a conversation comment's text (an issue's, a change request's or a discussion's). */
 export interface CommentUpdateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   commentId: string;
   body: string;
 }
 
-/** Remove a conversation comment. */
 export interface CommentDeleteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   commentId: string;
 }
 
-/** A reply in a change request's review thread; `threadId` is the host's id for it. */
 export interface ThreadReplyInput extends CommentInput {
   threadId: string;
 }
 
-/** Resolve a change request's review thread, or open it again. */
 export interface ThreadResolveInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   threadId: string;
   resolved: boolean;
 }
 
-/** `comment` publishes a review with no verdict: its draft comments and text. */
 export type ReviewVerdict = 'approve' | 'request-changes' | 'comment';
 
-/** Which side of a diff a review comment sits on. */
 export type ReviewCommentSide = 'old' | 'new';
 
-/** Where a comment goes in a review: lines of one side, or without `line` the whole file. */
 export type ReviewCommentPosition =
   | { path: string; side: ReviewCommentSide; line: number; startLine?: number }
   | { path: string; side?: never; line?: never; startLine?: never };
 
-/** A comment for the viewer's review draft. The target's `headSha` is the commit the lines are from. */
 export type ReviewCommentInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & ReviewCommentPosition & {
   body: string;
 };
@@ -833,7 +710,6 @@ export interface ReviewPerson {
   avatarUrl?: string;
 }
 
-/** An unpublished comment of the viewer's. `line` null: on the whole file. */
 export interface ReviewDraftComment {
   id: string;
   path: string;
@@ -852,7 +728,6 @@ export interface ReviewThreadComment {
   author: ReviewPerson | null;
 }
 
-/** A published thread on current lines of the diff. `line` null: on the whole file. */
 export interface ReviewThread {
   id: string;
   path: string;
@@ -865,16 +740,11 @@ export interface ReviewThread {
   comments: ReviewThreadComment[];
 }
 
-/**
- * A change request's review as the diff draws it. The draft lives on the
- * host, so one started on another device or by an agent reads the same.
- */
 export interface ChangeRequestReviewState {
   viewerIsAuthor: boolean;
   headSha: string;
   draft: { id: string; body: string; comments: ReviewDraftComment[] } | null;
   threads: ReviewThread[];
-  /** More threads exist than one read returns. */
   truncated: boolean;
 }
 
@@ -882,50 +752,37 @@ export type ChangeRequestReviewStateResult =
   | { connected: false }
   | ({ connected: true } & ChangeRequestReviewState);
 
-/** The whole label set of a change request or an issue; an empty one clears it. */
 export interface SetLabelsInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   labels: string[];
 }
 
-/** The whole set of people asked to review, by the host's user id (a login on GitHub). */
 export interface SetReviewersInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   reviewers: string[];
 }
 
-/** Close (`closed`) or reopen (`open`) a change request or an issue. */
 export interface SetStateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   state: 'open' | 'closed';
 }
 
-/** Why a discussion is closed: answered or settled, no longer relevant, or a copy of another. */
 export type DiscussionCloseReason = 'resolved' | 'outdated' | 'duplicate';
 
-/** A comment on a discussion, or with `replyTo` (a comment's id) a reply in that comment's thread. */
 export interface DiscussionCommentInput extends CommentInput {
   replyTo?: string;
 }
 
-/** Close a discussion for a reason, or reopen it. */
 export type SetDiscussionStateInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & (
   | { state: 'closed'; reason: DiscussionCloseReason }
   | { state: 'open'; reason?: never }
 );
 
-/** Choose a comment as the discussion's answer (`answer: true`), or unchoose it. */
 export interface SetDiscussionAnswerInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   commentId: string;
   answer: boolean;
 }
 
-/**
- * A review: a verdict where the host reviews by verdicts, or votes on labels
- * (label name to value) where it reviews by votes. The target's `headSha` is
- * the commit the review is for; a push past it refuses the review.
- */
 export type ReviewChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & {
   body?: string;
 } & (
   | { verdict: ReviewVerdict; votes?: never }
-  /** `publishDrafts`: send the review even with no votes, for its draft comments alone. */
   | { votes: Record<string, number>; verdict?: never; publishDrafts?: boolean }
 );

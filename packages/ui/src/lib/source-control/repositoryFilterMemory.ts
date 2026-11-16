@@ -1,22 +1,11 @@
 import { z } from 'zod';
 import type { RepositoryReferenceFilter, RepositoryReferenceKind, RepositorySelector } from '@/lib/api/types';
 
-/**
- * The repository filter (state, people, labels) last used, remembered per
- * resolved repository and tab across reloads. The key carries the host,
- * instance and `owner/repo` the folder resolves to: two clones of the same
- * repository share one entry, while a fork clone and its upstream keep
- * separate ones, since an unbound clone resolves through its own `origin`.
- * Another repository never sees the labels picked in one. The
- * across-repositories list has no single repository and so no entry.
- */
 const STORAGE_KEY = 'openchamber.repositoryFilters.v1';
 const MAX_ENTRIES = 500;
 const MAX_LABELS = 20;
-/** The shell drops a longer name, so a filter never names one it would not send. */
 const MAX_LABEL_LENGTH = 256;
 
-/** The labels a filter carries: trimmed, deduped, short enough for the shell, at most 20. */
 export const normalizeLabelFilter = (labels: readonly string[]): string[] => {
   const seen = new Set<string>();
   const kept: string[] = [];
@@ -30,9 +19,6 @@ export const normalizeLabelFilter = (labels: readonly string[]): string[] => {
   return kept;
 };
 
-// One malformed entry is dropped, never the rest. A value's state and people
-// must be values this app knows at all; whether the tab offers them is checked
-// where the filter is used.
 const filterSchema = z.object({
   state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']),
@@ -60,7 +46,6 @@ const readEntries = (): Array<[string, RepositoryReferenceFilter]> => {
   }
 };
 
-/** `provider\0instance\0owner/repo\0kind`; host and project names are case-insensitive. */
 export const repositoryFilterKey = (
   provider: string,
   instance: string,
@@ -71,22 +56,19 @@ export const repositoryFilterKey = (
   return [part(provider), part(instance), `${part(project.owner)}/${part(project.repo)}`, kind].join('\u0000');
 };
 
-/** The remembered filter for a key, or null when none or the entry is malformed. */
 export const savedRepositoryFilter = (key: string): RepositoryReferenceFilter | null => (
   readEntries().find(([storedKey]) => storedKey === key)?.[1] ?? null
 );
 
-/** Remembers a filter for a key; storage failures leave the session unaffected. */
 export const rememberRepositoryFilter = (key: string, filter: RepositoryReferenceFilter): void => {
   const parsed = filterSchema.safeParse(filter);
   if (!parsed.success) return;
   try {
     const entries = readEntries().filter(([storedKey]) => storedKey !== key);
     entries.push([key, parsed.data]);
-    // The newest entry goes last, so the oldest are the ones trimmed.
     const kept = entries.slice(Math.max(0, entries.length - MAX_ENTRIES));
     storage()?.setItem(STORAGE_KEY, JSON.stringify(kept));
+  // oxlint-disable-next-line no-empty
   } catch {
-    // Storage full or blocked: the filter still holds for this session.
   }
 };
