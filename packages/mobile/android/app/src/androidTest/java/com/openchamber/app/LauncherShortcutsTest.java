@@ -21,7 +21,7 @@ import org.junit.runner.RunWith;
 import org.xmlpull.v1.XmlPullParser;
 
 /**
- * Pins the launcher quick actions ("New session", "Needs attention") to the deep links the web
+ * Pins the launcher quick action ("New session") to the deep link the web
  * layer routes. Nothing else verifies them: a dropped metadata entry, a renamed id or a broken
  * link only shows up at runtime, as an empty long-press menu or a tap that opens the default
  * screen, so this reads the packaged resources the system would read.
@@ -64,13 +64,10 @@ public class LauncherShortcutsTest {
             parser.close();
         }
 
-        assertEquals(Arrays.asList("new-session", "attention"), ids);
-        assertEquals(Arrays.asList(
-            "openchamber://new",
-            "openchamber://sessions?filter=attention"), deepLinks);
+        assertEquals(Arrays.asList("new-session"), ids);
+        assertEquals(Arrays.asList("openchamber://new"), deepLinks);
 
         Resources resources = context.getResources();
         assertFalse(resources.getString(R.string.shortcut_new_session).trim().isEmpty());
-        assertFalse(resources.getString(R.string.shortcut_needs_attention).trim().isEmpty());
     }
 }

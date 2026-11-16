@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The app-icon quick actions, mirroring the iOS UIApplicationShortcutItems in Info.plist.
-     Each opens the same openchamber:// deep link the web layer routes; order matters because
-     the launcher shows them top to bottom. The icons are plain vector glyphs rather than the
-     adaptive launcher icon, which renders as an empty square in the menu. -->
+<!-- The app-icon quick action, mirroring the iOS UIApplicationShortcutItem in Info.plist.
+     It opens the same openchamber:// deep link the web layer routes; the icons are plain
+     vector glyphs rather than the adaptive launcher icon, which renders as an empty square
+     in the menu. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
         android:shortcutId="new-session"
@@ -14,16 +14,5 @@
             android:targetPackage="com.openchamber.app"
             android:targetClass="com.openchamber.app.MainActivity"
             android:data="openchamber://new" />
-    </shortcut>
-    <shortcut
-        android:shortcutId="attention"
-        android:enabled="true"
-        android:icon="@drawable/ic_shortcut_attention"
-        android:shortcutShortLabel="@string/shortcut_needs_attention">
-        <intent
-            android:action="android.intent.action.VIEW"
-            android:targetPackage="com.openchamber.app"
-            android:targetClass="com.openchamber.app.MainActivity"
-            android:data="openchamber://sessions?filter=attention" />
     </shortcut>
 </shortcuts>
