@@ -107,6 +107,192 @@ export const decideManagedOpenCodeLaunch = ({ state, ownsPid, binary, args, fing
   return { action: 'adopt', reason: 'matches-state' };
 };
 
+// ---- v2 versioned store (issue #82) ----
+// One document { schema_version: 2, generations: [...], handoffs: [...] },
+// written atomically on every transition. Replaces the v1 state.json +
+// draining.json pair for reads/writes once lifecycle.js is wired to it.
+export const MANAGED_OPENCODE_STORE_VERSION = 2;
+const MANAGED_OPENCODE_STORE_MAX_BYTES = 256 * 1024;
+
+const GENERATION_STATES = ['starting', 'active', 'draining', 'closed'];
+const HANDOFF_STEPS = ['prepared', 'switched', 'confirmed', 'aborted'];
+
+export const resolveManagedOpenCodeStorePaths = (dataDir) => {
+  const base = resolveManagedOpenCodePaths(dataDir);
+  return { ...base, storePath: path.join(base.dir, 'store.json') };
+};
+
+export const createEmptyManagedOpenCodeStore = () => ({
+  schema_version: MANAGED_OPENCODE_STORE_VERSION,
+  generations: [],
+  handoffs: [],
+});
+
+const isStoreRecord = (value) => value !== null && Object.getPrototypeOf(value) === Object.prototype;
+
+const isValidGeneration = (generation) => isStoreRecord(generation)
+  && Number.isInteger(generation.generation_id) && generation.generation_id > 0
+  && Number.isInteger(generation.pid) && generation.pid > 0
+  && Number.isInteger(generation.port) && generation.port > 0
+  && isText(generation.binary) && generation.binary.length > 0
+  && (generation.args === undefined || (Array.isArray(generation.args) && generation.args.every(isText)))
+  && isText(generation.fingerprint)
+  && GENERATION_STATES.includes(generation.state)
+  && isText(generation.started_at)
+  && (generation.ended_at === null || isText(generation.ended_at));
+
+const isValidHandoff = (handoff) => isStoreRecord(handoff)
+  && isText(handoff.handoff_id) && handoff.handoff_id.length > 0
+  && Number.isInteger(handoff.predecessor) && handoff.predecessor > 0
+  && Number.isInteger(handoff.successor) && handoff.successor > 0
+  && Array.isArray(handoff.busy_set) && handoff.busy_set.every(isText)
+  && HANDOFF_STEPS.includes(handoff.step)
+  && (handoff.outcome === null || isText(handoff.outcome))
+  && isText(handoff.at);
+
+export const readManagedOpenCodeStore = (storePath) => {
+  const parsed = readBoundedJsonFileSync(storePath, MANAGED_OPENCODE_STORE_MAX_BYTES);
+  if (parsed?.schema_version !== MANAGED_OPENCODE_STORE_VERSION) return null;
+  if (!Array.isArray(parsed.generations) || !Array.isArray(parsed.handoffs)) return null;
+  if (!parsed.generations.every(isValidGeneration) || !parsed.handoffs.every(isValidHandoff)) return null;
+  return parsed;
+};
+
+export const writeManagedOpenCodeStore = (storePath, store) => {
+  mkdirSync(path.dirname(storePath), { recursive: true, mode: 0o700 });
+  const tmpPath = `${storePath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify({ ...store, schema_version: MANAGED_OPENCODE_STORE_VERSION }, null, 2)}\n`, { mode: 0o600 });
+  renameSyncWithRetry((from, to) => renameSync(from, to), tmpPath, storePath);
+};
+
+// Generations are append-only: history is never rewritten, only advanced.
+export const appendGeneration = (store, generation) => {
+  const ids = store.generations.map((entry) => entry.generation_id);
+  const record = {
+    args: [],
+    ended_at: null,
+    ...generation,
+    generation_id: ids.length === 0 ? 1 : Math.max(...ids) + 1,
+  };
+  if (!isValidGeneration(record)) throw new Error('invalid generation record');
+  return { ...store, generations: [...store.generations, record] };
+};
+
+const GENERATION_TRANSITIONS = {
+  starting: ['active', 'closed'],
+  active: ['draining', 'closed'],
+  draining: ['closed'],
+  closed: [],
+};
+
+export const transitionGenerationState = (store, generationId, toState, endedAt = null) => {
+  const index = store.generations.findIndex((entry) => entry.generation_id === generationId);
+  if (index === -1) throw new Error(`unknown generation ${generationId}`);
+  const current = store.generations[index];
+  if (!GENERATION_TRANSITIONS[current.state].includes(toState)) {
+    throw new Error(`invalid generation transition ${current.state} -> ${toState}`);
+  }
+  const updated = {
+    ...current,
+    state: toState,
+    ended_at: toState === 'closed' ? (endedAt ?? new Date().toISOString()) : current.ended_at,
+  };
+  const generations = [...store.generations];
+  generations[index] = updated;
+  return { ...store, generations };
+};
+
+// Write-ahead: the record for a step is persisted BEFORE that step is
+// attempted, so a crash between any two steps has a defined resume path.
+// `at` and fresh handoff ids are injectable for deterministic replay tests.
+export const recordHandoffStep = (store, {
+  handoff_id,
+  predecessor,
+  successor,
+  busy_set = [],
+  step,
+  outcome = null,
+  at = new Date().toISOString(),
+}) => {
+  const record = { handoff_id, predecessor, successor, busy_set, step, outcome, at };
+  if (!isValidHandoff(record)) throw new Error('invalid handoff record');
+  const index = store.handoffs.findIndex((entry) => entry.handoff_id === handoff_id);
+  const handoffs = index === -1
+    ? [...store.handoffs, record]
+    : store.handoffs.map((entry, entryIndex) => (entryIndex === index ? record : entry));
+  return { ...store, handoffs };
+};
+
+// Recovery: given the last persisted step of a handoff, decide whether the
+// restarted server resumes the handoff or settles it as aborted.
+export const replayHandoffStep = (handoff) => {
+  switch (handoff?.step) {
+    case 'prepared': return { action: 'resume', reason: 'successor-never-started' };
+    case 'switched': return { action: 'resume', reason: 'successor-readiness-unconfirmed' };
+    case 'confirmed': return { action: 'resume', reason: 'predecessor-drain-unconfirmed' };
+    case 'aborted': return { action: 'settle', reason: 'already-aborted' };
+    default: return { action: 'abort', reason: 'unknown-step' };
+  }
+};
+
+// v1 -> v2 migration: every v1 generation is imported with its state
+// preserved (current state.json becomes active, draining.json entries become
+// draining). The v1 files are left untouched in place — they stay read-only
+// for one release once lifecycle.js stops writing them. The oracle is "no
+// lost generations": count and pids before/after must match exactly.
+export const migrateV1StoreToV2 = ({ statePath, drainingPath, now = () => new Date().toISOString() }) => {
+  const current = readManagedOpenCodeState(statePath);
+  const draining = readDrainingOpenCodeRecords(drainingPath);
+  let next = createEmptyManagedOpenCodeStore();
+  if (current) {
+    next = appendGeneration(next, {
+      pid: current.pid,
+      port: current.port,
+      binary: current.binary,
+      args: current.args ?? [],
+      fingerprint: current.fingerprint,
+      state: 'active',
+      started_at: current.startedAt ?? now(),
+    });
+  }
+  for (const record of draining) {
+    next = appendGeneration(next, {
+      pid: record.pid,
+      port: record.port,
+      binary: record.binary,
+      args: [],
+      fingerprint: '',
+      state: 'draining',
+      started_at: now(),
+    });
+  }
+  return next;
+};
+
+export const defaultManagedOpenCodePidLiveness = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+};
+
+// Store-only reaper: a recorded pid that is gone closes its generation with
+// the outcome recorded. Ownership is never inferred from `ps` output —
+// liveness is signal-0 (or the managed-process registry's answer, injected
+// as `isPidAlive`), and a dead pid is a closed generation, never a guess.
+export const reapManagedOpenCodeStore = (store, { isPidAlive = defaultManagedOpenCodePidLiveness, now = () => new Date().toISOString() } = {}) => {
+  let next = store;
+  const reaped = [];
+  for (const generation of store.generations) {
+    if (generation.state === 'closed' || isPidAlive(generation.pid)) continue;
+    next = transitionGenerationState(next, generation.generation_id, 'closed', now());
+    reaped.push({ generation_id: generation.generation_id, pid: generation.pid, outcome: 'pid-gone' });
+  }
+  return { store: next, reaped };
+};
+
 // Length of a trailing incomplete UTF-8 sequence in buffer[0, length), i.e. a
 // valid lead byte followed by fewer continuation bytes than it declares.
 // Invalid bytes (lone continuations, overlong leads 0xC0/0xC1, never-valid
