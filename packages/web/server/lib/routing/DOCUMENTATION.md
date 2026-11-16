@@ -89,7 +89,8 @@ Auto. There is no env gate — the feature shipped dark behind
   model, routes on the expanded task prompt with the new session's id, and
   switches the session before the goal and the first send.
 - The mark lives in process memory. A server restart between the model switch
-  and the next send drops it (see the TODO in `runtime.js`).
+  and the next send drops it. The session keeps its last real model even if
+  the composer still shows Auto.
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
@@ -124,7 +125,9 @@ Auto. There is no env gate — the feature shipped dark behind
   agent, a composer agent other than the routed one, or a switch off Auto ends
   that, so an agent the user picked stays. A session that had no agent of its
   own before the category agent has nothing to go back to. The record is
-  process memory, like the Auto mark.
+  process memory, like the Auto mark. A failed switch back keeps the record
+  until a session read confirms that the routed agent is gone, so the next
+  send can retry restoration.
 - A variant the model's catalog entry does not list is dropped before the
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
@@ -155,8 +158,62 @@ Auto. There is no env gate — the feature shipped dark behind
 - The send rewrite reads a body only in a session already marked as routed,
   which the URL alone answers; every other send, and anything that is not JSON,
   reaches the proxy as the stream it arrived as.
+- Routing settings and credential routes require normal authentication and
+  stay outside browser URL-token allowlists.
+- Directory headers are decoded before routing uses them, including percent
+  escapes without an encoding marker. The UI SDK encodes every directory
+  header but only marks non-Latin-1 values. The runtime encodes the decoded
+  directory for its own OpenCode calls; passing through an encoded value
+  double-encodes it and makes OpenCode's `realPath` fail. Query parameters
+  already arrive decoded.
+- Stored built-in categories contain only deviations so shipped default
+  changes reach categories the user leaves unchanged. Credential files stay
+  separate from exportable routing config and from each other so saving one
+  credential does not rewrite another.
+- Malformed endpoint and Gemini-key JSON produces a generic parse warning.
+  V8 syntax errors can quote file contents containing a key.
+- The config response includes built-in wording so Settings can reset edited
+  categories to their shipped descriptions.
 
 ## Decisions
+
+### Why category wording judges reasoning and not reply length
+
+Long mechanical edits need little reasoning, while short debugging answers can
+need a hard model. History resolves references and bare approvals to planned
+work; letting finished work influence a follow-up's category sends simple
+follow-ups to the fallback through low-confidence answers. Warm-context cost
+belongs to cache preservation and leaves classification unchanged.
+
+### Why the safety question asks for consent and not destructiveness
+
+Actions outside the working tree or in shared trackers can need consent while
+leaving local files intact. The consent wording and explicit tracker, branch,
+global-install and discard examples hold these actions more reliably in the
+permission lab, with misses on the safe side.
+
+### Why attachments add a classifier hint and not raw request text
+
+Jev reads text only, so an image hint distinguishes a screenshot request from
+a request about image-upload code. `requestTextOf` preserves the user's words
+and ignores preceding synthetic context messages; the separate classifier
+hint uses data URLs or filenames because prompt attachments omit MIME types.
+
+### Why history clips answers at both ends and not only the head
+
+A user's task usually sits at the start of a message, while an answer's
+finding and outcome can sit at opposite ends. New requests stay whole. A
+session without a settled answer has no history or cache to preserve; history
+read failures propagate to the caller so it can explicitly choose request-only
+routing.
+
+### Why uncertain cache state permits a switch and not a hold
+
+Holding a model after its cache goes cold is the costlier mistake, so unreadable
+warming config counts as warming off. OpenCode returns config documents in
+priority order and the last document setting `warming` wins. A hold also keeps
+the requested agent because changing agents misses the cache and can substitute
+tools the request does not ask for, such as a planning agent on an edit.
 
 ### Why Gemini has a key field of its own and not only OpenCode's Google key
 
