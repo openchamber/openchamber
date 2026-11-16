@@ -3,7 +3,6 @@ import { menuLabel } from './menu-locales.mjs';
 
 const jumpListSessionIdSchema = z.string().regex(/^ses_[A-Za-z0-9_]{1,120}$/);
 
-// The renderer's snapshot crosses IPC: each entry is parsed, and a malformed one is dropped.
 const unreadSessionSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
@@ -39,7 +38,6 @@ export const buildUnreadJumpList = (snapshot, { execPath, locale = 'en', removed
   ];
 };
 
-// Renderer snapshots already order unread sessions by their latest completed turn.
 export const buildDockMenuTemplate = (snapshot, { onAction, locale = 'en' }) => {
   const rows = readUnreadSessions(snapshot).slice(0, 10);
   if (rows.length === 0) return [];

@@ -1,13 +1,4 @@
-// Gives the packaged app's main executable its own Mach-O LC_UUID.
-//
-// macOS Local Network privacy identifies an app by that UUID (Apple TN3179).
-// Electron ships one prebuilt executable per version and architecture, so
-// every app on the same Electron release has the same UUID, and macOS applies
-// whichever of those apps it met first: OpenChamber borrows another app's
-// answer and never gets its own Local Network prompt. The UUID is derived from
-// the appId, so it stays the same across releases and the user's answer
-// survives updates. electron-builder signs after afterPack, so the signature
-// covers the new value.
+// external: https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy Local Network privacy uses the executable UUID; derive an app-specific stable UUID before signing.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 
@@ -17,7 +8,7 @@ const MACH_HEADER_64_SIZE = 32;
 
 const deriveExecutableUuid = (appId) => {
   const bytes = crypto.createHash('sha256').update(`openchamber-executable-uuid:${appId}`).digest().subarray(0, 16);
-  // RFC 9562 version 8 (custom) and variant bits.
+  // external: https://www.rfc-editor.org/rfc/rfc9562.html#section-5.8 Set UUID version 8 and variant bits for the app-derived identifier.
   bytes[6] = (bytes[6] & 0x0f) | 0x80;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   return bytes;

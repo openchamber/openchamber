@@ -1,22 +1,3 @@
-/**
- * What the entry module needs before `main.mjs` loads: app identity, the
- * first window on the splash, the login-shell probe, and the marks and app
- * events that main picks up later. Imported by the entry before the rest of
- * the main process, so it must stay small: Electron, Node built-ins and the
- * two tiny helpers below, no electron-log, no server code.
- *
- * Electron holds `ready` until the entry module's whole graph has evaluated,
- * and the main bundle takes a few hundred milliseconds of main-thread time to
- * load and set up. The entry module creates the window on the splash the
- * moment `ready` fires; `main.mjs` adopts it through `takeEarlyWindow()` and
- * attaches everything else. Both bundles must share this one module instance
- * (it stays external in `scripts/bundle-main.mjs`), or the handoff slots
- * below would be two different objects.
- *
- * The helpers here are also the main bundle's only copy: settings reading,
- * window state, splash markup and window options live here so the early
- * window and a later main window cannot drift apart.
- */
 
 import { app, BrowserWindow, nativeTheme, protocol, screen } from 'electron';
 import fs from 'node:fs';
@@ -65,14 +46,8 @@ export const shouldStartInBackground = (loginItemSettings = readLoginItemSetting
   );
 };
 
-// Startup clock shared by every process-lifetime mark: the entry module
-// evaluates this import first, so this is as close to "our code started" as
-// the main process can observe.
 export const startupStartedAt = performance.now();
 
-// Marks recorded before the logger exists are held until `main.mjs` installs
-// its `[startup-performance]` sink; later marks (a splash that becomes ready
-// after main loaded) go straight to it.
 const pendingStartupMarks = [];
 let startupMarkSink = null;
 export const recordEarlyStartupMark = (phase, details = {}) => {
@@ -109,9 +84,6 @@ const readJsonFile = (filePath) => {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
     if (error && error.code === 'ENOENT') return {};
-    // Parse errors can happen if a concurrent writer just truncated the file
-    // and hasn't finished writing yet. Log loudly so we notice, then return
-    // {} as before. Writes are atomic (tmp + rename) so this race is rare.
     console.warn('[electron] failed to read JSON file', filePath, error);
     return {};
   }
@@ -122,17 +94,11 @@ export const readSettingsRoot = () => {
   return root && typeof root === 'object' && !Array.isArray(root) ? root : {};
 };
 
-// The user's profile (theme mode among it) lives in preferences.json beside
-// settings.json since the settings split; each entry is { value, updatedAt }.
-// Installs that predate the split still carry those keys in settings.json, so
-// readers merge both, preferences winning.
 const readPreferencesValues = () => {
   const root = readJsonFile(path.join(path.dirname(settingsFilePath()), 'preferences.json'));
   const fields = root && typeof root === 'object' && root.version === 1 && root.fields && typeof root.fields === 'object'
     ? root.fields
     : {};
-  // Per-surface keys (theme mode among them) are resolved for the desktop
-  // shell: its own value first, the base value otherwise.
   const values = {};
   for (const [key, entry] of Object.entries(fields)) {
     if (!entry || typeof entry !== 'object') continue;
@@ -148,9 +114,6 @@ const readPreferencesValues = () => {
 
 export const readThemeSource = () => {
   const settings = { ...readSettingsRoot(), ...readPreferencesValues() };
-  // themeMode is the user's intent; themeVariant is only the resolved
-  // concrete appearance at persist time. When mode === 'system', we must
-  // follow the OS even if variant was saved as a specific value.
   if (settings.themeMode === 'system' || settings.useSystemTheme === true) return 'system';
   if (settings.themeMode === 'light') return 'light';
   if (settings.themeMode === 'dark') return 'dark';
@@ -159,7 +122,6 @@ export const readThemeSource = () => {
   return 'system';
 };
 
-// The UI language, for the few strings main shows before the renderer runs.
 export const readPreferredLocale = () => {
   const settings = { ...readSettingsRoot(), ...readPreferencesValues() };
   return typeof settings.locale === 'string' ? settings.locale : 'en';
@@ -167,10 +129,6 @@ export const readPreferredLocale = () => {
 
 export const getWindowIconPath = () => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
-  // A Windows dev copy shows the Windows icon behind construction tape
-  // (dev-icon-win.svg), like the macOS Dock's dev icon, in its taskbar, window
-  // and tray. GNOME takes the dock icon from the installed app's .desktop
-  // entry, whatever the window sets, so Linux keeps the usual icon.
   const devWindowsIcon = isDev && process.platform === 'win32';
   const iconFileName = devWindowsIcon ? 'dev-icon.ico' : process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
@@ -215,8 +173,6 @@ const clampWindowBoundsToVisibleWorkArea = (bounds) => {
 
 let cachedMacosMajorVersion = null;
 
-// Asked several times before the first window exists. Electron knows the
-// version without a child process; `sw_vers` remains for a plain Node run.
 export const macosMajorVersion = () => {
   if (process.platform !== 'darwin') return 0;
   if (cachedMacosMajorVersion !== null) return cachedMacosMajorVersion;
@@ -232,12 +188,6 @@ export const macosMajorVersion = () => {
 
 let cachedMacTrafficLightPosition = null;
 
-/**
- * Where macOS draws the window controls. The renderer sizes its titlebar per
- * macOS version around this point (`Header.tsx`, `MiniChatLayout.tsx`), so
- * change them together. macOS 26 draws 14px controls, centred in the 44px
- * titlebar: y = (44 - 14) / 2. Older releases keep the calibrated 56px layout.
- */
 export const macTrafficLightPosition = () => {
   if (!cachedMacTrafficLightPosition) {
     cachedMacTrafficLightPosition = Object.freeze(macosMajorVersion() >= 26 ? { x: 14, y: 15 } : { x: 16, y: 17 });
@@ -248,23 +198,16 @@ export const macTrafficLightPosition = () => {
 const SPLASH_DEFAULTS = { bgLight: '#FFFCF0', fgLight: '#100F0F', bgDark: '#151313', fgDark: '#CECDC3' };
 
 const readSplashColor = (settings, key, fallback) => {
-  // The renderer hands the colours over IPC (desktop_set_window_theme) and
-  // main stores them under `desktopSplashColors`; the flat `splash*` keys are
-  // what builds before the settings split wrote and are read as a fallback.
   const owned = settings.desktopSplashColors && typeof settings.desktopSplashColors === 'object'
     ? settings.desktopSplashColors[key]
     : undefined;
   const legacy = settings[`splash${key.charAt(0).toUpperCase()}${key.slice(1)}`];
   const value = typeof owned === 'string' ? owned : legacy;
-  // Checked again on read: a value stored before the IPC check existed is
-  // still interpolated into the trusted splash page.
   return isSplashColor(value) ? value : fallback;
 };
 
 const buildStartupSplashHtml = () => {
   const settings = readSettingsRoot();
-  // Defaults match packages/web/index.html, which shows the same logo next
-  // and must not look different: the renderer overwrites both from the theme.
   const splashBgLight = readSplashColor(settings, 'bgLight', SPLASH_DEFAULTS.bgLight);
   const splashFgLight = readSplashColor(settings, 'fgLight', SPLASH_DEFAULTS.fgLight);
   const splashBgDark = readSplashColor(settings, 'bgDark', SPLASH_DEFAULTS.bgDark);
@@ -330,8 +273,6 @@ export const resolveMainWindowBounds = () => {
   };
 };
 
-// The splash background for the theme the window will open in, so the frame
-// Chromium paints before the splash never flashes a foreign colour.
 export const resolveSplashBackgroundColor = (themeSource = nativeTheme.themeSource) => {
   const settings = readSettingsRoot();
   const dark = themeSource === 'dark' || (themeSource !== 'light' && nativeTheme.shouldUseDarkColors);
@@ -352,12 +293,6 @@ export const resolveBrowserPanelPreloadPath = () => (
   isDev ? path.join(__dirname, 'browser-panel-preload.cjs') : path.join(app.getAppPath(), 'browser-panel-preload.cjs')
 );
 
-// Arguments the preload reads from process.argv. They are fixed at window
-// creation: the main window is created before the backend resolves, so it
-// carries empty runtime values and receives them through the init script.
-// Dev renders from Vite, which is not the local API origin. Main.mjs trusts
-// this exact origin as a local sender in development; the preload needs the
-// same value to expose local-only bridges to the HMR page.
 const resolveDevUiOrigin = () => (
   isDev ? `http://127.0.0.1:${process.env.OPENCHAMBER_HMR_UI_PORT || '5173'}` : ''
 );
@@ -388,8 +323,6 @@ export const buildRendererAdditionalArguments = ({
   `--openchamber-native-frame=${nativeFrame ? '1' : '0'}`,
 ];
 
-// Linux can opt into the desktop environment's own title bar (Settings ->
-// Desktop); it takes effect at the next start, like the window it shapes.
 export const usesLinuxNativeFrame = () => (
   process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
 );
@@ -409,18 +342,11 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     icon: getWindowIconPath(),
     show: false,
     backgroundColor,
-    // Only the Linux system title bar keeps the window manager's frame. Electron
-    // reads a present `frame: undefined` as false, so the value is always a
-    // boolean; macOS draws its traffic lights through titleBarStyle 'hidden'.
     frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
-    // Electron's hiddenInset adds its own extra inset, which leaves the controls
-    // visibly lower than the app header. Use a plain hidden title bar instead.
     titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
     titleBarOverlay: false,
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
-    // macOS otherwise spends the first click on an inactive window activating
-    // it, so a button pressed while coming from another app needs two clicks.
     acceptFirstMouse: true,
     webPreferences: {
       additionalArguments,
@@ -429,14 +355,9 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
-      // sandbox must stay off: the preload uses contextBridge + ipcRenderer
-      // from Electron's Node layer. contextIsolation + nodeIntegration:false
-      // keep the renderer world walled off from Node. Do NOT flip to true —
-      // the preload would fail to load and the desktop bridge would be unavailable.
       sandbox: false,
     },
   };
-  // Without a saved position Electron centers the window on the primary display.
   if (Number.isFinite(bounds?.x) && Number.isFinite(bounds?.y)) {
     options.x = bounds.x;
     options.y = bounds.y;
@@ -450,20 +371,10 @@ export const shouldUsePackagedUi = () => {
   return app.isPackaged;
 };
 
-// The splash lives on the application's own origin whenever the application
-// is served from it. A splash on a data: URL is a different origin, so the
-// navigation to the application swaps renderer processes and Chromium may
-// show an empty frame in between; within one origin it keeps the previous
-// frame until the new document has painted.
 const SPLASH_PATHNAME = '/__splash';
 let packagedUiRequestHandler = null;
 let packagedUiSchemeRegistered = false;
 
-// Registered once, by whichever comes first: the early window (it loads the
-// splash from this scheme) or main.mjs installing the application handler
-// (a background start has no early window). The splash is answered here,
-// everything else goes to that handler; nothing asks for the application
-// before main is loaded, because the splash has no subresources.
 const registerPackagedUiScheme = () => {
   if (packagedUiSchemeRegistered) return;
   packagedUiSchemeRegistered = true;
@@ -495,12 +406,8 @@ const EARLY_WINDOW_SHOW_WAIT_MS = 500;
 let pendingEarlyWindow = null;
 let earlyWindowClosed = false;
 
-// True once the user closed the first window before main.mjs adopted it: the
-// app is quitting, and main must not open another window on its way out.
 export const wasEarlyWindowClosed = () => earlyWindowClosed;
 
-// Creates and shows the main window on the splash. Called from the entry
-// module the moment Electron is ready; `main.mjs` adopts it later.
 export const createEarlyWindow = () => {
   nativeTheme.themeSource = readThemeSource();
   if (shouldUsePackagedUi()) registerPackagedUiScheme();
@@ -512,16 +419,12 @@ export const createEarlyWindow = () => {
   }));
   recordEarlyStartupMark('electron.window.created');
   if (maximized) browserWindow.maximize();
-  // Shown at once in the theme colour, so the first thing on screen appears
-  // before the splash document has painted; the logo then fades in.
   browserWindow.show();
   browserWindow.focus();
   let markShown;
   const early = {
     browserWindow,
     maximized,
-    // Resolves once the splash document has painted; bounded, because a
-    // renderer that never reports ready-to-show must not hold the rest of startup.
     whenShown: new Promise((resolve) => {
       const timer = setTimeout(resolve, EARLY_WINDOW_SHOW_WAIT_MS);
       markShown = () => {
@@ -534,7 +437,6 @@ export const createEarlyWindow = () => {
     recordEarlyStartupMark('electron.window.ready-to-show', { documentClass: 'splash' });
     markShown();
   });
-  // Closing the only window before the rest of the app has adopted it is a quit.
   browserWindow.once('closed', () => {
     if (pendingEarlyWindow !== early) return;
     pendingEarlyWindow = null;
@@ -558,9 +460,6 @@ export const takeEarlyWindow = () => {
   return early && !early.browserWindow.isDestroyed() ? early : null;
 };
 
-// App events that can fire before `main.mjs` has registered its handlers: a
-// deep link the app was launched with, or a second launch during startup.
-// Buffered here and replayed by the main module once it takes them.
 const deferredAppEvents = [];
 const onEarlyOpenUrl = (event, url) => {
   event.preventDefault();
@@ -621,18 +520,12 @@ const loadWindowsEnv = () => {
   };
 };
 
-// Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
-// One shared probe that the backend awaits before it starts. The entry module
-// starts it as early as it can so the user's shell startup files run while
-// the window comes up instead of on the critical path; on Windows the loader
-// is synchronous registry reads, so it waits until the splash is on screen.
 export const shellEnvironmentAbort = new AbortController();
 const loadShellEnv = createShellEnvironmentLoader({ loadWindowsEnv, signal: shellEnvironmentAbort.signal });
 
 export const shellEnvironmentProbeBlocksMainThread = process.platform === 'win32';
 
-// Clear before probing/merging so login-shell snapshots and children never
-// inherit the AppImage path as argv[0] via zsh's ARGV0 parameter (#2588).
+// external: #2588 Clear AppImage ARGV0 before shell discovery because zsh applies it to child argv[0].
 export const startShellEnvironmentProbe = () => {
   clearAppImageArgv0FromProcessEnv();
   return loadShellEnv();

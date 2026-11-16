@@ -7,7 +7,6 @@ const readBytes = (descriptor, length, position) => {
   return fs.readSync(descriptor, buffer, 0, length, position) === length ? buffer : null;
 };
 
-/** The CPU architecture a Windows executable is built for, from its PE header. */
 export const readPeArchitecture = (filePath) => {
   const descriptor = fs.openSync(filePath, 'r');
   try {
