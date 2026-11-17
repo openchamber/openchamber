@@ -270,12 +270,16 @@ export function createGlobalMessageStreamHub({
           cursor: entry.cursor,
           committedAt: now(),
         };
-        // Persist before fan-out. A cursor cannot name a frame the store has not accepted.
-        durable.appendLocal(localEntry);
-        localEntries.push(localEntry);
-        localBytes += bytes;
-        localGeneration += 1;
-        trimLocalEntries();
+        // Persist before fan-out. A cursor cannot name a frame the store has not accepted:
+        // when the store refuses the frame (a failed durable append, #2111) it is not
+        // retained as committed replay state either. It still fans out live below —
+        // live delivery is not a durability claim.
+        if (durable.appendLocal(localEntry)) {
+          localEntries.push(localEntry);
+          localBytes += bytes;
+          localGeneration += 1;
+          trimLocalEntries();
+        }
       } else {
         durable.appendHead({ position, upstream: latestEventId });
       }
