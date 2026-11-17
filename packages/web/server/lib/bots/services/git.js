@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { isPrimitiveString } from '../../shared/guards.js';
 import { createGitCredentialBroker } from '../../git/credential-broker.js';
 import { resolveRepositoryIdentity } from '../../source-control/repository-identity.js';
 import { assertBotWriteAllowed } from '../../enterprise-mode.js';
@@ -51,9 +52,9 @@ export async function configureBotWorktreeIdentity({ directory, name, email }) {
   return { name, email };
 }
 
-export async function readBotGitSnapshot({ directory, branch, headSha, baseSha }) {
-  parse(text, directory); parse(branchSchema, branch); parse(sha, headSha); parse(sha, baseSha);
-  const actual = (await git(directory, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim();
+export async function readBotGitSnapshot({ directory, branch, localBranch = branch, headSha, baseSha }) {
+  parse(text, directory); parse(branchSchema, branch); parse(branchSchema, localBranch); parse(sha, headSha); parse(sha, baseSha);
+  const actual = (await git(directory, ['rev-parse', '--verify', `refs/heads/${localBranch}`])).trim();
   if (actual !== headSha) throw new BotServiceError('BOT_GIT_HEAD_CHANGED', 'The bot branch changed after publication was prepared.');
   const commits = (await git(directory, ['rev-list', '--reverse', '--topo-order', '--max-count=101', headSha, `^${baseSha}`])).trim().split(/\r?\n/).filter(Boolean);
   if (!commits.length || commits.length > 100) throw new BotServiceError('BOT_GIT_COMMIT_LIMIT', 'Publish between 1 and 100 bot commits at a time.');
@@ -96,7 +97,7 @@ export async function readBotGitSnapshot({ directory, branch, headSha, baseSha }
   return { baseTreeSha, commits: snapshots };
 }
 
-export async function publishBotGit({ credential, target, input, readBranch, readRules, root, policyOptions,
+export async function publishBotGit({ credential, target, input, readBranch, readRules, readPublicationRules, root, policyOptions,
   readSnapshot = readBotGitSnapshot, resolveRepository = resolveRepositoryIdentity, pushProcess = execFileAsync,
 }) {
   const repository = await resolveRepository(input.directory);
@@ -105,10 +106,11 @@ export async function publishBotGit({ credential, target, input, readBranch, rea
   }
   if (input.branch === input.base) throw new BotServiceError('BOT_GIT_BRANCH_INVALID', 'A bot cannot publish to its base branch.');
   const rules = await readRules(input.base);
+  const publicationRules = input.localBranch === undefined ? [] : await readPublicationRules(input.branch);
   const current = await readBranch(input.branch, true);
   if (current !== input.expectedRemoteSha) throw new BotServiceError('BOT_GIT_REMOTE_CHANGED', 'The bot branch changed on GitHub.');
   const parentSha = current ?? rules.headSha;
-  if (!rules.requiredSignatures) {
+  if (!rules.requiredSignatures && !publicationRules.some((rule) => rule.type === 'required_signatures')) {
     if (parentSha !== input.baseSha) throw new BotServiceError('BOT_GIT_BASE_CHANGED', 'The local publication base differs from the remote branch.');
     // Snapshot validation rejects hooks, submodules, lazy fetch and missing LFS transfers.
     await readSnapshot(input);
@@ -175,7 +177,7 @@ async function pushUnsigned({ credential, target, input, policyOptions, resolveR
     } });
     const current = await resolveRepository(input.directory);
     if (current.repositoryId !== target.repositoryId
-      || (await git(input.directory, ['rev-parse', '--verify', `refs/heads/${input.branch}`])).trim() !== input.headSha) {
+      || (await git(input.directory, ['rev-parse', '--verify', `refs/heads/${input.localBranch ?? input.branch}`])).trim() !== input.headSha) {
       throw new BotServiceError('BOT_GIT_HEAD_CHANGED', 'The bot worktree changed before publication.');
     }
     await credential.assertCurrent();
@@ -190,7 +192,17 @@ async function pushUnsigned({ credential, target, input, policyOptions, resolveR
         env: { ...gitEnvironment(), ...grant.env, HOME: temporary, USERPROFILE: temporary,
           GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(common, 'objects') },
       });
-    } catch { throw new BotServiceError('BOT_GIT_PUSH_UNKNOWN', 'The Git push outcome must be reconciled from GitHub.', 'outcome-unknown', 502); }
+    } catch (error) {
+      const destination = `${input.headSha}:refs/heads/${input.branch}`;
+      const rejected = error?.code === 1 && !error.killed && !error.signal
+        && isPrimitiveString(error.stderr) && error.stderr.includes('GH013:')
+        && isPrimitiveString(error.stdout) && error.stdout.split(/\r?\n/).some((line) => {
+          const [status, ref, summary] = line.split('\t');
+          return status === '!' && ref === destination && summary?.startsWith('[remote rejected]');
+        });
+      if (rejected) throw new BotServiceError('BOT_GIT_RULES_REJECTED', 'GitHub refused publication under the project rules.', 'refused', 409);
+      throw new BotServiceError('BOT_GIT_PUSH_UNKNOWN', 'The Git push outcome must be reconciled from GitHub.', 'outcome-unknown', 502);
+    }
     return { headSha: input.headSha, sourceHeadSha: input.headSha };
   } finally {
     grant?.revoke();

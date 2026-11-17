@@ -6,21 +6,22 @@ import { randomUUID } from 'node:crypto';
 import { createGitCredentialBroker } from '../git/credential-broker.js';
 import { firstRedirectedFolder, nameNotAllowedHere } from '../spaces/code-out.js';
 import { BotServiceError, sha } from './services/contracts.js';
+import { withBundleDirectory } from '../spaces/transfer-bundle.js';
 
 /** Local Git with no ambient credential, hook, fsmonitor or lazy-fetch authority. */
-export const botGit = (directory, args, input) => new Promise((resolve, reject) => {
-  const child = execFile('git', ['-c', 'core.hooksPath=', '-c', 'core.fsmonitor=false', '-c', 'credential.helper=',
-    '-c', 'protocol.allow=never', ...args], {
-    cwd: directory, shell: false, windowsHide: true, timeout: 120_000, maxBuffer: 16 * 1024 * 1024,
-    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, GIT_MASTER: '1', GIT_TERMINAL_PROMPT: '0',
-      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-      GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1', GIT_OPTIONAL_LOCKS: '0' },
-  }, (error, stdout) => error
-    ? reject(new BotServiceError('BOT_GIT_LOCAL_FAILED', 'The bot Git operation failed; retained work requires inspection.'))
-    : resolve(stdout));
-  child.stdin.on('error', () => {});
-  child.stdin.end(input);
-});
+export const botGit = async (directory, args, input) => {
+  try {
+    // The caller already checked project/checkout authority. A private global
+    // config trusts exactly that directory, including on Git 2.34, without
+    // loading the agent's hooks, credentials or unrelated safe-directory list.
+    return await withBundleDirectory({ trust: [path.resolve(directory)], caps: { timeoutMs: 120_000 },
+      environment: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, GIT_MASTER: '1',
+        GIT_NO_LAZY_FETCH: '1', GIT_OPTIONAL_LOCKS: '0' } }, ({ git }) => git.output(directory,
+      ['-c', 'credential.helper=', '-c', 'protocol.allow=never', ...args], { stdin: input, maxOutputBytes: 16 * 1024 * 1024 }));
+  } catch {
+    throw new BotServiceError('BOT_GIT_LOCAL_FAILED', 'The bot Git operation failed; retained work requires inspection.');
+  }
+};
 
 /** Match the Git population owner's filter exclusion for imported attributes.
  * No value from .gitattributes can select a configured host program. */
