@@ -551,6 +551,36 @@ describe('ui auth login rate limit', () => {
       auth.dispose();
     }
   });
+
+  it('does not let concurrent attempts exceed the per-IP failure budget', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    try {
+      // 30 simultaneous wrong-password attempts from one IP against a
+      // budget of 10: admission reserves each in-flight attempt, so
+      // exactly 10 may fail with 401 and the rest are throttled --
+      // before the fix, 14 were admitted (#2103).
+      const attempt = async () => {
+        const req = {
+          method: 'POST',
+          ip: '198.51.100.23',
+          headers: { host: '127.0.0.1:3000' },
+          body: { password: 'wrong' },
+        };
+        const res = createResponse();
+        await auth.handleSessionCreate(req, res);
+        return res.statusCode;
+      };
+
+      const statuses = await Promise.all(Array.from({ length: 30 }, () => attempt()));
+
+      expect(statuses.filter((status) => status === 401)).toHaveLength(10);
+      expect(statuses.filter((status) => status === 429)).toHaveLength(20);
+    } finally {
+      auth.dispose();
+    }
+  });
 });
 
 // issue #1778: the jwt-secret read is bounded and regular-file-checked.
