@@ -34,20 +34,6 @@ export const buildTranscriptionUrl = (opencodeBaseUrl: string): string => {
 /** Default concrete ref: the phase-1 end-to-end registration (§8.1). */
 export const DEFAULT_TRANSCRIPTION_MODEL = 'openai/whisper-1';
 
-/**
- * Concrete refs registered in the façade's TRANSCRIPTION_MODELS registry
- * (opencode packages/core/src/transcription-facade.ts). Every phase-1
- * registration is a hosted HTTP backend, so every one of these refs has
- * `audio_leaves_machine = true` in the registry (design §3/§5.3).
- */
-const HOSTED_TRANSCRIPTION_MODELS: ReadonlyArray<string> = [
-    'openai/whisper-1',
-    'deepgram/nova-3',
-    'google/gemini-3.5-transcribe',
-    'assemblyai/universal-3-5-pro',
-    'elevenlabs/scribe_v2',
-];
-
 /** §5.2 caps: bounded by default, never silently unlimited. */
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MiB
 export const MAX_AUDIO_DURATION_SECONDS = 600;
