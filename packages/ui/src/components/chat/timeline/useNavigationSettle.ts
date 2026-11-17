@@ -7,11 +7,6 @@ export const useNavigationSettle = (
     sessionKey: string,
     resolveScrollContainer: () => HTMLElement | null,
 ) => {
-    // A navigation scroll lands on estimates: an unmounted target teleports
-    // to its estimated offset, and even a mounted one drifts when neighbours
-    // finish measuring a frame later. This settle loop re-aligns the target to
-    // the requested viewport position until the layout stops moving, and backs
-    // off the moment the user touches the scroll.
     const cancelNavigationRef = React.useRef<(() => void) | null>(null);
     React.useLayoutEffect(() => () => {
         cancelNavigationRef.current?.();

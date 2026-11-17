@@ -26,8 +26,6 @@ export const useDisplayMessages = (
             if (typeof messageId === 'string') latestById.set(messageId, message);
         }
 
-        // Preserve the first occurrence's chronological position, but use the last
-        // value because prepended history can overlap with newer live store data.
         for (let index = 0; index < timeline.length; index += 1) {
             const message = timeline[index];
             const messageId = message.info?.id;
@@ -42,11 +40,6 @@ export const useDisplayMessages = (
             ));
         }
 
-        // v2 gives compaction, shell commands and subtasks their own message
-        // roles and tool parts, so the timeline needs no bridge-message
-        // stitching. What is left is folding the messages injected around a
-        // prompt back where they belong: composer context onto its user
-        // message, plumbing out of the list entirely.
         return attachSyntheticContext(dedupedMessages);
     }), [messages, runningSubagentRuns]);
 

@@ -15,7 +15,6 @@ import { useNavigationSettle } from './useNavigationSettle';
 
 type TurnProjection = ReturnType<typeof useTurnRecords>['projection'];
 
-/** Installs the navigation handle a parent drives the timeline through (scroll to a message, hold or restore a viewport anchor). */
 export const useMessageListHandle = (
     ref: React.ForwardedRef<MessageListHandle>,
     {
@@ -38,7 +37,6 @@ export const useMessageListHandle = (
 ) => {
     const { messageIndexMap, turnIndexMap, rowIndexByKey, collapsibleTurnByMessageId, turnByAssistantMessageId } = indexes;
 
-    // A retained hidden list must never fall back to another session's DOM.
     const resolveScrollContainer = React.useCallback((): HTMLElement | null => {
         return listRef.current?.getScrollableNode() ?? null;
     }, [listRef]);
@@ -48,17 +46,11 @@ export const useMessageListHandle = (
         uiPageProjectionRef.current = { projection, defaultActivityExpanded };
     }, [projection, defaultActivityExpanded]);
 
-    /** The row an anchor names: the slice of a long answer it was taken in, else its message's first row. */
     const anchorRowIndex = React.useCallback((anchor: MessageViewportAnchor): number | undefined => (
         (anchor.slice ? rowIndexByKey.get(`step:${anchor.messageId}:${anchor.slice}`) : undefined)
             ?? messageIndexMap.get(anchor.messageId)
     ), [messageIndexMap, rowIndexByKey]);
 
-    /**
-     * Opens the turn a linked or searched message is folded into, the way a
-     * browser's find opens a closed <details>. True when it had to open it:
-     * the row renders the message on a later frame.
-     */
     const revealFoldedMessage = React.useCallback((messageId: string): boolean => {
         const turnId = isReasoningRevealTarget(messageId)
             ? turnByAssistantMessageId.get(messageId)
@@ -72,27 +64,19 @@ export const useMessageListHandle = (
         if (!container) {
             return null;
         }
-        // A search hit in reasoning lands on the reasoning block itself rather
-        // than the top of its message.
         if (isReasoningRevealTarget(messageId)) {
             const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
             if (reasoning) return reasoning;
         }
-        // A long answer's later rows carry its id too; its start is the one without a slice.
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);
     }, [resolveScrollContainer]);
 
-    // A slice that no longer exists (the message is cut elsewhere now: the
-    // reasoning was hidden) falls back to the message's first row, as its index does.
     const findAnchorElement = React.useCallback((anchor: MessageViewportAnchor): HTMLElement | null => (
         anchor.slice && rowIndexByKey.has(`step:${anchor.messageId}:${anchor.slice}`)
             ? resolveScrollContainer()?.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"][data-message-slice="${anchor.slice}"]`) ?? null
             : findMessageElement(anchor.messageId)
     ), [findMessageElement, resolveScrollContainer, rowIndexByKey]);
 
-    // Accepts any index the list renders, the trailing streaming entry
-    // included — it lives at historyEntries.length and is a legitimate
-    // navigation target (the timeline rail's last item).
     const scrollHistoryIndexIntoView = React.useCallback((index: number) => {
         if (index < 0 || index >= rows.length) {
             return false;
@@ -103,19 +87,10 @@ export const useMessageListHandle = (
             return false;
         }
 
-        // Unanimated: an unmounted target's position is still an estimate, and
-        // a smooth scroll would end at that stale offset once the real
-        // measurement replaces it. Mounted targets still take the smooth DOM
-        // path in scrollMessageElementIntoView.
         void list.scrollToIndex({ index, animated: false, viewPosition: 0 });
         return true;
     }, [listRef, rows.length]);
 
-    // A navigation scroll lands on estimates: an unmounted target teleports
-    // to its estimated offset, and even a mounted one drifts when neighbours
-    // finish measuring a frame later. This settle loop re-aligns the target to
-    // the requested viewport position until the layout stops moving, and backs
-    // off the moment the user touches the scroll.
     const { cancelNavigationRef, settleNavigationTarget } = useNavigationSettle(sessionKey, resolveScrollContainer);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
@@ -149,8 +124,6 @@ export const useMessageListHandle = (
 
         const element = findAnchorElement(anchor);
         if (!element) {
-            // Not mounted: bring its row in from the estimate; the next step
-            // measures the real position.
             return scrollHistoryIndexIntoView(index) ? 'moved' : 'missing';
         }
         const delta = element.getBoundingClientRect().top
@@ -161,13 +134,9 @@ export const useMessageListHandle = (
         }
         const before = container.scrollTop;
         container.scrollTop += delta;
-        // A message near either end of the timeline cannot reach the offset:
-        // the scroll is clamped, and where it stopped is as close as it gets.
         return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
     }, [anchorRowIndex, findAnchorElement, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
 
-    // Installed during layout so a parent's layout effect (session entry
-    // restore) already reaches this list, not the one it replaced.
     React.useLayoutEffect(() => {
         if (!ref) {
             return;
@@ -235,8 +204,6 @@ export const useMessageListHandle = (
                 settleNavigationTarget(() => findAnchorElement(anchor), anchor.offsetTop);
             },
 
-            // The timeline is always virtualized now; the flag stays so callers
-            // that branch on it keep compiling and take the virtualized path.
             isHistoryVirtualized: () => true,
 
             captureViewportAnchor: () => {
@@ -258,8 +225,6 @@ export const useMessageListHandle = (
                 }
                 const container = resolveScrollContainer();
                 if (!container) return;
-                // Overshoot so the browser clamps to the exact fractional
-                // maximum (scrollHeight is integer-rounded).
                 container.scrollTop = container.scrollHeight + 4096;
             },
         };

@@ -37,8 +37,6 @@ export const MessageRow = React.memo<MessageRowProps>(({
     reviewTransferDirection,
     isFirstRow,
 }) => {
-    // Roles that are not a conversation turn render as their own timeline row
-    // (or as nothing); only user and assistant go through ChatMessage.
     const role = message.info.role;
     if (readSessionNotice(message.info)) return <TimelineNotice message={message.info} />;
     if (isSkippedTimelineMessage(message.info)) return null;

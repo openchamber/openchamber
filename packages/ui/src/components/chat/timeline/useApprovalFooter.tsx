@@ -5,7 +5,6 @@ import { EMPTY_ROW_MESSAGE_IDS } from './emptyCollections';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import type { RenderEntry } from './types';
 
-/** The list footer with the session's pending workflow approvals above the caller's footer. */
 export const useApprovalFooter = (
     sessionKey: string,
     directory: string | undefined,

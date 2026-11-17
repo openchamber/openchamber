@@ -1,10 +1,5 @@
 import type { RenderEntry } from './types';
 
-/**
- * The live tail's entry with the part store's newest parts, for the rows of
- * the tail. `LiveTailSource` computes it once per publish; only the rows of
- * the tail read it, so a streamed part re-renders those and nothing else.
- */
 export type LiveTailStore = {
     get: () => RenderEntry | null;
     set: (entry: RenderEntry | null) => void;

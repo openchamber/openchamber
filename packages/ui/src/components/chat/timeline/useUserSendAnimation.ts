@@ -17,22 +17,15 @@ export const useUserSendAnimation = (sessionKey: string, messages: ChatMessageEn
             .map((message) => message.info.id);
     }, [messages]);
 
-    // Detect new user messages SYNCHRONOUSLY during render.
-    // Must happen during render (not in useEffect) so that the new message
-    // receives animate=true on its FIRST render,
-    // starting it hidden (opacity 0). An effect-based approach causes
-    // the message to flash visible before the animation starts.
     {
         const anim = userAnimationRef.current;
 
-        // Reset on session switch
         if (anim.sessionKey !== sessionKey) {
             anim.sessionKey = sessionKey;
             anim.previousOrder = currentUserOrder;
             anim.animatedIds = new Set();
         }
 
-        // Detect appended user messages
         const prev = anim.previousOrder;
         if (currentUserOrder.length > prev.length) {
             const isAppendOnly = prev.every((id, i) => currentUserOrder[i] === id);
