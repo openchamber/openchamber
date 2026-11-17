@@ -13,7 +13,7 @@ import { subagentElapsedMs, subagentRowLook, type SubagentRow } from './useSubag
 
 const RunningDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   const hasDuration = useHasSessionActivityDuration(sessionId, true);
-  return hasDuration ? <SessionActivityDuration sessionId={sessionId} running /> : null;
+  return hasDuration ? <SessionActivityDuration sessionId={sessionId} running className="text-[0.6875rem] leading-4" /> : null;
 };
 
 const RowDetail: React.FC<{ row: SubagentRow; directory: string | null; showActivity: boolean }> = ({ row, directory, showActivity }) => {
