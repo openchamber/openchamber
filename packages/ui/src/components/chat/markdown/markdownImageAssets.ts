@@ -104,7 +104,6 @@ const validateDataImage = async (source: string): Promise<void> => {
   await validateImageBlob(new Blob([bytes]), match[1].toLowerCase());
 };
 
-/** A grant request the server refused; `status` is its HTTP status. */
 export class ImageGrantRequestError extends Error {
   constructor(readonly status: number) {
     super(`Unable to prepare images (${status})`);
@@ -128,7 +127,6 @@ export const prepareLocalMarkdownImages = async ({
   directory: string;
   sessionId: string;
   messageId: string;
-  /** The openchamber_render call whose page names the sources: the server then shows them up to the page's weight budget. */
   callId?: string;
   signal: AbortSignal;
 }): Promise<Map<string, PreparedMarkdownImage>> => {
@@ -153,7 +151,6 @@ export const prepareLocalMarkdownImages = async ({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ directory, messageId, callId, sources }),
-      // The grant is issued by the server that holds the file: a space's for a space directory.
       directory,
       signal,
     },
@@ -213,7 +210,6 @@ export const resolveMarkdownImageSource = async (
   throw new Error('Local image has not been prepared');
 };
 
-/** Reads an image through `/api/fs/raw`, after the same size and signature checks a drawn image gets. */
 const loadRawImageBlob = async (
   query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
   signal: AbortSignal,
@@ -233,21 +229,11 @@ const loadRawImageBlob = async (
   return blob;
 };
 
-/**
- * An image as a data URL, for a page that cannot load the asset URL itself:
- * an `openchamber_render` page runs in an opaque origin, and the asset URL
- * would hand its script the URL auth token.
- */
 const loadRawImageAsDataUrl = async (
   query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
   signal: AbortSignal,
 ): Promise<string> => blobToDataUrl(await loadRawImageBlob(query, signal));
 
-/**
- * VS Code has no OpenChamber server route for message-scoped temporary-file
- * grants. Preserve its existing workspace-only gallery path through the local
- * filesystem bridge, including the same size and signature validation.
- */
 export const resolveWorkspaceMarkdownImageSource = async (
   source: string,
   directory: string,
@@ -287,10 +273,6 @@ export const getPreparedMarkdownImageUrl = (
   },
   );
 
-/**
- * The own bytes, at full size, of a local image a message references, to save
- * as a file: the grant that drew it, then the whole file.
- */
 export const loadMessageImageBlob = async ({ source, directory, sessionId, messageId, signal }: {
   source: string;
   directory: string;
@@ -301,7 +283,6 @@ export const loadMessageImageBlob = async ({ source, directory, sessionId, messa
   const resolver = getRuntimeUrlResolver();
   const prepared = (await prepareLocalMarkdownImages({ sources: [source], directory, sessionId, messageId, signal })).get(source);
   if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
-  // The grant names a file on the server that issued it; another server may hold a different one at that path.
   if (getRuntimeUrlResolver() !== resolver) throw new DOMException('Runtime changed', 'AbortError');
   return loadRawImageBlob({
     path: prepared.path,
@@ -311,7 +292,6 @@ export const loadMessageImageBlob = async ({ source, directory, sessionId, messa
   }, signal);
 };
 
-/** A prepared local image as a data URL, for a page that cannot load the asset URL (see loadRawImageAsDataUrl). */
 export const loadPreparedImageAsDataUrl = (
   image: Extract<PreparedMarkdownImage, { status: 'ready' }>,
   directory: string,

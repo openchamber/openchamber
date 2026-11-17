@@ -6,8 +6,6 @@ const loadPreview = () => import('./MarkdownDiffPreview').then((module) => modul
 const keepSource = () => {};
 
 export function MarkdownDiff({ source, incomplete }: { source: string; incomplete: boolean }) {
-  // Parse only settled, bounded patches. Streaming source remains readable and
-  // ordinary Markdown never loads the diff rendering stack.
   const rich = !incomplete && !isToolDiffPreviewOversized(source);
   const Preview = useOnDemandComponent(rich, loadPreview, keepSource);
   return (

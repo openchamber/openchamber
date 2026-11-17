@@ -1,8 +1,3 @@
-// Bounded LRU for highlight results.
-//
-// Unchanged code reuses its highlight result. Keys are short content fingerprints so
-// cache maps do not duplicate large strings. Entry byte sizes are recorded once
-// at insert time; get/evict never re-walk the payload.
 
 export type HighlightResultCacheOptions = {
   maxEntries: number;
@@ -14,10 +9,8 @@ type CacheEntry<T> = {
   bytes: number;
 };
 
-/** UTF-16 storage estimate for a JS string (chars × 2). Avoids TextEncoder allocs. */
 export const utf16Bytes = (value: string): number => value.length * 2;
 
-/** Final avalanche so near-identical sources do not land in adjacent buckets. */
 const mix32 = (hash: number): number => {
   let h = hash;
   h ^= h >>> 16;
@@ -26,18 +19,6 @@ const mix32 = (hash: number): number => {
   return h >>> 0;
 };
 
-/**
- * Short stable fingerprint for cache keys: length + two independent 32-bit
- * multiplicative hashes (~64 bits of key space).
- *
- * These caches are content-addressed and global, so a collision does not merely
- * mis-color a block — the cache returns a *different* block's rendered HTML and
- * the user is shown source they never wrote. One 32-bit hash is not enough for
- * that failure mode: a few thousand same-length entries reach a birthday
- * collision probability worth caring about, and the result would be
- * undiagnosable in the field. Two multiplies per character are free next to
- * tokenization.
- */
 export const contentFingerprint = (value: string): string => {
   let h1 = 0x811c9dc5;
   let h2 = 0xc2b2ae35;
@@ -71,7 +52,6 @@ export class HighlightResultCache<T> {
   get(key: string): T | undefined {
     const entry = this.map.get(key);
     if (entry === undefined) return undefined;
-    // Refresh LRU order without recomputing size.
     this.map.delete(key);
     this.map.set(key, entry);
     return entry.value;
@@ -94,7 +74,6 @@ export class HighlightResultCache<T> {
       const oldestEntry = this.map.get(oldest);
       if (oldestEntry !== undefined) this.totalBytes -= oldestEntry.bytes;
       this.map.delete(oldest);
-      // Always allow a single oversized entry so huge files still cache once.
       if (this.map.size === 0) break;
     }
 

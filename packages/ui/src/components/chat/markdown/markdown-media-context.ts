@@ -17,14 +17,9 @@ export type MarkdownDocumentAssets = {
   colorScheme: 'light' | 'dark';
 };
 
-// The picture route `projectUploads.ts` leaves in a body on the relay. It alone
-// is read with the client's credentials; any other path an author writes stays
-// a plain address.
 const PROJECT_UPLOAD_ROUTE_RE = /^\/api\/source-control\/[^/?#]+\/uploads\/[0-9a-f]{32}\/[^/?#]+\?/;
 
 type GalleryImage = { source: string; filename: string; element: HTMLElement; resolve: () => Promise<string>; load: () => Promise<Blob> };
-// Parts of one message share the existing popup gallery. Entries live only while
-// their React-owned image is mounted and loaded, and retain no resolved URLs.
 const galleries = new Map<string, Set<GalleryImage>>();
 
 type MediaOwner = {
@@ -81,7 +76,6 @@ export class MarkdownMediaOwner {
       if (!documentAssets) {
         if (video || !PROJECT_UPLOAD_ROUTE_RE.test(source)) return source;
         const read = this.readDocumentImage(source, source, undefined, signal);
-        // A read the tunnel dropped is not kept, so opening the item again reads it again.
         void read.catch(() => { if (this.documentUrls.get(source) === read) this.documentUrls.delete(source); });
         return read;
       }
@@ -97,8 +91,6 @@ export class MarkdownMediaOwner {
       }
       return this.readDocumentImage(path, '/api/fs/raw', query, signal);
     }
-    // Tool/reasoning local mode retains its direct local-source behavior.
-    // Only assistant media uses the message grant / workspace bridge policy.
     if (mode === 'local') return source;
     if (isVSCodeRuntime()) {
       if (video) throw new Error('Video bridge is unavailable');
@@ -107,8 +99,6 @@ export class MarkdownMediaOwner {
       return url;
     }
     if (!sessionId || !messageId) throw new Error('Missing media owner');
-    // All owned nodes register in effects before the first viewport callback or
-    // microtask requests the batch. Embedded images count toward the same cap.
     await Promise.resolve();
     this.check(signal);
     const sources = [...this.sources.keys()].slice(0, 12);
@@ -152,12 +142,6 @@ export class MarkdownMediaOwner {
     return pending;
   }
 
-  /**
-   * An image's own bytes, to save it from the viewer. A message's local image
-   * is read whole through its grant; a document's, already read, and an
-   * inline one come from their object or data URL. A remote image is not
-   * ours to read.
-   */
   async load(source: string): Promise<Blob> {
     const signal = this.controller.signal;
     const { mode, directory, sessionId, messageId } = this.options;

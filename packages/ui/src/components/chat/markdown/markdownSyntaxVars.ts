@@ -1,14 +1,6 @@
 import type { Theme } from '@/types/theme';
 import { resolveSyntaxTokens } from '@/lib/theme/syntax';
 
-/**
- * Build the `--md-syntax-*` CSS custom properties for the given app theme.
- * Apply the result as inline styles on the markdown container so the static
- * Highlights theme resolves to the active palette.
- *
- * Keep this helper independent of highlighter registration so eager code
- * consumers can resolve colors without loading a renderer or diff stack.
- */
 export const getMarkdownSyntaxVars = (theme: Theme): Record<string, string> => {
   const base = theme.colors.syntax.base;
   const tokens = resolveSyntaxTokens(theme.colors.syntax);

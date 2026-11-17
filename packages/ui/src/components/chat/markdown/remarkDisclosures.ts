@@ -25,10 +25,6 @@ function rebasePositions(tree: Root | RootContent, source: string, offset: numbe
   walk(tree);
 }
 
-// GitHub review bodies title disclosures with a heading tag. Inside the summary
-// that tag forms its own HTML block, so it is read here into a heading node:
-// the heading renders with and without raw HTML instead of as literal markup.
-// Its attributes (GitHub bodies use align) are dropped with the tag.
 const headingTag = /^(\s*<h([1-6])(?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>=]+))?)*\s*>)([\s\S]*?)<\/h\2\s*>\s*$/i;
 const headingDepths: Heading['depth'][] = [1, 2, 3, 4, 5, 6];
 
@@ -49,8 +45,6 @@ declare module 'mdast' {
   interface RootContentMap { ocDisclosure: Disclosure; ocDisclosureSummary: DisclosureSummary }
 }
 
-// The scanner only identifies the disclosure boundary. Its body and summary
-// go back through the same CommonMark parser, including nested disclosures.
 function disclosureEnd(source: string, start: number) {
   const markers = /(^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$))|(`+)|(<\/?details\b[^>]*>)/gim;
   markers.lastIndex = start;
@@ -85,15 +79,13 @@ export function remarkDisclosures(this: Processor) {
   const parse = (source: string): Root => {
     const tree = this.parse(source);
     if (!isMarkdownRoot(tree)) throw new Error('Disclosure parsing requires a Markdown root');
-    // Micromark consumes an initial BOM without counting it in positions.
-    // Restore local source coordinates before mapping into the parent source.
+    // external: https://github.com/micromark/micromark/blob/main/packages/micromark/dev/lib/preprocess.js Micromark omits the initial BOM, so nested positions need local source coordinates restored.
     if (source.startsWith('\uFEFF')) rebasePositions(tree, source, 1);
     return tree;
   };
   const transform = (tree: Root | RootContent, source: string): void => {
     if (!('children' in tree)) return;
     const children: RootContent[] = tree.children;
-    // Reparse only this container, with one level of quote markers removed.
     if (tree.type === 'blockquote') {
       const start = tree.position?.start?.offset;
       const end = tree.position?.end?.offset;

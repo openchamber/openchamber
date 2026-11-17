@@ -219,8 +219,6 @@ let initialFitFrame: number | null = null;
 const scheduleInitialFit = (controller: InternalMermaidViewerController): void => {
   pendingInitialFit.add(controller);
   if (initialFitFrame !== null) return;
-  // Match the original viewer's two-frame settle, then read all sizes before
-  // writing any viewBox. React supplies the controllers without a DOM scan.
   initialFitFrame = window.requestAnimationFrame(() => {
     initialFitFrame = window.requestAnimationFrame(() => {
       initialFitFrame = null;
@@ -330,11 +328,9 @@ export const createMermaidViewerController = (block: HTMLElement): MermaidViewer
     height: svg.getAttribute('height'),
   });
   if (!contentBox) {
-    // Unrecognized bounds leave the renderer's native SVG visible.
     svg.setAttribute('data-oc-mermaid-fitted', '');
     return null;
   }
-  // Preview sizing must not read the user-controlled viewBox as content bounds.
   svg.setAttribute('data-oc-mermaid-original-viewbox', formatMermaidViewBox(contentBox));
 
   let currentBox = contentBox;
@@ -342,7 +338,6 @@ export const createMermaidViewerController = (block: HTMLElement): MermaidViewer
   let dragStartPointer: MermaidPoint | null = null;
   let lastPointer: MermaidPoint | null = null;
   let clearClickSuppressionTimer: number | null = null;
-  // Every pointer pressed on the diagram; a second one turns the pan into a pinch.
   const pressedPointers = new Map<number, MermaidPoint>();
   let lastPinchDistance: number | null = null;
 
@@ -354,8 +349,6 @@ export const createMermaidViewerController = (block: HTMLElement): MermaidViewer
   };
 
   const fitToViewport = (size: MermaidViewport): void => {
-    // Hidden/zero-size containers are not ready. ResizeObserver retries when
-    // the viewport acquires geometry; never reveal the unfitted first frame.
     if (!isPositiveFinite(size.width) || !isPositiveFinite(size.height)) return;
     applyViewBox(fitMermaidViewBox(contentBox, size));
     svg.setAttribute('data-oc-mermaid-fitted', '');
@@ -408,8 +401,6 @@ export const createMermaidViewerController = (block: HTMLElement): MermaidViewer
       return;
     }
     activate();
-    // A primary pointer starts a new gesture, so a lost pointerup cannot leave
-    // a stale finger behind that would turn the next pan into a pinch.
     if (event.isPrimary) {
       pressedPointers.clear();
       lastPinchDistance = null;
@@ -473,8 +464,6 @@ export const createMermaidViewerController = (block: HTMLElement): MermaidViewer
     }
     viewport.releasePointerCapture?.(event.pointerId);
     if (pressedPointers.size > 0) {
-      // A finger left after a pinch does not pan, so the view does not jump
-      // when the other one lifts.
       activePointerId = null;
       lastPinchDistance = pressedPointers.size > 1
         ? getMermaidPinch(Array.from(pressedPointers.values()))?.distance ?? null

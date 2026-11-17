@@ -1,5 +1,3 @@
-// Linear image alt text, local file paths and standalone GitHub asset links
-// identify clips. React media components own playback and recovery.
 const VIDEO_FILE_RE = /\.(?:mp4|m4v|mov|webm)$/i;
 const GITHUB_ASSET_RE = /^https:\/\/github\.com\/user-attachments\/assets\/[\w-]+$/i;
 export const hasMarkdownMediaCredentials = (source: string): boolean => /[?&]oc_(?:url|client)_token=/i.test(source);
@@ -23,12 +21,10 @@ const mediaFileName = (source: string): string => {
 
 const isVideoFileName = (name: string): boolean => VIDEO_FILE_RE.test(name.trim());
 
-/** A source, or the name it was given, that names a video file. */
 export const isVideoSource = (source: string, name = ''): boolean => (
   isVideoFileName(name) || isVideoFileName(mediaFileName(source))
 );
 
-/** A bare URL that stands for a clip when it is alone on its line. */
 export const isBareVideoUrl = (url: string): boolean => (
   /^https?:\/\//i.test(url) && (GITHUB_ASSET_RE.test(url) || isVideoSource(url))
 );

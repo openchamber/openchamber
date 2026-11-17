@@ -13,11 +13,6 @@ declare module 'micromark-util-types' {
   }
 }
 
-// A text construct keeps code and link destinations under CommonMark's parser.
-// Bracket math must occupy its own line so escaped bracket prose stays prose.
-// "Own line" is relative to its container: a list item or a quote starts its
-// text after the marker, so the line start is the start of the text flow or a
-// line ending, never an absolute column.
 const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   const lineStart = this.previous === null || this.previous < -2;
   let bracket = false;
@@ -84,8 +79,6 @@ const tokenizeBackslashMath: Tokenizer = function (effects, ok, nok) {
   return start;
 };
 
-// Guard single-dollar syntax before it can consume Markdown link punctuation.
-// Post-parse currency rejection is too late once a pair spans a link label.
 const tokenizeDollarMath: Tokenizer = function (effects, ok, nok) {
   const previous = this.previous;
   const angleConstructs = this.parser.constructs.text[60];
@@ -100,8 +93,6 @@ const tokenizeDollarMath: Tokenizer = function (effects, ok, nok) {
   function inside(code: number | null): State | undefined {
     if (code === null || code < 0 || code === 34) return nok(code);
     if (code === 60 && angleConstructs) return effects.check(angleConstructs, nok, content)(code);
-    // A real Markdown link boundary ends a candidate; interval brackets and
-    // comparison operators remain valid math content.
     if (code === 40 && value.endsWith(']')) return nok(code);
     if (!value && /\s/.test(String.fromCharCode(code))) return nok(code);
     if (code === 36) {
@@ -173,8 +164,6 @@ export function remarkMathCompatibility(this: Processor) {
     function transform(node: Root | RootContent): void {
       if (!('children' in node)) return;
       const children: RootContent[] = node.children;
-      // CommonMark parses explicit link labels as inline Markdown. A URL label
-      // must remain a readable URL even when it contains valid math delimiters.
       if (node.type === 'link') {
         const label = children.map(child => child.type === 'inlineMath' || child.type === 'math'
           ? source.slice(child.position?.start?.offset, child.position?.end?.offset)

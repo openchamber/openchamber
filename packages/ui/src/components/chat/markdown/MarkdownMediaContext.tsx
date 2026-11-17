@@ -33,14 +33,8 @@ export function MarkdownMediaProvider({
   const resolver = getRuntimeUrlResolver();
   const filePath = documentAssets?.filePath;
   const workspaceRoot = documentAssets?.workspaceRoot;
-  // Color scheme and link callbacks can change without revoking loaded assets.
-  // A settled assistant part's grants are checked against its text, so new
-  // text is a new owner. While it streams it loads nothing, and tool output,
-  // reasoning and documents read their media by path: keying any of these on
-  // the text rebuilt the owner, or reloaded every image, on each update.
   const ownerContent = mode === 'assistant' && settled ? content : '';
   const owner = React.useMemo(() => {
-    // Runtime and the assistant text are ownership even when paths and IDs are unchanged.
     void ownerContent;
     void runtimeKey;
     void transportRevision;
@@ -54,13 +48,11 @@ export function MarkdownMediaProvider({
     });
   }, [ownerContent, mode, directory, sessionId, messageId, runtimeKey, transportRevision, resolver, filePath, workspaceRoot]);
   React.useLayoutEffect(() => {
-    // A hidden provider misses endpoint events, including same-key renewal.
     if (runtimeKey !== getRuntimeKey() || resolver !== getRuntimeUrlResolver()) {
       owner.dispose();
       advanceTransport();
       return;
     }
-    // Connect before child passive effects resolve sources on first mount or replay.
     owner.connect();
     const unsubscribe = subscribeRuntimeEndpointWillChange(() => owner.dispose());
     return () => {
