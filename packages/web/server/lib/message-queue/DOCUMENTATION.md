@@ -21,6 +21,17 @@ UI-side queue and foreground auto-send hook.
 - The queue file holds conversation content, so it is readable by its owner
   only (`0o600`).
 
+## TypeScript conversion boundary
+
+`runtime.js` remains JavaScript until `../session-goal/create.js` exposes a
+contract matching its callers. Its inferred `createSessionGoal` input accepts
+only `null | undefined` for `tokenBudget`, while queued goals also supply
+positive integers. The inferred input also requires `baseUrl` and `authHeaders`,
+which this caller omits and the implementation ignores. A strict TypeScript
+caller produces TS2322 for a numeric budget and TS2739 for the omitted fields.
+The contract belongs to the session-goal assignment; this folder does not add
+a declaration shim, cast or narrower budget to bypass it.
+
 ## Files
 
 - `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
