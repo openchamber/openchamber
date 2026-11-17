@@ -241,6 +241,61 @@ describe('session folders routes', () => {
     expect((await routes.get()).updatedAt).toBe(5_001);
   });
 
+  it('announces a collapse-only legacy POST and advances the revision (#2162)', async () => {
+    const onChanged = vi.fn();
+    const routes = createPersistingRoutes({
+      ...folderPayload(5_000),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+    }, { onChanged, now: () => 10 });
+
+    await routes.post({
+      ...folderPayload(3_000),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+      collapsedFolderIds: ['f1'],
+    });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith(5_001);
+    const after = await routes.get();
+    expect(after.collapsedFolderIds).toEqual(['f1']);
+    expect(after.updatedAt).toBe(5_001);
+  });
+
+  it('announces a tombstone-only legacy POST and advances the revision (#2162)', async () => {
+    const onChanged = vi.fn();
+    const routes = createPersistingRoutes({
+      ...folderPayload(5_000),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+    }, { onChanged, now: () => 10 });
+
+    await routes.post({
+      ...folderPayload(3_000),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+      deletedFolderIds: { gone: 2_500 },
+    });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith(5_001);
+    const after = await routes.get();
+    expect(after.deletedFolderIds).toEqual({ gone: 2_500 });
+    expect(after.updatedAt).toBe(5_001);
+  });
+
+  it('stays silent for a no-op legacy POST (#2162)', async () => {
+    const onChanged = vi.fn();
+    const snapshot = {
+      ...folderPayload(5_000),
+      foldersMap: { a: [folder('f1', 'One', ['s1'])] },
+      collapsedFolderIds: ['f1'],
+    };
+    const routes = createPersistingRoutes(snapshot, { onChanged, now: () => 10 });
+
+    await routes.post(snapshot);
+
+    expect(onChanged).not.toHaveBeenCalled();
+    expect((await routes.get()).updatedAt).toBe(5_000);
+  });
+
   it('refuses changes on top of a malformed file instead of replacing it', async () => {
     const { app, getRoute } = createRouteRegistry();
     const fsPromises = { readFile: vi.fn(async () => '{broken'), writeFile: vi.fn(), mkdir: vi.fn(), rename: vi.fn() };
