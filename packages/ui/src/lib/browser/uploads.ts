@@ -1,17 +1,7 @@
-/**
- * Brings the files of an agent's upload to the machine whose page takes them.
- *
- * The server checked the paths the agent named and holds the files under a
- * one-time token (`packages/web/server/lib/browser-control/uploads.js`). The
- * page may run on another machine than the server, so the files come over as
- * data and the desktop shell writes them where the page's file input can read
- * them.
- */
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/** What the server sends for an upload: the token and the files it holds under it. */
 export const uploadTicketSchema = z.object({
   token: z.string().min(1),
   files: z.array(z.object({ name: z.string().min(1), size: z.number() })).min(1),

@@ -45,7 +45,6 @@ const isProcessAlive = (pid) => {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM: the process exists but belongs to another user.
     return error?.code === 'EPERM';
   }
 };

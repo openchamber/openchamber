@@ -2,14 +2,6 @@ import { isPlainObject, isString } from '../shared/guards.js';
 import { digestMutationInput } from './mutation-executor.js';
 import { reviewDraftEntries } from './review-position.js';
 
-/**
- * The standard mutation table: each shell route's persisted kind (GitLab's
- * names), its input normalization and the fields its digest covers. Gitea
- * uses it, and so does every extension provider, whose kinds and digests the
- * host owns. Kinds and digest fields are persisted in
- * `source-control-mutations.json`; changing either turns a retained record's
- * replay into a conflict (`mutation-digest-freeze.test.js` holds them).
- */
 
 const invalidMutationContext = (message) => Object.assign(new Error(message), {
   code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
@@ -18,18 +10,12 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
 
 const requestText = (value) => (isString(value) ? value.trim() : '');
 
-// Short text fields (a title, a label or reviewer id) share this cap.
 const TITLE_MAX = 256;
 
-// A votes host's label names and values (Gerrit's Code-Review, Verified, ...).
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
 
-/**
- * Votes as `{ label: value }`, copied so the digest covers exactly what was
- * checked; the digest's canonical JSON sorts the keys.
- */
 const parseVotes = (value) => {
   if (!isPlainObject(value)) throw invalidMutationContext('votes are invalid');
   const entries = Object.entries(value);
@@ -40,12 +26,6 @@ const parseVotes = (value) => {
   return Object.fromEntries(entries);
 };
 
-/**
- * `descriptor` supplies the limits (comment length, label and reviewer
- * counts, reviewer id syntax), the merge methods and the label in messages.
- * Routes are listed in a fixed order; a provider registers them all and the
- * shell answers 501 for a capability that is off.
- */
 const VERDICTS = ['approve', 'request-changes'];
 
 export function createStandardMutations(descriptor) {
@@ -73,21 +53,12 @@ export function createStandardMutations(descriptor) {
     if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
-  /**
-   * A votes host's review: votes on its labels, a message, or both, on the
-   * revision `target.headSha` names. A verdict is refused rather than mapped
-   * to a guessed label, so an older client cannot vote by accident. Same
-   * kind as a verdict review (the mutation store's kinds are a closed list),
-   * with its own digest fields.
-   */
   const normalizeVotes = (input, context) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
     }
     if (!context.target.number || !context.target.headSha) throw invalidMutationContext('target number and head SHA are required');
     const votes = parseVotes(input.votes ?? {});
-    // A review may be its draft comments alone: nothing but the host knows
-    // whether there are any, so the provider refuses an empty one.
     const publishDrafts = reviewDrafts && input.publishDrafts === true;
     if (!publishDrafts && Object.keys(votes).length === 0 && input.body === undefined) throw invalidMutationContext('a vote or a message is required');
     const text = commentText(input.body, false);
@@ -133,8 +104,6 @@ export function createStandardMutations(descriptor) {
         if (!context.target.number || !mergeMethods.includes(input.method)) {
           throw invalidMutationContext('target number and merge method are required');
         }
-        // A submit names the patchset that was read; without one it would land on whatever was uploaded last.
-        // `target` carries it, so the digest stays `{ method }`.
         if (input.method === 'submit' && !context.target.headSha) {
           throw invalidMutationContext('target head SHA is required to submit');
         }
@@ -160,7 +129,6 @@ export function createStandardMutations(descriptor) {
       normalize: (input, context) => {
         if (votesHost) return normalizeVotes(input, context);
         if (input.votes !== undefined) throw invalidMutationContext(`${descriptor.label} reviews take a verdict, not votes`);
-        // A verdict names the commit it is for; without one it would land on whatever was pushed last.
         if (!context.target.number || !context.target.headSha || ![...VERDICTS, ...(reviewDrafts ? ['comment'] : [])].includes(input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
@@ -180,7 +148,6 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
-  // An issue's title and body, replaced together; an empty body clears it.
   entries['/issues/update'] = {
     kind: 'issue-update',
     normalize: (input, context) => {
@@ -194,7 +161,6 @@ export function createStandardMutations(descriptor) {
       return normalized;
     },
   };
-  // Replace or remove one conversation comment, named by its id on the target item.
   for (const [route, kind] of [
     ['/pr/comment/update', 'change-request-comment-update'],
     ['/issues/comment/update', 'issue-comment-update'],
@@ -222,7 +188,6 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
-  // Close or reopen: `state` is what the item should become.
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     entries[route] = {
       kind,
@@ -259,11 +224,6 @@ export function createStandardMutations(descriptor) {
 
   return Object.freeze({
     routes: Object.freeze(Object.keys(entries)),
-    /**
-     * The persisted kind, normalized input and digest; the digest covers the
-     * exact credential and resolved target. The normalized input keeps its
-     * `digest` fields beside what the provider call needs.
-     */
     prepare: ({ route, input, context, actor, credential }) => {
       const entry = entryFor(route);
       const normalized = entry.normalize(input, context);

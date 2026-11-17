@@ -1,26 +1,3 @@
-/**
- * OpenCode v2 wire events -> the vocabulary the server's own consumers speak.
- *
- * The browser gets raw wire payloads (the UI translates them itself in
- * `packages/ui/src/lib/opencode/events.ts`). Everything that reacts on the
- * server — notifications, the message queue, session activity, goal mode,
- * permission auto-accept, Linear status — was written against OpenCode v1
- * event names, so this module is the single place that maps v2 onto them.
- * Keeping one translator means a consumer never has to know which OpenCode
- * shape produced its event.
- *
- * Two differences from v1 are load-bearing and cannot be papered over:
- *
- * - v2 emits no `session.status` and no `session.idle` of its own. Live status
- *   comes from `session.execution.started|succeeded|interrupted|failed`, so
- *   those are what synthesize the status vocabulary here, together with
- *   `session.retry.scheduled` (status `retry` while a provider error waits for
- *   the next attempt) and `session.step.started` (back to `busy` once that
- *   attempt begins).
- * - a v2 turn is a sequence of steps. Each `session.step.ended` becomes an
- *   assistant `message.updated`; only the last one carries `finish: "stop"`,
- *   which is the same signal v1 gave once per turn.
- */
 import { isRecord } from '../shared/guards.js';
 import { sessionParentId } from '../session-lineage.js';
 
@@ -34,13 +11,11 @@ const compact = (value) => {
   return result;
 };
 
-/** Directory an event belongs to. Execution events carry no location. */
 export const wireEventDirectory = (payload) => {
   if (!isRecord(payload)) return '';
   return trimmed(payload.location?.directory);
 };
 
-/** Structured errors travel as `{ type, message }`; consumers still read `name`. */
 const toServerError = (error) => {
   if (!isRecord(error)) return { name: 'Error', type: 'Error', message: typeof error === 'string' ? error : '' };
   const type = trimmed(error.type) || 'Error';
@@ -53,13 +28,6 @@ const ABORTED_ERROR = {
   message: 'The running turn was interrupted.',
 };
 
-/**
- * Translates one v2 wire payload into zero or more server-vocabulary events.
- *
- * Every returned event carries the source event id and the directory, because
- * consumers deduplicate on the id and route their own OpenCode calls by
- * directory.
- */
 export function translateWireEvent(payload) {
   if (!isRecord(payload)) return [];
   const type = trimmed(payload.type);
@@ -85,8 +53,6 @@ export function translateWireEvent(payload) {
 
     case 'installation.update-available':
       return [event('installation.update-available', { version: trimmed(data.version) })];
-
-    // --- session lifecycle --------------------------------------------------
 
     case 'session.created': {
       if (!sessionID) return [];
@@ -141,9 +107,6 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('session.deleted', { sessionID, info: { id: sessionID } })];
 
-    // Their own events, never a `session.updated`: the consumers of that one
-    // (goal mode, lineage, notifications) would take an archive or a restore
-    // for an edit.
     case 'session.archived':
       if (!sessionID) return [];
       return [event('session.archived', { sessionID })];
@@ -152,12 +115,6 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('session.unarchived', { sessionID })];
 
-    // --- live status --------------------------------------------------------
-
-    // v2 still declares `session.status` and `session.idle`; a 2.0.2 server was
-    // observed never to emit them, so the execution events below are what
-    // actually drive status. Both paths are translated so a server that does
-    // emit them stays correct.
     case 'session.status':
       if (!sessionID || !isRecord(data.status)) return [];
       return [status(data.status)];
@@ -166,17 +123,10 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [status({ type: 'idle' }), event('session.idle', { sessionID })];
 
-    // The one event that marks where a turn begins; every later busy only
-    // says the turn is still running. Its time is the turn's start.
     case 'session.execution.started':
       if (!sessionID) return [];
       return [status({ type: 'busy' }, { turnStartedAt: created })];
 
-    // v1 surfaced retries as `session.status {type:'retry'}` and the UI still
-    // renders that status (attempt + next-at countdown in the status chip).
-    // v2 replaced it with `session.retry.scheduled`, emitted between execution
-    // events while the turn is still running, so translate it back onto the
-    // status vocabulary instead of leaving the retry state invisible.
     case 'session.retry.scheduled': {
       if (!sessionID) return [];
       const error = isRecord(data.error) ? data.error : {};
@@ -195,18 +145,7 @@ export function translateWireEvent(payload) {
     case 'session.execution.interrupted': {
       if (!sessionID) return [];
       const reason = trimmed(data.reason) || 'user';
-      // A shutdown is not the end of the turn: OpenCode keeps the execution
-      // claim and the resumed drain continues the same turn after restart
-      // (v2.0.14 `session/execution.ts` settled(), `projector.ts` projectIdle,
-      // `message-updater.ts`), and none of its own projections mark the
-      // session idle. Reporting it as an abort would make the goal runtime
-      // pause the goal as a user stop and the queue hold the next prompt, so
-      // it produces nothing: the session stays busy until OpenCode resumes it
-      // and reports the real terminal outcome.
       if (reason === 'shutdown') return [];
-      // Every other interruption ends the turn without failing it: consumers
-      // that treat `session.error` as a failure must not fire, but the queue
-      // and goal runtimes still have to know the turn was aborted.
       return [
         status({ type: 'idle' }),
         event('session.idle', { sessionID, aborted: true, reason, error: ABORTED_ERROR }),
@@ -216,8 +155,6 @@ export function translateWireEvent(payload) {
     case 'session.execution.failed':
       if (!sessionID) return [];
       return [status({ type: 'idle' }), event('session.error', { sessionID, error: toServerError(data.error) })];
-
-    // --- messages -----------------------------------------------------------
 
     case 'session.inbox.enqueued': {
       const item = isRecord(data.item) ? data.item : {};
@@ -243,8 +180,6 @@ export function translateWireEvent(payload) {
       return [];
     }
 
-    // A shell command the user ran from the composer. It is no user message,
-    // so it passes under its own name.
     case 'session.shell.started':
       if (!sessionID) return [];
       return [event('session.shell.started', { sessionID })];
@@ -266,11 +201,6 @@ export function translateWireEvent(payload) {
             time: { created },
           }),
         }),
-        // A retry re-runs its step inside the same execution, so no execution
-        // event marks the wait ending. The step start is that signal: it clears
-        // the synthesized retry status back to busy while the attempt runs.
-        // session-runtime's 5s same-status dedup absorbs the repeats for
-        // ordinary multi-step turns.
         status({ type: 'busy' }),
       ];
     }
@@ -310,13 +240,9 @@ export function translateWireEvent(payload) {
       })];
     }
 
-    // v2's own `session.compacted` is declared but never published; a finished
-    // compaction is announced only by `session.compaction.ended`.
     case 'session.compaction.ended':
       if (!sessionID) return [];
       return [event('session.compacted', { sessionID })];
-
-    // --- requests to the user -------------------------------------------------
 
     case 'permission.asked': {
       const requestID = trimmed(data.id);
@@ -348,8 +274,6 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('form.settled', { sessionID, formID: trimmed(data.id) })];
 
-    // --- location-level notices ------------------------------------------------
-
     case 'vcs.branch.updated':
       return [event('vcs.branch.updated', { branch: typeof data.branch === 'string' ? data.branch : undefined })];
 
@@ -361,10 +285,6 @@ export function translateWireEvent(payload) {
   }
 }
 
-/**
- * Convenience for consumers that hand one payload to one handler: translates
- * and forwards every resulting event in order.
- */
 export function forwardTranslatedWireEvent(payload, handle) {
   if (typeof handle !== 'function') return;
   for (const translated of translateWireEvent(payload)) handle(translated);

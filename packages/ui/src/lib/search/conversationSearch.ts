@@ -16,14 +16,6 @@ const metadataField = (item: ConversationMetadata, ranges: ReadonlyArray<MatchRa
   return 'directory';
 };
 
-/**
- * Conversations are looked for by what the user remembers of them, and the
- * recent ones are the likely answer. Titles that hold every query word as
- * typed are the answer, the most recently changed on top. Titles matched only
- * by scattered letters ("agent" in "Add geometry notes") are noise beside
- * them, so they list only when no title holds the words, as the fallback for
- * an abbreviation or a typo. Without dates the match order stands.
- */
 const byWholeWordsThenRecency = <T extends { item: ConversationMetadata }>(ranks: T[], normalizedQuery: string): T[] => {
   const words = normalizedQuery.split(/\s+/).filter(Boolean);
   const whole: T[] = [];
@@ -32,12 +24,10 @@ const byWholeWordsThenRecency = <T extends { item: ConversationMetadata }>(ranks
     const title = rank.item.title.toLocaleLowerCase();
     (words.every((word) => title.includes(word)) ? whole : scattered).push(rank);
   }
-  // Array.prototype.sort is stable, so equal or missing dates keep the match order.
   whole.sort((left, right) => (right.item.updatedAt ?? 0) - (left.item.updatedAt ?? 0));
   return whole.length > 0 ? whole : scattered;
 };
 
-/** `titlesOnly` (the Titles only filter) skips the project, worktree and folder fields; `branchOnly` keeps the worktree's branch alone. */
 export function rankConversationMetadata(items: ReadonlyArray<ConversationMetadata>, text: string, options?: { limit?: number; titlesOnly?: boolean; branchOnly?: boolean }): MetadataMatch[] {
   const query = text.trim();
   if (!query) return [];
@@ -45,13 +35,10 @@ export function rankConversationMetadata(items: ReadonlyArray<ConversationMetada
   if (normalizedQuery.startsWith('ses_')) return items.filter((item) => item.sessionId.toLocaleLowerCase() === normalizedQuery).slice(0, options?.limit).map((item) => ({ sessionId: item.sessionId, score: 0, titleRanges: [], matchedField: 'id' }));
   const allTitleRanks = rankBySubsequence(items, query, (item) => item.title);
   const titleRanks = byWholeWordsThenRecency(allTitleRanks, normalizedQuery);
-  // A title match left out as scattered must not come back through the project and folder pass.
   const titleIds = new Set(allTitleRanks.map((entry) => entry.item.sessionId));
   const titleMatches = titleRanks.map((entry) => ({ sessionId: entry.item.sessionId, score: -entry.score, titleRanges: entry.ranges, matchedField: 'title' as const }));
   if (options?.titlesOnly) return titleMatches.slice(0, options.limit);
   const rest = items.filter((item) => !titleIds.has(item.sessionId));
-  // A list that already names each row's project gains nothing from matching it: the project's name
-  // would list every conversation in it. There only the branch finds a conversation besides its title.
   const metadataMatches = options?.branchOnly
     ? byWholeWordsThenRecency(rankBySubsequence(rest.filter((item) => item.worktreeLabel), query, (item) => item.worktreeLabel ?? ''), normalizedQuery)
       .map((entry) => ({ sessionId: entry.item.sessionId, score: 1_000_000 - entry.score, titleRanges: [], matchedField: 'worktree' as const }))

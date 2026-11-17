@@ -2,9 +2,6 @@ import type { Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { foldGutter, foldKeymap } from '@codemirror/language';
 
-// Fold arrows in the gutter plus fold/unfold of the block at the cursor
-// (Cmd+Alt+[ / ] on macOS, Ctrl+Shift+[ / ] elsewhere). Fold-all and
-// unfold-all are left out: their Ctrl+Alt+[ / ] chords cycle favourite models.
 const FOLD_AT_CURSOR_KEYMAP = foldKeymap.filter((binding) => binding.mac !== undefined);
 
 const createFoldMarker = (open: boolean): HTMLElement => {
@@ -23,8 +20,6 @@ const createFoldMarker = (open: boolean): HTMLElement => {
 export const codeFolding = (): Extension => [
   foldGutter({ markerDOM: createFoldMarker }),
   keymap.of(FOLD_AT_CURSOR_KEYMAP),
-  // A narrow column: just the 12 px arrow, and the gutter's trailing gap
-  // shrunk to match, so the arrows sit close to the code they fold.
   EditorView.theme({
     '.cm-foldGutter': { width: '12px' },
     '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },

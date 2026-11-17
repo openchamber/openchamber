@@ -6,30 +6,17 @@ import { isCapacitorApp } from '@/lib/platform';
 import type { PlayMessageTTSOptions } from './useMessageTTS';
 
 export interface AutoReadAloudOptions {
-    /** Identity of the session on screen; a switch starts a new baseline. */
     sessionKey: string;
-    /** The session's message history is loaded for this session. */
     ready: boolean;
-    /** The session is running a turn, permission prompts included. */
     sessionIsActive: boolean;
-    /** Newest completed answer in the session, or null when there is none. */
     reply: LatestReply | null;
-    /** Loaded session history; every finished answer in it belongs to the baseline. */
     history: readonly LatestReplyRecord[];
-    /** Completed answers fetched through older-history pagination. */
     olderCompletedReplyIds: ReadonlySet<string>;
     enabled: boolean;
     play: (text: string, options?: PlayMessageTTSOptions) => Promise<void>;
-    /** Claims a reply across windows so only one of them reads it. */
     claim?: (messageId: string) => Promise<boolean>;
 }
 
-/**
- * Reads the newest completed answer after a turn that this surface watched
- * run. Every finished answer present when a session opens is recorded as the
- * baseline, so opening a conversation never starts playback and trimming back
- * to an older answer does not read it for the first time.
- */
 export const useAutoReadAloud = ({
     sessionKey,
     ready,
@@ -45,9 +32,6 @@ export const useAutoReadAloud = ({
     const observedActiveRef = useRef(false);
     const initializedRef = useRef(false);
     const latestReplyIdRef = useRef<string | null>(null);
-    // Every id this surface has already read, plus every answer present at
-    // the baseline. Reverting or trimming a turn makes an older answer the
-    // latest reply again, and it must not be read as if it just finished.
     const heardReplyIdsRef = useRef<Set<string>>(new Set());
     const nativeMobile = isCapacitorApp();
     const foregroundRef = useRef(!nativeMobile);
@@ -82,7 +66,6 @@ export const useAutoReadAloud = ({
                 const state = await App.getState();
                 if (!disposed && !stateChanged) foregroundRef.current = state.isActive;
             }).catch(() => {
-                // Unknown native state must not authorize automatic speech.
                 foregroundRef.current = false;
             });
         }

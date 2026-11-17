@@ -8,7 +8,6 @@ import { UI_CSS } from './style.ts';
 export type SelectOption = {
   id: string;
   label: string;
-  /** Small muted text at the right of the option. */
   hint?: string;
 };
 
@@ -18,7 +17,6 @@ export type SelectProps = {
   options: SelectOption[];
   onChange: (id: string) => void;
   placeholder?: string;
-  /** Adds a search box at the top of the popup. */
   searchable?: boolean;
   searchPlaceholder?: string;
   disabled?: boolean;
@@ -26,7 +24,6 @@ export type SelectProps = {
 
 export type SelectHandle = Handle<SelectProps>;
 
-/** Case-insensitive substring match on label and id. Empty query keeps every option. */
 export const filterSelectOptions = (options: readonly SelectOption[], query: string): SelectOption[] => {
   const needle = query.trim().toLowerCase();
   if (!needle) {
@@ -93,9 +90,6 @@ export const mountSelect = (root: Element, initial: SelectProps): SelectHandle =
   };
 
   const close = (): void => {
-    // Removing a focused row fires `focusout` synchronously from inside the disposer, and
-    // that handler calls `close` again. Clearing the slot first makes the re-entry a no-op
-    // instead of a second `popup.remove()` that throws before the pick reaches `onChange`.
     const dispose = closePopup;
     closePopup = null;
     dispose?.();

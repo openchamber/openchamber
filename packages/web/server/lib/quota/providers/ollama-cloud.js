@@ -1,9 +1,3 @@
-/**
- * Ollama Cloud quota, read from `GET /api/balance` and `POST /api/me` with the
- * API key OpenCode holds for chat requests.
- *
- * @module quota/providers/ollama-cloud
- */
 
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { deleteLegacyOllamaCloudCredential } from '../credentials/store.js';
@@ -22,22 +16,6 @@ const apiKeyFromAuth = (auth) => {
   return asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
 };
 
-/**
- * The account's windows, read from an already-parsed `/api/balance` payload.
- *
- * `included` is one of two documented shapes. A credits plan reports the month's
- * pool: the used fraction is `(allowance_usd - balance_usd) / allowance_usd`,
- * clamped because a pool at or over its cap must read as 100 and never above,
- * with the reset at `period.until`. A legacy plan reports `session` and
- * `weekly` limits instead, each a `remaining_percent` with a `resets_at`; those
- * become their own windows. Whichever buckets are present are rendered, so a
- * plan on one shape keeps reporting while Ollama serves the other. A pool with
- * no positive allowance is skipped, not guessed at.
- *
- * `purchased.balance_usd` is pay-as-you-go credit bought on top of the plan. It
- * is a money balance, not a fraction of anything, so it is surfaced only while
- * positive; a zero or absent balance adds no row.
- */
 export const toUsageWindows = (payload) => {
   const windows = {};
   const included = asObject(asObject(payload)?.included);
@@ -92,7 +70,6 @@ export const fetchOllamaCloudUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-/** The plan tier ("free", "pro", "max"), best-effort: a failure drops the label, not the reading. */
 export const fetchOllamaCloudPlan = async (apiKey, fetchImpl = fetch) => {
   const response = await fetchImpl(ME_URL, {
     method: 'POST',
@@ -104,9 +81,6 @@ export const fetchOllamaCloudPlan = async (apiKey, fetchImpl = fetch) => {
 };
 
 export const fetchQuota = async () => {
-  // Mirrors the OpenCode Go cleanup: the stored cookie is obsolete now. It is
-  // removed on the first refresh whether or not a key is readable, so a user
-  // who only ever pasted a cookie never keeps a browser session cookie on disk.
   deleteLegacyOllamaCloudCredential();
 
   const apiKey = apiKeyFromAuth(await readOpenCodeCredentials());

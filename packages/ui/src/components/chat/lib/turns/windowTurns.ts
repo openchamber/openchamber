@@ -6,7 +6,6 @@ const resolveMessageRole = (message: ChatMessageEntry): string => {
     return typeof role === 'string' ? role : '';
 };
 
-/** A user prompt opens a turn, and so does a background report or a compaction (see `isTurnOpeningNotice`). */
 const opensTurn = (message: ChatMessageEntry): boolean =>
     resolveMessageRole(message) === 'user' || isTurnOpeningNotice(message.info);
 
@@ -108,8 +107,6 @@ export const updateTurnWindowModelIncremental = (
         return nextModel;
     }
 
-    // A reply after a skipped notice may open a turn at that notice, earlier
-    // in the list; the full pass places it.
     const previousMessage = previousMessages[previousMessages.length - 1];
     if (role === 'assistant' && previousMessage && isSkippedTimelineMessage(previousMessage.info)) {
         return null;
@@ -172,7 +169,6 @@ export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowMo
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         const messageId = message.info.id;
-        // Same rule as `projectTurnRecords`, so turn ids match the rendered turns.
         const noticeIndex = splitAtNotice(message.info, index);
         if (noticeIndex >= 0 && currentTurnIndex >= 0) {
             openTurn(messages[noticeIndex].info.id, noticeIndex);

@@ -35,17 +35,10 @@ import {
 
 const DEFAULT_IDLE_HOURS = 4;
 
-/**
- * The idle stop (decision 11): a space stops itself after this many hours with no session working,
- * and keeps its files. The host keeps the setting and tells every running space at once; this row
- * shows what the host answered. Rendered only while the switch is on, because the route exists
- * only then (decision 19).
- */
 const SpaceIdleStopSettings: React.FC = () => {
   const { t } = useI18n();
   const [setting, setSetting] = React.useState<SpaceIdleStop | null>(null);
   const [loadFailed, setLoadFailed] = React.useState(false);
-  // Only the answer to the latest change may set what the row shows.
   const latest = React.useRef(0);
 
   React.useEffect(() => {
@@ -97,7 +90,6 @@ const SpaceIdleStopSettings: React.FC = () => {
               min={SPACE_IDLE_STOP_MIN_HOURS}
               max={SPACE_IDLE_STOP_MAX_HOURS}
               step={1}
-              // Typing "12" must not save 1 on the way and send it to every running space.
               deferExternalValueWhileFocused
               aria-label={t('settings.openchamber.spaces.idleStop.afterAria')}
               className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
@@ -122,30 +114,12 @@ const SpaceIdleStopSettings: React.FC = () => {
   );
 };
 
-// What turning the switch off would do, asked of the host before it happens (decision 18): stop
-// that many running spaces, or the list could not be read.
 type TurnOffNotice = { kind: 'stops'; count: number } | { kind: 'unknown' };
 
-/**
- * The switch of the isolated-spaces feature, live through the host's switch route: turning it on
- * makes the feature exist now, turning it off stops every running space and keeps its files. When
- * there is something to stop, or the host cannot say what runs, a notice says so before anything
- * happens, and a space that could not be stopped is named afterwards. Removing spaces is never
- * part of this. Never mounted in VS Code (decision 16), and nowhere until the feature is
- * released, see `lib/spaces/release.ts`.
- */
-/**
- * The spaces whose project is no longer registered here (journey step 9, and
- * decision 12): removed from OpenChamber or added again under another path, so no project menu
- * leads to them. Listed only when there are any, with the folder each was made for and the same
- * actions as a space's group. A read that fails lists nothing here rather than saying there are
- * none: this list is a way out, not the spaces' status.
- */
 const SpacesWithoutProject: React.FC = () => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
   const { journey } = useSpacesJourneyRead();
-  // A space whose container is gone is listed under its place, with what it left behind.
   const spaces = journey ? spacesWithoutProject(journey).filter((entry) => entry.state !== 'missing') : [];
   if (spaces.length === 0) return null;
   return (
@@ -166,7 +140,6 @@ export const IsolatedSpacesSettings: React.FC = () => {
   const [outcome, setOutcome] = React.useState<SpacesSwitchChange | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  // The host holds the switch; the setting this window remembers can be older than it.
   React.useEffect(() => {
     const controller = new AbortController();
     readSpacesSwitch(controller.signal).then((state) => setEnabled(state.enabled), () => undefined);

@@ -82,8 +82,6 @@ function getWindowsStartupWrapperPath() {
 }
 
 function collectStartupEnv(options = {}) {
-  // Variables OpenChamber itself put into this shell (the desktop app's
-  // terminal, an agent's shell) describe that instance, not the service.
   const injected = injectedEnvKeys(process.env);
   const env = options.envSnapshot === false ? {} : Object.fromEntries(
     Object.entries(process.env)
@@ -114,13 +112,8 @@ function shouldPersistStartupEnv(key, value) {
   if (typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return false;
   if (typeof value !== 'string') return false;
   if (/[\r\n]/.test(value)) return false;
-  // A saved PATH outlives the toolchains it lists, and the server would keep
-  // it ahead of the login shell's current PATH. Without one, the service gets
-  // the platform default and the server adds the login shell's PATH at start.
-  // Windows spells it `Path`.
   if (key.toUpperCase() === 'PATH') return false;
 
-  // These are shell/session implementation details, not app configuration.
   const volatileKeys = new Set([
     '_',
     'BASH_ENV',
@@ -174,9 +167,6 @@ function removeStartupEnvFile() {
 const PNPM_STORE_SEGMENT = `${path.sep}.pnpm${path.sep}`;
 const PACKAGE_SEGMENT = `${path.sep}node_modules${path.sep}@openchamber${path.sep}web${path.sep}`;
 
-// pnpm keeps every installed version in its own store directory and links the
-// current one into node_modules. A startup service pointed at the store path
-// keeps launching the old version after an update, so prefer the link.
 function stablePnpmEntrypoint(resolved, exists = fs.existsSync) {
   const storeIndex = resolved.indexOf(PNPM_STORE_SEGMENT);
   if (storeIndex < 0) return null;
@@ -191,11 +181,6 @@ function stablePnpmEntrypoint(resolved, exists = fs.existsSync) {
   return exists(stable) ? stable : null;
 }
 
-// pnpm 11 and later install a global package into a new directory under
-// global/v11 on every update and delete the old one. A link beside it, named
-// after the installed packages, moves to each new directory, and pnpm's shim
-// starts the CLI through that link. Resolving it would pin the service to a
-// directory the next update deletes.
 function isPnpmGlobalLinkEntrypoint(invoked) {
   const packageIndex = invoked.indexOf(PACKAGE_SEGMENT);
   if (packageIndex < 0) return false;
@@ -367,10 +352,6 @@ function getCurrentUsername() {
   return process.env.USER || process.env.LOGNAME || '';
 }
 
-// A systemd --user service only keeps running without an active login session
-// when the user has lingering enabled. Detect it so `startup enable` can warn
-// that the service may otherwise stop on logout. Returns null when the state
-// cannot be determined (no username, loginctl unavailable, or odd output).
 function getUserLingerEnabled(user) {
   if (!user) {
     return null;
@@ -421,23 +402,17 @@ function getStartupStatus() {
   };
 }
 
-// The pid systemd reports as the unit's MainPID, from `systemctl show` output.
 function parseSystemdMainPid(stdout) {
   const pid = Number.parseInt(String(stdout || '').trim(), 10);
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-// The pid launchd reports for a running job, from `launchctl list <label>`
-// output. The `"PID"` key is absent while the job is not running.
 function parseLaunchdJobPid(stdout) {
   const match = /^\s*"PID"\s*=\s*(\d+);/m.exec(String(stdout || ''));
   const pid = match ? Number.parseInt(match[1], 10) : null;
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-// The process id of the running startup service, or null when it is not
-// running or startup integration here is not a service. systemd answers with
-// the unit's MainPID; launchd reports the pid of the job it runs.
 function getStartupServicePid() {
   if (process.platform === 'linux') {
     let result;
@@ -460,10 +435,6 @@ function getStartupServicePid() {
   return null;
 }
 
-// Task Scheduler has no pid to ask for, so the task's processes are read from
-// the task itself: its state, then the PowerShell wrapper running the task's
-// own arguments, then that wrapper's children. A second process with the same
-// command line cannot be told from the task's, so it reports no processes.
 const WINDOWS_TASK_PROCESSES_SCRIPT = [
   '$ErrorActionPreference = "Stop"',
   `$task = Get-ScheduledTask -TaskPath "\\" -TaskName "${STARTUP_SERVICE_ID}"`,
@@ -475,9 +446,6 @@ const WINDOWS_TASK_PROCESSES_SCRIPT = [
   '"running " + (($children | ForEach-Object { $_.ProcessId }) -join " ")',
 ].join('\n');
 
-// The pids the running task owns, from the script's output, or null when the
-// task is not running. The wrapper's children include its console host, so the
-// list is matched against the known instances.
 function parseWindowsTaskProcesses(stdout) {
   const output = String(stdout || '').trim();
   if (output === 'stopped') {
@@ -509,10 +477,6 @@ function getWindowsTaskProcesses() {
   return parseWindowsTaskProcesses(result.stdout);
 }
 
-// Throws when the task is running and no instance can be matched to it: the
-// update would otherwise stop the service as a plain CLI copy, or leave it on
-// the old release. Discovery skips a server that does not answer its probe, so
-// an empty list says nothing about the task.
 function findWindowsTaskInstance(instances, getTaskProcesses) {
   let taskPids;
   try {
@@ -534,10 +498,6 @@ function windowsTaskOwnershipError(detail) {
   return new Error(`Could not tell which running server belongs to the startup task: ${detail}. Nothing was stopped or installed. Run \`openchamber startup disable\`, update, then run \`openchamber startup enable\`.`);
 }
 
-// The instance a process manager will start again on its own, or null when
-// none of the running instances is that one. systemd and launchd report a pid,
-// and a null pid means the service is not running. Windows matches the running
-// task's processes and throws when it cannot.
 function findStartupServiceInstance(instances, {
   getPid = getStartupServicePid,
   getTaskProcesses = getWindowsTaskProcesses,
@@ -554,8 +514,6 @@ function restartSystemdService() {
   runStartupCommand('systemctl', ['--user', 'restart', 'openchamber.service']);
 }
 
-// Starts the task once the old server is gone and the task has stopped, and
-// gives up after 30 seconds, longer than the restart below waits for the exit.
 function buildWindowsTaskStartScript(serverPid) {
   return [
     '$deadline = (Get-Date).AddSeconds(30)',
@@ -571,8 +529,6 @@ function buildWindowsTaskStartScript(serverPid) {
   ].join('\n');
 }
 
-// The update may run in a terminal of this very server, and that terminal dies
-// with it, so a detached process has to issue the `/Run`.
 function startWindowsTaskAfterExit(serverPid, spawnProcess = spawn) {
   return new Promise((resolve, reject) => {
     const helper = spawnProcess(windowsPowershellPath(), windowsPowershellArgs(buildWindowsTaskStartScript(serverPid)), {
@@ -588,11 +544,6 @@ function startWindowsTaskAfterExit(serverPid, spawnProcess = spawn) {
   });
 }
 
-// A bare `/Run` on a running task is a no-op, and a `/Run` while the old server
-// holds the port starts a process that cannot bind it, so the helper waits for
-// the old server to be gone. `/End` stops the program the task started, which
-// is the PowerShell wrapper, so the server can outlive it and is stopped by
-// pid. `/End` comes first: after the server exits it would end the new run.
 async function restartWindowsStartupTask(instance, {
   run = runStartupCommand,
   requestShutdown = requestServerShutdown,
@@ -657,8 +608,6 @@ function enableStartupService(options = {}) {
     fs.writeFileSync(paths.servicePath, buildSystemdUserService(options), { mode: 0o600 });
     runStartupCommand('systemctl', ['--user', 'daemon-reload']);
     runStartupCommand('systemctl', ['--user', 'enable', 'openchamber.service']);
-    // `enable --now` leaves a running service alone, so it would keep the old
-    // unit and the old release.
     restartSystemdService();
     return getStartupStatus();
   }

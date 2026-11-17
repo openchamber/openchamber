@@ -4,12 +4,6 @@ import { asControlError } from '../openchamber-control/error.js';
 
 const BASE = '/api/openchamber/sessions/:sessionId/share-pages/:callId';
 
-/**
- * The session card's side of a shared page, behind UI auth like every
- * OpenChamber route: the group with each recipient's link and PIN, the
- * document the chat built (sealed and uploaded here), withdrawing one link,
- * and the local copy for the author's preview.
- */
 const handle = (fallback, work) => async (req, res) => {
   try {
     return res.json(await work(req));
@@ -23,12 +17,6 @@ const handle = (fallback, work) => async (req, res) => {
 
 const RECEIVED = '/api/openchamber/received-pages';
 
-/**
- * Pages other people shared, opened in this app (`received-runtime.js`):
- * which links this server opens, taking a pasted link, the PIN, the page and
- * its document, and the one answer. `config` never refuses; every other route
- * answers 403 `code: 'enterprise_mode'` while receiving is unavailable.
- */
 export const registerReceivedPageRoutes = (app, runtime) => {
   app.get(`${RECEIVED}/config`, handle('Could not read the shared pages settings', () => runtime.config()));
   app.get(RECEIVED, handle('Could not read the shared pages', () => runtime.list()));
@@ -48,7 +36,6 @@ export const registerSharePageRoutes = (app, runtime) => {
 
   app.get(BASE, handle('Could not read the shared page', (req) => runtime.getGroup(req.params.sessionId, req.params.callId)));
 
-  // A page may inline up to 25 MB of images plus the renderer.
   app.post(`${BASE}/document`, express.json({ limit: '40mb' }), handle('Could not share the page', (req) => (
     runtime.uploadDocument(req.params.sessionId, req.params.callId, { html: req.body?.html, title: req.body?.title, source: req.body?.source })
   )));

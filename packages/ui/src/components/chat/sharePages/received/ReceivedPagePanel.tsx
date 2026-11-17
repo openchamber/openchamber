@@ -13,15 +13,8 @@ import { ReceivedPageFrame } from './ReceivedPageFrame';
 import { receivedStatusLook, takesAnswerNow } from './status';
 import { useReceivedPage } from './useReceivedPage';
 
-/**
- * A page someone else shared, full size: the context panel's `pages` tab, or
- * the phone's full-screen page. One line of state over the page (waiting for
- * the user's answer, the answer they sent, read only, expired), then the page
- * itself with its own Send. A page never opened asks for its PIN here.
- */
 export function ReceivedPagePanel({ receivedId, onAddedToChat }: {
   receivedId: string;
-  /** After Add to chat: the phone's full-screen page steps aside so the composer shows. */
   onAddedToChat?: () => void;
 }) {
   const { t } = useI18n();
@@ -31,7 +24,6 @@ export function ReceivedPagePanel({ receivedId, onAddedToChat }: {
   const [document, setDocument] = React.useState<{ id: string; html: string } | null>(null);
   const [documentError, setDocumentError] = React.useState<string | null>(null);
   const opened = page?.opened === true;
-  // What the relay says now (locked, expired, withdrawn); the stored state stays shown if it cannot be read.
   React.useEffect(() => {
     let live = true;
     refreshReceivedPage(receivedId).then((next) => { if (live) accept(next); }, () => undefined);

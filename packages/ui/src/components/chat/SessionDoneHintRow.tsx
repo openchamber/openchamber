@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { settleRunningOperatorChildren } from '@/sync/operator-children-done';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -36,6 +37,7 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
     if (pending) return;
     setPending(true);
     try {
+      if (!await settleRunningOperatorChildren([sessionId])) return;
       await setSessionWorkState(sessionId, directory, 'done');
       // Done work leaves the working set: its header tab closes and the
       // neighbouring tab, or a new draft, takes over.

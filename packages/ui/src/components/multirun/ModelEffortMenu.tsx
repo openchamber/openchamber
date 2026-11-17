@@ -8,11 +8,6 @@ import { listModelVariantIds } from '@/lib/modelVariants';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 
-/**
- * Thinking effort (model variant) picker for one model; renders nothing for
- * models without variants. `inline` sits inside a model chip, `trigger` stands
- * next to a model picker button.
- */
 export function ModelEffortMenu({ providerID, modelID, variant, onChange, appearance = 'inline', disabled = false, tooltip }: {
   providerID: string;
   modelID: string;

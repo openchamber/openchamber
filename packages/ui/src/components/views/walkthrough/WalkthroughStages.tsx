@@ -9,16 +9,6 @@ interface WalkthroughStagesProps {
   progress: WalkthroughStageProgress;
 }
 
-/**
- * The wait is long and uneven — collecting a pull request diff is seconds of
- * network, the model call is minutes — and a lone spinner makes those look
- * identical. Naming the phase says which one you are waiting on, and that the
- * cost has been committed once it reads "waiting on the model".
- *
- * No durations: a stopwatch on a step nobody can hurry adds pressure, not
- * information. And no mention of the schema fallback — from out here it is the
- * same wait, and naming our plumbing only invites the question of what it is.
- */
 const STAGES: Array<{ labelKey: I18nKey }> = [
   { labelKey: 'walkthrough.stage.collecting' },
   { labelKey: 'walkthrough.stage.asking' },

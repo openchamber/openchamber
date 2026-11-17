@@ -44,11 +44,8 @@ export interface SettingsRuntimeContext {
   isWeb: boolean;
   isDesktop: boolean;
   isMobile: boolean;
-  /** Whether this runtime has Jev routing, which needs the OpenChamber server. */
   routingAvailable: boolean;
-  /** The server runs in enterprise mode: pages for what it refuses are hidden. */
   enterpriseMode: boolean;
-  /** Enterprise mode keeps Jev off (no administrator's endpoint), so pages that only configure Jev are hidden. */
   jevBlockedByEnterprise: boolean;
 }
 
@@ -234,7 +231,6 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'projects',
     kind: 'single',
     keywords: ['isolated', 'space', 'spaces', 'container', 'docker', 'colima', 'sandbox', 'disk', 'clean up', 'image'],
-    // Never in VS Code (decision 16 of the design); before the feature's first release only with the key on.
     isAvailable: (ctx) => !ctx.isVSCode && isIsolatedSpacesPageVisible(),
   },
   { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog', 'canary', 'channel'], isAvailable: (ctx) => !ctx.isVSCode },
@@ -285,9 +281,6 @@ export function resolveSettingsSlug(value: string | null | undefined): SettingsP
   return 'home';
 }
 
-// Lives here (not in SettingsView) so light consumers such as the command
-// palette can render settings entries without statically importing the whole
-// settings surface into the eager startup graph.
 export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
   switch (slug) {
     case 'general':

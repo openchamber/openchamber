@@ -1,23 +1,3 @@
-/**
- * Bundle the Electron main process into dist-bundle/. Three files come out:
- * entry.mjs (what Electron loads: pre-ready configuration and the first
- * window), main.mjs (everything else, imported after `ready`) and
- * early-startup.mjs, which both import. It must stay a separate file that
- * both bundles import at runtime: the early window is handed from entry to
- * main through a slot in that module, and inlining it would give each bundle
- * its own copy. Small electron-* helper deps are inlined; everything else —
- * including the in-process web server (@openchamber/web) and native modules —
- * stays external so it resolves from node_modules at runtime inside the
- * packaged app.
- *
- * Why external matters: packages/web/server pulls in bun-pty, which has
- * a top-level `import { dlopen } from "bun:ffi"`. If we inline it here,
- * Node's ESM loader sees `bun:ffi` at package load time and crashes with
- * ERR_UNSUPPORTED_ESM_URL_SCHEME before any runtime guard can skip it.
- * Leaving @openchamber/web external means the conditional
- * `if (isBunRuntime) await import('bun-pty')` stays dynamic and is never
- * reached under Electron.
- */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

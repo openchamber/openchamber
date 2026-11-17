@@ -36,11 +36,6 @@ const positive = (value: string): number | null => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-/**
- * One model of a custom provider. Collapsed, it reads as a single line (name,
- * id, the limits and anything beyond plain text), so a provider with dozens
- * of imported models stays scannable; the editor opens on demand.
- */
 export const CustomProviderModelRow: React.FC<Props> = ({
   model,
   errors,

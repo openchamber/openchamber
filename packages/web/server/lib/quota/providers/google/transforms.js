@@ -1,9 +1,3 @@
-/**
- * Google Provider - Transforms
- *
- * Data transformation functions for Google quota responses.
- * @module quota/providers/google/transforms
- */
 
 import {
   asNonEmptyString,

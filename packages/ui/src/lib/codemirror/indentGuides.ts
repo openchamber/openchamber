@@ -1,18 +1,11 @@
 import type { EditorState, Extension, Line, Text } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
-// A faint vertical line per indentation level, like the file tree's guides.
-// Each visible line gets a background drawn at multiples of the file's own
-// indent width, measured in `ch`, so the lines fall under the indentation
-// whatever the font. Only lines in view are decorated.
 
-// Lines read when guessing the indent width, and how far a blank line looks
-// for a neighbour with text.
 const DETECT_LINE_LIMIT = 2_000;
 const BLANK_LOOKAROUND_LIMIT = 100;
 const COMMON_WIDTHS = [2, 3, 4, 8];
 
-/** Columns of leading whitespace, tabs counted to the next tab stop; null for a blank line. */
 export const leadingColumns = (text: string, tabSize: number): number | null => {
   let columns = 0;
   for (const char of text) {
@@ -23,11 +16,6 @@ export const leadingColumns = (text: string, tabSize: number): number | null => 
   return null;
 };
 
-/**
- * The file's indent width in columns: the most common step between the
- * indentation of consecutive lines, among the usual widths. A file indented
- * with tabs steps by the tab size.
- */
 export const detectIndentWidth = (doc: Text, tabSize: number): number => {
   const votes = new Map<number, number>();
   let previous = 0;
@@ -55,10 +43,6 @@ const nearestTextColumns = (doc: Text, from: Line, direction: 1 | -1, tabSize: n
   return null;
 };
 
-/**
- * Guides a line shows: one per full indent step of its text. A blank line
- * takes the deeper of its neighbours, so the guides run through it.
- */
 export const guideLevel = (doc: Text, line: Line, width: number, tabSize: number): number => {
   let columns = leadingColumns(line.text, tabSize);
   if (columns === null) {
@@ -117,10 +101,6 @@ const guidesPlugin = ViewPlugin.fromClass(class {
 export const indentGuides = (): Extension => [
   guidesPlugin,
   EditorView.theme({
-    // Guides sit at columns 0, w, 2w… of the text, so the lines fall in the
-    // indentation and never under the line's own first character. Their tone
-    // comes from the editor's own text colour: the code background differs
-    // from the page, so the file tree's border tone barely shows on it.
     '.cm-indent-guides': {
       backgroundImage: 'repeating-linear-gradient(to right, color-mix(in srgb, currentColor 16%, transparent) 0 1px, transparent 1px calc(var(--cm-indent-width) * 1ch))',
       backgroundSize: 'calc(var(--cm-indent-guides) * var(--cm-indent-width) * 1ch) 100%',

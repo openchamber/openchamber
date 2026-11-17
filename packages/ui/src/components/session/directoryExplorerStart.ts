@@ -8,21 +8,15 @@ export const isRootedBrowseQuery = (query: string): boolean => ROOTED_PATH.test(
 
 const withTrailingSeparator = (value: string): string => (value.endsWith('/') ? value : `${value}/`);
 
-/**
- * Drops trailing separators from a slash path, keeping a filesystem root
- * absolute: `/` stays `/`, and a drive keeps its slash (`D:/`, `//?/D:/`),
- * since bare `D:` means that drive's current folder.
- */
+// external: https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats A bare drive letter resolves relative to that drive; drive roots retain their slash.
 export const trimTrailingSeparators = (value: string): string => {
   const trimmed = value.replace(/\/+$/u, '');
   if (!trimmed) return value ? '/' : value;
   return isFilesystemRoot(trimmed) && /:$/u.test(trimmed) ? `${trimmed}/` : trimmed;
 };
 
-/** A child of a slash folder, with exactly one separator between them, roots included. */
 export const joinBrowsePath = (folder: string, name: string): string => `${withTrailingSeparator(trimTrailingSeparators(folder))}${name}`;
 
-/** The folder above a browsed slash path, as a path-field value; none at home or a filesystem root. */
 export const getBrowseParentPath = (value: string): string | null => {
   const trimmed = trimTrailingSeparators(value.trim());
   if (!trimmed || trimmed === '~' || isFilesystemRoot(trimmed)) return null;
@@ -30,11 +24,6 @@ export const getBrowseParentPath = (value: string): string | null => {
   return parent === null ? null : withTrailingSeparator(parent);
 };
 
-/**
- * What the path field means. A name without a root belongs to the folder being
- * browsed: the server would otherwise resolve it against its own working
- * directory, which is nowhere the person is looking.
- */
 export const resolveBrowseQuery = (query: string, browsedFolder: string): string => (
   isRootedBrowseQuery(query) ? query.trimStart() : `${browsedFolder}${query.trimStart()}`
 );
@@ -43,8 +32,6 @@ type ProjectPlace = { path: string; addedAt?: number };
 
 const parentBrowseQuery = (projectPath: string, homeDirectory: string): string => {
   const path = trimTrailingSeparators(projectPath.trim().replace(/\\/g, '/'));
-  // A project at a filesystem root starts the picker at that root; one
-  // directly under a root starts there too, never above it.
   if (isFilesystemRoot(path)) return withTrailingSeparator(path);
   const parent = getNormalizedParentDirectory(path);
   if (!parent) return '~/';
@@ -55,11 +42,6 @@ const parentBrowseQuery = (projectPath: string, homeDirectory: string): string =
   return `${parent}/`;
 };
 
-/**
- * Where the add-project picker starts: the folder holding the most recently
- * added project, since a new project usually sits beside the previous ones.
- * Home when there is none, shown as `~/...` when it lies under home.
- */
 export const initialBrowseQuery = (
   projects: ReadonlyArray<ProjectPlace>,
   homeDirectory: string,
@@ -74,7 +56,6 @@ export const initialBrowseQuery = (
 
 const PROJECT_PLACES = 3;
 
-/** The folders projects live in, latest first, as path-field values. Home has its own entry. */
 export const projectBrowsePlaces = (
   projects: ReadonlyArray<ProjectPlace>,
   homeDirectory: string,

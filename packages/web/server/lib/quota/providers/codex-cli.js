@@ -1,16 +1,3 @@
-/**
- * The Codex CLI's own ChatGPT sign-in, read for the Codex usage provider of
- * both runtimes (web server and VS Code extension host).
- *
- * OpenCode's "Sign in with ChatGPT" token reaches only the Responses route,
- * so the usage endpoint refuses it. The Codex CLI signs in with OpenAI's own
- * app client and keeps a token the usage endpoint accepts, in
- * `$CODEX_HOME/auth.json` (`~/.codex` by default). That file is read fresh per
- * request and never written or refreshed: the CLI owns it, and a refresh from
- * here would race the CLI's own.
- *
- * @module quota/providers/codex-cli
- */
 
 import os from 'os';
 import path from 'path';
@@ -35,11 +22,6 @@ export const readCodexCliLogin = () => {
   return { accessToken, accountId: asNonEmptyString(tokens.account_id) };
 };
 
-/**
- * The email OpenAI puts in an access token's profile claim, or null when the
- * token carries none. Decoded only, never verified: it names the account for
- * display and comparison, and nothing is granted on it.
- */
 export const signInEmailOf = (accessToken) => {
   const part = accessToken.split('.')[1];
   if (!part) return null;

@@ -25,24 +25,10 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const BOOTSTRAP_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000];
-// A configured external OpenCode may come up after the startup window closes.
 const EXTERNAL_READINESS_RECHECK_MS = 5_000;
 const OPENCODE_HEALTH_PATH = '/api/info';
 const OPENCODE_REQUIRED_MAJOR_VERSION = 2;
 
-/**
- * OpenChamber talks to OpenCode 2.x only. v1 serves its routes without the
- * `/api` prefix, publishes a different event vocabulary and has no `plugins`
- * config key, so an older binary fails in a hundred small ways instead of one
- * clear one.
- *
- * The version comes from the health payload rather than from `opencode
- * --version`: it costs no extra process, and it also covers an external
- * OpenCode the user started themselves. `/api/info` only exists in 2.x (2.0.8
- * removed the older `/api/health`), so a 404 there is the same answer by
- * another route. A 200 is the readiness signal; the payload has no `healthy`
- * field, only `{ version, pid, urls, paths }`.
- */
 const OPENCODE_VERSION_REQUIREMENT_DETAIL =
   `OpenChamber requires OpenCode ${OPENCODE_REQUIRED_MAJOR_VERSION}.x`;
 
@@ -56,9 +42,6 @@ const classifyOpenCodeVersion = (version) => {
     detail: `${OPENCODE_VERSION_REQUIREMENT_DETAIL}, found ${version.trim()}. Update OpenCode and start OpenChamber again.`,
   };
 };
-// Only the directory the user will open anyway. On OpenCode 2 the first
-// directory-scoped read boots that location's whole MCP fleet, so warming
-// other projects "just in case" started processes nobody asked for (#4018).
 const WARMUP_DIRECTORY_LIMIT = 1;
 const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
@@ -73,11 +56,6 @@ const getBoundedTextTail = (value, maxBytes) => {
 const sanitizeDiagnosticText = (value) => String(value ?? '')
   .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[redacted]@')
   .replace(/\b(Bearer)\s+[^\s,;]+/gi, '$1 [redacted]')
-  // Unquoted `Authorization: <scheme> <credential>` values must be handled
-  // before the generic key/value rule below: that rule stops at whitespace, so
-  // it would redact only the scheme word and leave the credential intact.
-  // Scoped to authorization-style keys so ordinary prose using "basic" or
-  // "token" is not mangled.
   .replace(
     /(^|[\s,{\[])((?:"|')?[a-z0-9_.-]{0,80}authorization[a-z0-9_.-]{0,80}(?:"|')?\s*[:=]\s*(?:"|')?(?:basic|bearer|token)\s+)[^\s,;"']+/gim,
     '$1$2[redacted]',
@@ -144,14 +122,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
-    // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
-    // Scopes server-side reads while no project directory is usable (the
-    // managed chats root). Without it they name no directory, and OpenCode
-    // starts a location over its own working directory, the whole home.
     noProjectDirectory = null,
     onOpenCodeRestarted = null,
     managedStartupTimeoutMs = 30_000,
@@ -162,17 +136,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   } = deps;
 
   let managedPreflight = null;
-  // The environment the managed OpenCode was launched with. Keys OpenCode
-  // takes from environment variables are never stored in it, so this is the
-  // only place their values can be read back (see auth.js).
   let managedProcessEnv = null;
 
   const killProcessOnPortWin32 = (port) => {
     try {
-      // Get-NetTCPConnection reads the same locale-independent WinNT API
-      // netstat's display layer translates (e.g. "LISTENING" renders as
-      // "ABHÖREN"/"ÉCOUTE"/"ESCUTANDO" on non-English Windows), so this
-      // works regardless of the OS display language.
       const result = spawnSync(
         'powershell',
         [
@@ -334,9 +301,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     };
 
     if (process.platform === 'win32') {
-      // Windows child.kill() terminates only the parent, and nothing on
-      // Windows lets OpenCode close its running turns first. Closing the stdin
-      // lease does; the tree kill is the fallback (see managed-process-stop.js).
       await stopOpenCodeByClosingStdin(child, {
         forceKillTree: (treePid) => {
           try {
@@ -354,8 +318,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     signalProcessTree('SIGTERM');
     await waitForChildProcessClose(child, 2500);
-    // Parent exit does not prove group exit. Tools can ignore SIGTERM and keep
-    // running after their server has exited and closed its own stdio.
     signalProcessTree('SIGKILL');
 
     await waitForChildProcessClose(child, 1000);
@@ -366,8 +328,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     try {
       await terminateChildProcess(child);
     } finally {
-      // Drop it from the registry only once it has actually exited, so a child
-      // that survived teardown stays eligible for the next run's reaper.
       if (Number.isInteger(pid) && hasChildProcessExited(child)) {
         await unregisterManagedProcess(pid);
       }
@@ -388,8 +348,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0, attempt }) => {
     let binary = (resolvedBinary || process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     const sourceBinary = binary;
-    // Windows teardown stops OpenCode by closing its stdin lease, which only
-    // `serve --stdio` holds (see managed-process-stop.js).
     const stdinLease = process.platform === 'win32';
     let args = ['serve', ...(stdinLease ? ['--stdio'] : []), '--hostname', hostname, '--port', String(port)];
     let launchWrapperType = null;
@@ -434,7 +392,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       windowsHide: true,
       stdio: [stdinLease ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
-    // Closing the lease after OpenCode already exited must not throw EPIPE.
     child.stdin?.on('error', () => {});
     let runtimeStderrTail = '';
     let runtimeStderrAttached = false;
@@ -471,7 +428,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     child.on('exit', recordManagedProcessExit);
     child.on('close', recordManagedProcessExit);
 
-    // Ownership starts at spawn, including processes that never become ready.
     const registration = registerManagedProcess({
       pid: child.pid,
       ownerPid: process.pid,
@@ -512,8 +468,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         stdout += chunk.toString();
         const lines = stdout.split('\n');
         for (const line of lines) {
-          // OpenCode 2.x prints `server listening on http://host:port` with no
-          // "opencode" prefix, and `{"url":"http://host:port"}` under --stdio.
           const match = line.match(/server listening on\s+(https?:\/\/\S+)/)
             ?? line.match(/^\s*\{"url":"(https?:\/\/[^"\s]+)"\}\s*$/);
           if (!match) continue;
@@ -556,7 +510,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       throw error;
     });
 
-    // Shutdown must be able to close an in-flight startup, not only a ready server.
     state.openCodeProcess = serverProcess;
     syncToHmrState();
     serverProcess.url = await readiness;
@@ -659,8 +612,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const isOpenCodeProcessHealthy = async () => (await probeOpenCodeHealthDetailed()).healthy;
 
-  // The timeout covers the body too: headers can arrive and the JSON stall.
-  // `signal` lets a caller abandon the probe early.
   const probeExternalOpenCode = async (port, origin, { signal } = {}) => {
     if (!port || port <= 0) {
       return false;
@@ -694,9 +645,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  // The version of an explicitly configured server that answered but is not a
-  // supported OpenCode (v1, or 2.x below the minimum); null for anything else,
-  // including a server that is down.
   const readUnsupportedExternalOpenCodeVersion = async (port, origin) => {
     if (!port || port <= 0) return null;
     const version = await readExternalOpenCodeVersion(origin ?? `http://127.0.0.1:${port}`, getOpenCodeAuthHeaders())
@@ -730,7 +678,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // Trying the same binary again cannot help; the user has to change it first.
   const isBinaryRejected = (error) => error instanceof UnsupportedOpenCodeVersionError || error?.code === 'OPENCODE_BINARY_INVALID';
 
   const startOpenCodeOnce = async (attempt) => {
@@ -774,14 +721,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
     phaseStartedAt = performance.now();
 
-    // The user's variables go over the inherited environment (a PATH entry
-    // in front of the managed PATH) and under everything OpenChamber itself
-    // sets for OpenCode.
     const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
 
-    // Re-arm OpenCode's own V1 -> V2 session import for sessions a bundled
-    // OpenCode 1.x created after the migration already completed. Only for the
-    // managed process, only while it is not running, and never fatal.
     try {
       const topUp = topUpV1SessionMigration({ env: inheritedEnv });
       if (topUp && topUp.status !== 'skipped') {
@@ -791,16 +732,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    // What OpenChamber sets for OpenCode is recorded as injected, so a shell
-    // the agent opens can tell it from the user's own variables.
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
       { ...inheritedEnv },
       {
         ...managedOpenCodeEnv,
         PATH: inheritedEnv.PATH,
-        // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
-        // user's own OPENCODE_PASSWORD would otherwise win and every request
-        // we send with openCodePassword would get 401.
         OPENCODE_PASSWORD: openCodePassword,
         OPENCODE_SERVER_PASSWORD: openCodePassword,
       },
@@ -903,9 +839,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
-  // `whileStopped` runs after the managed process has exited and before the
-  // new one starts. Its failure is reported after the restart, so the server
-  // comes back either way.
   const restartOpenCode = async (reason = 'managed-restart', { whileStopped } = {}) => {
     if (state.isShuttingDown) return;
     if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
@@ -914,12 +847,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         await state.currentRestartPromise;
         return;
       }
-      // A restart already in flight never ran this task; restart once more for it.
       await state.currentRestartPromise.catch(() => {});
       if (state.isShuttingDown) return;
     }
-    // A startup retry in flight may have read the state this restart is for,
-    // and two starts at once would orphan a process: wait, then really restart.
     while (bootstrapRetryRun) await bootstrapRetryRun;
     if (state.isShuttingDown) return;
 
@@ -1012,12 +942,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         ensureOpenCodeApiPrefix();
       }
 
-      // The restart may have landed on a NEW port (the old one can remain
-      // occupied if killProcessOnPort/waitForPortRelease didn't free it in
-      // time, on any platform). Upstream event readers pinned to the old
-      // process would keep the UI silent forever, so rebind them to the
-      // current port. Best effort: a failure here must not fail the restart
-      // itself.
       try {
         onOpenCodeRestarted?.();
       } catch (error) {
@@ -1113,7 +1037,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
         if (response.ok) {
-          // OpenCode 2.x answers `/api/*` with `{ location, data }`.
           const body = await response.json();
           const agents = Array.isArray(body) ? body : body?.data;
           if (Array.isArray(agents) && agents.some((agent) => agent?.id === agentName)) {
@@ -1138,12 +1061,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await restartOpenCode(reason || 'config-change');
 
-    // A managed OpenCode process is restarted (and thus re-reads config from
-    // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
-    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
-    // written config is on disk but the running server keeps serving its old,
-    // startup-cached config until the user restarts it themselves. Report this
-    // honestly so callers don't claim the change is live.
     const external = state.isExternalOpenCode === true;
 
     try {
@@ -1151,8 +1068,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.isOpenCodeReady = true;
       state.openCodeNotReadySince = 0;
 
-      // Waiting for the agent to appear only makes sense when we actually
-      // reloaded config. An external server will never surface it here.
       if (agentName && !external) {
         await waitForAgentPresence(agentName);
       }
@@ -1177,13 +1092,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     externalReadinessTimer = null;
   };
 
-  /**
-   * A configured external OpenCode can outlive the single readiness window that
-   * startup allows, and nothing else watches it: the health monitor only speaks
-   * for a process OpenChamber started. This probe opens the gate once that
-   * server answers, and stops as soon as it does. One probe runs at a time, and
-   * its answer counts only if nothing changed while it was in flight.
-   */
   const recheckExternalReadiness = async () => {
     if (state.isShuttingDown || !state.isExternalOpenCode) {
       stopExternalReadinessRecheck();
@@ -1214,8 +1122,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       || state.openCodeBaseUrl !== endpointBefore.baseUrl
       || state.openCodePort !== endpointBefore.port
     ) {
-      // Shutdown began, or a restart re-attached somewhere, while this probe
-      // waited: its answer is about a server the state no longer points at.
       stopExternalReadinessRecheck();
       return;
     }
@@ -1243,9 +1149,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let unsupportedExternalVersion = null;
     recordStartupPerformance('opencode.bootstrap.start');
     try {
-      // Before doing anything, reap any OpenCode process WE spawned in a prior
-      // run that was orphaned by a crash/hard-exit. Verified + scoped to our own
-      // pids, so it never touches a live instance's or the user's own server.
       try {
         const orphanReapStartedAt = performance.now();
         const { reaped } = await reapManagedOrphanedProcesses({ log: (msg) => console.log(msg) });
@@ -1287,9 +1190,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         env.ENV_EFFECTIVE_PORT,
         env.ENV_CONFIGURED_OPENCODE_HOST?.origin,
       ))) {
-        // The configured server is an OpenCode this OpenChamber cannot use.
-        // Attach to it anyway, not ready, so the compatibility check reports
-        // its version instead of a managed instance silently replacing it.
         const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
         console.warn(`OpenCode ${unsupportedExternalVersion} at ${label} is not supported by this OpenChamber`);
         state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
@@ -1299,14 +1199,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         syncToHmrState();
         throw new UnsupportedOpenCodeVersionError(unsupportedExternalVersion);
       } else {
-        // We never auto-attach to an arbitrary pre-existing OpenCode instance.
-        // Attaching to an external server requires explicit opt-in via env
-        // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
-        // branches above. Without that opt-in we always start our OWN managed
-        // instance on a freshly-allocated port. A blind probe of the default
-        // port 4096 used to hijack a user's separately-running OpenCode (e.g.
-        // the OpenCode desktop app), coupling our lifecycle to theirs and
-        // breaking init against an unexpected server version/config.
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);
@@ -1315,8 +1207,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           syncToHmrState();
         }
 
-        // The last error stays readable until a start succeeds or fails anew:
-        // the UI shows it while a retry runs.
         state.openCodeProcess = await startOpenCode();
         syncToHmrState();
       }
@@ -1326,8 +1216,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       } catch (error) {
         bootstrapError = error;
         if (state.isExternalOpenCode) diagnosticJournal.record('external unavailable');
-        // Skip-start mode assumed readiness up front; a server that never
-        // proved itself must not keep reporting ready to startup diagnostics.
         state.isOpenCodeReady = false;
         console.error(`OpenCode readiness check failed: ${error.message}`);
         if (state.isExternalOpenCode) scheduleExternalReadinessRecheck();
@@ -1356,7 +1244,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const runBootstrapRetry = async (bootstrap, onAlreadyRunning) => {
     while (state.currentRestartPromise) await state.currentRestartPromise.catch(() => {});
     if (state.isShuttingDown) return;
-    // A restart got there first. Starting again would orphan its process.
     if (state.openCodeProcess) {
       lastBootstrapError = null;
       onAlreadyRunning();
@@ -1369,12 +1256,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       });
   };
 
-  /**
-   * Runs `bootstrap` again later when the last bootstrap left no managed
-   * OpenCode. Nothing else would start one: the health monitor only watches a
-   * running process. `onAlreadyRunning` replaces that run when a restart has
-   * started OpenCode by then. Answers whether a retry is scheduled.
-   */
   const scheduleBootstrapRetry = (bootstrap, onAlreadyRunning) => {
     if (
       !lastBootstrapError
@@ -1392,45 +1273,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return true;
   };
 
-  // The directory server-side reads use when they have none of their own: the
-  // one warmed at startup, which OpenCode is running anyway. v2 answers a
-  // location read without a directory for its own working directory (the
-  // user's home for a managed OpenCode) and starts it, MCP servers included.
-  //
-  // It is a cache of the directory warmed at startup, but that directory can
-  // stop being usable while the server keeps running: the user deletes or
-  // moves the project, the path is replaced by a regular file, or its
-  // permissions change. Handing that stale path to OpenCode makes every
-  // directory-scoped read answer `500 FileSystem.realPath ... ENOENT`, which
-  // is an avoidable failure of reads that are not about the directory at all
-  // (the integration list behind quota credentials, the small model's model
-  // list). The getter therefore revalidates on each read and, when the cached
-  // path is no longer usable, advances to another directory the warm pass
-  // validated and re-reads the settings-backed warmup source so the
-  // currently-valid `lastDirectory` replaces the stale one. Only a usable
-  // directory is ever sent; a valid directory still scopes the read, which
-  // keeps OpenCode from booting its working directory + MCP fleet.
   let defaultOpenCodeDirectory = null;
-  // The directories the last warm pass (or a later refresh) found usable,
-  // kept so a stale default can fall back synchronously without another
-  // settings read.
   let warmedOpenCodeDirectories = [];
   let defaultDirectoryRefresh = null;
   let defaultDirectoryRefreshAt = 0;
-  // A stale default is normal once and persistent when the user has no usable
-  // directory at all; the cooldown keeps that state from turning every read
-  // (small-model generations can be frequent) into a settings read.
   const DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS = 5000;
 
   const isUsableDirectory = (directory) => {
     if (!directory) return false;
     try {
-      // `stat`/`access` reject a non-path value on their own, so the caller
-      // only needs to rule out an empty hint; a throw lands in the catch.
       if (!statSync(directory).isDirectory()) return false;
-      // A directory whose read/execute bit is gone is not a directory scoped
-      // reads can use; OpenCode answers `500 FileSystem.realPath` for it just
-      // like the missing-path case, so treat it the same.
       accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
       return true;
     } catch {
@@ -1442,14 +1294,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     Array.isArray(directories) ? directories.filter((directory) => isUsableDirectory(directory)) : []
   );
 
-  // The first directory that is usable *right now*, revalidating each
-  // candidate because the warmed list was validated only at warm time.
   const selectUsableDirectory = (directories) => usableDirectories(directories)[0] || null;
 
-  // Re-reads the settings-backed warmup source when the cached default is no
-  // longer usable, so a directory valid now (`lastDirectory` after a move, a
-  // surviving project) replaces the stale one. Coalesced: concurrent reads
-  // trigger at most one refresh.
   const refreshDefaultDirectories = () => {
     if (defaultDirectoryRefresh) return defaultDirectoryRefresh;
     defaultDirectoryRefresh = (async () => {
@@ -1469,10 +1315,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return defaultDirectoryRefresh;
   };
 
-  // The warmed directory only while it is still usable; otherwise another
-  // usable directory (from this or a refreshed pass), else the no-project
-  // directory, else null so the caller sends no directory and OpenCode uses
-  // its own working directory.
   const getValidatedDefaultDirectory = () => {
     if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
     const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
@@ -1488,14 +1330,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return isUsableDirectory(noProjectDirectory) ? noProjectDirectory : null;
   };
 
-  // OpenCode initializes each project directory lazily on its first
-  // directory-scoped request, and that initialization takes seconds on large
-  // session stores. Without warming, the user's first session open pays it
-  // interactively (the chat waits on the message fetch until the directory
-  // finishes initializing). Warm the last-used directory right after
-  // readiness so the work overlaps UI startup instead. Sequential and
-  // best-effort: a failed or slow directory never blocks the others for long,
-  // and a restart invalidates the pass via the port/readiness guard.
   const warmOpenCodeDirectories = async () => {
     let directories = [];
     try {
@@ -1515,11 +1349,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), WARMUP_REQUEST_TIMEOUT_MS);
-        // Warming a directory is the point, not the answer: any read that goes
-        // through v2's location middleware makes OpenCode initialise it.
-        // `/api/location` is the cheapest; `/api/session` is a global list and
-        // warms nothing. v2 takes the directory from this header, not from a
-        // `?directory=` query.
         const url = buildOpenCodeUrl('/api/location', '');
         await fetch(url, {
           method: 'GET',
@@ -1538,17 +1367,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  /**
-   * Perform an immediate (one-shot) health check and restart OpenCode if it's
-   * not healthy.  Callers on the SSE / WS proxy path use this to trigger
-   * recovery without waiting for the next periodic interval (up to 15 s).
-   *
-   * Skips restart when sessions are actively busy — a busy server under
-   * concurrent load can fail the health check timeout without actually
-   * being dead (the health endpoint competes with LLM work).
-   * Forces restart if sessions stay "busy" and the server stays unhealthy
-   * for over 2 minutes (staleness guard against stuck session state).
-   */
   const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
   let consecutiveHealthFailures = 0;
@@ -1692,16 +1510,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   return {
-    /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
-    /** The directory to scope a server-side OpenCode read that has none, or null once none is usable. */
     getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
-    /**
-     * The UI saved the directory it now works in. That directory is running
-     * already, so reads without a directory of their own go there: the one
-     * used last at startup may be a chat the user has left, and the UI stops
-     * a left chat's OpenCode location, which such a read would start again.
-     */
     noteCurrentDirectory: (directory) => {
       if (!isUsableDirectory(directory)) return;
       defaultOpenCodeDirectory = directory;

@@ -15,7 +15,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type PluginScope = 'user' | 'project';
-/** `control` is an OpenCode 2 entry such as `-name` or `*` that turns known plugins off or on. */
 export type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
 export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'unreadable' | 'overridden';
@@ -27,13 +26,9 @@ export interface PluginEntry {
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
-  /** The config file that declares the entry; relative path specs resolve against its directory. */
   sourcePath?: string;
-  /** The `plugin:` resource an `integration.use` policy matches; OpenChamber's managed layer denies it. */
   policyResource?: string;
-  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
   switchState?: PluginSwitchState;
-  /** Host-resolved local target used only to filter duplicate discovery records. */
   resolvedPath?: string;
 }
 
@@ -41,14 +36,10 @@ export interface PluginFile {
   id: string;
   fileName: string;
   scope: PluginScope;
-  /** `file` is a `.ts`/`.js` OpenChamber can open; `package` is a plugin directory (or a v1 `plugin/` file) OpenCode loads but the page only lists. */
   kind: 'file' | 'package';
   absolutePath?: string;
-  /** The `plugin:` resource an `integration.use` policy matches for this local plugin. */
   policyResource?: string;
-  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
   switchState?: PluginSwitchState;
-  /** Host-resolved local target used only to filter duplicate discovery records. */
   resolvedPath?: string;
 }
 
@@ -67,9 +58,7 @@ type PluginMutationResult = {
   message?: string;
   warning?: string;
   requiresManualRestart?: boolean;
-  /** The server refused the spec: OpenCode cannot load it. Nothing was written. */
   invalidSpec?: boolean;
-  /** The server refused a switch: a rule in the OpenCode config would beat it. Nothing was written. */
   switchOverridden?: boolean;
 };
 
@@ -82,20 +71,13 @@ export type RegistryResult =
   | { kind: 'path-ok'; spec: string; absolutePath: string }
   | { kind: 'path-missing'; spec: string; absolutePath: string }
   | { kind: 'path-unreadable'; spec: string; absolutePath: string }
-  /** A Git package spec: OpenCode resolves it itself, so there is nothing to check. */
   | { kind: 'git-ok'; spec: string };
 
-/**
- * What OpenCode reported for the plugins of one directory and runtime
- * (`scope`, see `getPluginsScopeKey`). `failed` means the read failed: every
- * plugin's status is unknown, never "all fine" and never "all failed".
- */
 type PluginRuntimeSnapshot =
   | { kind: 'idle' }
   | { kind: 'ready'; scope: string; plugins: PluginRuntimeInfo[] }
   | { kind: 'failed'; scope: string };
 
-/** An update this client started, keyed by `getPluginUpdateKey`. */
 export type PluginPackageUpdate =
   | { kind: 'running' }
   | { kind: 'failed'; error: string };
@@ -113,7 +95,6 @@ interface PluginsStore {
   runtime: PluginRuntimeSnapshot;
   isCheckingUpdates: boolean;
   packageUpdates: Record<string, PluginPackageUpdate>;
-  /** Bumped after a switch writes a policy and on config events, so every policy reader re-reads. */
   policyRevision: number;
 
   setSelected: (id: string | null) => void;
@@ -193,13 +174,10 @@ const getPluginCacheKey = (directory: string | null): string => {
   return JSON.stringify([getRuntimeKey(), directory?.trim() || DEFAULT_PLUGINS_CACHE_KEY]);
 };
 
-/** Identifies the directory and runtime a runtime snapshot or update belongs to. */
 export const getPluginsScopeKey = getPluginCacheKey;
 
 export const getPluginUpdateKey = (scope: string, target: string): string => JSON.stringify([scope, target]);
 
-// Only the newest runtime read may commit: a slower earlier one (or one for a
-// directory the user already left) would put back an older inventory.
 let runtimeReadGeneration = 0;
 
 const invalidatePluginCache = (directory: string | null) => {
@@ -336,17 +314,12 @@ export const usePluginsStore = create<PluginsStore>()(
           set({ isCheckingUpdates: true });
           try {
             const plugins = await checkPluginUpdates(configDirectory);
-            // A check returns the whole inventory, so once it lands it
-            // supersedes list reads still in flight. Claiming the generation
-            // only on success keeps a failed check from discarding them.
             runtimeReadGeneration += 1;
             if (getPluginsScopeKey(getPluginsConfigDirectory()) === scope) {
               set({ runtime: { kind: 'ready', scope, plugins } });
             }
             return true;
           } catch (error) {
-            // The inventory already on screen is still what OpenCode loaded;
-            // only its update flags were not refreshed. The caller reports it.
             console.error('[PluginsStore] Failed to check plugin updates:', error);
             return false;
           } finally {
@@ -361,9 +334,6 @@ export const usePluginsStore = create<PluginsStore>()(
           set({ packageUpdates: { ...get().packageUpdates, [key]: { kind: 'running' } } });
           try {
             await updatePluginPackage(configDirectory, target);
-            // OpenCode announces the reload with `plugin.updated`; reading now
-            // clears the update flag even when that event is missed. The row
-            // stays running until then so the stale flag can't offer a rerun.
             await get().loadRuntime();
             const next = { ...get().packageUpdates };
             delete next[key];

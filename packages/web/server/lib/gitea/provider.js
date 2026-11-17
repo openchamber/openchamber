@@ -7,37 +7,13 @@ import { createGiteaResourceService } from './resources.js';
 import { normalizeSshUrl, parseSshUrl } from '../source-control/ssh-url.js';
 import { isForgejoVersion, probeGiteaVersion, verifyGiteaToken } from './verify.js';
 
-/**
- * Gitea as a source-control provider implementation behind the shared route
- * shell (`source-control/provider-routes.js`): personal access tokens only,
- * one account store section (`section('gitea')`) keyed by instance origin
- * (`source-control/pat-account-auth.js`), REST v1 through `client.js`, the
- * standard mutation kinds and digests (`source-control/standard-mutations.js`).
- * Everything here takes and returns plain JSON.
- *
- * Forgejo speaks the same API and is built from the same code with its own
- * descriptor and edition (`../forgejo/provider.js`).
- */
-
-/**
- * The servers that answer this API, told apart by `/version`. Each edition
- * names the release its support starts at, in its own numbering.
- */
 export const GITEA_EDITIONS = Object.freeze({
   gitea: Object.freeze({ id: 'gitea', label: 'Gitea', minimum: '1.21', serves: (version) => !isForgejoVersion(version) }),
   forgejo: Object.freeze({ id: 'forgejo', label: 'Forgejo', minimum: '7.0', serves: isForgejoVersion }),
 });
 
-// A comment or a review leaves nothing that tells a lost write from one never
-// sent short of guessing from its text, so the outcome stays unknown.
 const unknownOutcome = () => ({ state: 'outcome-unknown' });
 
-/**
- * The standard table on top, plus what Gitea refuses that the standard table
- * accepts: a request for changes without a body (422 on 1.21 and 1.27). The
- * standard normalization already refused a blank or oversized body, so a
- * missing one is all that is left; the digest is unchanged.
- */
 function giteaPrepare(standardMutations, label) {
   return (request) => {
     const prepared = standardMutations.prepare(request);
@@ -51,11 +27,6 @@ function giteaPrepare(standardMutations, label) {
   };
 }
 
-/**
- * Each standard mutation route's Gitea call and restart reconciliation. The
- * kind, normalization and digest come from the standard table; `normalized`
- * is its output.
- */
 function mutationOperations() {
   const call = (resolved, extra = {}) => ({
     providerTarget: resolved.providerTarget, expectedTarget: resolved.target, ...extra,
@@ -116,7 +87,6 @@ function mutationOperations() {
     perform: (service, normalized, resolved) => service.updateIssue(call(resolved, { title: normalized.title, body: normalized.body })),
     reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized.title, normalized.body),
   };
-  // A pull request comment is an issue comment to Gitea, so one method serves both.
   for (const route of ['/pr/comment/update', '/issues/comment/update']) {
     operations[route] = {
       perform: (service, normalized, resolved) => service.updateIssueComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
@@ -148,15 +118,8 @@ function mutationOperations() {
   return operations;
 }
 
-/** Every edition other than `edition`: the cards an instance could belong to instead. */
 const otherEditions = (edition) => Object.values(GITEA_EDITIONS).filter((other) => other.id !== edition.id);
 
-/**
- * `edition` is the server this provider serves (`GITEA_EDITIONS`); `store` is
- * its origin-keyed section of the source-control auth store; `events`
- * receives account lifecycle reports; `cli` is the CLI login a descriptor
- * that names one reads (`gt-cli.js` for Gitea). The rest are test seams.
- */
 export function createGiteaFamilyProvider({
   edition,
   descriptor,
@@ -178,10 +141,6 @@ export function createGiteaFamilyProvider({
       ? { version, supported, edition: probed }
       : { version, supported, edition: probed, message: `${label} ${version} is older than OpenChamber supports (${edition.minimum})` };
   };
-  /**
-   * An instance belongs to the edition its own API namespace names, else the
-   * one its `/version` names, so it is connected on one card only.
-   */
   const servesEdition = (target, { version, edition: probed }) => (probed ? probed === target.id : target.serves(version));
   const ownerElsewhere = (probeResult) => (servesEdition(edition, probeResult)
     ? null
@@ -192,9 +151,6 @@ export function createGiteaFamilyProvider({
     normalizeSshUrl: (value) => normalizeSshUrl(value, { label }), parseSshUrl, cli,
   });
 
-  // One resource service per session, so a request's reads, mutation target
-  // and provider call share one client. Errors carry the acting account for
-  // the shell's 401 handling.
   const services = new WeakMap();
   const serviceFor = (session) => {
     const cached = services.get(session);
@@ -256,7 +212,6 @@ export function createGiteaFamilyProvider({
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, binary, linked }),
       liveSummaries: ({ session, refs, issueRefs }) => serviceFor(session).liveSummaries({ refs, issueRefs }),
-      /** A pull request's head on the context's primary repository network, for a worktree made from it. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {
         const { request, headProject } = await serviceFor(session).findChangeRequest(directory, number, null, remote);
         const headSha = String(request.headSha || '').toLowerCase();
@@ -280,8 +235,6 @@ export function createGiteaFamilyProvider({
         const endpoint = headProject.cloneUrl;
         let parsed = null;
         try { parsed = new URL(endpoint); } catch { parsed = null; }
-        // The instance's own origin decides the scheme: HTTPS, or HTTP for an
-        // instance on a loopback host, which Git transport also allows.
         if (!parsed || parsed.origin !== new URL(context.instance).origin
           || decodeURIComponent(parsed.pathname).replace(/^\//, '').replace(/\.git$/, '') !== `${headProject.owner}/${headProject.name}`) {
           throw Object.assign(new Error(`${label} returned an invalid head repository endpoint`), { code: 'MALFORMED_PROVIDER_RESPONSE' });
@@ -301,10 +254,6 @@ export function createGiteaFamilyProvider({
     mutations: Object.freeze({
       routes: standardMutations.routes,
       prepare: giteaPrepare(standardMutations, label),
-      /**
-       * The provider coordinates and durable target. A replay rebuilds them
-       * from the stored target, except create, which is resolved again.
-       */
       resolveTarget: ({ session, context, kind, input, replayOf }) => {
         const service = serviceFor(session);
         if (kind === 'change-request-create') return service.resolveCreateMutation(context, context.target, input);
@@ -321,7 +270,6 @@ export function createGiteaFamilyProvider({
   });
 }
 
-/** Gitea, as the registry loads it, with the `gt` login. `execFile`, `readFile` and `cliTimeoutMs` are test seams. */
 export function createProvider({ descriptor = giteaDescriptor, execFile, readFile, cliTimeoutMs, ...services }) {
   const cli = createGtCli({ execFile, readFile, timeoutMs: cliTimeoutMs });
   return createGiteaFamilyProvider({ ...services, descriptor, edition: GITEA_EDITIONS.gitea, cli });

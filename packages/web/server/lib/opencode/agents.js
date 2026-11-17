@@ -31,17 +31,10 @@ import {
   isRecord,
 } from './config-v2.js';
 
-// ============== AGENT SCOPE HELPERS ==============
-//
-// OpenCode 2 discovers agents from `agent/`, `agents/`, `mode/` and `modes/`.
-// OpenChamber reads every one of those and WRITES only to `agents/`. An agent
-// that already lives in a v1 directory is rewritten in place (v2 fields, same
-// path) so no file silently moves out from under the user.
 
 const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
 const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
 
-/** Ensure the v2 project agent directory exists. */
 function ensureProjectAgentDir(workingDirectory) {
   const projectAgentDir = path.join(workingDirectory, '.opencode', 'agents');
   if (!fs.existsSync(projectAgentDir)) {
@@ -50,15 +43,8 @@ function ensureProjectAgentDir(workingDirectory) {
   return projectAgentDir;
 }
 
-/**
- * Project-level agent path: an existing v1 file keeps its path, otherwise the
- * v2 `agents/` location.
- */
 function getProjectAgentPath(workingDirectory, agentName) {
   const preferred = path.join(workingDirectory, '.opencode', 'agents', `${agentName}.md`);
-  // OpenCode 2 discovers `.opencode` from the working directory up to the
-  // project root, so a definition in a parent directory of a monorepo
-  // package counts; nested ids (`team/reviewer`) map onto the path.
   const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
   for (const base of getAncestors(workingDirectory, worktreeRoot)) {
     for (const dirName of PROJECT_AGENT_DIR_NAMES) {
@@ -69,9 +55,6 @@ function getProjectAgentPath(workingDirectory, agentName) {
   return preferred;
 }
 
-/**
- * Create a per-request lookup cache for user-level agent path resolution.
- */
 function createAgentLookupCache() {
   return {
     userAgentIndexByName: new Map(),
@@ -124,11 +107,6 @@ function getIndexedUserAgentPath(agentName, cache) {
   return found;
 }
 
-/**
- * User-level agent path — walks subfolders to support grouped layouts
- * (e.g. `~/.config/opencode/agents/business/ceo.md`) and the v1 `agent/` dir.
- * New agents land flat in the v2 `agents/` directory.
- */
 function getUserAgentPath(agentName, lookupCache = null) {
   const preferred = path.join(AGENT_DIR, `${agentName}.md`);
   for (const dir of USER_AGENT_DIRS) {
@@ -143,10 +121,6 @@ function getUserAgentPath(agentName, lookupCache = null) {
   return preferred;
 }
 
-/**
- * Determine agent scope based on where the .md file exists
- * Priority: project level > user level > null (built-in only)
- */
 function getAgentScope(agentName, workingDirectory, lookupCache = null) {
   if (workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
@@ -163,17 +137,12 @@ function getAgentScope(agentName, workingDirectory, lookupCache = null) {
   return { scope: null, path: null };
 }
 
-/**
- * Get the path where an agent should be written based on scope
- */
 function getAgentWritePath(agentName, workingDirectory, requestedScope, lookupCache = null) {
-  // For updates: check existing location first (project takes precedence)
   const existing = getAgentScope(agentName, workingDirectory, lookupCache);
   if (existing.path) {
     return existing;
   }
 
-  // For new agents or built-in overrides: use requested scope or default to user
   const scope = requestedScope || AGENT_SCOPE.USER;
   if (scope === AGENT_SCOPE.PROJECT && workingDirectory) {
     return {
@@ -188,7 +157,6 @@ function getAgentWritePath(agentName, workingDirectory, requestedScope, lookupCa
   };
 }
 
-// ============== READ ==============
 
 function readMdAgent(mdPath) {
   const { frontmatter, body } = parseMdFile(mdPath);
@@ -255,11 +223,6 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
   return sources;
 }
 
-/**
- * Canonical v2 agent entity plus where it came from. `config.system` is the
- * markdown body for .md agents; `config.permissions` is always the ordered v2
- * rule array, even when the file still uses a v1 `permission` map.
- */
 function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
@@ -302,11 +265,6 @@ function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLo
   };
 }
 
-/**
- * The permission rules that apply to an agent, in evaluation order (global
- * rules first, agent rules last; last match wins). Answers the editor question
- * "what applies to this agent".
- */
 function getAgentPermissions(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
   const layers = readConfigLayers(workingDirectory);
   const global = [
@@ -324,13 +282,10 @@ function getAgentPermissions(agentName, workingDirectory, lookupCache = createAg
   };
 }
 
-// ============== WRITE ==============
 
 function writeAgentMd(targetPath, entity) {
   const { fields, system } = fromAgentEntity(entity);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  // Native keys only: a single legacy key routes the whole file through
-  // OpenCode's v1 decoder, which would drop the `permissions` array.
   writeMdFile(targetPath, fields, system);
 }
 
@@ -372,9 +327,6 @@ function createAgent(agentName, config, workingDirectory, scope) {
   return { scope: targetScope, path: targetPath };
 }
 
-// v1 agent fields that do not exist at the top level of a v2 entity any more.
-// A client clearing one of them names the v1 field, so deletion has to reach
-// the v2 location instead of removing a key that was never there.
 const AGENT_REQUEST_BODY_FIELDS = ['temperature', 'top_p'];
 
 function deleteRequestBodyField(entity, key) {
@@ -384,7 +336,6 @@ function deleteRequestBodyField(entity, key) {
   if (Object.keys(entity.request).length === 0) delete entity.request;
 }
 
-/** Drop the `#variant` suffix, keeping the provider and model. */
 function stripModelVariant(entity) {
   const parsed = parseModelSelection(entity.model);
   if (!parsed) return;
@@ -408,13 +359,7 @@ function deleteAgentField(entity, field) {
   delete entity[field === 'prompt' ? 'system' : field];
 }
 
-/**
- * Merge a partial update into a canonical entity. `null` removes a field,
- * `undefined` leaves it alone.
- */
 function applyAgentUpdates(entity, updates) {
-  // `request` is copied so clearing one overlay field cannot mutate the entity
-  // the caller still holds.
   const next = { ...entity };
   if (isRecord(next.request)) {
     const request = { ...next.request };
@@ -434,7 +379,6 @@ function applyAgentUpdates(entity, updates) {
       else next.permissions = rules;
       continue;
     }
-    // `prompt` is the v1 spelling of `system`; accept it so older clients keep working.
     next[field === 'prompt' ? 'system' : field] = value;
   }
   return toAgentEntity(next);
@@ -458,8 +402,6 @@ function updateAgent(agentName, updates, workingDirectory) {
     const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
     const config = jsonSource.config || {};
     const rawSystem = jsonSource.section?.system ?? jsonSource.section?.prompt;
-    // `{file:...}` substitution still works in OpenCode 2, so an agent whose
-    // system prompt lives in a file keeps the reference and the file is edited.
     if (isPromptFileReference(rawSystem)) {
       const promptFilePath = resolvePromptFilePath(rawSystem);
       if (!promptFilePath) {
@@ -477,7 +419,6 @@ function updateAgent(agentName, updates, workingDirectory) {
     return { source: 'json', scope: current.scope, path: targetPath };
   }
 
-  // Built-in override: materialize a user-level v2 markdown agent.
   const { scope, path: targetPath } = getAgentWritePath(agentName, workingDirectory, AGENT_SCOPE.USER, lookupCache);
   writeAgentMd(targetPath, entity);
   console.log(`Created agent override: ${agentName} (scope: ${scope}, path: ${targetPath})`);
@@ -539,9 +480,7 @@ function deleteAgent(agentName, workingDirectory, scope) {
   throw new Error(`Agent ${agentName} is built-in or not deletable`);
 }
 
-// ============== DISABLED ==============
 
-/** Agent ids under one agents directory, nested ones as `group/name`. */
 function collectAgentIds(dir, prefix, ids) {
   let entries;
   try {
@@ -558,12 +497,6 @@ function collectAgentIds(dir, prefix, ids) {
   }
 }
 
-/**
- * Agents switched off with `disabled: true`. OpenCode drops them from its
- * agent list, so Settings learns about them here to offer turning them back
- * on. Every agent defined in a file or a config section is read the way the
- * editor reads it and kept when its own config says disabled.
- */
 function listDisabledAgents(workingDirectory) {
   const lookupCache = createAgentLookupCache();
   const names = new Set();

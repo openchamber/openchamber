@@ -7,10 +7,6 @@ import { expandSnippets } from '../opencode/snippets.js';
 export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueRuntime, createClient, listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent }) => {
   const admissions = new Set();
 
-  // The membership rule, in one place: a save or run and the picker's
-  // discovery both ask this, so the two can never disagree about whether a
-  // directory belongs to a project. Ownership comes from Git through
-  // `resolvePrimaryWorktreeRoot`, never from the renderer's worktree topology.
   const ownsDirectory = async (project, directory) => {
     if (!project || !directory) return false;
     if (path.resolve(directory) === path.resolve(project.path)) return true;
@@ -48,19 +44,10 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     return { session, directory };
   };
 
-  /**
-   * The discovery half of the same rule: which candidates a save or run would
-   * accept by their directory. Candidates arrive with the directory the client
-   * already knows; ownership is resolved here, and a session offered without a
-   * directory, or one that is archived or foreign, is never eligible. Whether
-   * the session still exists is left to `validateTarget` on save.
-   */
   const listEligibleTargets = async (projectId, candidates) => {
     const projects = await listProjects();
     const scopeId = chatsScope ? chatsScope.toStorageID(projectId) : projectId;
     const project = projects.find((entry) => entry.id === scopeId);
-    // Many sessions share a few directories, so membership is resolved once
-    // per directory: a Git lookup per session would run hundreds of processes.
     const membership = new Map();
     const belongsToTask = (directory) => {
       const key = path.resolve(directory);

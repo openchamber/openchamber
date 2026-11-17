@@ -18,12 +18,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 
 export type CommandScope = 'user' | 'project';
 
-/**
- * The command entity as OpenChamber persists it, i.e. the OpenCode 2 shape the
- * config routes read and write. `template` is the markdown body of a `.md`
- * command; `model` is the joined `provider/model#variant` string; `subagent`
- * runs the command in a child session instead of the current one.
- */
 export interface CommandConfig {
   name: string;
   description?: string;
@@ -37,18 +31,13 @@ export interface CommandConfig {
 
 export interface Command extends CommandConfig {
   isBuiltIn?: boolean;
-  /** The file OpenChamber would rewrite on the next save. */
   path?: string | null;
-  /** The file still uses v1 spellings; the next save rewrites it in v2. */
   legacy?: boolean;
-  /** OpenChamber confirmed no command file or config entry: OpenCode or a plugin defines it. */
   fromOpenCode?: boolean;
 }
 
-// Built-in commands provided by OpenCode (not defined in user config directories)
 const BUILTIN_COMMAND_NAMES = new Set(['init', 'review']);
 
-/** What `GET /api/config/commands/:name/config` answers. */
 interface CommandEntityEnvelope {
   source: 'md' | 'json' | 'none';
   scope: CommandScope | null;
@@ -57,10 +46,6 @@ interface CommandEntityEnvelope {
   config: Omit<CommandConfig, 'name' | 'scope' | 'source'>;
 }
 
-/**
- * The v2 `CommandInfo` OpenCode lists carries only a name and description, so
- * the editable fields come from the command's own stored entry.
- */
 const withCommandEntry = <T extends { name: string; description?: string }>(cmd: T, data: CommandEntityEnvelope | undefined) => {
   if (!data) return cmd;
   const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
@@ -76,11 +61,6 @@ const withCommandEntry = <T extends { name: string; description?: string }>(cmd:
   };
 };
 
-/**
- * Every named command's entry from `GET /api/config/command-configs`, or null
- * when that route gave no usable answer: an older server and the VS Code
- * bridge lack it, and the caller then reads each command on its own.
- */
 const readCommandEntries = async (
   names: string[],
   directory: string | null | undefined,
@@ -112,9 +92,6 @@ export const isCommandBuiltIn = (command: Command): boolean => {
   return BUILTIN_COMMAND_NAMES.has(command.name);
 };
 
-// OpenCode's own `/goal` (2.2.1+) duplicates Goal Mode, so the composer does
-// not offer it. A user's own `goal` command, or one whose metadata read
-// failed, stays.
 const HIDDEN_OPENCODE_COMMAND_NAMES = new Set(['goal']);
 
 export const isCommandOfferedInComposer = (command: Command): boolean => {
@@ -227,11 +204,6 @@ const removeCommandLocal = (
   });
 };
 
-/**
- * Directory a call operates on. Settings can browse another project without
- * moving the app, so every entry point takes one; omitting it means the project
- * the app is currently on.
- */
 const resolveDirectory = (directory?: string | null): string | null => {
   if (directory !== undefined) {
     const trimmed = directory?.trim();
@@ -245,12 +217,10 @@ const getRequestDirectory = (): string | null => {
     const projectsStore = useProjectsStore.getState();
     const activeProject = projectsStore.getActiveProject?.();
     
-    // 1. Primary: Active project path from store
     if (activeProject?.path?.trim()) {
       return activeProject.path.trim();
     }
 
-    // 2. Fallback: current OpenCode directory (session / runtime)
     const clientDir = opencodeClient.getDirectory();
     if (clientDir?.trim()) {
       return clientDir.trim();
@@ -275,9 +245,7 @@ interface CommandDraft {
 interface CommandsStore {
 
   selectedCommandName: string | null;
-  /** Commands of the project the app is on. Chat and autocompletes read this one. */
   commands: Command[];
-  /** Every directory loaded so far, including the ambient one. */
   commandsByDirectory: Record<string, Command[]>;
   isLoading: boolean;
   commandDraft: CommandDraft | null;
@@ -300,10 +268,6 @@ declare global {
 
 const EMPTY_COMMANDS: Command[] = [];
 
-/**
- * Commands of one project. Returns a stored array so components can select it
- * directly; an omitted directory means the project the app is on.
- */
 export const selectCommandsForDirectory = (
   state: Pick<CommandsStore, 'commandsByDirectory'>,
   directory?: string | null,
@@ -321,7 +285,6 @@ type ComposerCommandDirectory =
   | { status: 'pending' }
   | { status: 'resolved'; directory: string | null | undefined };
 
-/** A draft uses its start folder; pending discovery must never request the root. */
 export const resolveCommandDirectory = (
   directory: string | null | undefined,
   draft: CommandDirectorySource | null,
@@ -392,8 +355,6 @@ export const useCommandsStore = create<CommandsStore>()(
           const isCurrent = () => generation === commandsGeneration && !entry.invalidated;
           const request = (async () => {
             set({ isLoading: true });
-            // Only this directory can supply the comparison baseline. The mirror
-            // may still describe the project we just left.
             const previousCommands = get().commandsByDirectory[cacheKey];
             const previousSignature = buildCommandsSignature(previousCommands ?? EMPTY_COMMANDS);
             let lastError: unknown = null;
@@ -402,13 +363,9 @@ export const useCommandsStore = create<CommandsStore>()(
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-                // Ensure the list is scoped to the same directory we use for config source detection.
-                // v2 keeps skills in their own catalog, so every command here is a real command file.
                 const commands = await readCommandMetadata(generation, (signal) => opencodeClient.listCommands(directory, signal));
                 if (!isCurrent()) return false;
 
-                // One request answers every entry; a server without that
-                // route (an older one, the VS Code bridge) is asked per command.
                 const entries = commands.length > 0
                   ? await readCommandMetadata(generation, (signal) => readCommandEntries(commands.map((cmd) => cmd.name), directory, signal))
                   : new Map<string, CommandEntityEnvelope>();
@@ -456,7 +413,6 @@ export const useCommandsStore = create<CommandsStore>()(
                   }
                   return next;
                 });
-                // Cold locations can answer before OpenCode has built the catalog.
                 if (nextCommands.length > 0) commandsLastLoadedAt.set(cacheKey, Date.now());
                 else commandsLastLoadedAt.delete(cacheKey);
                 return true;
@@ -470,7 +426,6 @@ export const useCommandsStore = create<CommandsStore>()(
 
             if (!isCurrent()) return false;
             console.error("Failed to load commands:", lastError);
-            // Keep the current directory cache, including edits made during the load.
             set({ isLoading: false });
             return false;
           })();
@@ -613,7 +568,6 @@ export const useCommandsStore = create<CommandsStore>()(
         deleteCommand: async (name: string, requestedDirectory?: string | null) => {
           const generation = commandsGeneration;
           try {
-            // Use active project root for project-level command support
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 

@@ -11,26 +11,15 @@ import { useCurrentContextReading } from './useCurrentContextReading';
 
 const UNKNOWN_PERCENT = '—';
 
-// Neutral until the warning threshold, as the Session card's meter: green
-// means finished, and a context in use is not.
 const TONE_COLOR = {
   safe: 'var(--muted-foreground)',
   warn: 'var(--status-warning)',
   critical: 'var(--status-error)',
 } as const;
 
-/**
- * The header's context fill: a ring in the fill's tone and the percent, the
- * same figure the Work Status row shows. While the Session card is on screen
- * with its Context row, the card carries the figure and the header leaves it
- * out, so the reading shows once. A click opens the context overview and a
- * second click closes it; the rail's Context item does the same.
- */
 const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const { t } = useI18n();
   const { sessionId, fill, limit } = useCurrentContextReading();
-  // The panel key the rail uses, so this button and the rail's Context icon
-  // open, light up and close the same surface.
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
   const openContextSurface = useUIStore((state) => state.openContextSurface);
@@ -44,7 +33,6 @@ const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ bu
   }
 
   const percent = fill.state === 'measured' ? (fill.totalTokens / limit) * 100 : null;
-  // Rounded for the tone, as the Work Status meter does, so both turn together.
   const arcColor = percent === null ? undefined : TONE_COLOR[resolveUsageTone(Math.round(percent))];
 
   return (
@@ -52,7 +40,6 @@ const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ bu
       <TooltipTrigger asChild>
         <button
           type="button"
-          // Toggles, as the rail icon does: a second click closes the overview.
           onClick={directoryKey ? () => openContextSurface(directoryKey, 'context') : undefined}
           aria-label={t('contextUsage.aria.label')}
           aria-pressed={contextShown}
@@ -74,6 +61,4 @@ const HeaderContextUsageComponent: React.FC<{ buttonClassName: string }> = ({ bu
   );
 };
 
-// Memoised: the header re-renders on many session changes; this re-renders
-// when a response reports a new fill.
 export const HeaderContextUsage = React.memo(HeaderContextUsageComponent);

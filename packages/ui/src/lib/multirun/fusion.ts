@@ -25,9 +25,7 @@ export type FusionJudge = {
   modelID: string;
   variant?: string;
   agent?: string;
-  /** Display name for the fusion session title. */
   modelName?: string;
-  /** Context window of the judge model, when the provider reports it. */
   contextLimit?: number;
 };
 
@@ -48,20 +46,15 @@ type FusionSource = {
   location: RunMemberLocation | null;
 };
 
-// Diffs are inlined only while all of them together stay under this share of
-// the judge's context window; otherwise the judge reads them with git.
 const INLINE_DIFF_CONTEXT_SHARE = 0.1;
-// Rough token cost of one changed line (content plus diff framing).
 const TOKENS_PER_DIFF_LINE = 12;
 
-/** Selected lanes whose worktrees hold changes and who all have one: that is a code fusion. */
 export const fusionModeFor = (stats: ReadonlyArray<{ hasWorktree: boolean; diff: LaneDiffStat | null }>): FusionMode => (
   stats.length > 0 && stats.every((entry) => entry.hasWorktree) && stats.some((entry) => (entry.diff?.files ?? 0) > 0)
     ? 'code'
     : 'answers'
 );
 
-/** Whether every diff together fits in the inline budget of the judge's context window. */
 export const shouldInlineDiffs = (changedLines: number, contextLimit: number | undefined): boolean => (
   contextLimit !== undefined && contextLimit > 0
   && changedLines * TOKENS_PER_DIFF_LINE <= contextLimit * INLINE_DIFF_CONTEXT_SHARE
@@ -73,11 +66,6 @@ const laneLabel = (identity: MultiRunIdentity, variantCount: number): string => 
   return `${identity.providerID}/${identity.modelID}${index}${variant}`;
 };
 
-/**
- * Revalidates each selected lane and reads its latest reply. A read failure
- * stops the fusion rather than silently dropping a source; a lane that has
- * not answered is left out.
- */
 async function loadFusionSources(
   run: MultiRunSummary,
   sourceIds: readonly string[],
@@ -126,13 +114,6 @@ const taskBlocks = (prompts: ReadonlyMap<string, string>): string[] => (
   ))
 );
 
-/**
- * Starts a fusion session for the selected lanes and opens it. Answers mode
- * fuses the lanes' final replies in the project directory. Code mode snapshots
- * every lane, gives the judge its own worktree at the lanes' starting commit
- * and a manifest (answers, diffstats, snapshot commits), inlining the diffs
- * only when they are small next to the judge's context window.
- */
 export async function startRunFusion(input: {
   run: MultiRunSummary;
   sourceIds: readonly string[];
@@ -159,8 +140,6 @@ export async function startRunFusion(input: {
   const project = sources.find((source) => source.location)?.location?.project ?? null;
   const first = sources[0];
   const projectDirectory = project?.path ?? first.session.directory;
-  // Read before any worktree exists, so a failed read leaves nothing behind.
-  // The fusion worktree belongs to the same project, so its prompts are the project's.
   const magicPrompts = await loadMagicPrompts(projectDirectory);
   assertCurrent();
 
@@ -187,7 +166,6 @@ export async function startRunFusion(input: {
 
     const setupCommands = await resolveWorktreeSetupCommands(project);
     assertCurrent();
-    // A run can be fused more than once; each fusion gets its own branch.
     const worktreeName = `${run.groupSlug}/fusion-${Date.now().toString(36)}`;
     createdWorktree = await createWorktreeWithDefaults(project, {
       preferredName: worktreeName,

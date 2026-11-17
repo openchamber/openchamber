@@ -1365,6 +1365,21 @@ describe('render.page with answerLater', () => {
     return { laterPages, posts, dataDir };
   };
 
+  it.each([
+    ['answerLater', { answerLater: true }],
+    ['awaitAnswer', { awaitAnswer: true }],
+  ])('refuses %s in a session an agent started as its own work, and still shows a plain page', async (_label, wait) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service, client } = createService({ laterPages });
+    client.session.get.mockResolvedValue({ id: 'ses_1', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } });
+
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout', ...wait }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining('the user does not interact with it') });
+    expect((await laterPages.snapshot()).pages).toEqual([]);
+    await expect(service.execute('render.page', { html: page, title: 'Pick a layout' }, '/repo', call)).resolves.toMatchObject({ shown: true });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
   it('returns at once and keeps the page open past the end of the turn', async () => {
     const { laterPages, posts, dataDir } = await createLater();
     const onPageWaitChange = vi.fn();
@@ -1957,6 +1972,42 @@ describe('returning a dispatched session result', () => {
     expect(dispatchResults.register).not.toHaveBeenCalled();
   });
 
+  it('creates an ownWork session under the calling session and brings its answer back by default', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    const result = await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Fix the parser' }), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).toHaveBeenCalledWith({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000 });
+    expect(result.resultDelivery.status).toBe('pending');
+  });
+
+  it('keeps an ownWork session quiet when the agent turns its answer off', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser', ownWork: true, returnResult: false }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything(), { operatorParentId: 'ses_parent' });
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it('leaves a session without ownWork to the user', async () => {
+    const { service, sessionService, dispatchResults } = createReturningService();
+    await service.execute('session.create', { prompt: 'Fix the parser' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.anything());
+    expect(dispatchResults.register).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['without a calling session', 'session.create', { prompt: 'x', ownWork: true }, {}, 'needs a calling session'],
+    ['on a send', 'session.send', { sessionId: 'ses_child', prompt: 'x', ownWork: true }, { contextSessionId: 'ses_parent' }, 'applies only to session.create'],
+    ['as a string', 'session.create', { prompt: 'x', ownWork: 'true' }, { contextSessionId: 'ses_parent' }, 'ownWork must be a boolean'],
+  ])('refuses ownWork %s before creating anything', async (_label, action, input, options, message) => {
+    const { service, sessionService } = createReturningService();
+    await expect(service.execute(action, input, '/repo', options)).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    expect(sessionService.create).not.toHaveBeenCalled();
+    expect(sessionService.send).not.toHaveBeenCalled();
+  });
+
   it('refuses a wait that is not a boolean', async () => {
     const { service, sessionService } = createService();
     await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'x', wait: 'true' }, '/repo'))
@@ -1971,7 +2022,7 @@ describe('pr.unwatch', () => {
 
   // A real pull request watch runtime behind the control service, so the
   // service's handling of `url` is checked against what the runtime does.
-  const createWatching = async () => {
+  const createWatching = async ({ extensionWaits } = {}) => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-pr-watch-'));
     const prWatch = createPrWatchRuntime({
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
@@ -1989,7 +2040,7 @@ describe('pr.unwatch', () => {
         })),
       },
     });
-    const { service } = createService({ prWatch });
+    const { service } = createService({ prWatch, extensionWaits });
     const run = (action, input) => service.execute(action, input, '/repo', { contextSessionId: 'ses_agent' });
     await run('pr.watch', { url: URL_7 });
     await run('pr.watch', { url: URL_8 });
@@ -1997,6 +2048,7 @@ describe('pr.unwatch', () => {
     return {
       run,
       watched,
+      prWatch,
       cleanup: async () => {
         prWatch.stop();
         await prWatch.flush();
@@ -2039,6 +2091,111 @@ describe('pr.unwatch', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  describe('as a wait source', () => {
+    const URL_9 = 'https://github.com/acme/app/pull/9';
+    const TIMER_WAIT = { waitId: 'wait_t', sessionID: 'ses_agent', source: 'timer', title: 'Timer', label: '10 min', status: 'waiting' };
+    // The timer and extension side, which these tests only route to.
+    const fakeExtensionWaits = () => {
+      let timers = [TIMER_WAIT];
+      return {
+        load: vi.fn(async () => {}),
+        snapshot: () => ({ revision: 1, waits: timers }),
+        listWaits: vi.fn(async () => ({ waiting: timers, sources: [{ source: 'timer' }, { source: 'kit/deploy' }] })),
+        startWait: vi.fn(async () => ({ waiting: TIMER_WAIT, next: 'x' })),
+        stopWaits: vi.fn(async (_sessionID, waitId) => {
+          const ending = timers.filter((wait) => !waitId || wait.waitId === waitId);
+          timers = timers.filter((wait) => !ending.includes(wait));
+          return { waiting: timers, stopped: ending.length };
+        }),
+      };
+    };
+
+    it('starts a pull request wait from args, from JSON text args, and from url beside them', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        await expect(run('wait.start', { source: 'pr', args: { url: URL_9 } })).resolves.toMatchObject({ watching: { url: URL_9, number: 9 } });
+        await run('wait.start', { source: 'pr', args: JSON.stringify({ url: URL_7 }) });
+        await run('wait.start', { source: ' pr ', url: URL_8 });
+        expect(watched()).toEqual([7, 8, 9]);
+        expect(extensionWaits.startWait).not.toHaveBeenCalled();
+        await expect(run('wait.start', { source: 'pr', args: {} })).rejects.toMatchObject({ statusCode: 400 });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('lists pull requests beside the timer and extension waits, with pr as a source after the timer', async () => {
+      const { run, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        const listed = await run('wait.list', {});
+        expect(listed.sources.map((entry) => entry.source)).toEqual(['timer', 'pr', 'kit/deploy']);
+        expect(listed.waiting.map((wait) => wait.waitId)).toEqual([URL_7, URL_8, 'wait_t']);
+        expect(listed.waiting[0]).toMatchObject({ source: 'pr', title: '#7 PR 7', args: { url: URL_7 }, status: 'waiting' });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops one pull request by its address and leaves every other wait', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        const result = await run('wait.stop', { waitId: URL_8 });
+        expect(result).toMatchObject({ stopped: 1, waiting: [{ waitId: URL_7 }, { waitId: 'wait_t' }] });
+        expect(watched()).toEqual([7]);
+        expect(extensionWaits.stopWaits).not.toHaveBeenCalled();
+        await expect(run('wait.stop', { waitId: URL_9 })).rejects.toMatchObject({ statusCode: 404 });
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('leaves the pull request waiting when the other waits cannot be read', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      extensionWaits.load.mockRejectedValueOnce(Object.assign(new Error('EACCES'), { status: 500 }));
+      const { run, watched, cleanup } = await createWatching({ extensionWaits });
+      try {
+        await expect(run('wait.stop', { waitId: URL_8 })).rejects.toMatchObject({ statusCode: 500 });
+        expect(watched()).toEqual([7, 8]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('leaves the timer waiting when the pull request waits cannot be read', async () => {
+      const extensionWaits = fakeExtensionWaits();
+      const { run, prWatch, cleanup } = await createWatching({ extensionWaits });
+      try {
+        vi.spyOn(prWatch, 'listWaits').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { status: 500 }));
+        await expect(run('wait.stop', { waitId: 'wait_t' })).rejects.toMatchObject({ statusCode: 500 });
+        expect(extensionWaits.stopWaits).not.toHaveBeenCalled();
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops a timer by its id and leaves the pull requests', async () => {
+      const { run, watched, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        await expect(run('wait.stop', { waitId: 'wait_t' })).resolves.toMatchObject({ stopped: 1, waiting: [{ waitId: URL_7 }, { waitId: URL_8 }] });
+        expect(watched()).toEqual([7, 8]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    it('stops every wait of the session, pull requests included, without a waitId', async () => {
+      const { run, watched, cleanup } = await createWatching({ extensionWaits: fakeExtensionWaits() });
+      try {
+        await expect(run('wait.stop', {})).resolves.toEqual({ waiting: [], stopped: 3 });
+        expect(watched()).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
   });
 });
 

@@ -79,11 +79,6 @@ const SheetChanges: React.FC<{ sheet: SheetDifference; showName: boolean }> = ({
   );
 };
 
-/**
- * Two versions of an office document. A workbook lists its changed cells;
- * text documents compare their text in the regular diff, so line comments work
- * there too. Layout changes do not show: only the content is read.
- */
 export const OfficeDocumentDiff: React.FC<{
   filePath: string;
   original: string;
