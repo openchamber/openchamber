@@ -1,9 +1,44 @@
 import { OpenCode } from '@opencode/client';
+import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import { asNonEmptyString } from '../shared/guards.js';
 
-let connection = null;
+export interface OpenCodeRuntimeProviders {
+  buildOpenCodeUrl: (requestPath: string, query: string) => string;
+  getOpenCodeAuthHeaders: () => Record<string, string>;
+  getDefaultDirectory?: () => string | null;
+}
 
-export function configureOpenCodeRuntimeProviders(next) {
+export interface SmallModelRef {
+  providerID: string;
+  modelID: string;
+  variant?: string;
+}
+
+interface TrustRefusal {
+  code: 'opencode_trust_required';
+  message?: unknown;
+  directory?: unknown;
+}
+
+const isTrustRefusal = (value: unknown): value is TrustRefusal =>
+  value !== null && (typeof value === 'object' || typeof value === 'function')
+  && 'code' in value && value.code === 'opencode_trust_required';
+
+const hasCause = (value: unknown): value is { cause?: unknown } =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+const isDirectory = (value: unknown): value is string => typeof value === 'string';
+
+const hasModelId = <T>(value: T): value is T & { id: string } =>
+  Boolean(value) && typeof value === 'object' && value !== null
+  && 'id' in value && typeof value.id === 'string';
+
+const isTrustResponse = (value: unknown): value is { code?: unknown; directory?: unknown } =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+let connection: OpenCodeRuntimeProviders | null = null;
+
+export function configureOpenCodeRuntimeProviders(next: OpenCodeRuntimeProviders | null) {
   connection = next ?? null;
 }
 
@@ -13,9 +48,9 @@ export function resetOpenCodeRuntimeProviders() {
   modelCacheAt = 0;
 }
 
-const stripTrailingSlash = (value) => value.replace(/\/+$/, '');
+const stripTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
-export function getSmallModelClient(directory) {
+export function getSmallModelClient(directory?: string | null) {
   if (!connection) return null;
   let baseUrl;
   try {
@@ -24,7 +59,7 @@ export function getSmallModelClient(directory) {
     return null;
   }
   const headers = { ...connection.getOpenCodeAuthHeaders() };
-  const requested = typeof directory === 'string' ? directory.trim() : '';
+  const requested = isDirectory(directory) ? directory.trim() : '';
   const scope = requested || connection.getDefaultDirectory?.() || null;
   if (scope) {
     headers['x-opencode-directory'] = encodeURIComponent(scope);
@@ -35,9 +70,9 @@ export function getSmallModelClient(directory) {
     fetch: async (input, init) => {
       const response = await globalThis.fetch(input, init);
       if (response.status === 403) {
-        const body = await response.clone().json().catch(() => null);
-        const directory = asNonEmptyString(body?.directory);
-        if (body?.code === 'opencode_trust_required' && directory) {
+        const body: unknown = await response.clone().json().catch(() => null);
+        const directory = asNonEmptyString(isTrustResponse(body) ? body.directory : undefined);
+        if (isTrustResponse(body) && body.code === 'opencode_trust_required' && directory) {
           throw Object.assign(
             new Error(`OpenCode is paused for ${directory}. Open the folder in OpenChamber and trust its configuration before trying again.`),
             { statusCode: 403, code: body.code, directory },
@@ -50,20 +85,20 @@ export function getSmallModelClient(directory) {
 }
 
 const MODEL_CACHE_TTL_MS = 30_000;
-let modelCache = null;
+let modelCache: ModelInfo[] | null = null;
 let modelCacheKey = '';
 let modelCacheAt = 0;
 
-const unwrap = (payload) => (Array.isArray(payload?.data) ? payload.data : []);
+const unwrap = <T>(payload: { data: T[] }) => (Array.isArray(payload?.data) ? payload.data : []);
 
-export function getTrustRefusal(error) {
-  if (error?.code === 'opencode_trust_required') return error;
-  if (error?.cause?.code === 'opencode_trust_required') return error.cause;
+export function getTrustRefusal(cause: unknown) {
+  if (isTrustRefusal(cause)) return cause;
+  if (hasCause(cause) && isTrustRefusal(cause.cause)) return cause.cause;
   return null;
 }
 
-export async function listModelInfos(client, directory) {
-  const key = typeof directory === 'string' ? directory : '';
+export async function listModelInfos(client: OpenCodeClient, directory?: string | null) {
+  const key = isDirectory(directory) ? directory : '';
   if (modelCache && modelCacheKey === key && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) {
     return modelCache;
   }
@@ -81,7 +116,7 @@ export async function listModelInfos(client, directory) {
   }
 }
 
-export async function listProviderInfos(client) {
+export async function listProviderInfos(client: OpenCodeClient) {
   try {
     return unwrap(await client.provider.list());
   } catch (error) {
@@ -91,11 +126,11 @@ export async function listProviderInfos(client) {
   }
 }
 
-export async function getDefaultModelInfo(client) {
+export async function getDefaultModelInfo(client: OpenCodeClient) {
   try {
     const payload = await client.model.default();
     const info = payload?.data ?? payload;
-    return info && typeof info === 'object' && typeof info.id === 'string' ? info : null;
+    return hasModelId(info) ? info : null;
   } catch (error) {
     const refusal = getTrustRefusal(error);
     if (refusal) throw refusal;
@@ -103,11 +138,11 @@ export async function getDefaultModelInfo(client) {
   }
 }
 
-export async function getConfiguredSmallModelRef(client) {
+export async function getConfiguredSmallModelRef(client: OpenCodeClient) {
   try {
     const { model } = (await client.agent.get({ agentID: 'title' })).data;
     if (!model) return null;
-    const ref = { providerID: model.providerID, modelID: model.id };
+    const ref: SmallModelRef = { providerID: model.providerID, modelID: model.id };
     const variant = asNonEmptyString(model.variant);
     if (variant) ref.variant = variant;
     return ref;
@@ -118,15 +153,14 @@ export async function getConfiguredSmallModelRef(client) {
   }
 }
 
-export function findModelInfo(models, providerID, modelID) {
+export function findModelInfo(models: ModelInfo[], providerID: string, modelID: string) {
   const ofProvider = models.filter((model) => model?.providerID === providerID);
   return ofProvider.find((model) => model.id === modelID)
     ?? ofProvider.find((model) => model.modelID === modelID)
     ?? null;
 }
 
-/** @param {string | null} directory */
-export async function readOpenCodeCatalog(directory) {
+export async function readOpenCodeCatalog(directory: string | null) {
   const client = getSmallModelClient(directory);
   if (!client) throw new Error('OpenCode on this computer is not running');
   const [providers, models] = await Promise.all([client.provider.list(), client.model.list()]);

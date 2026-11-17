@@ -26,7 +26,7 @@ leave each caller responsible for choosing the right error object.
 
 ## Files
 
-- `client.js` — the connection to the running OpenCode. `server/index.js` wires
+- `client.ts` — the connection to the running OpenCode. `server/index.js` wires
   it once with `buildOpenCodeUrl` and `getOpenCodeAuthHeaders`; the client is
   built per call because the port and the server password both change across an
   OpenCode restart. Building its URL throws while OpenCode is still starting,
@@ -306,3 +306,26 @@ Returns `null` when OpenCode is not reachable.
 
 Mounted lazily from `feature-routes-runtime.js` (same pattern as quota): the
 module is imported on first request, not at server startup.
+
+## TypeScript boundary
+
+`client.ts` owns the runtime connection and configured model reference types.
+Directory checks remain at this boundary because the JavaScript generation
+route forwards an unchecked request-body directory. Non-string directories
+still select the server default and the empty cache key.
+
+Default-model responses retain both the SDK envelope and the direct-response
+fallback. Only a string `id` is checked. The inferred return type therefore
+includes an envelope with an `id` when `data` is null, without promising a
+`providerID`. Trust refusals likewise check only `code`; their message and
+directory remain unchecked values, including inherited properties.
+
+### Why generation and routes remain JavaScript
+
+The default-model response fallback can return an object without a provider.
+Generation forwards that provider to the SDK without validating it. Converting
+generation would require either a stronger response guarantee from
+`@opencode/client` or new validation that changes acceptance and failure behavior.
+The route service also forwards unchecked HTTP fields and arbitrary rejection
+values, and its GET error path reads `error.message` without a null check.
+Its contract must be settled with the generation boundary before conversion.
