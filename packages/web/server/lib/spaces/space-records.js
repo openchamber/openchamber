@@ -13,9 +13,13 @@ import { z } from 'zod';
 
 import { requireSpaceId } from './labels.js';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
+
+/** A record is small by construction — bounded domains, grants and setup output — so this generous cap is headroom, not a size a record grows toward. */
+export const MAX_RECORD_BYTES = 1024 * 1024;
 
 const NETWORK_MODES = Object.freeze(['allowlist', 'open']);
 // The allowlist's own rule for a name: labels of letters, digits and hyphens, with a real last label.
@@ -167,9 +171,14 @@ export function createSpaceRecords({ dataDir, logger = console }) {
     const file = fileOf(spaceId);
     let text;
     try {
-      text = fs.readFileSync(file, 'utf8');
+      const bounded = readBoundedFileSync(file, MAX_RECORD_BYTES);
+      if (!bounded.ok) {
+        if (bounded.reason === 'missing') return { status: 'missing', record: null };
+        logger.warn?.(`[spaces] could not read the record of space ${spaceId}: ${bounded.code}`);
+        return { status: 'unreadable', record: null };
+      }
+      text = bounded.buffer.toString('utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return { status: 'missing', record: null };
       logger.warn?.(`[spaces] could not read the record of space ${spaceId}: ${error?.code ?? error?.message ?? error}`);
       return { status: 'unreadable', record: null };
     }
