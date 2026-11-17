@@ -1,4 +1,6 @@
-export const formatResetTime = (timestamp) => {
+import type { QuotaResult, QuotaResultInput, ResetTimestamp, UsageWindow, UsageWindowInput } from './contracts.js';
+
+export const formatResetTime = (timestamp: ResetTimestamp) => {
   try {
     const resetDate = new Date(timestamp);
     if (!Number.isFinite(resetDate.getTime())) {
@@ -27,9 +29,9 @@ export const formatResetTime = (timestamp) => {
   }
 };
 
-const hasResetTimestamp = (resetAt) => resetAt !== null && resetAt !== undefined && resetAt !== '';
+const hasResetTimestamp = (resetAt: ResetTimestamp | null | undefined): resetAt is ResetTimestamp => resetAt !== null && resetAt !== undefined && resetAt !== '';
 
-export const calculateResetAfterSeconds = (resetAt) => {
+export const calculateResetAfterSeconds = (resetAt: ResetTimestamp | null | undefined) => {
   if (!hasResetTimestamp(resetAt)) return null;
   const resetAtTime = new Date(resetAt).getTime();
   if (!Number.isFinite(resetAtTime)) return null;
@@ -37,32 +39,33 @@ export const calculateResetAfterSeconds = (resetAt) => {
   return delta < 0 ? 0 : delta;
 };
 
-export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel, creditsUsed }) => {
+export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel, creditsUsed }: UsageWindowInput): UsageWindow => {
   const resetAfterSeconds = calculateResetAfterSeconds(resetAt);
   const resetFormatted = hasResetTimestamp(resetAt) ? formatResetTime(resetAt) : null;
-  const hasFiniteUsedPercent = typeof usedPercent === 'number' && Number.isFinite(usedPercent);
-  return {
+  const hasFiniteUsedPercent = usedPercent !== null && usedPercent !== undefined && Number.isFinite(usedPercent);
+  const window: UsageWindow = {
     usedPercent,
     remainingPercent: hasFiniteUsedPercent ? Math.max(0, 100 - usedPercent) : null,
     windowSeconds: windowSeconds ?? null,
     resetAfterSeconds,
     resetAt,
     resetAtFormatted: resetFormatted,
-    resetAfterFormatted: resetFormatted,
-    ...(valueLabel ? { valueLabel } : {}),
-    ...(creditsUsed !== undefined ? { creditsUsed } : {})
+    resetAfterFormatted: resetFormatted
   };
+  if (valueLabel) window.valueLabel = valueLabel;
+  if (creditsUsed !== undefined) window.creditsUsed = creditsUsed;
+  return window;
 };
 
-export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }) => {
-  const result = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
+export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel, accountLabel }: QuotaResultInput): QuotaResult => {
+  const result: QuotaResult = { providerId, providerName, ok, configured, usage: usage ?? null, fetchedAt: Date.now() };
   if (error) result.error = error;
   if (planLabel) result.planLabel = planLabel;
   if (accountLabel) result.accountLabel = accountLabel;
   return result;
 };
 
-export const durationToLabel = (duration, unit) => {
+export const durationToLabel = (duration: number | null | undefined, unit: string | null | undefined) => {
   if (!duration || !unit) return 'limit';
   if (unit === 'TIME_UNIT_MINUTE') return `${duration}m`;
   if (unit === 'TIME_UNIT_HOUR') return `${duration}h`;
@@ -70,7 +73,7 @@ export const durationToLabel = (duration, unit) => {
   return 'limit';
 };
 
-export const durationToSeconds = (duration, unit) => {
+export const durationToSeconds = (duration: number | null | undefined, unit: string | null | undefined) => {
   if (!duration || !unit) return null;
   if (unit === 'TIME_UNIT_MINUTE') return duration * 60;
   if (unit === 'TIME_UNIT_HOUR') return duration * 3600;
@@ -78,12 +81,12 @@ export const durationToSeconds = (duration, unit) => {
   return null;
 };
 
-export const formatMoney = (value) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+export const formatMoney = (value: number | null) => {
+  if (value === null || !Number.isFinite(value)) return null;
   return value.toFixed(2);
 };
 
-export const formatCredits = (value) => {
+export const formatCredits = (value: number) => {
   if (!Number.isFinite(value)) return null;
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded)
