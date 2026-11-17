@@ -1,6 +1,25 @@
+export interface SummarizeTextOptions {
+  text?: string | null;
+  threshold?: number;
+  maxLength?: number;
+  zenModel?: string;
+  mode?: string;
+}
 
-export function sanitizeForTTS(text) {
-  if (!text || typeof text !== 'string') return '';
+export interface SummarizeTextResult {
+  summary: string;
+  summarized: false;
+  reason: 'Text under threshold' | 'No text provided' | 'Model summarization provider unavailable';
+  originalLength?: number;
+  summaryLength?: number;
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+export function sanitizeForTTS(text: string | null | undefined) {
+  if (!text || !isText(text)) return '';
 
   return text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -9,7 +28,7 @@ export function sanitizeForTTS(text) {
     .replace(/^\s*[$#>]\s*/gm, '')
     .replace(/[|&;<>]/g, ' ')
     .replace(/\\/g, '')
-    .replace(/[\[\]{}()]/g, '')
+    .replace(/[[\]{}()]/g, '')
     .replace(/["']/g, '')
     .replace(/https?:\/\/[^\s]+/g, ' a link ')
     .replace(/\/[\w\-./]+/g, '')
@@ -17,8 +36,8 @@ export function sanitizeForTTS(text) {
     .trim();
 }
 
-function sanitizeForNotification(text) {
-  if (!text || typeof text !== 'string') return '';
+function sanitizeForNotification(text: string) {
+  if (!text) return '';
 
   return text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -35,8 +54,8 @@ function sanitizeForNotification(text) {
     .trim();
 }
 
-export function sanitizeForNote(text) {
-  if (!text || typeof text !== 'string') return '';
+export function sanitizeForNote(text: string | null | undefined) {
+  if (!text || !isText(text)) return '';
 
   return text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -54,13 +73,13 @@ export function sanitizeForNote(text) {
     .trim();
 }
 
-function sanitizeByMode(text, mode) {
+function sanitizeByMode(text: string, mode: string) {
   if (mode === 'note') return sanitizeForNote(text);
   if (mode === 'notification') return sanitizeForNotification(text);
   return sanitizeForTTS(text);
 }
 
-function distillNoteFallback(text, maxLength) {
+function distillNoteFallback(text: string, maxLength: number) {
   const sanitized = sanitizeForNote(text);
   if (!sanitized) return '';
 
@@ -74,10 +93,9 @@ function distillNoteFallback(text, maxLength) {
     .map((part) => part.trim())
     .filter(Boolean);
 
-  const best = (sentences[0] || normalized)
-    .split(/[;:()-]\s+/)[0]
-    .split(/,\s+/)[0]
-    .trim();
+  const [clause = ''] = (sentences[0] || normalized).split(/[;:()-]\s+/);
+  const [phrase = ''] = clause.split(/,\s+/);
+  const best = phrase.trim();
   const idealLimit = Math.min(maxLength, Math.max(32, Math.floor(normalized.length * 0.65)));
 
   if (best.length <= idealLimit) return best;
@@ -86,7 +104,7 @@ function distillNoteFallback(text, maxLength) {
   return clipped ? `${clipped}…` : best.slice(0, idealLimit).trim();
 }
 
-function distillNotificationFallback(text, maxLength) {
+function distillNotificationFallback(text: string, maxLength: number) {
   const sanitized = sanitizeForNotification(text);
   if (!sanitized) return '';
 
@@ -102,13 +120,13 @@ function distillNotificationFallback(text, maxLength) {
   return clipped ? `${clipped}…` : candidate.slice(0, limit).trim();
 }
 
-function fallbackByMode(text, maxLength, mode) {
+function fallbackByMode(text: string, maxLength: number, mode: string) {
   if (mode === 'note') return distillNoteFallback(text, maxLength);
   if (mode === 'notification') return distillNotificationFallback(text, maxLength);
   return sanitizeByMode(text, mode);
 }
 
-export async function summarizeText({ text, threshold = 200, maxLength = 500, zenModel, mode = 'tts' }) {
+export async function summarizeText({ text, threshold = 200, maxLength = 500, zenModel, mode = 'tts' }: SummarizeTextOptions): Promise<SummarizeTextResult> {
   void zenModel;
 
   const summary = fallbackByMode(text || '', maxLength, mode);
