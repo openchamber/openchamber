@@ -13,10 +13,8 @@ import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
-/** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
 
-/** UI-only type with instanceId for React keys and duplicate tracking */
 export interface ModelSelectionWithId {
   providerID: string;
   modelID: string;
@@ -30,10 +28,6 @@ export const generateInstanceId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 };
 
-/**
- * Model selection chip with remove button.
- * Shows instance index (e.g., "(2)") when same model is selected multiple times.
- */
 const ModelChip: React.FC<{
   model: ModelSelectionWithId;
   instanceIndex: number;
@@ -65,38 +59,20 @@ interface ModelMultiSelectProps {
   onAdd: (model: ModelSelectionWithId) => void;
   onRemove: (index: number) => void;
   onUpdate?: (index: number, model: ModelSelectionWithId) => void;
-  /** Minimum models required (shows validation hint) */
   minModels?: number;
-  /** Label for the add button */
   addButtonLabel?: string;
-  /** Whether to show the selected chips */
   showChips?: boolean;
-  /** Maximum models allowed */
   maxModels?: number;
-  /** Optional className for add model trigger button */
   addButtonClassName?: string;
-  /** Direction for the model picker popup. Multi-run launcher opens upward near the footer. */
   dropdownSide?: 'top' | 'bottom';
-  /** Optional className for the picker popup. */
   dropdownClassName?: string;
-  /** Optional className for the trigger/dropdown positioning container. */
   containerClassName?: string;
-  /** Optional trigger icon override. */
   triggerIcon?: React.ReactNode;
-  /**
-   * Render the picker over the page instead of inside the trigger's container.
-   * Needed inside the composer box, which clips its content.
-   */
   portal?: boolean;
-  /** Accessible name when the trigger shows only an icon. */
   addButtonAriaLabel?: string;
-  /** Tooltip on the trigger. */
   addButtonTooltip?: string;
 }
 
-/**
- * Model selector for multi-run (allows selecting same model multiple times).
- */
 export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   selectedModels,
   onAdd,
@@ -132,7 +108,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const isSingleSelect = maxModels === 1;
   const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
 
-  // Count occurrences of each model for display purposes
   const modelCounts = React.useMemo(() => {
     const counts = new Map<string, number>();
     for (const m of selectedModels) {
@@ -142,7 +117,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     return counts;
   }, [selectedModels]);
 
-  // Get instance index for a specific model selection
   const getInstanceIndex = React.useCallback((model: ModelSelectionWithId): number => {
     const sameModels = selectedModels.filter(
       m => m.providerID === model.providerID && m.modelID === model.modelID
@@ -150,7 +124,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     return sameModels.findIndex(m => m.instanceId === model.instanceId) + 1;
   }, [selectedModels]);
 
-  // Calculate available height: multi-run opens upward inside a scroller; fusion opens downward and may extend past the dialog.
   React.useEffect(() => {
     if (!isOpen || !triggerRef.current) return;
 
@@ -159,12 +132,10 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     if (portal) {
       const viewportHeight = window.visualViewport?.height ?? document.documentElement.clientHeight ?? window.innerHeight;
       const popupWidth = Math.min(420, window.innerWidth - 32);
-      // The popup hangs from the trigger's start edge: its right edge in RTL.
       const anchorLeft = isRightToLeft(triggerRef.current) ? triggerRect.right - popupWidth : triggerRect.left;
       const left = Math.max(16, Math.min(anchorLeft, window.innerWidth - popupWidth - 16));
       const opensUp = dropdownSide === 'top';
       const space = opensUp ? triggerRect.top - 16 : viewportHeight - triggerRect.bottom - 16;
-      // The list is the scrollable part; reserve room for the search and hint rows.
       setAvailableHeight(Math.max(160, Math.min(320, space - 112)));
       setPortalStyle(opensUp
         ? { position: 'fixed', left, bottom: viewportHeight - triggerRect.top + 4, width: popupWidth }
@@ -175,13 +146,11 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     if (dropdownSide === 'bottom') {
       const viewportHeight = window.visualViewport?.height ?? document.documentElement.clientHeight ?? window.innerHeight;
       const spaceBelow = viewportHeight - triggerRect.bottom - 16;
-      // availableHeight is only the scrollable model list; reserve room for search + keyboard hint chrome.
       const listSpaceBelow = spaceBelow - 112;
       setAvailableHeight(Math.max(160, Math.min(320, listSpaceBelow)));
       return;
     }
 
-    // Find the nearest dialog or overflow ancestor to constrain within
     let container: HTMLElement | null = triggerRef.current.parentElement;
     while (container) {
       if (container.matches('[role="dialog"], [data-scroll-shadow-scroller]')) {
@@ -196,7 +165,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
     const topBound = container ? container.getBoundingClientRect().top : 0;
     const spaceAbove = triggerRect.top - topBound - 16;
-    // Cap: min 150, max 300
     setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
   }, [dropdownSide, isOpen, portal]);
 
@@ -207,7 +175,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     }
   }, [canAddModel, isOpen]);
 
-  // Close dropdown when clicking outside
   React.useEffect(() => {
     if (!isOpen) return;
 
@@ -242,7 +209,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     }
   }, [isSingleSelect, onAdd, onUpdate, selectedModels.length]);
 
-  // In portal mode the popup leaves the clipping container and sits over the page.
   const mountPopup = (popup: React.ReactElement): React.ReactNode => (portal ? createPortal(popup, document.body) : popup);
 
   const labels = React.useMemo(() => ({
@@ -287,7 +253,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5 items-center">
-        {/* Add model button (dropdown trigger) */}
         <div className={cn('relative', containerClassName)} ref={dropdownRef}>
           {addButtonTooltip ? <HoverTooltip label={addButtonTooltip}>{trigger}</HoverTooltip> : trigger}
 
@@ -333,7 +298,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
           ) : null}
         </div>
 
-        {/* Selected models */}
         {showChips && selectedModels.length > 0 && (
           <div className="flex flex-col gap-2 w-full">
             {selectedModels.map((model, index) => {
@@ -403,7 +367,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
         )}
       </div>
 
-      {/* Validation hint */}
       {minModels !== undefined && selectedModels.length < minModels && (
         <p className="typography-micro text-muted-foreground">
           {maxModels !== undefined
