@@ -31,10 +31,6 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type View = 'agents' | 'log' | 'result' | 'script';
 
-// The header gives up room in steps while its row does not fit (the CSS is in
-// `index.css`): the view labels first, keeping their icons; then the action's
-// label; last the run's name, leaving its state icon and the chevron. Every
-// label shows while there is room, so choosing a view changes no widths.
 const WORKFLOWS_HEADER_FIT = {
   steps: ['data-workflows-header-compact', 'data-workflows-header-tight', 'data-workflows-header-narrow'],
 } as const;
@@ -46,17 +42,8 @@ const VIEWS: readonly { id: View; icon: IconName; labelKey: I18nKey; tooltipKey:
   { id: 'script', icon: 'code-sslash', labelKey: 'workflows.panel.view.script', tooltipKey: 'contextTooltips.workspace.workflow.view.script' },
 ];
 
-// A running run's log refreshes at most this often, however fast its lines come.
 const LOG_REFRESH_MS = 1_500;
 
-/**
- * The run's log, script and result, read from the server when one of those
- * views opens and again when the run's state changes. While the log view
- * shows a running run, its new lines read it again, at most every
- * LOG_REFRESH_MS. Until the first read lands, the summary's recent lines stand
- * in for the log. Everything is kept per run, so switching runs never shows
- * the last run's detail or its failed read.
- */
 type RunDetailState = { detail: WorkflowRunDetail | null; failed: boolean };
 
 const useRunDetail = (run: WorkflowRun, view: View): RunDetailState => {
@@ -68,7 +55,6 @@ const useRunDetail = (run: WorkflowRun, view: View): RunDetailState => {
   React.useEffect(() => {
     if (!wanted) return;
     let current = true;
-    // Only this run's own reads hold the next one back.
     const previous = lastRead.current?.runId === run.id ? lastRead.current.at : 0;
     const delay = Math.max(0, previous + LOG_REFRESH_MS - Date.now());
     const timer = setTimeout(() => {
@@ -149,7 +135,6 @@ const ScriptView: React.FC<{ detail: WorkflowRunDetail | null; failed: boolean }
     );
   }
   const args = detail.args;
-  // An empty object is what a run without args carries; anything else is worth showing.
   const hasArgs = args !== undefined && args !== null && JSON.stringify(args) !== '{}';
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
@@ -164,7 +149,6 @@ const ScriptView: React.FC<{ detail: WorkflowRunDetail | null; failed: boolean }
   );
 };
 
-/** The actions for the run's state, in the header beside its picker. */
 const RunAction: React.FC<{ run: WorkflowRun }> = ({ run }) => {
   const { t } = useI18n();
   const { pending, act } = useWorkflowRunAction();
@@ -212,10 +196,6 @@ const RunAction: React.FC<{ run: WorkflowRun }> = ({ run }) => {
 
 type SessionTitles = { get: (sessionId: string) => string | undefined };
 
-/**
- * Session titles for runs of other sessions than the one on screen, from the
- * global session list: those sessions may sit in the project's worktrees.
- */
 const useSessionTitles = (): SessionTitles => {
   const sessions = useGlobalSessionsStore((state) => state.entityById);
   return React.useMemo(() => ({ get: (sessionId) => sessions.get(sessionId)?.title }), [sessions]);
@@ -236,11 +216,6 @@ const RunItem: React.FC<{ run: WorkflowRun; selected: boolean; caption?: string;
   );
 };
 
-/**
- * Picks the run the panel shows: this session's runs first, then the other
- * sessions' with their session named, then the project's saved workflows to
- * run, and deleting the run on screen once it has finished.
- */
 const RunPicker: React.FC<{
   runs: WorkflowRun[];
   selected: WorkflowRun;
@@ -249,7 +224,6 @@ const RunPicker: React.FC<{
   saved: SavedWorkflow[];
   onSelect: (runId: string) => void;
   onRunSaved: (name: string) => void;
-  /** Absent while the run is open: it is stopped or declined first. */
   onDelete: (() => void) | null;
 }> = ({ runs, selected, sessionId, sessionTitles, saved, onSelect, onRunSaved, onDelete }) => {
   const { t } = useI18n();
@@ -319,11 +293,6 @@ const RunPicker: React.FC<{
   );
 };
 
-/**
- * Runs a saved workflow after a confirmation: in the session on screen, or in
- * a new session when none is open (a draft), which then opens. The run is that
- * session's, as if its agent had started it.
- */
 const useRunSavedWorkflow = (directory: string | null, scriptDirectory: string | null, sessionId: string | null, selectionKey: string) => {
   const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();
@@ -351,7 +320,6 @@ const useRunSavedWorkflow = (directory: string | null, scriptDirectory: string |
   return { run, dialog };
 };
 
-/** No runs yet: the project's saved workflows, each one click from running. */
 const EmptyState: React.FC<{ saved: SavedWorkflow[]; onRunSaved: (name: string) => void }> = ({ saved, onRunSaved }) => {
   const { t } = useI18n();
   if (saved.length === 0) {
@@ -381,13 +349,6 @@ const EmptyState: React.FC<{ saved: SavedWorkflow[]; onRunSaved: (name: string) 
   );
 };
 
-/**
- * The context panel's Workflows surface: the workflow runs of the project,
- * one at a time, the session on screen's newest first. The header carries the
- * run picker, the views, the run's action, and for another session's run a
- * way to that session; the body shows the agents by phase, the log, the result
- * or the script. With no runs, the project's saved workflows wait to be run.
- */
 export const WorkflowsPanel: React.FC<{ directory: string | null }> = ({ directory }) => {
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const scope = useWorkflowProjectScope(directory);
@@ -441,7 +402,6 @@ const WorkflowRunView: React.FC<{
     if (!confirmed) return;
     try {
       await deleteWorkflowRun(run.id);
-      // The server's event does the same; this keeps the panel from waiting on it.
       useWorkflowRunsStore.getState().remove(run.parentSessionId, run.id);
     } catch (error) {
       toast.error(t('workflows.panel.delete.failed'), { description: error instanceof Error ? error.message : undefined });
@@ -449,7 +409,6 @@ const WorkflowRunView: React.FC<{
   };
 
   const openOwnerSession = () => {
-    // Keeps showing this run there: the panel picks its run per session.
     select(run.parentSessionId, run.id);
     useSessionUIStore.getState().setCurrentSession(run.parentSessionId, run.directory);
   };
@@ -469,9 +428,6 @@ const WorkflowRunView: React.FC<{
             onRunSaved={onRunSaved}
             onDelete={open ? null : () => void deleteRun()}
           />
-          {/* Never shrinks: a squeezed strip would slide under the buttons after it
-              instead of overflowing the row, and only an overflow makes the
-              header give up labels. The spacer after it takes the free room. */}
           <nav className="flex shrink-0 items-center gap-1" aria-label={t('workflows.panel.view.label')}>
             {VIEWS.map((entry) => {
               const active = entry.id === view;
@@ -518,7 +474,6 @@ const WorkflowRunView: React.FC<{
           <RunAction run={run} />
         </div>
       </ContextPanelHeaderToolbar>
-      {/* The agents view scrolls its list above a fixed summary line; the others scroll whole. */}
       {view === 'agents' ? (
         <div className="min-h-0 flex-1"><WorkflowAgentsView key={run.id} run={run} directory={directory} /></div>
       ) : (

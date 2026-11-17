@@ -14,17 +14,10 @@ import { selectWorkflowsShown } from '@/lib/workflows/availability';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { useWorkflowRunAction, workflowRunLook } from './workflowRunPresentation';
 
-/**
- * The run a `workflow.run` call proposed, drawn in place of the call's row:
- * the plan the user approves, then how far the run got. The state comes from
- * the server's run, not from the call, so the card is current after a reload
- * and on every device.
- */
 export const WorkflowRunCard: React.FC<{ sessionId: string; runId: string }> = ({ sessionId, runId }) => {
   const { t } = useI18n();
   const run = useWorkflowRun(sessionId, runId);
   const status = useWorkflowRunsStore((state) => state.bySession[sessionId]?.status);
-  // Where workflows are unavailable (VS Code) or turned off no runs are read; a card says which.
   const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const shown = useUIStore(selectWorkflowsShown);
 
@@ -55,7 +48,6 @@ const WorkflowRunCardBody: React.FC<{ run: WorkflowRun }> = ({ run }) => {
   const look = workflowRunLook(run.state);
   const phases = React.useMemo(() => groupWorkflowAgentsByPhase(run), [run]);
   const busy = pending === run.id;
-  // The Workflows panel lives in the context panel, which the phone and VS Code do not have.
   const isMobile = useUIStore((state) => state.isMobile);
   const panelAvailable = !isMobile && !isVSCodeRuntime();
 

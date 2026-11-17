@@ -9,7 +9,6 @@ import { OperatorChildWorkflowApprovals } from './OperatorChildWorkflowApprovals
 
 const NO_LIVE_MESSAGES: readonly string[] = [];
 
-/** Runs can arrive before their proposing call, or outlive the loaded history. */
 export function PendingWorkflowApprovals(props: {
   sessionId: string;
   messages: readonly ChatMessageEntry[];
@@ -37,8 +36,6 @@ function OwnWorkflowApprovals({ sessionId, messages, liveMessageIds = NO_LIVE_ME
 
   const shown = new Set<string>();
   for (const message of messages) {
-    // Match TimelineRowContent: only the live tail overlays its snapshot, and
-    // an empty live array must not erase parts the snapshot already holds.
     const liveParts = livePartsByMessageId[message.info.id];
     for (const part of liveParts?.length ? liveParts : message.parts) {
       if (part.type !== 'tool') continue;

@@ -9,7 +9,6 @@ import type { WorkflowAgentState, WorkflowRunState } from '@/lib/workflows/model
 
 type StateLook = { icon: IconName; color?: string; labelKey: I18nKey };
 
-/** How a run's state reads in the chat card and the work-status panel alike. */
 const WORKFLOW_RUN_STATE_LOOK = {
   'awaiting-approval': { icon: 'time', color: 'var(--status-warning)', labelKey: 'chat.workflow.state.awaitingApproval' },
   running: { icon: 'record-circle', color: 'var(--status-info)', labelKey: 'chat.workflow.state.running' },
@@ -19,7 +18,6 @@ const WORKFLOW_RUN_STATE_LOOK = {
   declined: { icon: 'close-circle', labelKey: 'chat.workflow.state.declined' },
 } satisfies Record<WorkflowRunState, StateLook>;
 
-/** The same for one agent of a run, matching the Subagents rows' icons. */
 const WORKFLOW_AGENT_STATE_LOOK = {
   queued: { icon: 'time', labelKey: 'chat.workflow.agent.queued' },
   running: { icon: 'record-circle', color: 'var(--status-info)', labelKey: 'chat.workflow.agent.running' },
@@ -32,13 +30,7 @@ export const workflowRunLook = (state: WorkflowRunState): StateLook => WORKFLOW_
 
 export const workflowAgentLook = (state: WorkflowAgentState): StateLook => WORKFLOW_AGENT_STATE_LOOK[state];
 
-/**
- * Sends the user's approve, decline, stop or resume. `pending` names the run
- * whose action is in flight, so its buttons hold until the server answers; the
- * new state itself arrives as an event. A refusal shows the server's reason.
- */
 type WorkflowRunActions = {
-  /** The run whose action is in flight. */
   pending: string | null;
   act: (runId: string, action: WorkflowRunAction) => void;
 };
