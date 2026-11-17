@@ -462,6 +462,20 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:image/webp;base64,AQID")
   })
 
+  testWithMockFileReader("preserves video MIME types and data URLs", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File([new Uint8Array([1, 2, 3])], "clip.webm", { type: "video/webm" })
+    )
+    await waitForReaderCount(1)
+    expect(pendingReaders).toHaveLength(1)
+
+    resolveReader(pendingReaders[0], "data:video/webm;base64,AQID")
+
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("video/webm")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:video/webm;base64,AQID")
+  })
+
   testWithMockFileReader("adds extracted document text and referenced images atomically", async () => {
     const archive = zipSync({
       "word/document.xml": strToU8(`<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>Diagram</w:t><a:blip r:embed="rId1"/></w:p></w:body></w:document>`),
