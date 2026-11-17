@@ -33,7 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-// (dropdown menu used inside IntegrateCommitsSection)
 import {
   Command,
   CommandEmpty,
@@ -134,8 +133,6 @@ type GitmojiEntry = {
 const GIT_DIFF_PRIORITY_PREFETCH_LIMIT = 40;
 const GIT_DIFF_PRIORITY_BASELINE_LIMIT = 20;
 
-// The server already serializes reverts per repository, so anything beyond a
-// couple of in-flight POSTs only holds browser connections away from reads.
 const REVERT_PATHS_CONCURRENCY = 2;
 
 const KEYWORD_MAP: Record<string, string> = {
@@ -181,20 +178,17 @@ const KEYWORD_MAP: Record<string, string> = {
 const matchGitmojiFromSubject = (subject: string, gitmojis: GitmojiEntry[]): GitmojiEntry | null => {
   const lowerSubject = subject.toLowerCase();
 
-  // 1. Check for conventional commit prefix (e.g. "feat:", "fix(scope):")
   const conventionalRegex = /^([a-z]+)(?:\(.*\))?!?:/;
   const match = lowerSubject.match(conventionalRegex);
 
   if (match) {
     const type = match[1];
-    // Map common types to gitmoji codes
     const mappedCode = KEYWORD_MAP[type];
     if (mappedCode) {
       return gitmojis.find((g) => g.code === mappedCode) || null;
     }
   }
 
-  // 2. Check for starting words (e.g. "Add", "Fix")
   const firstWord = lowerSubject.split(' ')[0];
   const mappedCode = KEYWORD_MAP[firstWord];
   if (mappedCode) {
@@ -209,8 +203,6 @@ const GIT_VIEW_SNAPSHOTS_CAP = 20;
 const gitViewSnapshots = new Map<string, GitViewSnapshot>();
 
 const rememberSnapshot = (key: string, snapshot: GitViewSnapshot) => {
-  // Touch-on-write LRU: deleting before re-inserting promotes the key to
-  // the Map's insertion order, so the oldest key falls off the end.
   gitViewSnapshots.delete(key);
   gitViewSnapshots.set(key, snapshot);
   if (gitViewSnapshots.size > GIT_VIEW_SNAPSHOTS_CAP) {
@@ -237,14 +229,10 @@ type GitViewProps = {
 };
 
 export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
-  // Counts openings of the panel, which stays mounted while closed: the clean
-  // state remounts on each one and picks a new line.
   const [opening, setOpening] = React.useState({ active: isActive, count: 0 });
   if (opening.active !== isActive) setOpening({ active: isActive, count: opening.count + (isActive ? 1 : 0) });
   const { t } = useI18n();
   const { git, sourceControl, runtime } = useRuntimeAPIs();
-  // The panel's tabs belong to the open view's folder; the repository shown is the same folder,
-  // except in a draft waiting for a new space: the space once it runs, none while it is made.
   const panelDirectory = useEffectiveDirectory();
   const draftSpace = useDraftSpaceTarget();
   const currentDirectory = panelContentDirectory(draftSpace, panelDirectory) ?? undefined;
@@ -293,12 +281,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       loadDefaultGitIdentityId: s.loadDefaultGitIdentityId,
     })));
 
-  // The root the view is anchored to (session/worktree context stays keyed on
-  // it). When the user picked a repository nested under it — a submodule or a
-  // checkout in a non-repository folder — `gitDirectory` is the effective
-  // repository all git data and actions operate on. The hook owns probing,
-  // discovery, auto-select, and stale-selection recovery; data fetching below
-  // keys off its result.
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(
     currentDirectory ?? null,
     { enabled: isActive, recheckOnOpen: true },
@@ -308,14 +290,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const publishChooser = useGitPublishChooser({ directory: gitDirectory, branch: status?.current, chooseContributor: contributorDestination.choose });
   const operationRecovery = useGitOperationRecovery(gitDirectory, git, sourceControl);
 
-  // Authoritative session↔worktree attachment for repair action display
   const worktreeAttachment = useSessionWorktreeStore((s) =>
     currentSessionId ? s.getAttachment(currentSessionId) : undefined
   );
   const repairActions = worktreeAttachment ? getSessionWorktreeRepairActions(worktreeAttachment) : [];
 
-  // When an authoritative attachment exists, derive worktree-related fields from it
-  // rather than from the live detected worktree metadata.
   const authoritativeProjectRoot = worktreeAttachment && !worktreeAttachment.degraded && !worktreeAttachment.legacy
     ? worktreeAttachment.worktreeRoot ?? undefined
     : undefined;
@@ -363,23 +342,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const [remotes, setRemotes] = React.useState<GitRemote[]>([]);
   const binding = useRepositoryBinding(gitDirectory, sourceControl, isActive);
   const [isRepositoryConfigurationOpen, setRepositoryConfigurationOpen] = React.useState(false);
-  /**
-   * The remote an identity answers for: the one the binding already names, or
-   * the repository's own anchor. Without one there is nothing to bind, and
-   * applying an identity writes only the signature.
-   */
-  /**
-   * The one thing the identity's name cannot say: whether the binding still
-   * does what it claims. Everything else about the configuration is the
-   * identity, so this is all that is left to surface.
-   */
   const identityAttention = React.useMemo(() => {
     const read = binding.read;
     if (!read?.binding || binding.status !== 'ready' || read.binding.state === 'bound') return null;
-    // The commonest way a binding stops matching is a bound remote renamed,
-    // repointed or removed after the identity was applied. That has a remedy
-    // the generic words do not name — choose the identity again — so it is
-    // said here.
     return hasConfigChangedGrant(read.binding)
       ? t('gitView.identity.configChanged')
       : t('gitView.context.needsAttention');
@@ -745,8 +710,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const repoRootForIntegrate = authoritativeProjectRoot || worktreeMetadata?.projectDirectory || null;
   const sourceBranchForIntegrate = status?.current || null;
   const shouldShowIntegrateCommits = React.useMemo(() => {
-    // For PR worktrees from forks we set upstream to a non-origin remote (e.g. pr-<owner>-<repo>).
-    // Re-integrate commits is intended for local scratch branches -> base branch, not fork PR branches.
     const tracking = status?.tracking;
     if (!tracking) return true;
     return tracking.startsWith('origin/');
@@ -803,13 +766,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const [graphLogMaxCount, setGraphLogMaxCount] = React.useState(100);
   const [graphLogRefreshToken, setGraphLogRefreshToken] = React.useState(0);
 
-  // Conflict state persistence key
   const conflictStorageKey = React.useMemo(() => {
     if (!currentSessionId) return null;
     return `openchamber.conflict:${currentSessionId}`;
   }, [currentSessionId]);
 
-  // Save conflict state to localStorage
   const persistConflictState = React.useCallback((
     directory: string,
     files: string[],
@@ -820,7 +781,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     window.localStorage.setItem(conflictStorageKey, JSON.stringify(payload));
   }, [conflictStorageKey]);
 
-  // Clear conflict state from localStorage
   const clearConflictState = React.useCallback(() => {
     if (!conflictStorageKey || typeof window === 'undefined') return;
     window.localStorage.removeItem(conflictStorageKey);
@@ -835,7 +795,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     }
   }, [gitDirectory, persistConflictState]);
 
-  // Restore conflict state from localStorage on mount
   React.useEffect(() => {
     if (!conflictStorageKey || typeof window === 'undefined' || !gitDirectory) return;
 
@@ -849,13 +808,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         operation: 'merge' | 'rebase';
       };
 
-      // Validate the stored state matches the effective repository
       if (parsed.directory !== gitDirectory) {
         window.localStorage.removeItem(conflictStorageKey);
         return;
       }
 
-      // Restore conflict state
       setConflictFiles(parsed.conflictFiles ?? []);
       setConflictOperation(parsed.operation ?? 'merge');
       setConflictDialogOpen(true);
@@ -864,7 +821,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     }
   }, [conflictStorageKey, gitDirectory]);
   const [stashDialogOpen, setStashDialogOpen] = React.useState(false);
-  // Branch a dirty-tree switch is waiting on; null when no switch is blocked.
   const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
   const [stashDialogOperation, setStashDialogOperation] = React.useState<'merge' | 'rebase'>('merge');
   const [stashDialogBranch, setStashDialogBranch] = React.useState('');
@@ -903,7 +859,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   React.useEffect(() => {
     if (!gitDirectory || !git) return;
 
-    // Find hashes that are expanded but not yet loaded or loading
     const hashesToLoad = Array.from(expandedCommitHashes).filter(
       (hash) => !commitFilesMapRef.current.has(hash) && !loadingCommitHashesRef.current.has(hash)
     );
@@ -969,9 +924,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     };
   }, [expandedCommitHashes, gitDirectory, git]);
 
-  // Restore the per-repository draft when the effective repository changes
-  // (e.g. the user picks a different nested repository from the picker),
-  // mirroring the fresh-mount behavior of a directory switch.
   React.useEffect(() => {
     if (!gitDirectory) return;
     const snapshot = gitViewSnapshots.get(gitDirectory) ?? null;
@@ -1067,10 +1019,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     await fetchLog(gitDirectory, git, logMaxCountLocal);
   }, [gitDirectory, git, fetchLog, logMaxCountLocal]);
 
-  // After a commit or a transfer the control waits for the status only: it is
-  // what says what is staged and how far ahead the branch is. The branch list
-  // and the log read history, so both follow in the background instead of
-  // holding the button.
   const refreshAfterGitAction = React.useCallback(async (onBackgroundSettled?: () => void) => {
     if (!gitDirectory) return;
     const background = Promise.allSettled([fetchBranches(gitDirectory, git), refreshLog()]);
@@ -1093,8 +1041,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     if (!defaultId || defaultId === 'global') return;
 
     const runtimeKey = getRuntimeKey();
-    // Keyed on the effective repository, so a nested selection is tracked apart
-    // from its root, and on the runtime key, so a runtime switch re-attempts.
     const attemptKey = JSON.stringify([runtimeKey, gitDirectory]);
     const previousAttempt = autoAppliedDefaultRef.current.get(attemptKey);
     if (previousAttempt === defaultId) return;
@@ -1135,8 +1081,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const changeEntries = React.useMemo(() => {
     if (!status) return [];
     const files = status.files ?? [];
-    // GitStatus.files is already unique by `path` per the server contract;
-    // a defensive dedup pass would only mask real upstream bugs.
     return [...files].sort((a, b) => a.path.localeCompare(b.path));
   }, [status]);
 
@@ -1209,7 +1153,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       } else if (action === 'pull' && remote) {
         toast.success(t('gitView.toast.pulledFromRemote', { name: remote.name }));
       } else if (action === 'sync') {
-        // Say what happened, as `git` does: nothing, a pull, a push, or both.
         toast.success(syncOutcome?.kind === 'up-to-date'
           ? t('gitView.toast.alreadyUpToDate')
           : syncOutcome?.kind === 'pulled'
@@ -1224,16 +1167,12 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       await refreshAfterGitAction();
     } catch (err) {
       if (err instanceof GitOperationResultError || err instanceof PendingGitOperationError) {
-        // The card under the header carries the details; the toast says that
-        // the action did not happen, which is what a person looking elsewhere
-        // needs to hear.
         if (err instanceof GitOperationResultError && err.read.availability === 'available') {
           toast.error(t('gitView.toast.syncActionFailed', { action: actionLabel }), { description: err.message || undefined });
         }
         if (recovery.isCurrent()) await refreshAfterGitAction();
         if (recovery.isCurrent() && err instanceof GitOperationResultError && err.read.availability === 'available'
           && err.read.operation.state === 'conflicted' && err.read.operation.error.code === 'CONFLICT') {
-          // A pull merges the fetched commits, so its conflicts leave a merge in progress.
           const afterConflict = await git.getGitStatus(gitDirectory).catch(() => null);
           const files = (afterConflict?.files ?? []).filter(isConflictedStatusFile).map((file) => file.path);
           if (files.length > 0) openConflictDialog(files, 'merge');
@@ -1425,8 +1364,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     return 'worktree is invalid';
   };
 
-  // Creating a branch does not publish it: pushing is an explicit planned
-  // operation the user starts from the publish action.
   const handleCreateBranch = async (branchName: string) => {
     if (!gitDirectory || !status) return;
 
@@ -1442,7 +1379,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       await git.createBranch(gitDirectory, branchName, checkoutBase ?? 'HEAD');
       toast.success(t('gitView.toast.createdBranch', { name: branchName }));
 
-      // Checkout the new branch and stay on it
       if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
       await git.checkoutBranch(gitDirectory, branchName);
 
@@ -1480,7 +1416,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const handleCheckoutBranch = async (branch: string) => {
     if (!gitDirectory) return;
 
-    // Block mutation if worktree is in an attention-required state
     const blockingReasons = getMutationBlockingReasons(worktreeAttachment);
     if (blockingReasons.length > 0) {
       toast.error(t('gitView.toast.cannotCheckout', { reason: formatBlockingReason(blockingReasons[0]) }));
@@ -1493,10 +1428,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       return;
     }
 
-    // A checkout over uncommitted changes can carry them onto the target
-    // branch, conflict, or silently rewrite what the user was editing. The
-    // switch is blocked until the working tree is resolved: commit, or
-    // explicitly revert (DirtyBranchSwitchDialog).
     if ((status?.files?.length ?? 0) > 0) {
       setPendingDirtySwitchBranch(normalized);
       return;
@@ -1509,8 +1440,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     if (!gitDirectory) return;
     const normalized = branch;
     try {
-      // Picking a remote-tracking branch checks out the local branch that
-      // tracks it, so report the branch the repository actually landed on.
       if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
       const result = await git.checkoutBranch(gitDirectory, normalized);
       toast.success(t('gitView.toast.checkedOut', { name: result?.branch || normalized }));
@@ -1523,12 +1452,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     }
   };
 
-  /**
-   * Switching a repository's identity switches all of it.
-   *
-   * An identity is the account, the transport and the signature, so choosing
-   * one here writes the same three answers the add and clone screens write.
-   */
   const handleApplyIdentity = async (profile: GitIdentityProfile) => {
     if (!gitDirectory) return;
     const runtimeKey = getRuntimeKey();
@@ -1574,9 +1497,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
 
   const currentBranch = status?.current ?? null;
 
-  // The repository's own default branch, so a repo whose default is neither
-  // main, master nor develop stops being compared against a branch that does
-  // not exist.
   const defaultBranch = React.useMemo(() => {
     const primaryRemote = binding.contexts[0]?.primaryRemote;
     return primaryRemote ? branches?.defaultBranches?.[primaryRemote] : undefined;
@@ -1600,12 +1520,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     rootBranchHint,
     worktreeMetadata?.createdFromBranch,
   ]);
-  // The branch's own parent (a chosen base, its pull request's target, the
-  // layer below it in a stack) wins over the worktree's guess.
   const baseBranch = useBranchPullRequestBase(gitDirectory ?? null, currentBranch, isActive, binding, branches, derivedBaseBranch);
-  // The header's pull request chip and the base above read the branch's pull
-  // request status; ask for it while shown, or a branch nothing else asked
-  // about (a project's own checkout has no sidebar worktree row) shows none.
   useBranchPullRequestRequest(isActive ? gitDirectory ?? null : null, isActive ? currentBranch : null, binding);
 
   const updateTargetBranch = React.useMemo(() => {
@@ -1620,9 +1535,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     [profiles, globalIdentity, connectedAccountIds],
   );
 
-  // Which account the repository is bound to, so two identities that share an
-  // author (the machine's own and an account with the same email) resolve to
-  // the one that was actually chosen. Unknown while the binding is unread.
   const boundAccountId = binding.read
     ? binding.read.binding?.providers.find((provider) => provider.readiness === 'ready')?.accountId ?? null
     : undefined;
@@ -1712,7 +1624,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     };
   }, [baseBranch, currentBranch, gitDirectory, git, log, logMaxCountLocal]);
 
-  // Clear graph log when directory changes
   React.useEffect(() => {
     setGraphLog(null);
   }, [gitDirectory]);
@@ -1741,7 +1652,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     return () => { cancelled = true; };
   }, [gitLogDialogMode, gitDirectory, graphLogMaxCount, graphLogRefreshToken, git]);
 
-  // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
   const moveChangePaths = React.useCallback((paths: string[], direction: GitIndexMutationDirection) => {
     if (!gitDirectory || paths.length === 0) return;
@@ -1878,10 +1788,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     [handleRevertPaths]
   );
 
-  // Context-panel tabs are keyed by the project root, not by the repository
-  // being diffed: the diff surface resolves the selected nested repository on
-  // its own, so opening the tab under `gitDirectory` would park it under a key
-  // the panel never displays.
   const handleViewChangeDiff = React.useCallback((path: string, staged: boolean) => {
     if (panelDirectory && !isMobile) {
       openContextDiff(panelDirectory, path, staged);
@@ -1984,7 +1890,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     );
   }, []);
 
-  // Helper to add/update operation logs
   const addOperationLog = React.useCallback((message: string, status: OperationLogEntry['status']) => {
     setOperationLogs(prev => [...prev, { message, status, timestamp: Date.now() }]);
   }, []);
@@ -2002,12 +1907,10 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     });
   }, []);
 
-  // Called at start of operation to reset logs
   const resetOperationLogs = React.useCallback(() => {
     setOperationLogs([]);
   }, []);
 
-  // Called when dialog is closed to fully reset state
   const handleOperationComplete = React.useCallback(() => {
     setOperationLogs([]);
     setBranchOperation(null);
@@ -2216,13 +2119,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const handleResolveWithAIFromBanner = React.useCallback(() => {
     if (!gitDirectory) return;
 
-    // Determine operation type from status
     const isMerge = !!status?.mergeInProgress?.head;
     const operation = isMerge ? 'merge' : 'rebase';
 
     const filesWithConflicts = (status?.files ?? []).filter(isConflictedStatusFile).map((f) => f.path);
 
-    // Update conflict state and open dialog
     if (filesWithConflicts.length > 0) {
       setConflictFiles(filesWithConflicts);
     }
@@ -2240,7 +2141,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       const branchLabel = stashDialogBranchLabel || branch;
       const hadStagedChanges = (status?.files ?? []).some(isStagedStatusFile);
 
-      // Stash changes
       try {
         await git.stash(gitDirectory, {
           message: `Auto-stash before ${operation} with ${branchLabel}`,
@@ -2259,7 +2159,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       let hasConflict = false;
 
       try {
-        // Perform the operation
         if (operation === 'merge') {
           if (!git.merge) throw new Error('Git merge is unavailable on this runtime');
           const result = await git.merge(gitDirectory, { branch });
@@ -2286,7 +2185,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           }
         }
 
-        // Restore stashed changes if requested and operation succeeded
         if (restoreAfter && operationSucceeded) {
           try {
             await git.stashPop(gitDirectory);
@@ -2303,7 +2201,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         await refreshStatusAndBranches();
         await refreshLog();
       } catch (err) {
-        // If the operation failed (not due to conflicts), try to restore stash
         if (restoreAfter) {
           try {
             await git.stashPop(gitDirectory);
@@ -2350,8 +2247,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     if (!result.conflict) return;
 
     if (result.operation === 'cherry-pick' || result.operation === 'revert') {
-      // Cherry-pick and revert conflicts are not supported by the shared ConflictDialog
-      // Show a toast with manual resolution instructions
       toast.error(t('gitView.history.actions.conflictToastTitle'), {
         description: t('gitView.history.actions.conflictToastDescription', {
           files: result.conflictFiles?.join(', ') ?? 'unknown files',
@@ -2434,8 +2329,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   }
 
   if (isGitRepo === false) {
-    // Nested repository discovery states (discovering, failed, unsupported,
-    // none found, or settling on the auto-selected repository).
     return (
       <NestedRepoResolutionStates
         root={currentDirectory}
@@ -2498,7 +2391,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             prChecks={prChipStatus?.ci?.summary ?? prChipStatus?.checks ?? null}
             pullRequestStack={prChipStatus?.stack ?? null}
             onOpenPullRequest={
-              // The branch's own tab of the Tracker, in the panel this view is in.
               gitDirectory ? () => openContextPanelTab(panelDirectory ?? gitDirectory, { mode: 'pr' }) : undefined
             }
             repositoryOptions={repositoryOptions ?? undefined}
@@ -2511,7 +2403,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             repositoryRoot={repositoryOptions ? currentDirectory ?? undefined : undefined}
           />
 
-      {/* VS Code manages Git hosting itself; the webview projects remotes as a system binding without a settings surface. */}
       {!runtime.isVSCode ? <RepositoryConfigurationDialog
         open={isRepositoryConfigurationOpen}
         onOpenChange={setRepositoryConfigurationOpen}
@@ -2519,7 +2410,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       /> : null}
       <GitOperationStatus className="mx-4 mt-3" entry={operationRecovery.entry} onRefresh={() => void operationRecovery.refresh()} onCancel={() => void operationRecovery.cancel()} />
 
-      {/* In-progress operation banner */}
       {currentDirectory && (
         (status?.mergeInProgress?.head) ||
         (status?.rebaseInProgress?.headName || status?.rebaseInProgress?.onto)
@@ -2593,8 +2483,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       <Dialog
         open={isUpdateBranchDialogOpen}
         onOpenChange={(open) => {
-          // Keep the dialog up while a merge/rebase is running so the
-          // operation log stays visible until it completes or fails.
           if (!open && branchOperation !== null) {
             return;
           }
@@ -2745,7 +2633,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           <DialogHeader className="px-4 pt-4">
             <DialogTitle>{t('gitView.gitmoji.title')}</DialogTitle>
           </DialogHeader>
-          {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+          {/* external: https://github.com/dip/cmdk#command-commandmenu Disable cmdk filtering to preserve rankByQuery's ordering. */}
           <Command className="h-[420px]" shouldFilter={false}>
             <CommandInput
               placeholder={t('gitView.gitmoji.searchPlaceholder')}
@@ -2822,9 +2710,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               });
               pushedRemoteName = target.remoteName;
             } catch (error) {
-              // The commit stands, so nothing is lost — but the switch is
-              // cancelled: the user must see the failed push on the branch it
-              // belongs to instead of discovering it later from elsewhere.
               console.error('Push after commit failed:', error);
               toast.error(t('gitView.dirtySwitch.pushFailed'));
               await refreshStatusAndBranches();
@@ -2833,8 +2718,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               return;
             }
           }
-          // Without a push the commit stays local on the branch being left;
-          // after the switch nothing on screen would say so, so the toast must.
           toast.success(pushedRemoteName
             ? t('gitView.toast.pushedToUpstream', { name: pushedRemoteName })
             : sourceBranch
@@ -2850,7 +2733,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           const paths = (status?.files ?? []).map((file) => file.path).sort();
           const { message } = await generateSessionCommitMessage(gitDirectory, paths);
           const subject = message.subject?.trim() ?? '';
-          // Same gitmoji decoration as the commit panel's Generate button.
           if (subject && settingsGitmojiEnabled && gitmojiEmojis.length > 0) {
             const match = matchGitmojiFromSubject(subject, gitmojiEmojis);
             if (match && !subject.startsWith(match.code) && !subject.startsWith(match.emoji)) {
@@ -2864,9 +2746,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           if (!branch || !gitDirectory) return;
           const paths = (status?.files ?? []).map((file) => file.path);
           await handleRevertPaths(paths, true, 'all');
-          // The revert reports its own partial failures; the checkout happens
-          // only once the tree is verifiably clean, so a half-reverted tree is
-          // never switched over.
           const fresh = await git.getGitStatus(gitDirectory);
           if (!fresh.isClean && (fresh.files?.length ?? 0) > 0) {
             toast.error(t('gitView.dirtySwitch.revertIncomplete'));

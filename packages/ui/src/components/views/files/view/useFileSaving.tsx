@@ -52,8 +52,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
   const { root } = scope;
   const { openPaths, removeUnselectedOpenPath, resolveFileReadOptions, selectedFile, selectedFilePathRef } = tabs;
 
-  // `fresh` bypasses the content cache and HTTP cache so external-change polling
-  // compares against the file on disk rather than a cached copy.
   const readFile = React.useCallback(async (path: string, cacheOptions?: { fresh?: boolean }): Promise<string> => {
     const options = resolveFileReadOptions(path);
     if (files.readFile) {
@@ -143,7 +141,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
       return false;
     }
 
-    // A binary file saves only through the extension editor that owns it.
     const selectedIsBinary = (isBinaryFile(selectedFile.path) || contentDetectedBinary) && !binaryCanvasRef.current;
     if (!shouldAllowFileDraftSave({
       selectedFilePath: selectedFile.path,
@@ -166,13 +163,10 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
       return false;
     }
 
-    // Clean draft: treat as success so discard/save dialogs and Ctrl+S are not stranded.
     if (!isDirty) {
       return true;
     }
 
-    // The file is moving: a write now would recreate it at the old path. Once
-    // the editor adopts the new path, autosave runs again and saves there.
     if (pendingPathMoveRef.current || isFilePathMoveInFlight(selectedFile.path)) {
       return false;
     }
@@ -180,12 +174,7 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
     setIsSaving(true);
 
     try {
-      // One snapshot: what is written and what is later marked saved are the
-      // same state, so edits made during the write stay unsaved. A canvas that
-      // cannot answer fails the save instead of writing the stale draft.
       const canvas = canvasDirty ? canvasEditorRef.current : null;
-      // A canvas that went away (its extension was paused or removed) took its
-      // edits with it; left set, the flag would keep autosave writing forever.
       if (canvasDirty && !canvas) setCanvasDirty(false);
       const canvasRead = canvas ? await canvas.getContent('save') : EMPTY_CANVAS_READ;
       if (!canvasRead.ok) {
@@ -194,13 +183,10 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
       }
       const canvasSnapshot = canvasRead.snapshot;
       if (canvasSnapshot && 'bytes' in canvasSnapshot) {
-        // Bytes go through the atomic upload write, replacing the file.
         if (!files.uploadFile) {
           toast.error(t('filesView.toast.savingNotSupported'));
           return false;
         }
-        // No baseline while writing: the poll records the new stat instead of
-        // reading our own write as an external change and reloading the editor.
         lastLoadedFileStatRef.current = null;
         const written = await files.uploadFile(selectedFile.path, new Blob([canvasSnapshot.bytes]), { overwrite: true });
         if (!written?.success) {
@@ -209,7 +195,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
         }
         canvasEditorRef.current?.markSaved(canvasSnapshot.signature);
       } else {
-        // The file keeps the line endings it was loaded with, drawn or typed.
         const contentToWrite = serializeEditorContent(canvasSnapshot ? canvasSnapshot.content : draftContent, loadedFileLineEnding);
         const result = await files.writeFile(selectedFile.path, contentToWrite);
         if (!result?.success) {
@@ -245,7 +230,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
         diagramXmlRef.current = draftContent;
         diagramSavedXmlRef.current = draftContent;
       }
-      // Refresh stat after write so polling doesn't see a stale metadata change.
       void readFileStat(selectedFile.path)
         .then((stat) => {
           if (stat) {
@@ -275,7 +259,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
     }
   }, [autoSaveEnabled]);
 
-  // Auto-save: debounce 1.5s after user stops typing
   const AUTO_SAVE_DELAY = 1500;
 
   React.useEffect(() => {
@@ -295,9 +278,6 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
       return;
     }
 
-    // Drawing changes no dependency here (the draft stays put while the canvas
-    // is dirty), so the timer re-arms itself until the canvas has been quiet
-    // for the full delay, like typing does.
     const schedule = (delay: number) => {
       autoSaveTimerRef.current = setTimeout(() => {
         const quietFor = Date.now() - canvasLastEditAtRef.current;
@@ -322,13 +302,11 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
     };
   }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
 
-  // Reset auto-save status when switching files
   React.useEffect(() => {
     setAutoSaveStatus('idle');
   }, [selectedFile?.path]);
 
   const saveNow = React.useCallback(() => {
-    // Cancel pending auto-save because the explicit save should run immediately.
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;

@@ -21,14 +21,10 @@ export function renderFileViewer({ commentPanel, content, discardDialog, extensi
     >
       {discardDialog}
       <div className={cn('flex flex-col flex-shrink-0', showTabs && 'border-b border-edge-muted')}>
-        {/* Row 1: Tabs */}
         {showTabs ? (
           tabsRow()
         ) : null}
 
-        {/* Row 2: Docked editor toolbar, 36px with 24px buttons: the same band
-            the context panel's file tree draws beside it with its search
-            field and actions, so the two read as one strip. */}
         {hasFile ? (
           <div className="flex h-9 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
             {toolbar}

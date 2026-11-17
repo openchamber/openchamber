@@ -116,8 +116,6 @@ export function useFileTreeRendering({ externalActions, fileDirectory, fileOpeni
           {isDir && isExpanded && (
             <ul className="flex flex-col">
               {loadErrorsByDir[node.path] ? (
-                // As wide as the pane and held at its start, so a tree widened by a long
-                // name keeps the message and its button on screen.
                 <li
                   className="sticky inset-s-0 flex w-[100cqw] items-center gap-2 py-1 pe-2 typography-meta text-muted-foreground"
                   style={{ paddingLeft: fileTreeRowPaddingLeft(depth + 1) }}

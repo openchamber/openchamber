@@ -41,8 +41,6 @@ export function useDiffViewTurnNavigation({
     setPendingTurnDiffFile, turnDiffSettled, rootDirectory, lastTurnDiffs, onDiffScopeChange, effectiveDirectory,
     repositoriesKnown, rootIsGitRepo, repositoryOptions, selectNestedRepo, fetchStatus, git, changedFiles,
 }: DiffViewTurnNavigationOptions) {
-    // A file the last turn's diff did not have, on its way to Changed. The
-    // repository is picked for it once, and its status read once per repository.
     const [changedFallback, setChangedFallback] = React.useState<{ file: string; picked: boolean; statusReadFor: string | null } | null>(null);
     const fallbackStatusRequestRef = React.useRef<string | null>(null);
     const revealListedFile = React.useCallback((path: string) => {
@@ -54,17 +52,12 @@ export function useDiffViewTurnNavigation({
         setScrollRequestNonce((value) => value + 1);
     }, [expandStackedFile]);
 
-    // A click asked for a file in the last turn's diff. Only an answer to the
-    // session's current state decides: a list kept from an earlier turn would
-    // send a file this turn did change to Changed, and a failed read keeps its
-    // retry. Asked once per click, so picking Last turn by hand stays there.
     React.useEffect(() => {
         if (!pendingTurnDiffFile || !visible) return;
         if (diffScope !== 'turn' || pendingTurnDiffFile.sessionId !== currentSessionId) {
             setPendingTurnDiffFile(null);
             return;
         }
-        // Entering the scope resets what is expanded, so wait for that first.
         if (!turnDiffSettled || activeDiffScope !== 'turn') return;
         setPendingTurnDiffFile(null);
         const file = toAbsoluteFilePath(rootDirectory, pendingTurnDiffFile.file);
@@ -79,9 +72,6 @@ export function useDiffViewTurnNavigation({
         onDiffScopeChange?.('working');
     }, [activeDiffScope, currentSessionId, diffScope, lastTurnDiffs, onDiffScopeChange, pendingTurnDiffFile, revealListedFile, rootDirectory, setPendingTurnDiffFile, turnDiffSettled, visible]);
 
-    // Changed reads one repository, and the status on hand may predate the
-    // turn, so the file is looked for in its own repository's fresh status. A
-    // repository the picker drops again (a broken `.git`) ends the attempt.
     React.useEffect(() => {
         if (!changedFallback || !visible || !effectiveDirectory) return;
         if (activeDiffScope !== 'working') {

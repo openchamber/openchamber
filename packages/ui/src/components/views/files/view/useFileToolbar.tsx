@@ -83,8 +83,6 @@ export function useFileToolbar({ fileAssets, draft, fileKinds, canvasState, view
     const { searchAction, outlineAction, goToLineAction, symbolsAction, wrapAction, readAloudAction } = sourceActions;
     const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file', shortcutOverrides));
 
-    // Annotation needs the rendered page: from the source it switches to the
-    // preview and starts once the page has loaded.
     const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode && !htmlPreviewUnreachable ? {
       id: 'annotate',
       label: t('contextPanel.browser.annotate.toggle'),
@@ -142,8 +140,6 @@ export function useFileToolbar({ fileAssets, draft, fileKinds, canvasState, view
         start={renderFileToolbarPath({ clipboard, fileKinds, copyPathLabel, docked, pathLabelCopies, showsPathLabel })}
         status={status}
         inline={hasSourceEditor ? (
-          // Rendered with the row, not with its button, so it still opens when
-          // that button has moved into the "More actions" menu.
           <GoToLineDialog
             open={isGoToLineOpen}
             onOpenChange={setIsGoToLineOpen}
@@ -151,10 +147,6 @@ export function useFileToolbar({ fileAssets, draft, fileKinds, canvasState, view
             variant="inline"
           />
         ) : null}
-        // The row keeps what a file is read and worked with: its view mode,
-        // find and a comment on it. Editor aids, the file's own actions and
-        // document settings wait in "More actions", so the row stays a few
-        // buttons whatever the file is.
         groups={[
           [modeAction, annotateAction],
           [searchAction, outlineAction, commentAction],

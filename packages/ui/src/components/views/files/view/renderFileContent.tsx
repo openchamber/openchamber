@@ -50,8 +50,6 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
           ) : fileError ? (
             renderFileErrorState(selectedFile)
           ) : showCanvas ? (
-            // Ahead of the built-in previews: a binary editor may claim an image or PDF.
-            // Shown fullscreen instead while the overlay is open: one canvas instance.
             canvasInFullscreen ? <div className="h-full" /> : canvasElement
           ) : artifactPreview ? (
             artifactPreview
@@ -79,8 +77,6 @@ export function renderFileContent({ artifacts, diagram, draft, fileAssets, fileC
                 <JsonTreeView
                   className="h-full"
                   jsonString={fileContent}
-                  // Config files under a .json name (tsconfig, opencode.json) carry
-                  // comments and trailing commas; the editor's check accepts them too.
                   format="jsonc"
                   maxHeight="100%"
                   initiallyExpandedDepth={2}

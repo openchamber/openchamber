@@ -26,7 +26,6 @@ interface FileRowProps {
   isBrowserClient: boolean;
   alwaysShowActions: boolean;
   depth: number;
-  /** Open in a tab of this view. */
   isOpen: boolean;
   status?: FileTreeGitStatus | null;
   badge?: { modified: number; added: number } | null;
@@ -163,7 +162,6 @@ export const FileRow: React.FC<FileRowProps> = ({
           <Icon name="folder-received" className="me-2 size-4" /> {t(getRevealLabelKey())}
         </Item>
       )}
-      {/* The OS opens it with whatever app owns the type: Word for a .docx, Typora for a .md. */}
       {!isDir && canRevealPath && isDesktopLocalOriginActive() && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
@@ -251,9 +249,6 @@ export const FileRow: React.FC<FileRowProps> = ({
         </FileTreeRowEnd>
       </button>
       {hasMenuActions && (
-        // Takes no width and fades in over the row's end lane, with its own fade over the name.
-        // Only on touch screens: with a mouse the row's menu is its right
-        // click (Shift+F10 from the keyboard).
         <div className={cn(
           "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity pointer-fine:hidden",
           fileTreeRowMenuFillClassName(isActive),

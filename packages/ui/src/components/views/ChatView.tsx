@@ -6,7 +6,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 type ChatViewProps = {
     active?: boolean;
     readOnly?: boolean;
-    /** Shows this session instead of the app's selection (see ChatContainer). */
     pinnedSession?: { sessionId: string; directory: string | null };
 };
 

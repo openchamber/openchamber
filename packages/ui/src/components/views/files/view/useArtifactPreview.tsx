@@ -51,8 +51,6 @@ export function useArtifactPreview({ draft, fileAssets, fileDocument, fileFreshn
   const { selectedFile, selectedFileIsOutsideWorkspace } = tabs;
   const { mermaidViewMode, tableViewMode } = viewModes;
 
-  // Keyed per file, so the next file gets a fresh boundary and not the last
-  // file's failure.
   const previewBoundary = (key: string, preview: React.ReactNode) => (
     <ErrorBoundary key={key} fallback={<ContentState title={t('filesView.error.previewUnavailable')} />}>
       <React.Suspense fallback={<ContentLoadingState label={t('filesView.artifact.state.loading')} />}>
@@ -61,8 +59,6 @@ export function useArtifactPreview({ draft, fileAssets, fileDocument, fileFreshn
     </ErrorBoundary>
   );
 
-  // Everything shown as an artifact rather than as editable text. One place
-  // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
     if (isSelectedImage && !isSvgSource) {
       return (
@@ -144,8 +140,6 @@ export function useArtifactPreview({ draft, fileAssets, fileDocument, fileFreshn
     }
     if (isMermaid && mermaidViewMode === 'preview') {
       return (
-        // The whole panel is the diagram: the same fill-the-container styling
-        // the fullscreen mermaid dialog uses, not the chat block's capped height.
         <div className="h-full min-h-0 overflow-hidden">
           <ErrorBoundary
             fallback={
@@ -177,7 +171,6 @@ export function useArtifactPreview({ draft, fileAssets, fileDocument, fileFreshn
     <ContentState
       icon={<Icon name="error-warning" className="size-10 text-[color:var(--status-error)]" />}
       title={t('filesView.artifact.state.readFailed', { name: file.name })}
-      // The generic fallback adds nothing to the title; a server's reason does.
       description={fileError && fileError !== assetAuthErrorFallback ? fileError : undefined}
       actions={(
         <Tooltip>

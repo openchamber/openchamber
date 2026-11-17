@@ -15,7 +15,6 @@ export function renderFileDiscardDialog({ closeState, draft, fileClosing, t }: {
   const { discardAndContinue, saveAndContinue } = fileClosing;
   return (
       <Dialog open={confirmDiscardOpen} onOpenChange={(open) => {
-        // Intentionally no "cancel" action. Keep dialog modal.
         if (!open) {
           setConfirmDiscardOpen(true);
         }

@@ -42,8 +42,6 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
   const { root } = scope;
   const { openFiles, removeOpenPath, selectedFile, setSelectedPath } = tabs;
 
-  // Closes `path` once nothing stands in the way (no unsaved edits, or the
-  // prompt was answered), moving to `nextFile` when it was the one on screen.
   const closeOpenFile = React.useCallback((path: string, nextFile: FileNode | null) => {
     if (onCloseFile) {
       onCloseFile(path);
@@ -82,12 +80,10 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
     pendingSelectFileRef.current = null;
     pendingClosePathRef.current = null;
 
-    // Allow one guarded navigation (tab/file) without re-opening dialog.
     skipDirtyOnceRef.current = true;
 
     setConfirmDiscardOpen(false);
 
-    // Discard draft by reverting back to last loaded content
     setCanvasDirty(false);
     setCanvasRemountNonce((nonce) => nonce + 1);
     setDraftContent(fileContent);
@@ -117,7 +113,6 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
     pendingSelectFileRef.current = null;
     pendingClosePathRef.current = null;
 
-    // We'll proceed after saving; suppress guard reopening.
     skipDirtyOnceRef.current = true;
 
     setConfirmDiscardOpen(false);
@@ -148,8 +143,6 @@ export function useFileClosing({ canvasState, closeState, draft, fileDocument, f
     closeOpenFile(path, nextFile);
   }, [closeOpenFile, getNextOpenFile, isDirty, openFiles, selectedFile?.path]);
 
-  // While a file is open here, Cmd/Ctrl+W closes its tab (asking first when
-  // it has unsaved edits) instead of the whole window.
   const handleCloseFileRef = React.useRef(handleCloseFile);
   React.useEffect(() => {
     handleCloseFileRef.current = handleCloseFile;

@@ -18,8 +18,6 @@ export function useFileScope({ isMobile, mode, visible }: {
   const showGitignored = useFilesViewShowGitignored();
   const zoneInteractive = useZoneInteractive();
 
-  // The panel's tabs belong to the open view's folder; the files come from it too, except in a
-  // draft waiting for a new space, which shows the space's (`panelContentDirectory`).
   const panelDirectory = useEffectiveDirectory() ?? '';
   const currentDirectory = panelContentDirectory(useDraftSpaceTarget(), panelDirectory) ?? '';
   const root = normalizePath(currentDirectory.trim());

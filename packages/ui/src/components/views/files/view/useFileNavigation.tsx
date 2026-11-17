@@ -123,8 +123,6 @@ export function useFileNavigation({ closeState, draft, editor, fileDocument, fil
       return;
     }
 
-    // The jump focuses the editor, which does nothing inside a zone that is
-    // still opening (inert); it runs once the zone settles.
     if (!zoneInteractive) {
       return;
     }
@@ -200,7 +198,6 @@ export function useFileNavigation({ closeState, draft, editor, fileDocument, fil
   ]);
 
   React.useEffect(() => {
-    // Focus inside a zone that is still opening (inert) does nothing.
     if (!pendingFileFocusPath || !root || !zoneInteractive) {
       return;
     }
@@ -212,10 +209,6 @@ export function useFileNavigation({ closeState, draft, editor, fileDocument, fil
     }
 
     if (selectedFile?.path !== targetPath) {
-      // Selection is owned by the tab sync / user. A pending focus request must
-      // not steal selection back (e.g. after the user switched to another tab
-      // while this file was still loading). Wait; clear once it loads or the
-      // request is superseded.
       return;
     }
 
@@ -223,10 +216,6 @@ export function useFileNavigation({ closeState, draft, editor, fileDocument, fil
       return;
     }
 
-    // Best-effort focus: preview renderers (markdown/html preview, drawio,
-    // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
-    // must clear regardless — otherwise it lingers and replays on every
-    // dependency change.
     if (failedFilePath !== targetPath && !fileError && !isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && canEdit && textViewMode === 'edit') {
       editorViewRef.current?.focus();
     }
@@ -292,7 +281,6 @@ export function useFileNavigationRequests() {
       }
     };
   }, []);
-  // Session/config for sending comments
   const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
   const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
   const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);

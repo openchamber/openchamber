@@ -8,8 +8,6 @@ type FileEditorPosition = {
   head: number;
 };
 
-// Keep only position metadata, not editor instances or file contents. This
-// survives FilesView unmounts without retaining every file visited indefinitely.
 const fileEditorPositions = new Map<string, FileEditorPosition>();
 const MAX_FILE_EDITOR_POSITIONS = 100;
 
@@ -24,7 +22,6 @@ export const FilePositionEditor = ({
     const view = viewRef.current;
     if (!view) return;
 
-    // Read before React removes the editor DOM and its scroll offsets collapse.
     const { anchor, head } = view.state.selection.main;
     fileEditorPositions.delete(positionKey);
     fileEditorPositions.set(positionKey, { scroll: view.scrollSnapshot(), anchor, head });
