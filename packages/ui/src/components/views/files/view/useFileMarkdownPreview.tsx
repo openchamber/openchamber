@@ -5,15 +5,10 @@ import { type useFileTabs } from './useFileTabs';
 import { type useFileViewModes } from './useFilePreviewModes';
 
 export function useFileMarkdownPreview() {
-  // In-preview find for the rendered Markdown preview (Ctrl/Cmd+F).
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
   const [mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce] = React.useState(0);
-  // The outline of the rendered Markdown preview. Closed whenever a preview opens; never stored.
   const [mdPreviewOutlineOpen, setMdPreviewOutlineOpen] = React.useState(false);
   const mdPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
-  // Give the rendered preview keyboard focus (without scrolling it) unless the
-  // user is typing somewhere else, so Cmd/Ctrl+F opens the preview find bar
-  // right after a Markdown file opens and after any click inside it.
   const focusMdPreviewContainer = React.useCallback((event?: React.MouseEvent<HTMLDivElement>) => {
     const container = event?.currentTarget ?? mdPreviewContainerRef.current;
     if (!container) return;
@@ -39,8 +34,6 @@ export function useFileMarkdownOutline({ fileKinds, markdownPreview, tabs, viewM
   const { setMdPreviewOutlineOpen } = markdownPreview;
   const { selectedFile } = tabs;
   const { mdViewMode } = viewModes;
-  // The outline lists the rendered preview's headings: it closes when the
-  // preview goes away and when another file opens.
   const mdPreviewShown = isMarkdown && mdViewMode === 'preview';
   React.useEffect(() => {
     if (!mdPreviewShown) setMdPreviewOutlineOpen(false);

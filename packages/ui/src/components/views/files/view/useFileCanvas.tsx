@@ -20,14 +20,9 @@ export function useFileCanvasState() {
   const [canvasDirty, setCanvasDirty] = React.useState(false);
   const canvasDirtyRef = React.useRef(false);
   canvasDirtyRef.current = canvasDirty;
-  // Set during render once the selected file's editor is known: callbacks
-  // declared above that point (save, autosave, fullscreen) read it here.
   const binaryCanvasRef = React.useRef(false);
   const [canvasSaved, setCanvasSaved] = React.useState(false);
-  // The canvas has no CodeMirror wrapper; Cmd/Ctrl+S must reach it too.
   const canvasWrapperRef = React.useRef<HTMLDivElement | null>(null);
-  // Last drawing change, so autosave waits until the user stops drawing. A ref:
-  // strokes arrive every frame and must not re-render this view.
   const canvasLastEditAtRef = React.useRef(0);
 
   return { canvasRemountNonce, setCanvasRemountNonce, canvasEditorRef, canvasDirty, setCanvasDirty, canvasDirtyRef, binaryCanvasRef, canvasSaved, setCanvasSaved, canvasWrapperRef, canvasLastEditAtRef };
@@ -42,18 +37,12 @@ export function useFileFullscreen({ canvasState, draft, tabs }: {
   const { saveDraftRef, setDraftContent } = draft;
   const { selectedFilePathRef } = tabs;
   const [isFullscreen, setIsFullscreen] = React.useState(false);
-  // The canvas lives in one place at a time (docked or fullscreen), so moving
-  // it carries unsaved edits over through the draft, as the source toggle does.
-  // An extension editor answers asynchronously; if it cannot, the canvas stays
-  // where it is rather than remounting without the user's edits.
   const changeFullscreen = React.useCallback((next: boolean) => {
     if (!canvasDirtyRef.current) {
       setIsFullscreen(next);
       return;
     }
     const pathAtToggle = selectedFilePathRef.current;
-    // Bytes have no text draft to travel through, so a binary editor's
-    // unsaved changes are saved before it moves.
     if (binaryCanvasRef.current) {
       void saveDraftRef.current?.().then((saved) => {
         if (saved && selectedFilePathRef.current === pathAtToggle) setIsFullscreen(next);
@@ -105,9 +94,6 @@ export function useFileCanvas({ canvasState, draft, fileAssets, fileDocument, fi
   const { selectedFile, selectedFileIsOutsideWorkspace, selectedFilePathRef } = tabs;
   const { canvasViewModeByPathRef, setCanvasViewMode } = viewModes;
 
-  // A binary editor reads the file itself at mount, so a reload of the file
-  // (the poll found an external change and nothing was unsaved) remounts it.
-  // The first load of a path mounts the editor anyway; only a repeat reloads.
   const lastLoadedPathRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!loadedFilePath) return;

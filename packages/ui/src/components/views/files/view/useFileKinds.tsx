@@ -32,7 +32,6 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
-  // SVG is text with a picture in it: the toggle decides which one is shown.
   const isSvgSource = isSelectedSvg && svgViewMode === 'edit';
   const isSelectedPdf = Boolean(selectedFile?.path && isPdfFile(selectedFile.path));
   const isSelectedVideo = Boolean(selectedFile?.path && isVideoFile(selectedFile.path));
@@ -43,7 +42,6 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
     && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
   );
   const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isSelectedFont;
-  // Everything the viewer shows as an artifact rather than as text.
   const isSelectedNonText = isSelectedBinary || (isSelectedImage && !isSvgSource);
 
   const displaySelectedPath = React.useMemo(() => {
@@ -52,14 +50,9 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
 
   const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedPdf && !isUnsupportedBinary && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  // Keep image/SVG on the preview path: `isBinaryFile` excludes `.svg`, so binary
-  // alone would flip canEdit/isTextFile true and show a dead edit toggle + no-op Save.
   const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedBinary && (!isSelectedImage || isSelectedSvg) && files.writeFile);
   const isTextFile = Boolean(selectedFile && !isSelectedBinary && (!isSelectedImage || isSelectedSvg));
-  // An active extension's editor claims a text file ahead of the host's own
-  // previews.
   const matchedGuestFileEditor = useGuestFileEditor(selectedFile?.path);
-  // Text editors take text files; binary editors take any matching file.
   const guestFileEditor = matchedGuestFileEditor && (isTextFile || matchedGuestFileEditor.editor.content === 'binary')
     ? matchedGuestFileEditor
     : null;
@@ -70,24 +63,15 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
   const isMarkdown = !claimedByGuest && Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = !claimedByGuest && Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = !claimedByGuest && Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
-  // The draw.io editor is diagrams.net's own page in a frame, and the diagram
-  // is handed to it. Enterprise mode keeps file contents away from third
-  // parties, so there a .drawio file opens as its XML like any text file.
   const isDrawio = !claimedByGuest && !enterpriseMode && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isMermaid = !claimedByGuest && Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
-  // One too large for the editor has no text here, only its table view.
   const isTable = !claimedByGuest && !contentDetectedBinary && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
   const isNotebook = !claimedByGuest && Boolean(selectedFile?.path && isNotebookFile(selectedFile.path));
-  // Both are text with a richer view that the same toggle switches.
   const isTableView = isTable || isNotebook;
   const hasCanvas = claimedByGuest;
-  // A binary editor checks the bytes it reads too; the stat size spares a read.
   const canMountCanvas = claimedByGuest && (binaryCanvas
     ? artifactSize === null || artifactSize <= GUEST_FILE_EDITOR_CONTENT_MAX
     : draftContent.length <= GUEST_FILE_EDITOR_CONTENT_MAX);
-  // Excalidraw drawings open in the Excalidraw extension. Without it they show
-  // their text and a pointer to the Integrations card, where the runtime can
-  // install extensions at all.
   const guestCatalogStatus = useGuestsStore((state) => state.status);
   const suggestExcalidrawExtension = !claimedByGuest && isTextFile && guestCatalogStatus !== 'unsupported'
     && Boolean(selectedFile?.path && isExcalidrawFile(selectedFile.path));
@@ -104,8 +88,6 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
     || (isTableView && tableViewMode === 'text')
     || (isJson && jsonViewMode === 'text')
     || (!isMarkdown && !isHtml && !isJson && !hasCanvas && !isSelectedSvg && !isMermaid && !isTableView && textViewMode === 'edit');
-  // The CodeMirror source is on screen. A draw.io file shows it whenever its diagram is not;
-  // a read-only file in its source mode shows the code preview instead.
   const sourceEditorShown = (isDrawio ? drawioViewMode !== 'preview' : isEditingFile)
     && !(canUseShikiFileView && textViewMode === 'view');
   return {

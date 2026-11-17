@@ -12,8 +12,6 @@ export function useFileMobileKeyboard({ editor, isMobile }: {
       return;
     }
 
-    // The inline comment bar is a block widget inside the editor; once its
-    // textarea takes focus the editor itself loses focus, so track the bar.
     const activeElement = document.activeElement;
     const commentInput = !view.hasFocus && activeElement instanceof HTMLElement && view.dom.contains(activeElement)
       ? activeElement.closest<HTMLElement>('[data-comment-input="true"]')

@@ -15,7 +15,6 @@ export function renderFileOpenInApps({ externalActions, tabs, t }: {
   const { selectedFile } = tabs;
     const openInAppMenuItems = (
       <>
-        {/* Always first: whatever app the OS has for this file type. */}
         <DropdownMenuItem
           className="flex items-center gap-2"
           onClick={() => {

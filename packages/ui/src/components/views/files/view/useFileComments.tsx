@@ -33,10 +33,8 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
   const { editorViewRef } = editor;
   const { fileContent, fileLoading, loadedFilePath, pendingPathMoveRef } = fileDocument;
   const { selectedFile } = tabs;
-  // Line selection state for commenting
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
 
-  // Extract selected code
   const extractSelectedCode = React.useCallback((content: string, range: SelectedLineRange): string => {
     const lines = content.split('\n');
     const startLine = Math.max(1, range.start);
@@ -47,9 +45,6 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
 
   const markdownPreviewRef = React.useRef<HTMLDivElement | null>(null);
 
-  // Comments follow their code when the file changes on disk. Only a loaded
-  // text counts: an empty or half-loaded file would read as every commented
-  // line being gone.
   const commentLineSource = React.useMemo(
     () => (fileContent && !fileLoading && loadedFilePath === selectedFile?.path ? textLineSource(fileContent) : null),
     [fileContent, fileLoading, loadedFilePath, selectedFile?.path],
@@ -78,7 +73,6 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
     startEdit,
     deleteDraft,
   } = fileCommentController;
-  // Whole-file comments show under the toolbar, never between the lines.
   const filesLineDrafts = React.useMemo(() => filesFileDrafts.filter((draft) => !isWholeFileComment(draft)), [filesFileDrafts]);
   const wholeFileComment = useWholeFileComment({ fileLabel: selectedFile?.path ?? '', source: 'file' });
 
@@ -90,7 +84,6 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
   });
 
   React.useEffect(() => {
-    // A moved file is the same document under a new path: it keeps its draft.
     if (pendingPathMoveRef.current?.to === selectedFile?.path) return;
     setLineSelection(null);
     reset();
@@ -129,10 +122,6 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
     };
   }, [cancel, commentText, editingDraftId, isDragReleaseClick, lineSelection]);
 
-  // Touch devices: while the comment bar is open, the line range is shown by
-  // the highlightLines decoration. Any native text selection left in the
-  // editor makes Android/iOS draw their copy/paste toolbar right over the bar,
-  // so collapse it. Desktop keeps its selection untouched.
   React.useEffect(() => {
     if (!isMobile || !lineSelection) return;
     const view = editorViewRef.current;
@@ -158,8 +147,6 @@ export function useFileComments({ draft, editor, fileDocument, tabs, isMobile }:
     if (saved) setLineSelection(null);
     return saved;
   }, [lineSelection, saveComment]);
-  // Above the scroller, so an editor opened far down the file is on screen.
-  // The fullscreen overlay shows it instead while it is open: one editor at a time.
   const wholeFileCommentPanel = wholeFileComment.editor || wholeFileComment.cards ? (
     <ScrollableOverlay outerClassName="max-h-[50%] shrink-0 border-b border-edge-muted" disableHorizontal>
       {wholeFileComment.editor}

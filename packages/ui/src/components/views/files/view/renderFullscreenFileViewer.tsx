@@ -69,11 +69,9 @@ export function renderFullscreenFileViewer({ artifacts, draft, editor, fileAsset
   const { selectedFile } = tabs;
   const { textViewMode } = viewModes;
 
-  // Fullscreen file viewer overlay
   return mode === 'full' && isFullscreen && selectedFile && (
     <div className="absolute inset-0 z-50 flex flex-col bg-background">
       {wholeFileCommentPanel}
-      {/* Fullscreen content */}
       <div className="flex-1 min-h-0 min-w-0 relative">
         <div className="absolute inset-e-4 top-4 z-30">
           {renderFileToolbar({ exitFullscreenOnly: true })}
@@ -88,9 +86,6 @@ export function renderFullscreenFileViewer({ artifacts, draft, editor, fileAsset
           ) : artifactPreview ? (
             artifactPreview
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
-            // The find bar is a sibling of the scroll container, never a child:
-            // inside it, its own "1/3" and "No matches" text would be walked and
-            // highlighted by the search it drives.
             <div className="relative h-full min-h-0">
             <div
               className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-4 outline-none"

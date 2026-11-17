@@ -108,9 +108,6 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
     mdFullscreenPreviewContainerRef.current = node;
     setFullscreenMarkdownScroll(node);
   }, [setFullscreenMarkdownScroll]);
-  // A relative link in a rendered Markdown file opens that file here; on
-  // desktop the context panel owns the tab, on mobile the files surface
-  // consumes the same pending focus path.
   const openLinkedFile = React.useCallback((absolutePath: string) => {
     if (!panelRoot) return;
     useUIStore.getState().openContextFile(panelRoot, absolutePath);
@@ -125,8 +122,6 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
     colorScheme: markdownColorScheme,
   });
   const shikiWorkerPool = useWorkerPool('unified');
-  // Large code previews use the full draft with viewport virtualization and
-  // the shared diff worker pool. The threshold does not disable editing.
   const isLargeFile = draftContent.length > LARGE_FILE_CHAR_THRESHOLD;
   const largeFileCacheKey = React.useMemo(
     () => (isLargeFile && codePreviewActive ? makeFileContentCacheKey(draftContent) : undefined),
@@ -153,8 +148,6 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
         style={isLargeFile ? undefined : { height: '100%' }}
-        // The virtualizer lays out unmeasured rows at this height, so it must
-        // equal the CSS row height. Pierre reads it once, at mount.
         metrics={editorCode ? { ...DEFAULT_VIRTUAL_FILE_METRICS, lineHeight: editorCode.lineHeight } : undefined}
       />
     );
@@ -163,11 +156,6 @@ export function useFilePreviewRendering({ draft, editor, fileComments, fileDocum
       return <div className="h-full" style={editorCode?.style}>{pierreFile(file.path)}</div>;
     }
 
-    // Large files render through pierre's Virtualizer (viewport-only DOM) and
-    // the shared diff worker pool. The pool is created lazily: until it is
-    // ready the key carries a 'pending' suffix so the file remounts with the
-    // worker-backed highlighter instead of silently staying on the main thread.
-    // The row height is in the key so a font size change remounts with it.
     return (
       <div className="h-full" style={editorCode?.style}>
         <VirtualizerContext.Provider value={virtualizer.virtualizer}>

@@ -23,12 +23,10 @@ interface ChangeScopeSelectorProps {
     prCount: number | null;
     showCommitOption: boolean;
     showBranchOption: boolean;
-    /** The host of the project's change requests, for the pull/merge request wording. */
     changeRequestTerm: ChangeRequestTerm;
     onScopeChange?: (scope: PendingDiffScope) => void;
 }
 
-/** The Changes toolbar's view picker: which diff is shown, and how many files it has. */
 export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     scope,
     workingCount,
@@ -44,8 +42,6 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
 }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
-    // A count not known yet (a file list still loading, a diff the host does
-    // not serve) is left out rather than shown as 0.
     const currentCount = scope === 'pr' ? prCount : scope === 'staged' ? stagedCount : scope === 'turn' ? turnCount : scope === 'branch' ? branchCount : scope === 'commit' ? commitCount : workingCount;
     const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : scope === 'staged'
         ? t('diffView.scope.staged')

@@ -27,6 +27,39 @@ render functions.
 
 ## Invariants
 
+- Position memory retains coordinates only, without editor instances or file
+  contents. Editor positions are read before DOM teardown collapses offsets;
+  preview cleanup keeps the last scroll event's coordinates.
+- Local open-in-app actions exist only for paths on this machine. Remote hosts,
+  including WSL, cannot hand their paths to this machine's default application.
+- The unavailable-HTML action changes only the current file's mode. It cannot
+  persist a code-first preference that follows the user to a direct connection.
+- Markdown preview containers accept programmatic focus without entering the
+  tab order, so their scoped find shortcut works after opening or clicking them.
+  The find controls mount with the row even when their trigger moves into More.
+- Mobile line comments collapse native text selection while the comment bar is
+  open because the system copy/paste toolbar would cover it. The line-range
+  decoration preserves the selected range; desktop keeps native selection.
+- Git gutters accept an empty baseline only for a status-listed new file.
+  Ignored and untracked-by-HEAD files can also return an empty original and must
+  not appear wholly added. Refetch keys include the file's own status and branch,
+  so unrelated status refreshes do not reload the baseline.
+- Shiki token colors replace Lezer colors when enabled, while Lezer's language
+  remains for indentation and folding. Competing highlighters cannot both color
+  the same source.
+- Phone search clears match options unavailable in its compact find bar, so a
+  desktop option cannot silently narrow results without a way to change it.
+- A file's freshness baseline advances only after an observed read. Unsaved
+  text or draw.io edits and failed reads leave it pending. Text that becomes
+  binary takes the full reload path so binary guards run before rendering.
+- Known binaries never load as UTF-8 because a later autosave could corrupt
+  them. Enterprise mode shows draw.io XML because its external frame would
+  receive document contents.
+- Virtualized code-preview keys include worker readiness and row height. The
+  worker becoming ready or metrics changing must remount the file because Pierre
+  reads those inputs at mount; pending highlights cannot stay on the main thread.
+- The unsaved-change prompt stays modal without a separate Cancel action.
+  Guarded save or discard permits one navigation without reopening the prompt.
 - Hooks run unconditionally in the order shown in `FilesView`, including mode
   defaults before pending navigation.
 - State, refs, effect dependencies, editor keys and lazy preview lifetimes

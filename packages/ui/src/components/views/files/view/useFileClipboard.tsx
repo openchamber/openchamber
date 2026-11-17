@@ -26,8 +26,6 @@ export function useFileClipboard({ fileDocument, fileKinds, t }: {
       }
     };
   }, []);
-    // `announce` is for the "More actions" menu: the menu closes on select, so
-    // the button's check-mark feedback would never be seen there.
     const copyContents = async (announce: boolean) => {
       const result = await copyTextToClipboard(fileContent);
       if (!result.ok) {

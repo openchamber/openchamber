@@ -72,9 +72,6 @@ export function useFileImageLoading({ fileDocument, fileKinds, scope, tabs, file
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-            // Marked failed like a text read. Clearing the loaded path would make
-            // the selection effect load the file again, which wipes this error
-            // without fetching the image and leaves the viewer empty.
             setFailedFilePath(selectedFile.path);
           }
         })

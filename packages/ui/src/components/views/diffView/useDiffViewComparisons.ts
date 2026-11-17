@@ -27,7 +27,6 @@ import type { GitAPI, GitStatus } from '@/lib/api/types';
 import type { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import type { useI18n } from '@/lib/i18n';
 
-/** Bounded retries for branch metadata in the context diff panel (see effect). */
 const BRANCH_METADATA_MAX_ATTEMPTS = 3;
 
 interface DiffViewComparisonsOptions {
@@ -52,10 +51,6 @@ export function useDiffViewComparisons({
     currentSessionId, rootDirectory, visible, activeDiffScope, status, effectiveDirectory, binding, setActiveDiffScope,
     onDiffScopeChange, fetchBranches, git, isGitRepo, diffScope, expandedFiles, t,
 }: DiffViewComparisonsOptions) {
-    // The last turn's diffs, merged per file by OpenCode from the turn's
-    // snapshots, so a file edited three times in one turn is one diff. Read
-    // in every scope while the view is shown, so the scope picker's count is
-    // current before the user switches to it.
     const {
         diffs: lastTurnDiffs,
         count: turnFileCount,
@@ -92,16 +87,12 @@ export function useDiffViewComparisons({
         return status.files.filter(isStagedStatusFile).length;
     }, [status]);
 
-    // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
-    // A pull request opened from the issues and PRs board.
     const requestedPr = usePullRequestSelectionStore((state) => (effectiveDirectory ? state.diffRequests.get(effectiveDirectory) : undefined));
     const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, binding.contexts[0] ?? null, visible && activeDiffScope === 'pr' && !isVSCodeRuntime(), requestedPr);
-    // Set only when the server serves the project's provider: change-request diffs exist only for those.
     const pullRequestContext = prComparison.readContext;
     const selectedPr = prComparison.selectedSource;
     const prChangeRequestTerm = useChangeRequestTerm(prComparison.provider);
-    // Taken once the branch is known: the selection it landed in is the real one.
     React.useEffect(() => {
         if (!effectiveDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
         usePullRequestSelectionStore.getState().settleDiffRequest(effectiveDirectory, requestedPr);
@@ -117,13 +108,6 @@ export function useDiffViewComparisons({
     const branches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.branches ?? null : null));
     const isLoadingBranches = useGitStore((state) => (effectiveDirectory ? state.directories.get(effectiveDirectory)?.isLoadingBranches ?? false : false));
 
-    // The Branch scope needs defaultBranches metadata that nothing else loads
-    // when only the context diff panel is open (GitView and the composer fetch
-    // it, and their absence must not hide the option), so load it here. A
-    // failed fetch leaves `branches` null and the loading flag settles back to
-    // false; the bounded retry below re-issues it a few times per directory and
-    // reports exhaustion so a dead repository neither loops forever nor spins
-    // the Branch scope on base resolution.
     const startBranchMetadataFetch = React.useCallback(() => {
         if (effectiveDirectory) {
             void fetchBranches(effectiveDirectory, git);
@@ -144,38 +128,18 @@ export function useDiffViewComparisons({
         () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
         [binding.read]
     );
-    // Chosen, else the open pull request's base, else the reflog, else the
-    // default branch, qualified to the bound remote's copy where it has one.
-    // Resolved in every scope: whether a base exists decides whether the
-    // Branch scope is offered at all. VS Code has no context diff panel.
     const { base: qualifiedBranchBase, source: branchBaseSource, resolved: isBranchBaseResolved, revision: branchRevision } = useBranchComparisonBase(
         effectiveDirectory ?? null,
         currentBranch,
         visible && !isVSCodeRuntime() && isGitRepo !== false,
         { branches, remoteNames, primaryRemote: binding.contexts[0]?.primaryRemote, readContext: binding.contexts[0] ?? null },
     );
-    // The base above reads the branch's pull request; ask for it while shown,
-    // so a stacked branch checked out here compares against its parent.
     const asksBranchPullRequest = visible && !isVSCodeRuntime() && isGitRepo !== false;
     useBranchPullRequestRequest(asksBranchPullRequest ? effectiveDirectory ?? null : null, asksBranchPullRequest ? currentBranch : null, binding);
     const showBranchOption = !isVSCodeRuntime() && isBranchScopeAvailable(currentBranch, qualifiedBranchBase);
-    // On a branch with a base, the default view is the whole branch against
-    // it, uncommitted work included: what its pull request will merge. It
-    // follows the branch until the person picks a view. While the base is
-    // still being found the view stays where it is; the coercion below moves
-    // it to Changed once the branch is known to have none.
     React.useEffect(() => {
         if (diffScope === null && showBranchOption) setActiveDiffScope('branch');
     }, [diffScope, showBranchOption]);
-    // Coercion acts only on CONFIRMED unavailability: the runtime has no branch
-    // scope at all, a settled status has no branch (detached HEAD), every base
-    // candidate answered without a base (the default branch, or a repository
-    // with nothing to compare against), or metadata retries were exhausted.
-    // While status and the base are still loading a persisted branch scope
-    // must survive instead of being rewritten to working on the first render.
-    // `status !== null` is the settled test: before the first status request
-    // even starts, status is null with loading still false, and that must not
-    // read as "settled without a branch".
     const isBranchStatusResolved = status !== null;
     const branchScopeDefinitelyUnavailable = isVSCodeRuntime()
         || isGitRepo === false
@@ -188,20 +152,10 @@ export function useDiffViewComparisons({
         );
     const [comparisonRetryRevision, setComparisonRetryRevision] = React.useState(0);
 
-    // A context tab persists its scope across branch checkouts and runtime
-    // switches. When the Branch scope is CONFIRMED unavailable (checked out the
-    // known default branch, VS Code runtime), fall back to Working instead of
-    // rendering the base-resolution spinner forever. Persist the coercion so
-    // the tab and the selector agree. Note it keys off confirmed
-    // unavailability, not off `showBranchOption`: while metadata loads the
-    // option is hidden but a persisted branch scope must not be rewritten.
     React.useEffect(() => {
         const coercedScope = coerceDiffScope(activeDiffScope, !branchScopeDefinitelyUnavailable);
         if (coercedScope !== activeDiffScope) {
             setActiveDiffScope(coercedScope);
-            // The only coercion is 'branch' -> 'working', so the persisted
-            // value always fits the callback domain. A default view is not
-            // persisted: it follows the branch on its own.
             if (coercedScope === 'working' && diffScope !== null) {
                 onDiffScopeChange?.('working');
             }
@@ -231,10 +185,6 @@ export function useDiffViewComparisons({
     const branchFiles = activeDiffScope === 'branch' ? comparison.files : null;
     const branchFilesError = activeDiffScope === 'branch' ? comparison.error : null;
 
-    // Range diffs are fetched per expanded file: unlike working/staged diffs
-    // there is no per-file cache channel, so patch data lives in a range-keyed
-    // local cache. Stale completions from a previous range cannot write into
-    // the new range's cache (see useRangeKeyedCache).
     const comparisonRangeKey = comparison.files ? (activeDiffScope === 'pr'
         ? JSON.stringify([comparison.key, comparison.revision]) : comparison.key) : null;
     const comparisonPathsKey = React.useMemo(
@@ -262,17 +212,11 @@ export function useDiffViewComparisons({
         },
         [loadComparisonDiff, loadComparisonVersions, t]
     );
-    // Branch and commit diffs are re-read from git with the whole file as
-    // context; a PR diff comes from GitHub at fixed context, so its full view
-    // is built from both sides of the file as GitHub has them.
     const fetchComparisonFullFileEntry = React.useCallback(
         async (filePath: string): Promise<ComparisonDiffResult> => {
             try {
                 if (isOfficePreviewFile(filePath)) return await fetchComparisonDiffEntry(filePath);
                 const { original, modified } = await loadComparisonFullFile(filePath);
-                // Complete-file metadata, like the git-backed full patches: the
-                // viewer keeps the highlighted partial diff on screen until this
-                // one is highlighted, then replays the requested expansion.
                 const fileDiff = parseDiffFromFile({ name: filePath, contents: original }, { name: filePath, contents: modified });
                 return { status: 'ready', data: { original, modified, fileDiff, contextMode: 'full' } };
             } catch (error) {
@@ -290,8 +234,6 @@ export function useDiffViewComparisons({
         [activeDiffScope, fetchComparisonDiffEntry, fetchComparisonFullFileEntry]
     );
 
-    // A status read re-reads the Branch file list; each expanded file then
-    // re-reads its patch only when its own revision moved.
     const branchDiffRevisions = React.useMemo(
         () => activeDiffScope === 'branch' ? branchPathRevisions(branchFiles, branchRevision) : undefined,
         [activeDiffScope, branchFiles, branchRevision]

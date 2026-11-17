@@ -35,8 +35,6 @@ export function buildFileActions({ clipboard, fileAssets, fileKinds, tabs, copyP
     };
 
     const fileActions: ToolbarGroup = [
-      // Every item hands the path to this machine's OS. A remote server, WSL
-      // included, keeps its files elsewhere, so the menu would only fail there.
       isDesktopLocalOriginActive() && {
         id: 'open-in-app',
         label: t('filesView.editor.openInDesktopApp'),
@@ -51,7 +49,6 @@ export function buildFileActions({ clipboard, fileAssets, fileKinds, tabs, copyP
         onSelect: () => void copyContents(false),
         onMenuSelect: () => void copyContents(true),
       },
-      // Where the toolbar names the file, a click on the name copies its path.
       canCopyPath && !pathLabelCopies && {
         id: 'copy-path',
         label: copyPathLabel,

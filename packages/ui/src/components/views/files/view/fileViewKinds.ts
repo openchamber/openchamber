@@ -9,10 +9,6 @@ export const isMarkdownFile = (path: string): boolean => {
   return ext === 'md' || ext === 'markdown';
 };
 
-/**
- * Files an extension's file editor opens. For callbacks and loaders; render
- * code reads the reactive `useGuestFileEditor` instead.
- */
 export const opensInFileCanvas = (path: string | null | undefined): boolean => Boolean(
   path && findGuestFileEditor(useGuestsStore.getState().guests, path),
 );

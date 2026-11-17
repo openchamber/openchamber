@@ -46,9 +46,6 @@ export function renderFileSaveStatus({ canvasState, diagram, draft, fileKinds, f
         onClick={() => void saveDraft()}
       />
     ) : null;
-    // A canvas or diagram saves through its own button even where text cannot be edited.
-    // Save state sits after the path, which gives up the width it takes:
-    // the buttons never move when it appears.
     const status = (canEdit && isTextFile) || hasCanvas || isDrawio ? statusContent : null;
 
   return { status };

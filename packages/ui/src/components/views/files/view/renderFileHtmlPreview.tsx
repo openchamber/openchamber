@@ -22,7 +22,6 @@ export function renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime,
               </div>
             ) : (
             <div className="h-full overflow-hidden">
-              {/* No allow-same-origin: the page is untrusted and must not run as the app. */}
               <iframe
                 ref={htmlPreviewFrameRef}
                 onLoad={() => {

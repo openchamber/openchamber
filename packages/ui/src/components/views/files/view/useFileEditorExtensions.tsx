@@ -46,8 +46,6 @@ export function useFileEditor() {
   const [isSymbolsOpen, setIsSymbolsOpen] = React.useState(false);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const fileEditorVimMappings = useUIStore((state) => state.fileEditorVimMappings);
-  // Vim mappings live in the Vim keymap, which is global; editing them in
-  // Settings applies to open editors on the next key press.
   React.useEffect(() => {
     if (fileEditorKeymap === 'vim') syncVimMappings(fileEditorVimMappings);
   }, [fileEditorKeymap, fileEditorVimMappings]);
@@ -75,22 +73,13 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
   const { currentTheme, darkTheme, lightTheme } = themes;
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
-  // The rendered preview follows the editor's font size, so zoom and the
-  // Editor Font Size setting resize both modes. At the default 12 px it
-  // renders at 14 px body and 12 px code.
   // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
   const previewFontStyle = React.useMemo(() => ({
     '--text-markdown': `${editorFontSize + 2}px`,
     '--text-code': `${editorFontSize}px`,
   } as React.CSSProperties), [editorFontSize]);
-  // The code preview is code at the editor's size and rows, so switching
-  // between edit and view keeps the text in place.
   const editorCode = useEditorCodeMetrics();
 
-  // Git change markers compare the open file with its HEAD version. The
-  // server answers an empty original both for a new file and for one git does
-  // not track at all (ignored, outside the repo's HEAD), so an empty baseline
-  // counts only when git status lists the file as new.
   const selectedRelativePath = selectedFile?.path && root && selectedFile.path.startsWith(`${root}/`)
     ? selectedFile.path.slice(root.length + 1)
     : null;
@@ -98,12 +87,8 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
   const gitTarget = gitBaselineTarget(selectedFile?.path, currentDirectory, selectedGitDirectory);
   const gitDirectory = gitTarget?.directory ?? null;
   const gitRelativePath = gitTarget?.relativePath ?? null;
-  // Refetch when the file's own status or the branch changes (a commit,
-  // checkout or stash moves its HEAD version), not on every status refresh:
-  // the selector returns a string, so unrelated refreshes do not re-render.
   const gitBaselineKey = useGitStore((state) => {
     if (!gitRelativePath || !gitDirectory) return null;
-    // Keyed like the tree's own git status lookup.
     const status = state.directories.get(gitDirectory)?.status;
     const entry = status?.files.find((file) => file.path === gitRelativePath) ?? null;
     return JSON.stringify([gitDirectory, gitRelativePath, status?.current ?? null, entry]);
@@ -135,7 +120,6 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
     return () => {
       cancelled = true;
     };
-    // gitBaselineKey carries the status fields that decide a refetch.
   }, [git, gitBaselineKey, gitDirectory, gitRelativePath, selectedRelativePath]);
   const gitBaselineRef = React.useRef(gitBaseline);
   gitBaselineRef.current = gitBaseline;
@@ -148,8 +132,6 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
     applyGitBaseline(editorViewRef.current);
   }, [applyGitBaseline, gitBaseline]);
 
-  // Typing into a file opened as a preview keeps its tab, as in VS Code. Only
-  // user edits count: loading or syncing a file also changes the document.
   const pinPreviewOnEditRef = React.useRef<() => void>(() => {});
   pinPreviewOnEditRef.current = () => {
     if (!selectedFile?.path || !panelRoot) return;
@@ -168,8 +150,6 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
     if (edited) pinPreviewOnEditRef.current();
   }), []);
 
-  // Cmd/Ctrl+click on a relative import opens the file it names. The handler
-  // reads the latest render through a ref, so the extension keeps its identity.
   const openRelativeImportRef = React.useRef<(specifier: string) => void>(() => {});
   openRelativeImportRef.current = (specifier) => {
     const fromFile = selectedFile?.path;
@@ -198,10 +178,6 @@ export function useFileEditorExtensions({ editor, fileLanguage, mobileKeyboard, 
       return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     }
 
-    // Token colors from the file view's highlighter (see codeHighlight.ts).
-    // Same language resolver as the view, so both agree on the language. When
-    // it is the color source, drop the lezer token colors to avoid a
-    // competing highlighter (Keep the lezer language for indentation/folding).
     const highlightLanguage = getLanguageFromExtension(selectedFile.path);
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme, highlightLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
@@ -277,8 +253,6 @@ export function useFileEditorPanels({ editor, fileKinds, isMobile }: {
 }) {
   const { editorViewRef, isSearchOpen, setIsGoToLineOpen, setIsSymbolsOpen } = editor;
   const { sourceEditorShown } = fileKinds;
-  // The phone's find bar has no match options: one set on a wider layout must
-  // not keep narrowing the search with no way to clear it.
   React.useEffect(() => {
     const view = editorViewRef.current;
     if (!isMobile || !isSearchOpen || !view) return;
@@ -287,7 +261,6 @@ export function useFileEditorPanels({ editor, fileKinds, isMobile }: {
     view.dispatch({ effects: setEditorSearchQuery.of(new SearchQuery({ search: query.search, replace: query.replace })) });
   }, [isMobile, isSearchOpen]);
 
-  // Go to line and symbols drive that editor: they close when a preview replaces it.
   React.useEffect(() => {
     if (sourceEditorShown) return;
     setIsGoToLineOpen(false);

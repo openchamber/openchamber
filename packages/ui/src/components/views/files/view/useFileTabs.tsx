@@ -75,13 +75,11 @@ export function useFileTabs({ scope }: {
   const resolveFileReadOptions = React.useCallback((path: string) => ({
     allowOutsideWorkspace: Boolean(root && !isPathWithinRoot(path, root)),
   }), [root]);
-  // Editor tabs horizontal scroll fades
   const editorTabsScrollRef = React.useRef<HTMLDivElement>(null);
   const [editorTabsOverflow, setEditorTabsOverflow] = React.useState<{ start: boolean; end: boolean }>({ start: false, end: false });
   const updateEditorTabsOverflow = React.useCallback(() => {
     const el = editorTabsScrollRef.current;
     if (!el) return;
-    // scrollLeft is negative in RTL; its magnitude is the distance from the start.
     const fromStart = Math.abs(el.scrollLeft);
     setEditorTabsOverflow({
       start: fromStart > 2,
