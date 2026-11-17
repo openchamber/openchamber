@@ -5,18 +5,10 @@ import { cn } from '@/lib/utils';
 
 const LENGTH = 6;
 
-/**
- * The six-digit PIN of a shared page, the way the relay's viewer asks for it:
- * one box per digit, the phone's one-time-code fill on the first, a paste
- * spread over the boxes, Backspace stepping back, and the PIN sent as soon as
- * the sixth digit lands. Digits read left to right in every language.
- */
 export function PinField({ onComplete, disabled, invalid, resetKey }: {
   onComplete: (pin: string) => void;
   disabled?: boolean;
-  /** The last PIN was wrong: the boxes are drawn as refused until the next digit. */
   invalid?: boolean;
-  /** Changing it empties the boxes and focuses the first one (after a refused PIN). */
   resetKey?: number;
 }) {
   const { t } = useI18n();
@@ -77,7 +69,6 @@ export function PinField({ onComplete, disabled, invalid, resetKey }: {
               setDigits(next);
               inputs.current[index - 1]?.focus();
             }
-            // Enter belongs to the PIN here, not to the composer's send.
             if (event.key === 'Enter') {
               event.preventDefault();
               event.stopPropagation();

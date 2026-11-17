@@ -17,13 +17,6 @@ import { useReceivedPageText } from './useReceivedPageText';
 
 type SharedPageReference = Extract<ComposerReference, { kind: 'shared-page' }>;
 
-/**
- * A share link pasted or typed into the composer, standing in for the link.
- * Before the PIN it says whether the page can still be
- * opened; the right PIN opens it here and the chip shows its title and
- * outline, and the agent then gets the page's content with the message.
- * Sent without the PIN, the agent learns only that a link was shared.
- */
 export function SharedPageChip({ reference, onChange }: {
   reference: SharedPageReference;
   onChange: (next: SharedPageReference) => void;
@@ -37,7 +30,6 @@ export function SharedPageChip({ reference, onChange }: {
   const page = state.page;
   const text = useReceivedPageText(page);
 
-  // The link went to the server when it left the text; the chip learns the page's id from its answer.
   const latest = React.useRef(reference);
   latest.current = reference;
   React.useEffect(() => {
@@ -60,7 +52,6 @@ export function SharedPageChip({ reference, onChange }: {
     return () => { live = false; };
   }, [accept, fail, onChange, reference.receivedId, reference.shareKey, t]);
 
-  // Before the PIN, what the relay says now: locked, expired, answered or withdrawn show at once.
   const [checked, setChecked] = React.useState(false);
   React.useEffect(() => {
     if (!reference.receivedId) return;
@@ -77,7 +68,6 @@ export function SharedPageChip({ reference, onChange }: {
     return () => { live = false; };
   }, [accept, fail, reference.receivedId]);
 
-  // Once opened, the agent's copy is the page itself.
   React.useEffect(() => {
     if (!page?.opened || !text) return;
     const current = latest.current;

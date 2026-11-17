@@ -8,17 +8,10 @@ import { cn } from '@/lib/utils';
 
 import { PinField } from './PinField';
 
-/**
- * The PIN boxes with the line under them: the hint, then the attempts left
- * after a wrong PIN. The right PIN, or a share that turned locked, expired or
- * answered meanwhile, comes back through `onPage`.
- */
 export function PinPrompt({ receivedId, onPage, onFailure, centered = false }: {
   receivedId: string;
-  /** Centred under the page's icon in the panel; at the start of the line in the chip. */
   centered?: boolean;
   onPage: (page: ReceivedPage) => void;
-  /** A refusal the page itself cannot show (the policy turned receiving off). */
   onFailure: (error: Error) => void;
 }) {
   const { t } = useI18n();
