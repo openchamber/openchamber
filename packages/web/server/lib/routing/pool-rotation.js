@@ -238,15 +238,18 @@ export const createPoolRotation = ({
    * defines it: a project can override a pool with the same id.
    */
   /**
-   * Whether `destination` belongs to the pool as this session's project
-   * defines it (a project can override a pool with the same id), and has not
-   * passed that project's own `until`.
+   * The model to switch to when `destination` belongs to the pool as this
+   * session's project defines it (a project can override a pool with the same
+   * id) and has not passed that project's own `until`, or null. The model,
+   * variant included, is the project's entry, so the session runs what its
+   * own pool lists.
    */
-  const destinationInSessionPool = (poolID, destination, directory, now) => {
-    if (!directory) return true;
+  const destinationModelForSession = (poolID, destination, directory, now) => {
+    if (!directory) return destination.model;
     const targets = readRoutes(directory)[poolID]?.targets ?? [];
-    return targets.map(concreteModel).some((candidate) => candidate?.ref === destination.ref
+    const entry = targets.map(concreteModel).find((candidate) => candidate?.ref === destination.ref
       && (candidate.until === null || candidate.until > now));
+    return entry?.model ?? null;
   };
 
   /** Whether a session other than `sessionID` from `live` is still on the pool now (Auto ones count). */
@@ -272,17 +275,23 @@ export const createPoolRotation = ({
       if (live.length < 2) continue;
       for (const chosen of movable) {
         // The best destination this session's own project keeps in the pool.
-        const destination = destinations.find((candidate) => destinationInSessionPool(poolID, candidate, chosen.directory, tickStart));
+        let destination = null;
+        let model = null;
+        for (const candidate of destinations) {
+          model = destinationModelForSession(poolID, candidate, chosen.directory, tickStart);
+          if (model) { destination = candidate; break; }
+        }
         if (!destination) continue;
-        // Reading the other sessions takes time; the user may have picked a
-        // model or Auto for this one since, and that choice stands.
-        if (!stillOnPool(await readSession(chosen.sessionID), chosen.sessionID, poolID)) continue;
-        // The others may have left meanwhile too: move only while another session is still on the target.
+        // The others may have left meanwhile: move only while another session is still on the target.
         if (!(await anotherStillOn(live, chosen.sessionID, poolID))) continue;
+        // Reading the sessions takes time; the user may have picked a model or
+        // Auto for this one since, and that choice stands. Read last, right
+        // before the switch.
+        if (!stillOnPool(await readSession(chosen.sessionID), chosen.sessionID, poolID)) continue;
         // Reads can take seconds each; turning rotation off meanwhile stops the tick before any move.
         if (!settings().enabled) throw new RotationTurnedOff();
         try {
-          await withTimeout(switchModel(chosen.sessionID, destination.model), callTimeoutMs, 'Switching the session model');
+          await withTimeout(switchModel(chosen.sessionID, model), callTimeoutMs, 'Switching the session model');
         } catch (error) {
           failedUntil.set(chosen.sessionID, tickStart + FAILED_SESSION_BACKOFF_MS);
           log.warn?.(`[pool-rotation] ${poolID}: could not move ${chosen.sessionID}: ${error?.message ?? error}`);

@@ -396,6 +396,41 @@ describe('pool rotation', () => {
     expect(switches).toEqual([{ sessionID: 'sub', model: { providerID: 'other', id: 'c' } }]);
   });
 
+  it('moves to the variant the session project lists, not the global one', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const inProject = { model: pool, location: { directory: '/p' } };
+    const { rotation, switches } = setup({
+      // Globally the pool lists anthropic/b#high; this project lists #low.
+      projectRoutes: { busy: { targets: ['openai/a', 'anthropic/b#low'] } },
+      sessions: { 'primary-old': inProject, 'primary-new': inProject, sub: { ...inProject, parentID: 'x' } },
+    });
+    await rotation.tick();
+    expect(switches).toEqual([{ sessionID: 'sub', model: { providerID: 'anthropic', id: 'b', variant: 'low' } }]);
+  });
+
+  it('keeps a model the user picked for the chosen session while the others were read', async () => {
+    const pool = { providerID: 'opencode-route', id: 'busy' };
+    const sessions = {
+      'primary-old': { model: pool },
+      'primary-new': { model: pool },
+      sub: { parentID: 'primary-old', model: pool },
+    };
+    const reads = new Map();
+    const { rotation, switches } = setup({
+      sessions,
+      // The second read of primary-old is the check that another session is
+      // still on the target; the user picks a model for sub during it.
+      getSession: async (sessionID) => {
+        const count = (reads.get(sessionID) ?? 0) + 1;
+        reads.set(sessionID, count);
+        if (sessionID === 'primary-old' && count === 2) sessions.sub = { parentID: 'primary-old', model: { providerID: 'openai', id: 'a' } };
+        return sessions[sessionID];
+      },
+    });
+    await rotation.tick();
+    expect(switches.map(({ sessionID }) => sessionID)).not.toContain('sub');
+  });
+
   it('does not move the last session when the others left while it was being read', async () => {
     const pool = { providerID: 'opencode-route', id: 'busy' };
     const reads = new Map();
