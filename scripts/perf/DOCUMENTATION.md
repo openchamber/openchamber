@@ -23,6 +23,37 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:analyze` | Where one run's time went: functions, source files, components, long tasks, renders. |
 | `bun run build:web:diag` | Not a capture: the diagnostic build that names functions and components (Attribution below). |
 
+## Manual mobile workspace resize check
+
+`scripts/mobile-workspace-resize.manual.mjs` checks that an unsaved editor draft
+survives mobile viewport changes, including keyboard sizes, a folded phone, and
+rotation. It drives headless Chrome over CDP and writes screenshots and
+`results.json` to the requested output directory. This is a manual check. The
+root test runner does not collect it.
+
+The check needs Chrome or Chromium available through the resolver in
+`scripts/perf/cdp.mjs`, a built web app, and an isolated OpenChamber server. From
+the repository root, build the app and start the isolated server:
+
+```bash
+bun run build:web
+bun run profile:serve
+```
+
+The server prints its URL. The default is `http://127.0.0.1:4799`, and the
+selected project is `tmp/perf-serve/project`. In a second terminal, add the
+required root-level fixture file to that project, then run the check with the
+printed server URL and an evidence directory:
+
+```bash
+printf 'Mobile workspace resize fixture\n' > tmp/perf-serve/project/fold-resize.txt
+node scripts/mobile-workspace-resize.manual.mjs http://127.0.0.1:4799 tmp/fold-resize-evidence
+```
+
+Keep `profile:serve` running until the command finishes. It writes one
+screenshot per viewport and updates `results.json` after each viewport. Stop
+the isolated server with Ctrl-C when finished.
+
 All of them measure a real browser over CDP. Pass `--help` to any of them for
 the full option list.
 
