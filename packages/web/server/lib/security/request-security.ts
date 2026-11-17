@@ -1,18 +1,49 @@
 import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+import type { Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
 
-export const isOpaqueOriginRequest = (req) => {
+export interface SecurityRequest {
+  headers: NodeJS.Dict<string | string[]>;
+  socket?: Socket & { encrypted?: boolean };
+}
+
+export interface FrameAncestorsOptions {
+  allowLocalDevOrigins?: boolean;
+  extra?: string | undefined;
+}
+
+export interface RequestSecurityDependencies {
+  readSettingsFromDiskMigrated: () => Promise<PublicOriginSettings | null>;
+  allowLocalDevOrigins?: boolean;
+}
+
+export interface PublicOriginSettings {
+  publicOrigin?: string;
+}
+
+export type RequestOriginChecker = (req: SecurityRequest) => boolean | Promise<boolean>;
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+const firstHeaderValue = (value: string | string[] | undefined, method: 'split' | 'trim') => {
+  const first = Array.isArray(value) ? value[0] : value || '';
+  if (first === undefined) throw new TypeError(`Cannot read properties of undefined (reading '${method}')`);
+  return first;
+};
+
+export const isOpaqueOriginRequest = (req: Pick<SecurityRequest, 'headers'> | null | undefined) => {
   const header = req?.headers?.origin;
   const value = Array.isArray(header) ? header[0] : header;
   return String(value ?? '').trim() === 'null';
 };
 
-export const allowsLocalDevOrigins = (env) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
-export const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+export const allowsLocalDevOrigins = (env: NodeJS.ProcessEnv) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
+export const isLocalDevClientOrigin = (origin: string) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 
 const PACKAGED_FRAME_ANCESTORS = ['openchamber-ui://app', 'capacitor://localhost', 'https://localhost'];
 const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?)$/i;
 
-export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' } = {}) => {
+export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' }: FrameAncestorsOptions = {}) => {
   const sources = ["'self'", ...PACKAGED_FRAME_ANCESTORS];
   if (allowLocalDevOrigins) sources.push('http://127.0.0.1:*', 'http://localhost:*');
   for (const source of String(extra).split(/[\s,]+/)) {
@@ -21,14 +52,14 @@ export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra 
   return `frame-ancestors ${sources.join(' ')}`;
 };
 
-export const isPasswordlessSocketOriginAllowed = async (req, isRequestOriginAllowed) => {
+export const isPasswordlessSocketOriginAllowed = async (req: SecurityRequest, isRequestOriginAllowed: RequestOriginChecker) => {
   const header = req?.headers?.origin;
   const origin = String((Array.isArray(header) ? header[0] : header) ?? '').trim();
   if (!origin) return true;
   return Boolean(await isRequestOriginAllowed(req));
 };
 
-export const createRequestSecurityRuntime = (deps) => {
+export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) => {
   const { readSettingsFromDiskMigrated, allowLocalDevOrigins = false } = deps;
   const packagedClientOrigins = new Set([
     'openchamber-ui://app',
@@ -36,9 +67,9 @@ export const createRequestSecurityRuntime = (deps) => {
     'https://localhost',
   ]);
 
-  const getUiSessionTokenFromRequest = (req) => {
+  const getUiSessionTokenFromRequest = (req: Pick<SecurityRequest, 'headers'> | null | undefined) => {
     const cookieHeader = req?.headers?.cookie;
-    if (!cookieHeader || typeof cookieHeader !== 'string') {
+    if (!cookieHeader || !isString(cookieHeader)) {
       return null;
     }
     const expected = sessionCookieNameForRequest(req);
@@ -55,20 +86,21 @@ export const createRequestSecurityRuntime = (deps) => {
     return null;
   };
 
-  const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
+  const rejectWebSocketUpgrade = (socket: Duplex | null | undefined, statusCode: number, reason?: string) => {
     if (!socket || socket.destroyed) {
       return;
     }
 
-    const message = typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : 'Bad Request';
+    const message = reason && reason.trim().length > 0 ? reason.trim() : 'Bad Request';
     const body = Buffer.from(message, 'utf8');
-    const statusText = {
-      400: 'Bad Request',
-      401: 'Unauthorized',
-      403: 'Forbidden',
-      404: 'Not Found',
-      500: 'Internal Server Error',
-    }[statusCode] || 'Bad Request';
+    const statusTexts = new Map([
+      [400, 'Bad Request'],
+      [401, 'Unauthorized'],
+      [403, 'Forbidden'],
+      [404, 'Not Found'],
+      [500, 'Internal Server Error'],
+    ]);
+    const statusText = statusTexts.get(statusCode) || 'Bad Request';
 
     try {
       socket.write(
@@ -79,33 +111,35 @@ export const createRequestSecurityRuntime = (deps) => {
       );
       socket.write(body);
     } catch {
+      void 0;
     }
 
     try {
       socket.destroy();
     } catch {
+      return;
     }
   };
 
-  const getRequestOriginCandidates = async (req) => {
-    const origins = new Set();
-    const hosts = new Set();
-    const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
-      ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
+  const getRequestOriginCandidates = async (req: SecurityRequest) => {
+    const origins = new Set<string>();
+    const hosts = new Set<string>();
+    const forwardedProto = isString(req.headers['x-forwarded-proto'])
+      ? (req.headers['x-forwarded-proto'].split(',')[0] ?? '').trim().toLowerCase()
       : '';
     const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
 
-    const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-      ? req.headers['x-forwarded-host'].split(',')[0].trim()
+    const forwardedHost = isString(req.headers['x-forwarded-host'])
+      ? (req.headers['x-forwarded-host'].split(',')[0] ?? '').trim()
       : '';
-    const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+    const host = forwardedHost || (isString(req.headers.host) ? req.headers.host.trim() : '');
 
     if (host) {
       hosts.add(host.toLowerCase());
       origins.add(`${protocol}://${host}`);
       const [hostname, port] = host.split(':');
-      const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
-      const portSuffix = typeof port === 'string' && port.length > 0 ? `:${port}` : '';
+      const normalizedHost = hostname?.toLowerCase() ?? '';
+      const portSuffix = port && port.length > 0 ? `:${port}` : '';
       if (normalizedHost === 'localhost') {
         origins.add(`${protocol}://127.0.0.1${portSuffix}`);
         origins.add(`${protocol}://[::1]${portSuffix}`);
@@ -116,17 +150,18 @@ export const createRequestSecurityRuntime = (deps) => {
 
     try {
       const settings = await readSettingsFromDiskMigrated();
-      if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
+      if (isString(settings?.publicOrigin) && settings.publicOrigin.trim().length > 0) {
         origins.add(new URL(settings.publicOrigin.trim()).origin);
       }
     } catch {
+      return { origins, hosts };
     }
 
     return { origins, hosts };
   };
 
-  const isRequestOriginAllowed = (req) => {
-    const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+  const isRequestOriginAllowed = (req: SecurityRequest) => {
+    const originHeader = isString(req.headers.origin) ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;
     }
@@ -146,10 +181,10 @@ export const createRequestSecurityRuntime = (deps) => {
     }
 
     const forwardedHostHeader = req.headers['x-forwarded-host'];
-    const forwardedHost = (Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader || '')
-      .split(',')[0].trim().toLowerCase();
+    const forwardedHost = firstHeaderValue(forwardedHostHeader, 'split')
+      .split(',')[0]?.trim().toLowerCase() ?? '';
     const hostHeader = req.headers.host;
-    const host = forwardedHost || (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader || '').trim().toLowerCase();
+    const host = forwardedHost || firstHeaderValue(hostHeader, 'trim').trim().toLowerCase();
     if (host && host === origin.host.toLowerCase()) return true;
 
     return getRequestOriginCandidates(req).then((candidates) => (
