@@ -242,6 +242,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   const registerRoutes = async (app, routeDependencies) => {
     if (routeDependencies.frontDoor) {
       registerFrontDoorLocalRoutes(app, routeDependencies);
+      routeDependencies.botsServer?.registerRoutes(app);
       return;
     }
     const {

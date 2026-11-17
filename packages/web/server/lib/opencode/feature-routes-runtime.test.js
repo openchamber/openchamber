@@ -34,6 +34,7 @@ describe('feature-routes-runtime', () => {
       getOwnPorts: noop,
       buildOpenCodeUrl: noop,
       getOpenCodeAuthHeaders: noop,
+      isLocalMcpScopeSupported: () => false,
       getOpenCodePort: noop,
       waitForOpenCodeReady: noop,
       writeSseEvent: noop,
