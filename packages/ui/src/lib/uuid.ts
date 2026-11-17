@@ -1,10 +1,4 @@
-/**
- * An RFC 4122 version 4 UUID.
- *
- * `crypto.randomUUID()` exists only in secure contexts, so a plain-HTTP LAN or
- * Tailscale origin has none. `crypto.getRandomValues()` is available in every
- * context, so the fallback builds the same v4 layout from it.
- */
+// external: https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID randomUUID requires a secure context; getRandomValues supports the v4 fallback on plain HTTP.
 export function generateUuid(): string {
   if (globalThis.crypto.randomUUID) return globalThis.crypto.randomUUID();
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));

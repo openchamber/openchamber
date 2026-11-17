@@ -50,7 +50,6 @@ type ProjectActionIconKey =
   | 'windows'
   | 'linux';
 
-/** The id of the built-in action that detects the dev server command and opens what it serves. */
 export const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
 
 export const PROJECT_ACTION_ICONS: Array<{

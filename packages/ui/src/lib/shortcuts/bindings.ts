@@ -2,8 +2,6 @@ import type React from 'react';
 import { isDesktopShell } from '@/lib/desktop';
 import { isMacOS, isWindows } from '@/lib/utils';
 
-// `mod` is Command on macOS and Control elsewhere. `super` is the Windows /
-// Super key on Windows and Linux; macOS has no such key of its own.
 type ShortcutModifier = 'mod' | 'shift' | 'alt' | 'ctrl' | 'super';
 type ShortcutDisplayPlatform = 'macos' | 'windows' | 'other';
 type ShortcutKey = string;
@@ -249,10 +247,8 @@ export function getShortcutConflict(left: ShortcutCombo, right: ShortcutCombo): 
   return sharesLeader && leftChords.length !== rightChords.length ? 'prefix' : undefined;
 }
 
-// The keys `convertShortcutComboToAccelerator` in packages/electron maps.
 const MENU_ACCELERATOR_KEY = /^(?:[a-z0-9]|f(?:[1-9]|1\d|2[0-4])|arrow(?:up|down|left|right)|space|tab|escape|backspace|delete|insert|home|end|pageup|pagedown|comma|period|plus|minus|enter|[/;'[\]\\`=])$/;
 
-/** A native menu accelerator is one chord: a key the menu can show, held with a modifier other than Shift. */
 export function isMenuAcceleratorCombo(combo: ShortcutCombo): boolean {
   const parsed = parseShortcut(combo);
   if (parsed?.chords.length !== 1) return false;
@@ -264,8 +260,6 @@ export function isRiskyBrowserShortcut(combo: ShortcutCombo): boolean {
   if (isUnassignedShortcut(combo)) return false;
   const parsed = parseShortcut(combo);
   if (!parsed) return false;
-  // Every chord counts: a second chord like "mod+w" is just as capable of
-  // closing the tab as a first one, and mod+shift+w closes a window.
   return parsed.chords.some((chord) => {
     if (!chord.modifiers.has('mod')) return false;
     if (chord.modifiers.has('alt')) return false;
@@ -295,14 +289,6 @@ function keyFromEventCode(code: string): string | null {
   return CODE_KEY_MAP.get(code) ?? null;
 }
 
-/**
- * The character a physical key press should match against bindings. `key`
- * carries the layout-produced character: Option on macOS substitutes symbols
- * ("¡" for ⌥1) and non-Latin layouts substitute their own alphabet ("л" for
- * K). Both keep the physical key in `code`, so those two cases fall back to
- * it; Latin layouts that MOVE keys (Dvorak, AZERTY) keep their `key`-based
- * meaning untouched.
- */
 export function resolveShortcutEventKey(
   event: Pick<KeyboardEvent, 'key' | 'code' | 'altKey'>,
 ): string {
@@ -312,7 +298,6 @@ export function resolveShortcutEventKey(
   return raw;
 }
 
-/** The digit a press addresses, layout- and Option-proof via `code`. */
 export function resolveShortcutEventDigit(
   event: Pick<KeyboardEvent, 'key' | 'code'>,
 ): string | null {
@@ -345,11 +330,9 @@ export function eventMatchesShortcut(
 
   if (expectedMod && !modMatches) return false;
   if (isMac) {
-    // Meta is Command, the `mod` key; there is no separate Super key.
     if (expectedSuper) return false;
     if (!expectedMod && event.metaKey) return false;
   } else if (expectedSuper !== event.metaKey) {
-    // Elsewhere Meta is the Windows / Super key.
     return false;
   }
   if (expectedShift !== event.shiftKey) return false;
@@ -364,10 +347,6 @@ export function eventMatchesShortcut(
   return keyToShortcutToken(resolveShortcutEventKey(event)) === keyToShortcutToken(chord.key);
 }
 
-/**
- * The second chord of a sequence pressed with the leader's modifiers still
- * held: Ctrl+K then Ctrl+B for `mod+k b`.
- */
 export function heldSequenceChord(leader: ShortcutCombo, chord: ShortcutCombo): ShortcutCombo | undefined {
   const modifiers = parseShortcut(leader)?.chords[0]?.modifiers;
   return modifiers && normalizeCombo([...modifiers, chord].join('+'));

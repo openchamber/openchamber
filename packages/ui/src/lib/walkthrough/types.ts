@@ -1,12 +1,5 @@
 import type { SourceControlReadContext } from '@/lib/source-control/types';
 
-/**
- * Contract for the AI diff walkthrough, mirrored from
- * `packages/web/server/lib/walkthrough`.
- *
- * Hunk ids are opaque here on purpose: the server owns how they are derived,
- * and the client only ever matches them against the index it is handed.
- */
 
 export type WalkthroughWorkingTreeScope = 'all' | 'staged' | 'working';
 
@@ -14,12 +7,6 @@ export type WalkthroughSource =
   | { kind: 'working-tree'; scope: WalkthroughWorkingTreeScope }
   | { kind: 'branch'; baseRef: string; headRef: string }
   | { kind: 'commit'; hash: string }
-  /**
-   * `revision`: a full commit SHA naming an earlier revision (a patchset) on
-   * a host that keeps them; absent, the change request's current one.
-   * `linked`: a link named it outside the bound repository network, so it is
-   * read wherever it is and offers no review.
-   */
   | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string; linked?: true };
 
 type WalkthroughLocalSource = Exclude<WalkthroughSource, { kind: 'pr' }>;
@@ -33,7 +20,6 @@ export type WalkthroughChapterIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'doc'
 export type WalkthroughStopImportance = 'critical' | 'normal' | 'context';
 export type WalkthroughObservationKind = 'decision' | 'cost' | 'limitation' | 'asymmetry' | 'unproven';
 
-/** A fact the reader agrees to by accepting the change; never a finding. */
 export interface WalkthroughObservation {
   kind: WalkthroughObservationKind;
   note: string;
@@ -45,7 +31,6 @@ export interface WalkthroughStop {
   hunkIds: string[];
   importance: WalkthroughStopImportance;
   prose: string;
-  /** Absent on entries written before observations existed. */
   observations?: WalkthroughObservation[];
 }
 
@@ -57,7 +42,6 @@ export interface WalkthroughChapter {
   stops: WalkthroughStop[];
 }
 
-/** One line on a file the stops left out, shown where the reader meets it. */
 export interface WalkthroughRoutineNote {
   path: string;
   note: string;
@@ -67,7 +51,6 @@ export interface Walkthrough {
   title: string;
   focus: string;
   chapters: WalkthroughChapter[];
-  /** Absent on entries written before routine notes existed. */
   routine?: WalkthroughRoutineNote[];
 }
 
@@ -81,7 +64,6 @@ export interface WalkthroughHunk {
   newStart: number;
   added: number;
   deleted: number;
-  /** Standalone patch for this hunk, including the file header. */
   patch: string;
 }
 
@@ -93,38 +75,24 @@ export interface WalkthroughModel {
 
 export interface WalkthroughResult {
   source: WalkthroughSource;
-  /** Required and validated by the client for pull-request results. */
   readContext?: Readonly<SourceControlReadContext>;
   walkthrough: Walkthrough | null;
   model?: WalkthroughModel;
-  /**
-   * Language the prose on screen is written in — not necessarily the one being
-   * asked for now. Null for an entry written before the setting existed.
-   */
   language?: string | null;
   generatedAt?: string;
   fromCache?: boolean;
   hunks: WalkthroughHunk[];
   hunkCount: number;
-  /** True when at least one stop points at code that has since changed. */
   isStale?: boolean;
   missingHunkIds?: string[];
   staleStopIds?: string[];
-  /** Hunks in the current diff that no stop covers. Rendered as a tail. */
   uncoveredHunkIds?: string[];
-  /** Whether generating is possible at all, computed from the same diff. */
   readiness?: WalkthroughReadiness;
-  /** A generation is already running on the server for this source. */
   generating?: boolean;
 }
 
-/**
- * Only phases a person can wait on. Building the digest and reading the cache
- * take milliseconds; naming them would imply progress that is not happening.
- */
 export type WalkthroughStage = 'collecting' | 'asking' | 'retrying' | 'assembling';
 
-/** Reasons the server reports for refusing to generate. */
 export type WalkthroughBlockedReason =
   | 'no-model'
   | 'no-provider-login'
@@ -134,11 +102,6 @@ export type WalkthroughBlockedReason =
   | 'structured-output-unsupported'
   | 'output-exhausted';
 
-/**
- * Everything the panel can render as a blocking screen. `server-unsupported` is
- * never sent by a server — it is what the client concludes when the answer is
- * not JSON at all, which is how a server too old to have these routes replies.
- */
 export type WalkthroughBlockedState = WalkthroughBlockedReason | 'server-unsupported';
 
 export interface WalkthroughReadiness {
@@ -148,7 +111,6 @@ export interface WalkthroughReadiness {
     inputCharBudget?: number;
     contextTokens?: number;
     structuredOutput?: boolean | null;
-    /** False when the resolved provider has no usable OpenCode login. */
     hasLogin?: boolean;
   };
   requiredChars?: number;

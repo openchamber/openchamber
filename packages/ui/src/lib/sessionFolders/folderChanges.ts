@@ -1,13 +1,6 @@
 import { z } from 'zod';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 
-/**
- * One user action on the shared folders. The client applies it to its own copy
- * at once and sends it to the server, which applies it to the stored folders
- * (`packages/web/server/lib/session-folders/folder-changes.js`); both sides
- * keep the same semantics, so a change still pending is laid over every newer
- * server copy the same way the server will apply it.
- */
 export type FolderChange =
   | { type: 'create'; scopeKey: string; folder: { id: string; name: string; parentId: string | null; createdAt: number } }
   | { type: 'rename'; scopeKey: string; folderId: string; name: string }
@@ -17,11 +10,6 @@ export type FolderChange =
   | { type: 'forget-sessions'; sessionIds: string[] }
   | { type: 'forget-scopes'; scopeKeys: string[] };
 
-/**
- * Which folder of the scope each chat was in when the user moved it (null: in
- * none). A chat that has since moved elsewhere stays there, so a move sent late
- * or sent twice cannot undo a newer one from another client.
- */
 export type ChatPlacement = Record<string, string | null>;
 
 const id = z.string().min(1);
@@ -44,7 +32,6 @@ const storedFolderSchema = z.object({
   parentId: z.string().nullable().optional().transform((value) => value ?? null),
 });
 
-/** The server's answer to a read or a write of the shared folders. */
 export const folderSnapshotSchema = z.object({
   exists: z.boolean().optional(),
   foldersMap: z.record(z.string(), z.array(storedFolderSchema)).default({}),
@@ -76,12 +63,10 @@ const chatsStillInPlace = (folders: readonly SessionFolder[], sessionIds: readon
     const expected = from?.[sessionId];
     if (expected === undefined) return true;
     const holding = folderHolding(folders, sessionId);
-    // A chat left in no folder because its folder was deleted was not moved by anyone.
     return holding === expected || (holding === null && !folders.some((folder) => folder.id === expected));
   })
 );
 
-/** A folder and every folder under it. */
 export const collectFolderSubtree = (folders: readonly SessionFolder[], rootId: string): Set<string> => {
   const result = new Set([rootId]);
   let grew = true;
@@ -102,17 +87,12 @@ const withScope = (map: SessionFoldersMap, scopeKey: string, folders: SessionFol
   return { ...map, [scopeKey]: folders };
 };
 
-/**
- * Apply one change. Returns the same map when nothing changes, so a caller can
- * skip the write, and keeps every untouched scope and folder by reference.
- */
 export const applyFolderChange = (map: SessionFoldersMap, change: FolderChange): SessionFoldersMap => {
   switch (change.type) {
     case 'create': {
       const folders = map[change.scopeKey] ?? [];
       if (folders.some((folder) => folder.id === change.folder.id)) return map;
       const parentId = change.folder.parentId && folders.some((folder) => folder.id === change.folder.parentId) ? change.folder.parentId : null;
-      // Field order matches a parsed server answer, so laying this over one compares equal.
       const { id, name, createdAt } = change.folder;
       return withScope(map, change.scopeKey, [...folders, { id, name, sessionIds: [], createdAt, parentId }]);
     }

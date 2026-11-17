@@ -1,36 +1,22 @@
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 
-/** True on Linux, where Chromium middle-click pastes the PRIMARY selection. */
 export const isLinuxPlatform = (): boolean => navigator.platform.toLowerCase().startsWith('linux');
 
-/** True when running inside the native Capacitor shell (iOS/Android app), not the web/PWA. */
 export const isCapacitorApp = (): boolean => {
   if (typeof window === 'undefined') return false;
   const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
 };
 
-/** True in the native app when it can hold the screen on: the iOS plugin, or the WebView's Screen Wake Lock API. */
 export const canKeepScreenAwake = (): boolean => (
   isCapacitorApp() && (getClientPlatform() === 'ios' || 'wakeLock' in navigator)
 );
 
-/**
- * True when running inside the native Capacitor shell on an iPad.
- * Capacitor reports 'ios' for both iPhone and iPad; iPadOS WKWebView
- * masquerades as macOS Safari, so the only reliable tell is a Mac-like
- * platform with real touch points (or a legacy explicit iPad UA).
- */
 export const isIPadApp = (): boolean => {
   if (typeof window === 'undefined' || !isCapacitorApp()) return false;
   return getClientPlatform() === 'ios' && isIPadDevice();
 };
 
-/**
- * True on an iPad in any runtime (Safari, Home Screen app, Capacitor).
- * iPadOS sends a Mac user agent; real touch points are the tell, since no
- * Mac has them.
- */
 export const isIPadDevice = (): boolean => {
   if (typeof navigator === 'undefined') return false;
   const userAgent = navigator.userAgent || '';
@@ -41,11 +27,6 @@ export const isIPadDevice = (): boolean => {
 
 type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
 
-/**
- * The runtime surface this client is. Used by the push presence model: only 'ios'/'android'
- * count as mobile (push recipients); everything else is an interactive surface that suppresses
- * mobile push while visible.
- */
 export const getClientPlatform = (): ClientPlatform => {
   if (typeof window !== 'undefined') {
     const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;

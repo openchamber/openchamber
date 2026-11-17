@@ -19,12 +19,10 @@ type KeepFailureReason = 'membership-changed' | 'snapshot-failed' | 'archive-fai
 
 export type KeepRunResult = {
   keptSessionId: string;
-  /** Members whose chat was archived (their worktree is gone unless listed in `failures`). */
   archivedIds: string[];
   failures: Array<{ sessionId: string; reason: KeepFailureReason }>;
 };
 
-/** Private ref that preserves a lane's complete work before its worktree is removed. */
 export const runSnapshotRef = (run: Pick<MultiRunSummary, 'key' | 'groupSlug' | 'lanes' | 'fusions'>, sessionId: string): string => {
   const member = [...run.lanes, ...run.fusions].find((entry) => entry.sessionId === sessionId);
   const group = member?.identity.group;
@@ -37,10 +35,6 @@ const projectRefFor = (path: string): ProjectRef => {
   return { id: project?.id ?? `path:${path}`, path };
 };
 
-/**
- * Where a member lives: its project, and the worktree when it has one. A
- * member in the project root has no worktree and is never removed.
- */
 export async function resolveRunMemberLocation(session: Session, run: MultiRunSummary): Promise<RunMemberLocation | null> {
   const directory = normalizePath(session.directory);
   if (!directory) return null;
@@ -56,13 +50,6 @@ export async function resolveRunMemberLocation(session: Session, run: MultiRunSu
   });
 }
 
-/**
- * Keeps one member of a run and cleans up the others. For every other member:
- * snapshot its worktree (tracked and untracked work) into a private ref, then
- * archive its chat, then remove the worktree and its local branch. A step that
- * fails stops cleanup for that member only and leaves its worktree in place.
- * The project root is never removed.
- */
 export async function keepRunMember(
   run: MultiRunSummary,
   keptSessionId: string,
@@ -121,9 +108,6 @@ export async function keepRunMember(
     if (!worktree || !location) continue;
 
     try {
-      // Another chat the user started in this worktree keeps it alive. OpenCode
-      // lists sessions by exact directory, so the lane's own folder inside the
-      // checkout (`<worktree>/ai`) is asked too.
       const directories = [...new Set([worktree.path, current.directory].map((entry) => normalizePath(entry) ?? entry))];
       const remaining = (await Promise.all(directories.map((directory) => (
         listGlobalSessionPages(listSessionPage, { directory, pageSize: 500 })

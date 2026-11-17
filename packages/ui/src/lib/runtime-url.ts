@@ -13,7 +13,6 @@ interface RuntimeUrlConfig {
 export interface RuntimeUrlResolver {
   api(path: string, query?: RuntimeUrlQuery): string;
   authenticatedAsset(path: string, query?: RuntimeUrlQuery): string;
-  /** Same as `authenticatedAsset` with a caller-minted scoped token instead of the session-wide one. */
   assetWithUrlToken(path: string, token: string, query?: RuntimeUrlQuery): string;
   auth(path: string, query?: RuntimeUrlQuery): string;
   health(query?: RuntimeUrlQuery): string;
@@ -61,9 +60,6 @@ const currentHref = (config: RuntimeUrlConfig): string => {
 const appendQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   if (!query) return;
 
-  // A URLSearchParams may name one key more than once on purpose (`label`,
-  // `directory`): `set` would keep only the last value, which is a different
-  // request. A plain object has one value per key, so it still overrides.
   if (query instanceof URLSearchParams) {
     for (const [key, value] of query) url.searchParams.append(key, value);
     return;
@@ -96,11 +92,6 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
     return appendRelativeQuery(normalizedPath, query);
   }
 
-  // Join onto the base's own path instead of new URL(absolutePath, base),
-  // which keeps only the origin and drops a sub-path prefix
-  // (https://host/openchamber -> https://host). A saved host URL can still
-  // carry a query or hash from the browser address bar; neither belongs to
-  // the API path, so they are dropped.
   const base = new URL(baseUrl);
   const url = new URL(`${base.origin}${base.pathname.replace(/\/+$/, '')}${normalizedPath}`);
   appendQuery(url, query);

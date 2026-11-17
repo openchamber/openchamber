@@ -39,22 +39,12 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-/**
- * The set of linked worktrees of one repository changed: created or removed by
- * this server, by an agent, or from a terminal. `directories` are the
- * directories inside that repository the server has seen requests for, so a
- * listener can map them onto its registered projects and refresh only those.
- */
 type WorktreeChangedEvent = {
   type: 'worktree-changed';
   directories: string[];
   changedAt: number;
 };
 
-/**
- * One in-app browser action requested by the agent tool. Broadcast to every
- * connected client; only the one owning a browser view answers.
- */
 type BrowserControlRequestEvent = {
   type: 'browser-control-request';
   requestId: string;
@@ -63,10 +53,6 @@ type BrowserControlRequestEvent = {
   context: BrowserControlRequestContext;
 };
 
-/**
- * The session that called the browser tool and the project it works in, each
- * null when unknown (an older server, or a caller with no session).
- */
 const browserControlRequestContextSchema = z.object({
   directory: z.string().min(1).nullable().catch(null),
   sessionId: z.string().min(1).nullable().catch(null),
@@ -74,11 +60,6 @@ const browserControlRequestContextSchema = z.object({
 export type BrowserControlRequestContext = z.infer<typeof browserControlRequestContextSchema>;
 const UNKNOWN_BROWSER_CONTROL_CONTEXT: BrowserControlRequestContext = { directory: null, sessionId: null };
 
-/**
- * The agent asked for a file to be shown in the user's file panel. Every
- * client receives it; the desktop file panel opens the file, and the mobile
- * shell opens it only for the session on screen and announces the others.
- */
 const fileOpenRequestSchema = z.object({
   path: z.string().min(1),
   directory: z.string().min(1).nullable(),
@@ -86,11 +67,6 @@ const fileOpenRequestSchema = z.object({
 });
 type FileOpenRequestEvent = { type: 'file-open-request' } & z.infer<typeof fileOpenRequestSchema>;
 
-/**
- * The agent asked for a saved plan to be shown. `projectId` is the storage
- * owner; `directory` is where the asking session works, so the window that
- * shows that project opens the plan.
- */
 const planOpenRequestSchema = z.object({
   projectId: z.string().min(1),
   planId: z.string().min(1),
@@ -100,11 +76,6 @@ const planOpenRequestSchema = z.object({
 });
 type PlanOpenRequestEvent = { type: 'plan-open-request' } & z.infer<typeof planOpenRequestSchema>;
 
-/**
- * The agent changed what it remembers. Carries only which store moved, not the
- * entries: listeners re-read from the server, so the event cannot go stale
- * between being sent and being handled.
- */
 type AgentMemoryChangedEvent = {
   type: 'agent-memory-changed';
   scope: 'global' | 'project';
@@ -114,73 +85,32 @@ type AgentMemoryChangedEvent = {
 const projectContextChangedSchema = z.object({ projectId: z.string().min(1) });
 type ProjectContextChangedEvent = { type: 'project-context-changed' } & z.infer<typeof projectContextChangedSchema>;
 
-/** A client changed the chat folders; `updatedAt` is the stored revision, so a client already showing it skips the read. */
 const sessionFoldersChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionFoldersChangedEvent = { type: 'session-folders-changed' } & z.infer<typeof sessionFoldersChangedSchema>;
 
-/** A client saved, sent or discarded a session draft; every client reads the drafts again. */
 const sessionDraftsChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionDraftsChangedEvent = { type: 'session-drafts-changed' } & z.infer<typeof sessionDraftsChangedSchema>;
 
-/**
- * The extension chosen as browser provider can no longer serve (paused,
- * removed, or approval withdrawn), so the server put the in-app browser back.
- * The setting is already written; listeners update the store and tell the user.
- */
 const browserProviderResetSchema = z.object({
   guestId: z.string().min(1),
   guestName: z.string().min(1),
 });
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
 
-/**
- * The set of source-control providers the server serves changed: an extension
- * that acts as a Git host was approved, enabled, updated, paused or removed.
- * Carries nothing; listeners re-read the provider list from the server, so the
- * event cannot go stale between being sent and being handled.
- */
 type SourceControlProvidersChangedEvent = { type: 'source-control-providers-changed' };
 
-/**
- * The set of trackers the server serves changed: an extension that acts as a
- * tracker was approved, enabled, updated, paused or removed, or connected its
- * server. Carries nothing; listeners re-read the tracker list.
- */
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 
-/**
- * The set of usage providers the server serves changed: an extension that
- * reports usage was approved, enabled, updated, paused or removed. Carries
- * nothing; listeners re-read the provider list.
- */
 type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
 
-/**
- * The extension catalog changed: an extension was installed, updated, approved,
- * paused, enabled or removed, or a folder install's files changed. Carries
- * nothing; listeners re-read the catalog.
- */
 type GuestsChangedEvent = { type: 'guests-changed' };
 
-/**
- * The marks extensions put on sidebar rows changed (`marks.set`, or a service
- * ended). Carries nothing; listeners re-read the marks.
- */
 type GuestMarksChangedEvent = { type: 'guest-marks-changed' };
 
-/** An extension's service sent its open frames something (`emit`). */
 type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
 
-/**
- * A theme file in the server's custom themes folder was added, removed or
- * rewritten. Carries nothing; listeners re-read the custom themes.
- */
 type ThemesChangedEvent = { type: 'themes-changed' };
 
-/**
- * A usage limit stopped a session and the server moved on: the provider to
- * its next account (for every session), or this session to the fallback model.
- */
 const limitFailoverSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('account'),
@@ -200,11 +130,9 @@ const limitFailoverSchema = z.discriminatedUnion('kind', [
 ]);
 type LimitFailoverEvent = { type: 'limit-failover'; failover: z.infer<typeof limitFailoverSchema> };
 
-/** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
 const routingUpdatedSchema = z.object({
   available: z.boolean(),
   autoReady: z.boolean(),
-  // Absent from servers before the classifier pick, where Jev always answered.
   jevAvailable: z.boolean().default(true),
   tokenPresent: z.boolean(),
   jevSource: z.enum(['typesafe', 'zen-free']),
@@ -226,7 +154,6 @@ const routingDecisionSchema = z.object({
 const routingPermissionHeldSchema = z.object({
   permissionId: z.string().min(1),
   sessionId: z.string().min(1),
-  // Where the request lives, so the held request can be announced from its directory's store.
   directory: z.string().nullable().default(null),
   score: z.number(),
   kind: z.string().nullable(),
@@ -244,20 +171,9 @@ type RoutingDecisionEvent = { type: 'routing-decision'; decision: z.infer<typeof
 type RoutingPermissionHeldEvent = { type: 'routing-permission-held' } & z.infer<typeof routingPermissionHeldSchema>;
 type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<typeof routingSafetySkippedSchema>;
 
-/**
- * A permission mode change, or a request the server's auto-answer left for the
- * user. The main event stream carries both as well; a window whose main stream
- * runs over SSE hears them only here.
- */
 export type PermissionPolicySyncEvent = Extract<SyncEvent, { type: 'openchamber.permission-auto-accept' | 'openchamber.permission-left-for-user' }>;
 type PermissionPolicyEvent = { type: 'permission-policy'; event: PermissionPolicySyncEvent };
 
-/**
- * OpenChamber's own session announcements the sync layer applies: a page
- * waiting for an answer, a pending recap, a workflow run, an archive. The main
- * event stream carries them only over the WebSocket; over SSE it is OpenCode's
- * own stream, so this stream is where every transport hears them.
- */
 const CONTROL_STREAM_SYNC_TYPES = new Set([
   'openchamber:page-waiting',
   'openchamber:page-settled',
@@ -278,24 +194,16 @@ const isControlStreamSyncEvent = (event: SyncEvent): event is ControlStreamSyncE
   || event.type === 'openchamber.workflow-run' || event.type === 'openchamber.workflow-run-removed'
 );
 
-/**
- * A page the agent shared with other people changed on the server (uploaded,
- * opened, answered, expired, cancelled). Carries only which call; the card
- * reads the group again, so the event cannot go stale.
- */
 const sharePageChangedSchema = z.object({ sessionId: z.string().min(1), callId: z.string().min(1) });
 type SharePageChangedEvent = { type: 'share-page-changed' } & z.infer<typeof sharePageChangedSchema>;
 
-/** A page someone else shared, opened in this app, changed (opened, answered, its status read). */
 const receivedPageChangedSchema = z.object({ receivedId: z.string().min(1) });
 type ReceivedPageChangedEvent = { type: 'received-page-changed' } & z.infer<typeof receivedPageChangedSchema>;
 
-/** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
 const eventStreamReadySchema = z.object({ connectionId: z.string().min(1).optional() });
 const sourceControlActivitySchema = z.object({ directory: z.string().min(1) });
-// The host follows one isolated space's queue or permission modes again.
 const spaceStreamConnectedSchema = z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal('connected') });
 
 const notificationPropertiesSchema = z.object({
@@ -313,10 +221,8 @@ const notificationPropertiesSchema = z.object({
 type OpenChamberEvent =
   | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
-  /** `connectionId` names this connection on the server; absent from servers before tracked items. */
   | { type: 'event-stream-ready'; connectionId: string | null }
   | TrackedItemsChangedEvent
-  /** An agent turn finished in `directory`; its branches may have a new pull request. */
   | { type: 'source-control-activity'; directory: string }
   | RoutingUpdatedEvent
   | RoutingDecisionEvent
@@ -329,13 +235,9 @@ type OpenChamberEvent =
   | LaterPagesUpdatedEvent
   | PermissionPolicyEvent
   | ControlStreamSyncEnvelope
-  /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
-  /** A session's todo list changed, or has to be read again (`todos` null); `sessionId` null for a whole directory. */
   | { type: 'session-todos'; event: SessionTodosEvent }
-  /** The host follows this space's queue again; what changed in a gap is read from the space. */
   | { type: 'space-queue-stream'; spaceId: string }
-  /** The host follows this space's permission modes again; what changed in a gap is read from the space. */
   | { type: 'space-permission-stream'; spaceId: string }
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
@@ -373,9 +275,6 @@ let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
 const listeners = new Set<Listener>();
-// The ready event of the open connection. A listener that subscribes after it
-// arrived gets it replayed, since the server sends it once per connection and
-// some listeners (tracked-items interest) cannot act until they have it.
 let readyEvent: Extract<OpenChamberEvent, { type: 'event-stream-ready' }> | null = null;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -398,8 +297,6 @@ const scheduleReconnect = () => {
   if (reconnectTimer || authSessionWait || listeners.size === 0) {
     return;
   }
-  // An expired session answers every attempt with 401; wait for the login
-  // instead and reconnect right after it.
   if (useAuthSessionStore.getState().state !== 'ok') {
     const wait = new AbortController();
     authSessionWait = wait;
@@ -880,13 +777,7 @@ const connect = () => {
 
   cleanupSource();
 
-  // Tell the server what this client can do while the connection lasts. Only a
-  // Chromium host can drive a page; a browser tab can display one but not be
-  // driven, and the agent tool needs to know which it is talking to without a
-  // setting anyone has to remember to change.
   const canControlBrowser = canDriveBrowserPage();
-  // Native mobile has no desktop realtime proxy. Fetch can attach the saved
-  // instance headers to SSE; EventSource cannot.
   if (isRelayModeActive() || (Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp())) {
     connectFetchStream(canControlBrowser);
     return;
@@ -935,8 +826,6 @@ const cleanupRuntimeChangeSubscription = () => {
 };
 
 export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
-  // VS Code runs OpenCode through its bridge, not the OpenChamber server that
-  // owns this stream. Opening it here retries against vscode-webview:// forever.
   if (isVSCodeRuntime()) return () => undefined;
 
   listeners.add(listener);

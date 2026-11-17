@@ -5,12 +5,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 const disabledProvidersSchema = z.object({ providers: z.array(z.string()) });
 const errorSchema = z.object({ error: z.string().min(1) });
 
-/**
- * Providers turned off in the user's OpenCode config (`disabled_providers`).
- * OpenCode leaves them out of its provider list entirely, so this is the only
- * way Settings can show them again. Null where the runtime has no OpenChamber
- * server to ask (VS Code): the feature is not offered there.
- */
 export const fetchDisabledProviders = async (): Promise<string[] | null> => {
   const response = await runtimeFetch('/api/provider/disabled');
   if (response.status === 404) return null;
@@ -18,7 +12,6 @@ export const fetchDisabledProviders = async (): Promise<string[] | null> => {
   return disabledProvidersSchema.parse(await response.json()).providers;
 };
 
-/** Turns a provider off or back on; answers with the new list. */
 export const setProviderDisabled = async (providerId: string, disabled: boolean): Promise<string[]> => {
   const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/disabled`, {
     method: 'PUT',

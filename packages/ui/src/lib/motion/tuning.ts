@@ -1,18 +1,11 @@
 import { z } from 'zod';
 import { MOTION_SPRING_NAMES, MOTION_SPRINGS, springCssVariables, type MotionSpringName, type SpringSpec } from './springs';
 
-/**
- * Live motion tuning for development builds. The values the dev motion panel
- * sets are written over the stylesheet's defaults on the root element and kept
- * on this device, so a spring can be tried across the app before its numbers
- * go into MOTION_SPRINGS. Production builds never read or write them.
- */
 
 const STORAGE_KEY = 'oc.dev.motionTuning';
 
 export type MotionTuning = {
   springs: Record<MotionSpringName, SpringSpec>;
-  /** How long a popup takes to fade out, in ms. */
   popupExitMs: number;
 };
 
@@ -41,7 +34,6 @@ export const readMotionTuning = (): MotionTuning => {
   }
 };
 
-/** Writes the tuning over the stylesheet defaults; the defaults come back when nothing is stored. */
 export const applyMotionTuning = (tuning: MotionTuning, persist: boolean): void => {
   const root = document.documentElement;
   for (const name of MOTION_SPRING_NAMES) {

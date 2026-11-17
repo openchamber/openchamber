@@ -1,7 +1,6 @@
 import type { Theme } from '../../types/theme';
 import { mixColor, readableText } from './color';
 
-/** Host-owned text colors shared by app CSS and extension snapshots. */
 export function getReadableThemeColors(theme: Theme) {
   const { surface, primary, status, interactive } = theme.colors;
   const dark = theme.metadata.variant === 'dark';

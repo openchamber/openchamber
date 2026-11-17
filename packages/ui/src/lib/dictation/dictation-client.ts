@@ -1,10 +1,3 @@
-/**
- * WebSocket client for the OpenChamber dictation endpoint (/api/dictation/ws).
- *
- * One shared client per app. The socket is opened lazily when a dictation
- * starts and closed after an idle delay. URLs are resolved at connect time via
- * the runtime URL resolver so runtime switches never leak a stale endpoint.
- */
 
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -15,7 +8,6 @@ export interface DictationStartOptions {
     provider?: 'local' | 'openai-compatible';
     language?: string;
     localModel?: string;
-    /** Fix misheard words with the Small Model before the final text. */
     correct?: boolean;
     openaiCompatible?: {
         baseUrl?: string;
@@ -52,10 +44,6 @@ const createStreamError = (message: string, retryable: boolean, reasonCode?: str
 };
 
 const CONNECT_TIMEOUT_MS = 10000;
-// The first start of a session also loads the local ONNX engine (measured ~3s
-// on an M1, more on slower machines and on first run after boot). 15s left too
-// little headroom and surfaced as "Dictation start timed out" before the worker
-// was ready.
 const START_TIMEOUT_MS = 30000;
 const IDLE_CLOSE_DELAY_MS = 30000;
 const DEFAULT_FINISH_TIMEOUT_MS = 60000;
@@ -112,11 +100,6 @@ export class DictationClient {
             return;
         }
 
-        // A WebSocket upgrade can't carry an Authorization header, so it
-        // authenticates via the oc_url_token query param. Mint/await a valid
-        // token BEFORE connecting — the sync getter returns "" while the token
-        // is unminted or inside its expiry skew, and the server would reject
-        // the upgrade with 401.
         try {
             await refreshRuntimeUrlAuthToken();
         } catch {
@@ -172,10 +155,6 @@ export class DictationClient {
             };
 
             socket.onerror = () => {
-                // Prefer onclose, which follows with the real reason (e.g.
-                // "Unexpected server response: 403"). But if a socket ever errors
-                // without a prompt onclose, fail fast here rather than hanging for
-                // the full connect timeout. onclose still wins if it arrives first.
                 window.setTimeout(() => {
                     if (settled) return;
                     settled = true;
@@ -205,9 +184,6 @@ export class DictationClient {
         await this.connectPromise;
     }
 
-    /**
-     * Start a dictation stream. Resolves once the server acks the stream.
-     */
     async startDictationStream(
         dictationId: string,
         format: string,
@@ -249,9 +225,6 @@ export class DictationClient {
         return this.send({ type: 'chunk', dictationId, seq, audio: audioBase64 });
     }
 
-    /**
-     * Finish a dictation stream. Resolves with the final transcript.
-     */
     finishDictationStream(dictationId: string, finalSeq: number): Promise<{ text: string }> {
         return new Promise<{ text: string }>((resolve, reject) => {
             const pending: PendingFinish = {
@@ -424,10 +397,6 @@ export class DictationClient {
         }, IDLE_CLOSE_DELAY_MS);
     }
 
-    /**
-     * Runtime switch: close the socket and fail all in-flight dictations so
-     * nothing keeps streaming to the previous runtime.
-     */
     cancelAllForRuntimeSwitch(): void {
         this.clearIdleCloseTimer();
         const socket = this.socket;
@@ -456,7 +425,6 @@ export const dictationClient = new DictationClient();
 
 if (typeof window !== 'undefined') {
     window.addEventListener('openchamber:runtime-endpoint-changed', () => {
-        // Drop the socket so the next dictation reconnects to the new runtime.
         dictationClient.cancelAllForRuntimeSwitch();
     });
 }

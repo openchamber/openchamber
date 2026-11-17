@@ -4,9 +4,6 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 
 type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
 
-// Manual restart for changes OpenCode cannot hot-apply (plugin presets, plugin
-// config). An external OpenCode is not ours to restart; the server says so and
-// the user is told to restart it where they started it.
 export async function restartOpenCodeWithFeedback(t: TranslateFn): Promise<void> {
   try {
     await reloadOpenCodeConfiguration({

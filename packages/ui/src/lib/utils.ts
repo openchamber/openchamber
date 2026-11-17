@@ -7,10 +7,6 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * Detects if the current platform is macOS.
- * Uses navigator.userAgent in browser environments.
- */
 export const isMacOS = (): boolean => {
   if (typeof navigator === 'undefined') return false;
   return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
@@ -47,8 +43,6 @@ export const truncatePathMiddle = (
     return source;
   }
 
-  // Keep the segments closest to the file name: in trees full of index.md the
-  // parent directory is the distinguishing part, so drop leading segments.
   let suffix = fileName;
   for (let i = segments.length - 1; i >= 0; i--) {
     const segment = segments[i];
@@ -116,10 +110,6 @@ export function formatDirectoryName(path: string | null | undefined, homeDirecto
   return name || "/";
 }
 
-/**
- * Fuzzy search using Fuse.js with typo tolerance.
- * Returns true if query fuzzy-matches target (e.g. "coude" matches "claude")
- */
 export function fuzzyMatch(target: string, query: string): boolean {
   return matchesFuzzyQuery(target, query);
 }

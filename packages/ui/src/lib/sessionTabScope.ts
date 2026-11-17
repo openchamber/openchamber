@@ -3,13 +3,6 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 
-/**
- * Which working set of header tabs a place in the app shows, with separate
- * tabs per workspace on: one per project root, worktree and isolated space,
- * found by the folder sessions run in, and one for all chats, each per
- * instance, so switching servers never mixes their tabs. Tabs stay on the
- * device (`useSessionTabsStore`), so another browser keeps its own sets.
- */
 export const sessionTabChatsScope = (runtimeKey: string): string => `${runtimeKey}|chats`;
 
 export const sessionTabScopeFor = (runtimeKey: string, directory: string | null): string | null => {
@@ -18,12 +11,6 @@ export const sessionTabScopeFor = (runtimeKey: string, directory: string | null)
   return normalized ? `${runtimeKey}|${normalized}` : null;
 };
 
-/**
- * The sessions a worktree or space opens with the first time it is shown:
- * the ones the user started there (no subagents, nothing archived), the most
- * recent first. A project root opens with none, since it can hold hundreds,
- * and so do chats.
- */
 export const sessionTabSeedFor = (
   directory: string | null,
   sessions: readonly Session[],

@@ -9,7 +9,6 @@ import type { MultiRunSummary } from './runs';
 import { useMultiRunSessions } from './useMultiRuns';
 import { RUN_LAUNCHER_ID } from './launcher';
 
-/** Resolves the judge's display name and context window from the provider catalog. */
 export const resolveFusionJudge = (selection: { providerID: string; modelID: string; variant?: string; agent?: string }): FusionJudge => {
   const provider = useConfigStore.getState().providers.find((entry) => entry.id === selection.providerID);
   const model = provider?.models.find((entry) => entry.id === selection.modelID);
@@ -21,9 +20,6 @@ export const resolveFusionJudge = (selection: { providerID: string; modelID: str
 };
 
 const startedRunKeys = new Set<string>();
-// Lanes seen running on this page. A lane is finished only after it was seen
-// running and then left the live busy set with an outcome. A parent idling for
-// a subagent must record a newer completion before its answer can be fused.
 const seenRunningLaneIds = new Set<string>();
 const waitingLaneIdleTimes = new Map<string, number | undefined>();
 const waitingForResumptionLaneIds = new Set<string>();
@@ -44,7 +40,6 @@ function useRunAutoFusion(onStartFailed: (failure: AutoFusionFailure) => void): 
         if (lane.sessionId !== sessionId) continue;
         if (activeIds.has(sessionId)) {
           seenRunningLaneIds.add(sessionId);
-          // A resumed parent may finish again before this batch reaches React.
           waitingForResumptionLaneIds.delete(sessionId);
           waitingLaneIdleTimes.delete(sessionId);
         } else if (hasActiveSubagent(sessionId, activeIds, (id) => sessionById.get(id)?.parentID)) {
@@ -93,7 +88,6 @@ function useRunAutoFusion(onStartFailed: (failure: AutoFusionFailure) => void): 
   }, [activeSessionIds, index, sessionById]);
 }
 
-/** Mounted once per shell that can launch runs. */
 export function RunAutoFusion(): null {
   const { t } = useI18n();
   useRunAutoFusion(React.useCallback((failure: AutoFusionFailure) => {

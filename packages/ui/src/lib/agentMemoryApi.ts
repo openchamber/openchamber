@@ -1,17 +1,3 @@
-/**
- * Client for the OpenChamber agent memory routes.
- *
- * The store is owned by the server (`packages/web/server/lib/agent-memory`).
- * This module only speaks HTTP and resolves no storage paths.
- *
- * Every function throws on failure. An authoritative read must never resolve to
- * an empty list a caller could mistake for "the agent remembers nothing" — that
- * reading is exactly what would make the user think memory had been lost.
- *
- * A 404 is the one exception, and it means the feature is switched off rather
- * than that the entry is missing: the server disables the whole surface, so
- * callers translate it into `disabled` instead of an error.
- */
 
 import { z } from 'zod';
 
@@ -28,30 +14,18 @@ export interface AgentMemoryEntry {
   type: AgentMemoryType;
   createdAt: number;
   updatedAt: number;
-  /**
-   * Reads as an instruction to the model rather than a fact. Kept in the store
-   * and shown here, but withheld from what sessions are told.
-   */
   flagged?: boolean;
-  /** The session this was learned in, when the agent recorded one. */
   sessionId?: string;
 }
 
 interface AgentMemorySnapshot {
   global: AgentMemoryEntry[];
   project: AgentMemoryEntry[];
-  /**
-   * A scope that failed to load. Kept separate from an empty list so the panel
-   * can say "could not load" rather than showing an empty tab that reads as
-   * "the agent has forgotten everything".
-   */
   globalFailed: boolean;
   projectFailed: boolean;
-  /** The last dreaming pass of each scope, or null where none ran. */
   dream: { global: AgentMemoryDream | null; project: AgentMemoryDream | null };
 }
 
-/** What the last background tidy-up (dreaming) of one scope did. */
 export interface AgentMemoryDream {
   finishedAt: number;
   status: 'done' | 'failed';
@@ -60,15 +34,12 @@ export interface AgentMemoryDream {
   rewritten: number;
   undone: boolean;
   canUndo: boolean;
-  /** Project entries the pass found belong in the project's agent docs. */
   toDocs: string[];
 }
 
-/** Mirrors the server's clamps, so the editor stops where storage would cut. */
 export const AGENT_MEMORY_TITLE_MAX_LENGTH = 120;
 export const AGENT_MEMORY_BODY_MAX_LENGTH = 2000;
 
-/** Raised when the server reports the whole memory surface as switched off. */
 export class AgentMemoryDisabledError extends Error {
   constructor() {
     super('Agent memory is disabled');
@@ -78,10 +49,6 @@ export class AgentMemoryDisabledError extends Error {
 
 const BASE_PATH = '/api/agent-memory';
 
-/**
- * Mirrors the server: the storage id comes from the project path, not from
- * `project.id`, because the path-derived id is what names the file on disk.
- */
 const resolveMemoryProjectId = (projectPath: string | null | undefined): string => {
   const trimmed = typeof projectPath === 'string' ? projectPath.trim() : '';
   return trimmed ? createProjectIdFromPath(trimmed) : '';
@@ -102,10 +69,6 @@ interface ErrorPayload {
   disabled?: unknown;
 }
 
-/**
- * A 404 alone does not mean the feature is off — a deleted entry answers 404
- * too. Only the server's explicit `disabled` flag distinguishes them.
- */
 const failed = async (response: Response, fallback: string): Promise<never> => {
   let payload: ErrorPayload | null = null;
   try {
@@ -146,10 +109,6 @@ const parseEntries = (value: unknown): AgentMemoryEntry[] => (
   Array.isArray(value) ? value.map(parseEntry).filter((entry): entry is AgentMemoryEntry => entry !== null) : []
 );
 
-/**
- * Both scopes in one request. Two requests would let one scope render while the
- * other is still in flight, which reads as memory that has gone missing.
- */
 export const fetchAgentMemory = async (
   projectPath: string | null,
   options: { signal?: AbortSignal } = {},
@@ -188,13 +147,11 @@ const dreamSchema = z.object({
   canUndo: z.boolean().catch(false),
   toDocs: z.array(z.string()).catch([]),
 });
-/** Each scope's last pass; one that cannot be read shows as none, never fails the load. */
 const dreamsSchema = z.object({
   global: dreamSchema.nullable().catch(null),
   project: dreamSchema.nullable().catch(null),
 }).catch({ global: null, project: null });
 
-/** Puts the scope back as the last dreaming pass found it, keeping what was written since. */
 export const undoAgentMemoryDream = async (
   scope: AgentMemoryScope,
   projectPath: string | null,
@@ -206,7 +163,6 @@ export const undoAgentMemoryDream = async (
   }
 };
 
-/** A user correction from the panel; the agent rewrites by saving again. */
 export const updateAgentMemory = async (
   scope: AgentMemoryScope,
   projectPath: string | null,
