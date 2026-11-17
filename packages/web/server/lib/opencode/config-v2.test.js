@@ -413,6 +413,36 @@ describe('config sections', () => {
     expect(deleteSectionEntry(config, 'agents', 'a')).toBe(true);
     expect(config).toEqual({});
   });
+
+  // #2299: presence is an own-property question. Names inherited from
+  // Object.prototype must not read as configured entries in a section that
+  // defines nothing, and deleting them must not report a removal.
+  it('does not resolve Object.prototype members as section entries', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf']) {
+      expect(readSectionEntry({ providers: {} }, 'providers', name))
+        .toEqual({ value: undefined, key: null, legacy: false });
+      expect(readSectionEntry({ provider: {} }, 'providers', name))
+        .toEqual({ value: undefined, key: null, legacy: false });
+      const config = { providers: {} };
+      expect(deleteSectionEntry(config, 'providers', name)).toBe(false);
+      expect(config).toEqual({ providers: {} });
+    }
+  });
+
+  it('still resolves a prototype name that is a real own entry', () => {
+    // PUT /api/provider accepts 'constructor' as an id (it passes the id
+    // pattern) and stores it as an own property; that entry must read back.
+    const config = { providers: {} };
+    writeSectionEntry(config, 'providers', 'constructor', { models: {} });
+    expect(readSectionEntry(config, 'providers', 'constructor').value).toEqual({ models: {} });
+    expect(deleteSectionEntry(config, 'providers', 'constructor')).toBe(true);
+  });
+
+  it('writing one entry does not drop an unrelated empty legacy map over a prototype name', () => {
+    const config = { provider: {} };
+    writeSectionEntry(config, 'providers', 'constructor', { models: {} });
+    expect(config.provider).toEqual({});
+  });
 });
 
 describe('web search choice', () => {
