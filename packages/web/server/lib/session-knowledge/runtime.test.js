@@ -427,6 +427,34 @@ describe('pins', () => {
     await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', false)).resolves.toEqual({ notes: ['n2'], plans: [] });
   });
 
+  test('rejects a pin id past the length bound and persists nothing (#2326)', async () => {
+    const store = createMetadataStub({
+      ses_a: { openchamber: { project_context_pins: { notes: [], plans: [] } } },
+    });
+    const runtime = createRuntime(store);
+
+    await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'x'.repeat(1001), true))
+      .rejects.toThrow(/pin id must be at most 1000 characters/);
+    expect(store.patches).toEqual([]);
+  });
+
+  test('rejects a new pin once the kind is at its count bound (#2326)', async () => {
+    const full = Array.from({ length: 500 }, (_, index) => `n${index}`);
+    const store = createMetadataStub({
+      ses_a: { openchamber: { project_context_pins: { notes: full, plans: [] } } },
+    });
+    const runtime = createRuntime(store);
+
+    await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'one-too-many', true))
+      .rejects.toThrow(/at most 500 notes/);
+    // Re-pinning an id already in the set stays idempotent at the cap.
+    await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'n0', true))
+      .resolves.toEqual({ notes: full, plans: [] });
+    // The other kind has its own budget.
+    await expect(runtime.setPin('ses_a', DIRECTORY, 'plan', 'p1', true))
+      .resolves.toEqual({ notes: full, plans: ['p1'] });
+  });
+
   test('says so plainly when no metadata store is wired', async () => {
     await expect(createRuntime().setPin('ses_a', DIRECTORY, 'note', 'n1', true)).rejects.toThrow(/session metadata store/);
   });

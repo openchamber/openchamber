@@ -18,6 +18,21 @@ import { isRecord } from '../shared/guards.js';
 const PINS_METADATA_KEY = 'project_context_pins';
 
 /**
+ * Bounds for client-supplied pin ids (#2326), mirroring the project-context
+ * store's discipline (#2113): an id of arbitrary length, or an unbounded
+ * number of ids, would grow the persisted session metadata on every call,
+ * and every later read pays for the bloat.
+ */
+export const PIN_ID_MAX_LENGTH = 1000;
+export const PINS_MAX_PER_KIND = 500;
+
+const pinLimitError = (message) => {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+};
+
+/**
  * One entry per source, so a memory saved mid-session re-sends the memory
  * index and nothing else. OpenCode orders entries by key.
  */
@@ -373,8 +388,15 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const pins = readPins(await readStoredSession(sessionId));
     const key = kind === 'note' ? 'notes' : 'plans';
     const next = new Set(pins[key]);
-    if (pinned) next.add(id);
-    else next.delete(id);
+    if (pinned) {
+      if (id.length > PIN_ID_MAX_LENGTH) {
+        throw pinLimitError(`pin id must be at most ${PIN_ID_MAX_LENGTH} characters`);
+      }
+      if (!next.has(id) && next.size >= PINS_MAX_PER_KIND) {
+        throw pinLimitError(`a session can pin at most ${PINS_MAX_PER_KIND} ${key}`);
+      }
+      next.add(id);
+    } else next.delete(id);
     // The next send writes the changed pin set; the merge patch leaves
     // neighbouring state alone.
     await persistSessionMetadata(sessionId, directory, {
