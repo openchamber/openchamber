@@ -270,7 +270,13 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         // A valid whole copy repairs a malformed file, as it always did.
         const current = await readCurrent() ?? EMPTY_SNAPSHOT;
         const merged = mergeSnapshots(current, body, now());
-        const changed = JSON.stringify(merged.foldersMap) !== JSON.stringify(current.foldersMap ?? {});
+        // #2162: the merge persists more than the folder map — a
+        // collapse-only or tombstone-only POST changes durable state
+        // too, and must advance the revision and announce like any
+        // other change, or connected clients keep stale state.
+        const changed = JSON.stringify(merged.foldersMap) !== JSON.stringify(current.foldersMap ?? {})
+          || JSON.stringify(merged.collapsedFolderIds) !== JSON.stringify(current.collapsedFolderIds ?? [])
+          || JSON.stringify(merged.deletedFolderIds ?? {}) !== JSON.stringify(current.deletedFolderIds ?? {});
         // The writer's clock is its own; a change still moves the revision
         // past the stored one, or clients that saw it would skip the read.
         const outgoing = changed
