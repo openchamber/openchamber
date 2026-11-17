@@ -17,8 +17,6 @@ import {
 const jsonPrimitive = z.union([z.string().max(GUEST_POPOVER_DATA_MAX), z.number(), z.boolean(), z.null()]);
 const jsonRecord = z.record(z.string().max(GUEST_POPOVER_DATA_MAX), z.unknown());
 
-// Parse one level at a time: recursive z.json() would traverse a hostile cycle
-// or deeply nested structured-clone payload before its size/depth refinement.
 export const guestPopoverDataSchema = z.custom<JsonValue>((value) => {
   const pending = [{ value, depth: 0 }];
   let size = 0;
@@ -41,8 +39,6 @@ export const guestPopoverDataSchema = z.custom<JsonValue>((value) => {
         if (!record.success) return false;
         const prototype = Object.getPrototypeOf(item);
         if (prototype !== null && prototype !== Object.prototype) return false;
-        // z.record normalizes prototype-named keys. Validate the original
-        // structured-clone values so those keys cannot escape the budget.
         const entries = Object.entries(Object.getOwnPropertyDescriptors(item)).filter(([, descriptor]) => descriptor.enumerable);
         size += 2 + Math.max(0, entries.length - 1);
         for (const [key, descriptor] of entries) {

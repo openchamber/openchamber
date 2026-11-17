@@ -62,15 +62,7 @@ const buildRankFields = (texts: ReadonlyArray<string | null | undefined>): RankF
   return { fields, compact };
 };
 
-/**
- * Score one query token against an item's fields. Lower is better:
- * field prefix < word-boundary substring < mid-word substring <
- * punctuation-insensitive ("compact") substring. Earlier fields win ties, so
- * callers should order `getTexts` by importance (name before path/description).
- */
 const scoreRankToken = (token: string, { fields, compact }: RankFields): number => {
-  // A token with no alphanumerics compacts to '', and every field contains ''.
-  // Without this guard a "..." query would score a hit on every item.
   const compactToken = compactText(token);
   let best = RANK_TOKEN_MISS;
   for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
@@ -96,21 +88,9 @@ const scoreRankToken = (token: string, { fields, compact }: RankFields): number 
 
 export interface RankByQueryOptions {
   limit?: number;
-  /** Typo-tolerant Fuse fallback for single-token queries (default true). */
   fuzzy?: boolean;
 }
 
-/**
- * The canonical dropdown matcher: every whitespace-separated query token must
- * match somewhere in the item's fields (any order, punctuation-insensitive),
- * and results come back ordered by relevance — exact/prefix matches first,
- * then word-boundary and substring matches, original order breaking ties.
- * Single-token queries additionally fall back to typo-tolerant fuzzy matching.
- *
- * Use this for every searchable dropdown (projects, agents, branches, models)
- * instead of ad hoc `toLowerCase().includes` filters, so matching quality and
- * ordering stay consistent across pickers.
- */
 export function rankByQuery<T>(
   items: readonly T[],
   query: string,
@@ -159,11 +139,6 @@ export function rankByQuery<T>(
   return scored.slice(0, limit).map((entry) => entry.item);
 }
 
-/**
- * Boolean companion to `rankByQuery` for lists that keep their own grouping or
- * order: every token must match one of the fields, punctuation-insensitive,
- * without the fuzzy fallback.
- */
 export function matchesRankQuery(
   texts: ReadonlyArray<string | null | undefined>,
   query: string,
@@ -176,22 +151,10 @@ export function matchesRankQuery(
   return tokens.every((token) => scoreRankToken(token, rankFields) !== RANK_TOKEN_MISS);
 }
 
-/**
- * How the sidebar's search and its sections' title condition match: each word
- * from the start of a word, so a standing section does not fill with "prefix"
- * for "fix". The pickers keep matching anywhere.
- */
 export const SIDEBAR_SEARCH = { wordStart: true } as const;
 
 const WORD_CHARACTER = /[\p{L}\p{N}]/u;
 
-/**
- * Whether a token starts a word in one of the fields: at the field's start or
- * after a character that is not a letter or a digit, in any script. "fix"
- * finds "Fix login" and "bugfix/fix-relay" but not "prefix". Punctuation inside
- * the token may be left out from a word start on: "sidebarcustom" finds
- * "openchamber/sidebar-custom-sections".
- */
 const matchesTokenAtWordStart = (token: string, { fields }: RankFields): boolean => {
   const compactToken = compactText(token);
   return fields.some((field) => {

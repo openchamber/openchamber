@@ -116,7 +116,6 @@ export const runDeviceGuestStorage = async (
   }
 };
 
-/** Called only after a confirmed successful uninstall, never catalog omission. */
 export const removeDeviceGuestStorage = async (identity: DeviceGuestStorageIdentity): Promise<void> => {
   const parsedIdentity = identitySchema.parse(identity);
   const database = await openDatabase();

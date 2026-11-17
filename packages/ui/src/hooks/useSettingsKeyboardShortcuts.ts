@@ -9,14 +9,12 @@ import { hasOpenDropdown, isEditableEventTarget } from './keyboard-shortcut-dom'
 
 export const handleSettingsShortcut = (): boolean | void => {
   const state = useUIStore.getState();
-  // VS Code forwards this default key to its workbench, which owns the binding.
   if (isVSCodeRuntime() && getEffectiveShortcutCombo('open_settings', state.shortcutOverrides) === 'mod+comma') {
     return false;
   }
   state.setSettingsDialogOpen(!state.isSettingsDialogOpen);
 };
 
-/** A Settings-only webview has no chat selection or session bootstrap demand. */
 export const useSettingsKeyboardShortcuts = (): void => {
   useKeybind('open_settings', handleSettingsShortcut);
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);

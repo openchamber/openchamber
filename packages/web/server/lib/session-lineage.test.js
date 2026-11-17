@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSessionLineage, sessionParentId } from './session-lineage.js';
+import { createSessionLineage, isOperatorChildSession, sessionParentId } from './session-lineage.js';
 
 const created = (sessionID, parentID) => ({
   type: 'session.created',
@@ -37,6 +37,20 @@ describe('session lineage', () => {
     expect(lineage.isChild('c')).toBe(false);
   });
 
+  it('forgets a linked child the user took over, and learns a link written later', () => {
+    const lineage = createSessionLineage();
+    const link = { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } };
+    expect(lineage.noteMetadata('ses_worker', link)).toBe(false);
+    expect(lineage.isChild('ses_worker')).toBe(true);
+
+    expect(lineage.noteMetadata('ses_worker', { openchamber: { work: { state: 'open' } } })).toBe(true);
+    expect(lineage.isChild('ses_worker')).toBeUndefined();
+
+    lineage.remember('ses_root', null);
+    expect(lineage.noteMetadata('ses_root', {})).toBe(false);
+    expect(lineage.isChild('ses_root')).toBe(false);
+  });
+
   it('ignores unrelated events', () => {
     const lineage = createSessionLineage();
     lineage.observe({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
@@ -51,6 +65,14 @@ describe('sessionParentId', () => {
     expect(sessionParentId({ id: 'ses_child', parentID: 'ses_parent' })).toBe('ses_parent');
     expect(sessionParentId({ id: 'ses_agent', metadata: link('ses_run') })).toBe('ses_run');
     expect(sessionParentId({ id: 'ses_agent', parentID: 'ses_parent', metadata: link('ses_run') })).toBe('ses_parent');
+  });
+
+  it("reads an operator's child session as a child of the session that created it", () => {
+    const record = { id: 'ses_worker', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_operator' } } };
+    expect(sessionParentId(record)).toBe('ses_operator');
+    expect(isOperatorChildSession(record)).toBe(true);
+    expect(isOperatorChildSession({ id: 'ses_agent', metadata: link('ses_run') })).toBe(false);
+    expect(isOperatorChildSession(null)).toBe(false);
   });
 
   it('treats any other session as top-level', () => {

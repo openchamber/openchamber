@@ -33,9 +33,7 @@ export type MobileConnectionNotice = {
 };
 
 type Props =
-  /** The app's first screen: nothing is connected yet, a new address connects at once. */
   | { mode: 'welcome'; onConnected: () => void; notice?: MobileConnectionNotice | null }
-  /** Inside the app: one instance is live, a new address is saved for later. */
   | { mode: 'instances'; onConnected: () => void; onActiveConnectionDeleted: () => void };
 
 type FormTarget = { kind: 'add' } | { kind: 'edit'; id: string };
@@ -46,12 +44,6 @@ const isRelayOnly = (connection: { candidates: ReadonlyArray<{ kind: string }> }
 const hasAnyHeader = (headers: MobileHeaderDraft[]): boolean =>
   headers.some(({ name, value }) => name.trim() || value.trim());
 
-/**
- * The saved servers, on the first screen and in Instances. With none saved the
- * screen introduces the app and offers the two ways in. With servers it leads
- * with the one the user comes back to, the others below it, and adding within
- * thumb's reach. Everything else about a server is in its sheet.
- */
 export const MobileConnectionsView: React.FC<Props> = (props) => {
   const { mode, onConnected } = props;
   const { t } = useI18n();
@@ -75,10 +67,8 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
   const editingConnection = formTarget?.kind === 'edit'
     ? connections.find((connection) => connection.id === formTarget.id) ?? null
     : null;
-  // A relay-only connection has no address or typed token to edit; only its name.
   const editingRelayOnly = editingConnection ? isRelayOnly(editingConnection) : false;
 
-  // Which row is being connected to, for its spinner.
   const [connectingId, setConnectingId] = React.useState<string | null>(null);
   const [password, setPassword] = React.useState('');
 
@@ -88,13 +78,9 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
   const scanAbortRef = React.useRef<AbortController | null>(null);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
 
-  // Hidden diagnostics: long-press the logo or the lead card to open the
-  // connection event log, reachable even when bounced back to this screen.
   const [debugOpen, setDebugOpen] = React.useState(false);
   const debugLongPress = useDebugPanelLongPress(React.useCallback(() => setDebugOpen(true), []));
 
-  // Populate and clear the form imperatively, on the tap: an effect keyed on the
-  // connection would re-fire on any list churn and overwrite what is being typed.
   const closeForm = React.useCallback(() => {
     editRequestRef.current += 1;
     setFormTarget(null);
@@ -128,8 +114,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
   };
 
   const handleUrlChange = (value: string) => {
-    // The first screen takes a pasted pairing link (openchamber://connect?...) in
-    // the URL field and splits it back into the server URL and token.
     if (mode === 'welcome' && /^openchamber:\/\//i.test(value.trim())) {
       const payload = parseConnectionPayload(value);
       if (payload) {
@@ -159,8 +143,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
     }
     if (isSaving) return;
     setIsSaving(true);
-    // The id is what makes this an edit: saveConnection uses it to keep the
-    // instance's relay and https candidates and the Keychain token they key.
     void saveConnection({
       id: editingConnection?.id,
       url,
@@ -186,8 +168,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
       }
       switch (result.status) {
         case 'ok':
-          // Legacy token QR. The form keeps the scanned values for a retry on the
-          // first screen, and for review before saving in Instances.
           setUrl(result.url);
           if (result.label) setLabel(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
@@ -247,8 +227,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
     editRequestRef.current += 1;
     closeActions();
     if (formTarget?.kind === 'edit' && formTarget.id === id) closeForm();
-    // Removing the active instance, or the last one, drops the user back to the
-    // connect screen instead of leaving a stale, unbacked UI.
     const wasLast = connections.length === 1;
     void removeConnection(id).then((removed) => {
       if (!removed || mode !== 'instances') return;
@@ -257,7 +235,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
   };
 
   const liveConnection = mode === 'instances' ? connections.find(isActiveRuntimeConnection) ?? null : null;
-  // Saved connections are ordered by last use, so the first is the way back.
   const leadConnection = liveConnection ?? connections[0] ?? null;
   const otherConnections = connections.filter((connection) => connection !== leadConnection);
   const addressOf = (connection: MobileSavedConnection): string =>
@@ -349,7 +326,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
       )}
       <h2 dir="auto" className="oc-ui-start-align truncate pe-8 typography-ui-header font-semibold text-foreground">{leadConnection.label}</h2>
       <p dir="ltr" className="oc-ui-start-align truncate pe-8 typography-meta text-muted-foreground">{addressOf(leadConnection)}</p>
-      {/* Live already: what would be the button says so, in the button's place, beside the server's heartbeat. */}
       {liveConnection ? (
         <MobileConnectionHeartbeat
           status={(
@@ -575,8 +551,6 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
     <>
       {forms}
       <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+16px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+16px)] text-foreground"
-        // Clear the screen's side insets too: the notch in landscape, the status
-        // bar column on the right of iPhone Duo.
         style={{
           paddingLeft: 'calc(var(--oc-safe-area-left, 0px) + 1rem)',
           paddingRight: 'calc(var(--oc-safe-area-right, 0px) + 1rem)',

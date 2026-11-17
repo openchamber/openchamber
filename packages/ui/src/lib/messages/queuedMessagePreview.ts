@@ -32,7 +32,6 @@ function contextPreview(payload: ContextPartPayload): string {
     }
 }
 
-/** Display-only summary; never substitute it for the editable or delivered text. */
 export function getQueuedMessagePreview(message: Pick<QueuedMessage, 'content' | 'context' | 'contextPreview' | 'attachments'>): string {
     let text = message.content.trim() || message.contextPreview?.trim() || '';
     if (!text) {

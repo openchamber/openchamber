@@ -1,5 +1,3 @@
-// WebKit-only pinch events (Safari on macOS trackpads, iOS WKWebView).
-// lib.dom does not declare them.
 interface GestureEvent extends UIEvent {
   readonly scale: number;
   readonly clientX: number;

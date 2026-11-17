@@ -1,14 +1,3 @@
-/**
- * GitHub payloads in, provider-neutral source-control DTOs out.
- *
- * Two halves: strict checks of what GitHub's REST API answered (a malformed
- * collection or record fails the read rather than becoming a partial or
- * empty success), and the mappers that turn checked payloads into the DTOs
- * every client parses for every provider (`Project`, `ChangeRequest`,
- * `Issue`, `IssueComment`, `CI`, ...). Each DTO carries the identity it was
- * read with, `{ provider: 'github', instance }`, where the instance is
- * github.com or the enterprise host.
- */
 
 export const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
 export const isProviderString = (value) => Object.prototype.toString.call(value) === '[object String]';
@@ -22,7 +11,6 @@ export function requireProviderArray(value, message) {
   return value;
 }
 
-/** A repository network (`resolveRepoNetwork`) whose origin entry is the primary repository. */
 export function requireGitHubRepoNetwork(value, primaryRepo) {
   if (value === null) return value;
   const network = requireProviderArray(value, 'GitHub returned invalid fork metadata');
@@ -85,11 +73,6 @@ export function requireGitHubComment(value, message) {
   return value;
 }
 
-/**
- * Whether a web or clone URL names `owner/repo`. `host`, when given, is the
- * instance the answer came from: a web URL of another host (a GitLab or
- * another GitHub's repository of the same name) is not this repository.
- */
 export function matchesGitHubRepositoryUrl(value, owner, repo, host = '') {
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
@@ -203,10 +186,6 @@ const httpUrl = (value) => {
   }
 };
 
-/**
- * A user, from REST (`login`, `id`, `avatar_url`) or the account summary the
- * auth routes build (`login`, `id`, `avatarUrl`, `name`, `email`).
- */
 export function mapUser(user, identity) {
   const result = { ...identity, id: String(user.id ?? user.login), username: user.login };
   const avatarUrl = httpUrl(user.avatarUrl ?? user.avatar_url);
@@ -220,10 +199,6 @@ const mapOptionalUser = (user, identity) => (isPlainObject(user) && isProviderSt
   ? mapUser(user, identity)
   : null);
 
-/**
- * A repository as a project: `owner`/`repo` plus what the caller knows of it.
- * The web URL defaults to the instance's own page for it.
- */
 export function mapProject(repo, identity) {
   const result = {
     ...identity,
@@ -245,7 +220,6 @@ const mapLabels = (labels) => (Array.isArray(labels) ? labels.flatMap((label) =>
   return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
 }) : []);
 
-/** A pull request from REST (`pulls.get`, `pulls.list`, `pulls.create`). */
 export function mapChangeRequest(pr, project, identity) {
   const state = pr.merged === true || text(pr.merged_at) ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
   const result = {
@@ -282,7 +256,6 @@ export function mapChangeRequest(pr, project, identity) {
   return result;
 }
 
-/** An issue from REST (`issues.get`, `issues.listForRepo`). */
 export function mapIssue(issue, project, identity) {
   const result = {
     ...identity,
@@ -307,7 +280,6 @@ export function mapIssue(issue, project, identity) {
   return result;
 }
 
-/** A conversation comment from REST (`issues.listComments`). */
 export function mapComment(comment, identity) {
   const result = {
     ...identity,
@@ -321,7 +293,6 @@ export function mapComment(comment, identity) {
   return result;
 }
 
-/** A line comment from REST (`pulls.listReviewComments`). */
 export function mapReviewComment(comment, identity) {
   return {
     ...mapComment(comment, identity),
@@ -331,7 +302,6 @@ export function mapReviewComment(comment, identity) {
   };
 }
 
-/** A changed file from REST (`pulls.listFiles`). */
 export function mapFile(file) {
   const result = {
     path: file.filename,
@@ -344,7 +314,6 @@ export function mapFile(file) {
   return result;
 }
 
-/** A check run from REST, with the workflow job and annotations the detailed read joined to it. */
 export function mapCheckRun(run, { job, annotations } = {}, identity) {
   const result = { ...identity, id: String(run.id), name: run.name, status: run.status };
   if (text(run.started_at)) result.startedAt = run.started_at;
@@ -361,7 +330,6 @@ export function mapCheckRun(run, { job, annotations } = {}, identity) {
   return result;
 }
 
-/** The job a check run's details URL names, from `actions.listJobsForWorkflowRun`. */
 export function mapWorkflowJob({ runId, jobId, job, detailsUrl }) {
   if (!job) {
     const result = { runId: String(runId), url: httpUrl(detailsUrl) };
@@ -388,7 +356,6 @@ export function mapWorkflowJob({ runId, jobId, job, detailsUrl }) {
   };
 }
 
-/** Annotations of a failed check run, from `checks.listAnnotations`; ones without a message are dropped. */
 export function mapAnnotations(annotations) {
   return annotations.flatMap((annotation) => (text(annotation?.message) ? [{
     path: text(annotation.path),
@@ -401,7 +368,6 @@ export function mapAnnotations(annotations) {
   }] : []));
 }
 
-/** A checks summary (`checks-summary.js`) and its runs as CI. */
 export function mapCI(summary, runs) {
   if (!summary) return null;
   const result = {
@@ -420,7 +386,6 @@ export function mapCI(summary, runs) {
   return result;
 }
 
-/** A user for an auth answer, or an account's stored user. */
 export function mapAccount(account, identity) {
   return {
     id: account.id,
@@ -433,10 +398,6 @@ export function mapAccount(account, identity) {
     current: Boolean(account.current),
     source: account.source === 'gh-cli' || account.source === 'cli' ? 'cli' : account.source === 'pat' ? 'pat' : 'oauth',
     status: account.status === 'invalid' ? 'invalid' : 'valid',
-    // Whether a binding may pick this account now. A stored credential is
-    // always usable; a gh login only while its host's switch is on, which the
-    // account layer states instead of leaving clients to infer it from the one
-    // `current` account.
     usable: account.usable !== false,
   };
 }

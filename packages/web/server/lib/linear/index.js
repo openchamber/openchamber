@@ -1,9 +1,3 @@
-// What the legacy `/api/linear/*` routes (`routes.js`), the tracker adapter
-// (`tracker.js`) and the shared auth steps (`auth-status.js`) take from
-// Linear's libraries, as one object. Callers load this module lazily, so
-// Linear's libraries stay out of server startup; one named export keeps the
-// lazy boundary visible to the dead-code check.
-
 import {
   activateLinearAuth,
   clearLinearAuth,

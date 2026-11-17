@@ -1,10 +1,3 @@
-/**
- * Antigravity Quota Provider
- *
- * Dedicated quota provider for Google Cloud Code Antigravity IDE and proxy tools.
- * Supports dual-layer quotas: 5-Hour rolling limits and 7-Day weekly limits.
- * @module quota/providers/antigravity
- */
 
 import { buildResult } from '../../utils/index.js';
 import { resolveAntigravityAuth, isConfigured, DEFAULT_PROJECT_ID } from './auth.js';

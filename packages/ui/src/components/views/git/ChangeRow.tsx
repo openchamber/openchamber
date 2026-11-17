@@ -12,7 +12,6 @@ import { changedPathName } from './changesTree';
 import { ChangedPathLabel } from './ChangedPathLabel';
 import { DiffCount } from '@/components/ui/diff-count';
 
-/** Line counts of a changed file; the side with nothing to say stays out on a narrow row. */
 export const ChangeStats: React.FC<{ insertions: number; deletions: number; hideZero?: boolean }> = ({ insertions, deletions, hideZero = false }) => (
   <DiffCount added={insertions} removed={deletions} hideZero={hideZero} className="typography-micro" />
 );
@@ -28,9 +27,7 @@ interface ChangeRowProps {
   stats?: { insertions: number; deletions: number };
   rowPaddingClassName?: string;
   indentPx?: number;
-  /** Place the stage/unstage action at the row start (flat view) instead of the end (tree view). */
   actionAtStart?: boolean;
-  /** Tree view: the directory rows above already say where the file lives. */
   nameOnly?: boolean;
   showRevert?: boolean;
 }
@@ -110,7 +107,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           onClick={handleRevertClick}
           disabled={isReverting}
           className={cn(
-            // On a phone a long press on the row reverts; the button stays for screen readers.
             isMobile ? 'sr-only' : 'flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
           )}
           aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
@@ -175,9 +171,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
             {revertButton}
           </>
         ) : (
-          // Tree view: on hover the actions take the place of the stats, so
-          // nothing in the row moves. Narrow (touch) layouts have no hover and
-          // show both side by side.
           <span className="flex shrink-0 items-center justify-items-end gap-2 md:grid">
             <span
               className={cn(

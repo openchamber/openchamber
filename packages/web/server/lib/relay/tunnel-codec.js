@@ -1,9 +1,3 @@
-// Tunnel mux frame codec (Layer 3 of the protocol spec). Pure functions, no I/O.
-// JS mirror of packages/ui/src/lib/relay/tunnel-codec.ts (+ the Layer 3
-// constants from protocol.ts) — MUST stay byte-compatible with those modules.
-// Frame layout: [1 byte frameType (high bit = fragment-continues)][4 byte BE streamId][payload].
-// Client-initiated streams use odd streamIds starting at 1; even ids are reserved.
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
 import { MAX_PLAINTEXT_FRAME_BYTES } from './e2ee.js';
 
@@ -11,9 +5,6 @@ import { MAX_PLAINTEXT_FRAME_BYTES } from './e2ee.js';
 const TUNNEL_FRAME_HEADER_BYTES = 5;
 const TUNNEL_FRAGMENT_FLAG = 0x80;
 
-// Batch envelope container (mirror of protocol.ts). Only used when both peers
-// negotiated `batch`. Reserve the per-frame envelope overhead from the payload
-// budget so any single frame still fits one 64 KiB encrypted plaintext.
 const BATCH_CONTAINER_TAG_SINGLE = 0x00;
 const BATCH_CONTAINER_TAG_BATCH = 0x01;
 const BATCH_FRAME_LENGTH_BYTES = 4;
@@ -44,7 +35,6 @@ const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
 
 const MAX_STREAM_ID = 0xffffffff;
 
-/** Decode the client's cumulative raw tunnel-frame byte count. */
 export const decodeDeliveryAck = (payload) => {
   if (payload.length !== 8) throw new Error('invalid delivery acknowledgement');
   const bytes = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0));
@@ -285,16 +275,12 @@ export const decodeFrameBatch = (plaintext) => {
   return frames;
 };
 
-// Only high-volume body/stream data is buffered; setup/teardown/keepalive frames
-// flush immediately so TTFT, terminal echo, and liveness stay snappy.
 const BUFFERED_FRAME_TYPES = new Set([
   TunnelFrameType.HttpBody,
   TunnelFrameType.WsText,
   TunnelFrameType.WsBinary,
 ]);
 
-// See the TS mirror (tunnel-codec.ts) for the 150ms rationale: the chat render pipeline's
-// 100ms input throttle + ~64ms paced-reveal smoothing make a 150ms batch window invisible.
 const DEFAULT_BATCH_WINDOW_MS = 150;
 const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
 const DEFAULT_BATCH_MAX_FRAMES = 32;

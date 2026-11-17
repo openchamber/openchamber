@@ -5,18 +5,6 @@ import os from 'os';
 import path from 'path';
 import { PROMPT_VERSION, WALKTHROUGH_VERSION } from './schema.js';
 
-// Two artifacts with two different jobs.
-//
-// Cache entries are content-addressed and immutable: the key is derived from
-// the *current* diff, so a hit means "this walkthrough was written about
-// exactly this code". There is no freshness question to ask of an entry —
-// staleness is a miss.
-//
-// The pointer is mutable and keyed by repository + source only. It answers the
-// questions the cache cannot: which walkthrough was the last one here, what was
-// it written about, and has the code moved since. It is also what feeds the
-// previous walkthrough into a regeneration.
-
 const DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
@@ -50,8 +38,6 @@ const ensureDir = (dir) => {
   }
 };
 
-// Atomic so a crash mid-write leaves the previous entry intact rather than a
-// half-written file that later fails to parse.
 const writeJsonAtomic = (filePath, value) => {
   if (!ensureDir(path.dirname(filePath))) return false;
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -76,17 +62,10 @@ const readJson = (filePath) => {
     if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch {
-    // Missing, unreadable, or corrupt all mean the same thing to callers: no
-    // usable cached walkthrough. Never throw — a bad cache file must not break
-    // the feature.
     return null;
   }
 };
 
-/**
- * Content-addressed key. Every input that can change the output is in here:
- * change any of them and you get a miss rather than a stale hit.
- */
 export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, language, files, readContext }) {
   const input = {
     walkthroughVersion: WALKTHROUGH_VERSION,
@@ -95,9 +74,6 @@ export function buildCacheKey({ repoRoot, sourceKey, providerID, modelID, langua
     sourceKey,
     providerID,
     modelID,
-    // Without this, switching language hits the entry written in the previous
-    // one and the panel answers a request to translate with the untranslated
-    // text it already had.
     language,
     files: [...files]
       .map((file) => ({ path: file.path, status: file.status, hunkIds: file.hunks.map((hunk) => hunk.id) }))
@@ -150,11 +126,6 @@ export function writePointer(repoRoot, sourceKey, pointer, readContext) {
   return writeJsonAtomic(pointerPath(repoRoot, sourceKey, readContext), value);
 }
 
-/**
- * Bound the cache by count and total size, dropping least-recently-used
- * entries. Pointers are tiny and are left alone; a pointer to an evicted entry
- * simply reads as "no walkthrough", which is the truthful answer.
- */
 function evictEntries() {
   let files;
   try {
@@ -191,20 +162,8 @@ function evictEntries() {
   }
 }
 
-// Housekeeping runs off the request path and never synchronously.
-//
-// The Electron desktop app hosts this server inside the main process, so a
-// blocking loop here stalls IPC and the window, not just one request. Worse,
-// the paths being checked are user repositories: a worktree on an unplugged
-// drive or an unreachable network share can make a single existence check hang
-// for seconds. Async calls wait without holding the loop, and the cap keeps a
-// pathological directory from turning into a long tail of work.
 const PRUNE_LIMIT = 500;
 
-/**
- * Drop pointers for repositories that no longer exist. Only ever removes
- * entries whose subject is provably gone.
- */
 export async function pruneMissingRepositories() {
   let names;
   try {
@@ -229,9 +188,6 @@ export async function pruneMissingRepositories() {
       await fsp.stat(repoRoot);
       continue;
     } catch (error) {
-      // Unreachable is not the same as gone. Only a definite "no such file"
-      // justifies deleting: a disconnected share or a permissions error must
-      // not cost the user their walkthroughs.
       if (error?.code !== 'ENOENT') continue;
     }
 

@@ -6,7 +6,6 @@ export type SearchFieldProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  /** Accessible name. Falls back to the placeholder. */
   label?: string;
   autofocus?: boolean;
 };

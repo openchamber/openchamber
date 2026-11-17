@@ -154,8 +154,6 @@ function findSnippetByName(name, workingDirectory) {
   return registry.get(name.toLowerCase()) ?? null;
 }
 
-// A name or alias that already triggers a snippet is taken: a second file
-// under it would shadow or be shadowed by the first.
 function assertSnippetNameFree(name, registry, owner = null) {
   const current = registry.get(name.toLowerCase());
   if (current && current !== owner) throw new Error(`Snippet "${name}" already exists`);
@@ -167,8 +165,6 @@ function isSameFile(a, b) {
   return first.dev === second.dev && first.ino === second.ino;
 }
 
-// Rename and scope moves keep the file's bytes; a move across volumes (a
-// project on another disk than the global config) cannot rename.
 function moveSnippetFile(from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   try {
@@ -247,10 +243,6 @@ export function createSnippet(name, config, workingDirectory, scope = 'global') 
   return getSnippet(name, workingDirectory);
 }
 
-/**
- * Writes the snippet's fields; `updates.name` renames it and `updates.scope`
- * moves it between the global and the project folder.
- */
 export function updateSnippet(name, updates, workingDirectory) {
   assertValidSnippetName(name);
   const registry = loadSnippetRegistry(workingDirectory);
@@ -266,8 +258,6 @@ export function updateSnippet(name, updates, workingDirectory) {
     : path.join(getWritableSnippetDir(nextScope, workingDirectory), `${nextName}${SNIPPET_EXTENSION}`);
   if (targetPath !== existing.filePath) {
     assertSnippetNameFree(nextName, registry, existing);
-    // A case-only rename finds its own file on a case-insensitive disk; any
-    // other file there is a snippet the registry shadows, never overwritten.
     if (fs.existsSync(targetPath) && !isSameFile(targetPath, existing.filePath)) {
       throw new Error(`Snippet "${nextName}" already exists`);
     }
@@ -291,16 +281,11 @@ export function expandSnippets(text, workingDirectory) {
   return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
 }
 
-/**
- * What a snippet body, saved or not, sends once used: its own prepend and
- * append blocks placed, and the snippets it names expanded.
- */
 export function previewSnippet(content, workingDirectory) {
   const registry = loadSnippetRegistry(workingDirectory);
   const collector = { prepend: [], append: [] };
   const counts = new Map();
   const parsed = parseSnippetBlocks(content || '');
-  // The order `expandText` gives a used snippet: its blocks, then its text.
   for (const block of parsed.prepend) collector.prepend.push(expandText(block, registry, counts, collector));
   for (const block of parsed.append) collector.append.push(expandText(block, registry, counts, collector));
   const inline = expandText(parsed.inline, registry, counts, collector).trim();

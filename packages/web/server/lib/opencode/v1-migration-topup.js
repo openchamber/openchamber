@@ -1,45 +1,3 @@
-/**
- * Re-arms OpenCode's own V1 -> V2 session migration for sessions that were
- * created after it already finished.
- *
- * OpenCode 2.x migrates the legacy `session`/`message`/`part` tables into
- * `session_v2`/`session_message` once and then writes `{"phase":"completed"}`
- * under `migration.v1-v2` in `kv`. Users who kept running OpenChamber's
- * bundled OpenCode 1.x beside a v2 install created more V1 sessions after that
- * point, and OpenCode never looks at them again: they are simply invisible in
- * v2. This module hands OpenCode a resume cursor before OpenChamber spawns the
- * MANAGED OpenCode, so OpenCode's own `run()` imports them on startup with its
- * own transform. OpenChamber never writes session rows itself.
- *
- * Two hard rules, both verified against v2.0.8
- * `packages/core/src/database/v1-migration.bun.ts`:
- *
- * 1. NEVER delete or clear the `migration.v1-v2` row. With no row at all,
- *    OpenCode treats the database as pre-migration and DELETEs the whole
- *    `event` table — v2's durable event log — before starting over.
- * 2. NEVER schedule a cursor that makes OpenCode revisit a session which has
- *    seen v2 activity. Every visited session gets its `session_message` rows
- *    deleted and replaced by the V1 transform, so a migrated session that was
- *    continued in v2 would lose that conversation.
- * 3. Only 1.x activity since the last completed import triggers a new one.
- *    A v2 delete removes the `session_v2` row but leaves the legacy `session`
- *    row behind, so "missing from v2" alone would bring deleted sessions back
- *    on every start. A legacy session counts as missing only when its
- *    `time_updated` is newer than the completion stamp OpenCode writes on
- *    `migration.v1-v2`: only OpenCode 1.x writes that table, so an unchanged
- *    table means nobody ran 1.x since and the top-up skips. Decided by the
- *    maintainer (2026-09-24). When 1.x was used again, OpenCode still walks
- *    every id below the cursor, so a deleted session sorting below a fresh one
- *    comes back with it; that needs an import route taking an explicit list.
- *
- * The loop OpenCode runs is `SELECT id FROM session WHERE id < cursor ORDER BY
- * id DESC LIMIT 1`, one session at a time, so the cursor has to be strictly
- * greater than the largest id we want imported. Session ids encode time
- * descending in a fixed-width field that wraps, so id order is NOT time order:
- * a 2026-08 session can sort far below a newer one. Everything here compares
- * ids the way SQLite does (BINARY / memcmp — neither `session.id` nor
- * `session_v2.id` declares a collation) and never assumes id order means age.
- */
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,10 +6,6 @@ import { z } from 'zod';
 
 import { getOpenCodeDataDir } from './shared.js';
 
-/**
- * Where OpenCode keeps its database: `OPENCODE_DB` when set (absolute or
- * relative to the data dir), else `opencode.db` in the data dir.
- */
 const resolveOpenCodeDbPath = (env) => {
   const dataDir = getOpenCodeDataDir(env);
   const configured = (env.OPENCODE_DB ?? '').trim();
@@ -59,22 +13,10 @@ const resolveOpenCodeDbPath = (env) => {
   return path.join(dataDir, 'opencode.db');
 };
 
-/** OpenCode's key for the migration state row in `kv`. */
 const MIGRATION_STATE_KEY = 'migration.v1-v2';
 
-/**
- * The `session_message.type` values OpenCode's V1 transform can produce
- * (`transformSession` emits only these four). Any other type on a session is
- * proof the session was used in v2 after it was migrated.
- */
 const V1_IMPORT_MESSAGE_TYPES = ['user', 'assistant', 'synthetic', 'compaction'];
 
-/**
- * Appended to the largest missing id to build the cursor. SQLite compares TEXT
- * byte by byte, so `<id><anything>` sorts immediately after `<id>`, and since
- * every session id has the same length no real id can fall between the two.
- * The cursor therefore selects exactly "this id and everything below it".
- */
 const CURSOR_SUFFIX = '￿';
 
 /**
@@ -91,12 +33,6 @@ const countRowSchema = z.object({ value: z.number() });
 const nullableIdRowSchema = z.object({ id: z.string().nullable() });
 const migrationStateSchema = z.object({ phase: z.string() });
 
-/**
- * A minimal read-write connection: `all(sql, params)`, `run(sql, params)` and
- * `close()`. Node provides it through `node:sqlite`, Bun through `bun:sqlite`;
- * both are built in and no dependency is added. Neither being available
- * yields null and the top-up is skipped.
- */
 let openConnection;
 const loadSqlite = () => {
   if (openConnection !== undefined) return openConnection;
@@ -104,8 +40,6 @@ const loadSqlite = () => {
   openConnection = null;
   try {
     const { DatabaseSync } = process.getBuiltinModule?.('node:sqlite') ?? require('node:sqlite');
-    // Opening an in-memory database proves the builtin is usable before we
-    // commit to it; a Node without `node:sqlite` throws here and Bun is tried.
     new DatabaseSync(':memory:').close();
     openConnection = (dbPath) => {
       const db = new DatabaseSync(dbPath);
@@ -162,10 +96,6 @@ const hasTables = (db, names) => {
   return names.every((name) => found.has(name));
 };
 
-/**
- * The completion timestamp of a `{"phase":"completed"}` migration row, or null
- * when the row is missing, unreadable, or the migration is not finished.
- */
 const readCompletedMigration = (db) => {
   const row = firstRow(kvRowSchema, db.all('SELECT value, time_updated FROM kv WHERE key = ?', [MIGRATION_STATE_KEY]));
   if (!row) return null;
@@ -180,12 +110,6 @@ const readCompletedMigration = (db) => {
   return { completedAt: row.time_updated };
 };
 
-/**
- * Sessions OpenCode will revisit at this cursor that carry evidence of v2 use
- * after the migration finished: a message created after completion, a session
- * row touched after completion, or a message type the V1 transform never
- * emits. Any hit means the top-up must not run.
- */
 const findRevisitedSessionsWithV2Activity = (db, cursor, completedAt) =>
   db
     .all(
@@ -208,10 +132,6 @@ const findRevisitedSessionsWithV2Activity = (db, cursor, completedAt) =>
       return parsed.success ? [parsed.data.id] : [];
     });
 
-/**
- * A legacy session with no `session_v2` twin that 1.x touched after the last
- * completed import (see rule 3). Bound parameter: the completion timestamp.
- */
 const MISSING_CONDITION = 'id NOT IN (SELECT id FROM session_v2) AND time_updated > ?';
 
 const countMissingSessions = (db, completedAt) =>

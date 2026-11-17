@@ -13,7 +13,6 @@ export type FilesystemErrorReason =
 export class FilesystemError extends Error {
   readonly reason: FilesystemErrorReason;
   readonly status?: number;
-  /** The server's size ceiling, set when an upload was rejected for its size. */
   readonly maxBytes?: number;
 
   constructor(message: string, options: { reason?: FilesystemErrorReason; status?: number; maxBytes?: number } = {}) {
@@ -50,8 +49,6 @@ export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReaso
   }
 };
 
-// Web rejects with an Error; the VS Code bridge rejects with a plain object
-// that carries the message.
 const messageCarrierSchema = z.object({ message: z.string() });
 
 export const isFileMissingError = (error: unknown): boolean => {
@@ -66,4 +63,3 @@ export const isFileMissingError = (error: unknown): boolean => {
     || normalized.includes('no such file')
     || normalized.includes('does not exist');
 };
-

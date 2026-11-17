@@ -4,7 +4,6 @@ export type OpenInApp = {
   id: string;
   label: string;
   appName: string;
-  /** The app's monochrome mark from the sprite (see scripts/icons/open-in-apps.mjs). */
   icon: IconName;
 };
 

@@ -11,11 +11,6 @@ import { GeneratedImages } from './GeneratedImages';
 import { ShownPage } from './HtmlRenderFrame';
 import { SecretRequestCard, SecretRunCard } from './SecretRequestCard';
 
-/**
- * What a call the chat shows in place (`isShownInPlace`) draws instead of its
- * row: the run a `workflow.run` call proposed, the images `image.generate`
- * made, the card a secret request asks on, else the page it showed.
- */
 export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   const runId = React.useMemo(() => proposedWorkflowRunId(part.tool, part.state), [part.tool, part.state]);
   const images = React.useMemo(() => generatedImagePaths(part.tool, part.state), [part.tool, part.state]);
@@ -28,7 +23,6 @@ export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPop
   return <ShownPage part={part} />;
 }
 
-/** A settled form a collapsed Activity keeps in view: one line, no form. */
 function SettledAskLine({ part }: { part: ToolPart }) {
   const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
   if (!page) return null;
@@ -39,11 +33,6 @@ function SettledAskLine({ part }: { part: ToolPart }) {
   );
 }
 
-/**
- * A part a collapsed Activity keeps in view (`getShownPages`): a call drawn in
- * place, the line of a settled form, or the text with a UI block the agent
- * wrote before a later step.
- */
 export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPopup?: (content: ToolPopupContent) => void }) {
   if (part.type === 'tool') {
     if (isSettledAsk(part)) return <SettledAskLine part={part} />;

@@ -1,12 +1,3 @@
-// Applying a space's work to the user's project, or throwing it away (decisions 7 and 8,
-// user journey step 6). The host brings the work out and applies it; this module names the default
-// branch, reads what an apply was refused for into what the dialog shows, tells whether an agent
-// still works in the space, and records a removal that followed the apply.
-//
-// The maintainer's calls of 2026-09-29: the branch is the default, named after the space; a refusal
-// that closes the way of uncommitted changes switches the dialog to the branch and leaves the next
-// press to the user; an agent still at work gets a warning, not a block, and the space is not
-// deleted afterwards unless the user asks.
 
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { applySpaceWork, SpacesRequestError, type SpaceApplyOutcome, type SpaceApplyRequest, type SpaceFailure, type SpaceFailureDetails, type SpaceReportedPaths } from './spaces-api';
@@ -15,10 +6,6 @@ import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore } from '.
 
 const FALLBACK_BRANCH = 'space';
 
-/**
- * The branch an apply suggests: the space's name, which the create dialog fills from the same
- * generator as a worktree's branch, made into a name git takes. The server checks it again.
- */
 export const branchNameOfSpace = (name: string): string => {
   const slug = name
     .normalize('NFKD')
@@ -35,10 +22,6 @@ export const branchNameOfSpace = (name: string): string => {
   return slug || FALLBACK_BRANCH;
 };
 
-/**
- * Why an apply did not go through, as the dialog tells it. `changes_closed` and `partly_applied`
- * close the way of uncommitted changes for good, so the dialog turns to the branch.
- */
 export type SpaceApplyRefusal =
   | { kind: 'changes_closed' }
   | { kind: 'part_thrown_away'; stillThere: SpaceReportedPaths }
@@ -55,12 +38,6 @@ export type SpaceApplyRefusal =
   | { kind: 'not_running' }
   | { kind: 'other'; failure: SpaceFailure };
 
-// The refusals after which the host applies this space only as a branch; see "Apply" in the
-// module documentation of `packages/web/server/lib/spaces`. The route is told once, at the
-// refusal (decision 7), so the cases whose next step differs keep a sentence of their own: part of
-// the last apply thrown away leaves files that stand in the way of the branch, a file git ignores
-// or one a filter such as Git LFS keeps was there before the space, and a read that ran out of
-// time says nothing about whether the work fits.
 const CLOSING = new Set(['changes_do_not_apply', 'changes_route_closed', 'changes_blocked_by_link']);
 
 const closingRefusalOf = (details: SpaceFailureDetails): SpaceApplyRefusal => {
@@ -94,7 +71,6 @@ export const applyRefusalOf = (error: Error, branch: string | null): SpaceApplyR
   return { kind: 'other', failure: { code, message: error.message } };
 };
 
-/** Whether a refusal leaves the space applicable only as a branch from now on. */
 export const closesChanges = (refusal: SpaceApplyRefusal): boolean => {
   switch (refusal.kind) {
     case 'changes_closed':
@@ -114,7 +90,6 @@ const insideSpace = (directory: string, spaceId: string): boolean => {
 
 type StatusIndex = { activeSessionIds: ReadonlySet<string>; statusById: ReadonlyMap<string, { directory: string }> };
 
-/** Whether a session in the space is working or retrying now, by the live status index. */
 export const isAgentWorkingInSpace = (index: StatusIndex, spaceId: string): boolean => {
   for (const sessionId of index.activeSessionIds) {
     const entry = index.statusById.get(sessionId);
@@ -130,10 +105,6 @@ type SpaceApplyResult =
   | { kind: 'refused'; refusal: SpaceApplyRefusal }
   | { kind: 'overtaken' };
 
-/**
- * Applies the space's work and reads the host's list again. A removal that followed and went
- * through in part stays on the group's status line as a failed delete, with Delete to try again.
- */
 export const applySpace = async (spaceId: string, request: SpaceApplyRequest): Promise<SpaceApplyResult> => {
   const generation = spacesRuntimeGeneration();
   let outcome: SpaceApplyOutcome;

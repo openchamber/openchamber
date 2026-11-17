@@ -9,7 +9,6 @@ type SessionSearchInputProps = {
   value: string;
   onSearch: (query: string) => void;
   placeholder: string;
-  /** The field's accessible name, when the placeholder is too short to be one. */
   label?: string;
   clearLabel: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
@@ -17,12 +16,7 @@ type SessionSearchInputProps = {
   active?: boolean;
   mobile?: boolean;
   debounceMs?: number;
-  /** Sits inside the field, before the clear button: a status mark, a count, the Search in menu. */
   trailing?: React.ReactNode;
-  /**
-   * A field that shares a toolbar row: at rest it is an icon and a word with
-   * no field chrome, and takes the field look once focused or filled.
-   */
   quiet?: boolean;
 };
 
@@ -30,7 +24,6 @@ const FIELD_CLASS = 'rounded-md border border-border oc-raised oc-field hover:[&
 const QUIET_REST_CLASS = 'rounded-md border border-transparent hover:bg-interactive-hover';
 const BARE_INPUT_CLASS = 'h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none dark:bg-transparent typography-ui-label text-foreground hover:[&:not(:focus)]:[background-image:none]';
 
-// Keeps the draft local and commits it on a debounce, so typing renders only the field.
 export function SessionSearchInput({
   value, onSearch, placeholder, label, clearLabel, inputRef, onClose, active = true, mobile = false, debounceMs = 100, trailing, quiet = false,
 }: SessionSearchInputProps) {
@@ -46,9 +39,6 @@ export function SessionSearchInput({
   };
 
   React.useLayoutEffect(() => {
-    // The parent holds the trimmed query. When it only confirms what the draft
-    // already says, the draft keeps its own spacing, so a space typed before
-    // the debounce fired is still there for the next word.
     setDraft((current) => (current.trim() === value ? current : value));
     composing.current = false;
     cancelPendingSearch();
@@ -88,7 +78,6 @@ export function SessionSearchInput({
   return (
     <div
       data-session-search-input
-      // The whole field is the way in: a press on its icon or its padding puts the caret in the input.
       onMouseDown={(event) => {
         if (event.target instanceof Element && event.target.closest('input, button')) return;
         event.preventDefault();

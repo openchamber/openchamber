@@ -2,11 +2,8 @@ import type { Theme } from '@/types/theme';
 import type { VSCodeThemePalette } from './adapter';
 import { colorHue, contrastRatio, mixColor, onColor, readableText, tintColor, withOpacity } from '../color';
 
-// Share of the primary's hue and chroma a user bubble takes on, at the
-// bubble's own lightness. The same chroma reads stronger on a light canvas.
 const BUBBLE_TINT = { dark: 0.16, light: 0.06 } as const;
 
-// Both file imports and live VS Code palettes pass through this policy once.
 export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePalette['colors']>, highContrast = false): void {
   if (highContrast) return;
   const { surface, primary, status, interactive, markdown, chat, tools, syntax } = theme.colors;
@@ -15,9 +12,6 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
   const neutral = onColor(canvas, canvas);
   const contrast = (color: string, background: string) => contrastRatio(color, background, canvas) ?? 1;
 
-  // Search along a color pair, retaining the source hue instead of replacing
-  // every palette with one shared gray. If a text floor is unattainable, the
-  // readable neutral endpoint is the best available result.
   const toward = (seed: string, target: string, accepts: (color: string) => boolean) => {
     if (accepts(seed)) return seed;
     let low = 0, high = 1;
@@ -39,8 +33,6 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     const quiet = toward(start, canvas, (color) => contrast(color, canvas) <= 1.10);
     const separated = contrast(target, canvas) < 1.04
       ? target : toward(quiet, target, (color) => contrast(color, canvas) >= 1.04);
-    // Mid-tone canvases have very little contrast headroom. Keep text readable
-    // even when that leaves less room for separating the layers.
     return toward(separated, canvas, (color) => contrast(neutral, color) >= surfaceTextFloor);
   };
   surface.muted = layer(surface.muted, false);
@@ -55,8 +47,6 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
   );
   const bodyCeiling = dark ? 15.4 : 13;
   surface.foreground = text(surface.foreground, bodyCeiling, 7);
-  // Dark palettes cap secondary text lower: there mid greys sit close
-  // together, and a brighter secondary colour merges with resting titles.
   surface.mutedForeground = text(surface.mutedForeground, Math.min(dark ? 5.2 : 6, contrast(surface.foreground, canvas) * 0.7));
   surface.elevatedForeground = text(surface.elevatedForeground, bodyCeiling, 7);
 
@@ -71,10 +61,7 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     interactive.focusRing = primary.base;
     interactive.borderFocus = primary.base;
   }
-  // Selection is a state, not a substitute for the sidebar surface.
   interactive.selection = toward(interactive.selection, mixColor(primary.base, canvas, 0.18, canvas), (color) => minimum(color) >= 1.1);
-  // OpenChamber reference contrasts, in canvas/sidebar/elevated order. A
-  // sidebar's stronger edge must not become the budget for floating controls.
   const caps = dark ? {
     border: [1.217, 1.245, 1.117], hover: [2.304, 2.356, 2.115],
     tools: [1.199, 1.207, 1.156], divider: [1.410, 1.442, 1.294],
@@ -82,9 +69,7 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     border: [1.268, 1.203, 1.162], hover: [1.640, 1.557, 1.503],
     tools: [1.231, 1.195, 1.171], divider: [1.427, 1.355, 1.308],
   } as const;
-  // Alpha must be measured over each surface, not flattened onto the canvas.
   const border = (seed: string, [cap, sidebarCap, elevatedCap]: readonly [number, number, number]) => {
-    // Restore a little definition while keeping most of the per-surface relief.
     const strongest = Math.max(cap, sidebarCap, elevatedCap);
     const relaxed = (limit: number) => limit + (strongest - limit) * 0.2;
     const quiet = (color: string) => contrast(color, canvas) <= relaxed(cap)
@@ -108,8 +93,6 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
   interactive.selection = border(interactive.selection, [1.6, 1.7, 1.45]);
   interactive.selectionForeground = readableText(surface.foreground, interactive.selection, canvas);
 
-  // Semantic hue families stay stable even when the source diagnostics reuse
-  // a brand accent. Shades within the family remain authored where possible.
   const semantic = (seed: string, fallback: string, low: number, high: number) => {
     const hue = colorHue(seed, canvas);
     return readable(hue !== null && hue >= low && hue <= high ? seed : fallback);
@@ -169,8 +152,6 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     markdown.inlineCodeBackground = surface.subtle;
     markdown.inlineCode = readableText(readable(authored['textPreformat.foreground'] ?? primary.base), surface.subtle, canvas);
   }
-  // Code keeps its own lightness but takes the canvas hue, so a neutral source
-  // code fill does not sit as a cold slab inside a warm or tinted theme.
   syntax.base.background = toward(tintColor(canvas, syntax.base.background, 1, canvas), canvas,
     (color) => contrast(color, canvas) <= 1.1);
   syntax.base.foreground = readableText(surface.foreground, syntax.base.background, canvas);

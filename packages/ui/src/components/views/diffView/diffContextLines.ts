@@ -1,0 +1,3 @@
+export const LARGE_DIFF_CHANGED_LINES = 500;
+export const FULL_CONTEXT_DIFF_LINES = 1_000_000;
+export const DEFAULT_CONTEXT_DIFF_LINES = 3;

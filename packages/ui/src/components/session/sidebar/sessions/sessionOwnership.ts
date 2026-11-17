@@ -29,7 +29,6 @@ export type DirectoryOwner = {
   projectRoot: string;
   scopeDirectory: string;
   kind: 'project' | 'worktree' | 'space';
-  /** The isolated space that owns the scope, for `kind: 'space'`. */
   spaceId?: string;
 };
 
@@ -111,10 +110,6 @@ export const createSessionOwnershipIndex = (
     }
   }
 
-  // An isolated space belongs to the registered project it was made for, as the host resolved
-  // it from the space's label; a space whose project is not registered here owns nothing, so
-  // its sessions stay out of every project, as any session without an owner does. VS Code never
-  // has spaces (decision 16 of the design).
   if (!isVSCode) {
     for (const space of spaces) {
       const projectRoot = normalizePath(space.projectDirectory);
@@ -131,17 +126,9 @@ export const createSessionOwnershipIndex = (
     }
   }
 
-  // OpenCode project IDs are not OpenChamber's path-derived project IDs. Only
-  // project metadata whose canonical worktree is itself a configured root can
-  // bridge the two namespaces. Conflicting metadata stays unresolved.
   const canonicalOwnerByOpenCodeProjectId = new Map<string, DirectoryOwner | null>();
   const authoritativeProjectIds = new Set<string>();
   const registerCanonicalOwner = (openCodeProjectId: string, worktree: string | null | undefined): void => {
-    // `global` is OpenCode's catch-all project, not a real project: every
-    // session whose directory resolves to no configured root (non-git
-    // directories, `C:/`, subagent workspaces) shares it. Bridging it to a
-    // configured root would file those unrelated sessions under whichever
-    // project happens to own the id, so it never gets a canonical owner.
     if (openCodeProjectId === 'global') return;
     const canonicalRoot = normalizePath(worktree ?? null);
     const project = canonicalRoot ? projectByRoot.get(canonicalRoot) : undefined;
@@ -240,9 +227,6 @@ export const createSessionOwnershipIndex = (
   };
 
   bucket(sessions, sessionsByProject, sessionsByScope);
-  // The sidebar's archived buckets hold top-level sessions only: a subsession
-  // belongs to the agent run that spawned it. One archived under an active
-  // parent is listed on the Archive page instead (`isRestorableOnItsOwn`).
   bucket(archivedSessions.filter((session) => !session.parentID), archivedSessionsByProject);
 
   return {

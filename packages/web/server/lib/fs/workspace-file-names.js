@@ -1,11 +1,3 @@
-// Workspace files by name, for linking a bare file name an agent wrote
-// (`Renderer.tsx:42`) to the one file it means.
-//
-// git is slow to start and, on Windows, slow to walk the working tree for
-// untracked files, so one `git ls-files` per workspace serves every name for a
-// short while, concurrent lookups share it, it has a deadline, and a listing
-// too large to hold is dropped rather than kept. Outside a repository, or when
-// git fails, every lookup answers no match.
 
 import nodePath from 'node:path';
 
@@ -23,7 +15,6 @@ export const createWorkspaceFileNameIndex = ({
   maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES,
   now = () => Date.now(),
 }) => {
-  // directory -> { loadedAt, pending, byName: Map<name, relative[]> | null }
   const workspaces = new Map();
 
   const listFiles = (directory) => new Promise((resolve) => {
@@ -94,7 +85,6 @@ export const createWorkspaceFileNameIndex = ({
     return pending;
   };
 
-  /** Absolute paths of the workspace files called `name`, at most 20. */
   const find = async (directory, name) => {
     const byName = await load(directory);
     return (byName?.get(name) ?? []).map((relative) => nodePath.join(directory, relative));

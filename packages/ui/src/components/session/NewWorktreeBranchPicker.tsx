@@ -24,14 +24,12 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 
-/** A branch as git names it (`remotes/origin/x` for a remote one) and as it is shown. */
 export type PickedBranch = { value: string; label: string };
 
 type BranchSection = { heading: string; branches: PickedBranch[] };
 
 const PAGE_SIZE = 100;
 
-/** The nearest scrolling ancestor; the mobile sheet scrolls itself, not the list. */
 const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null => {
   let node = start;
   while (node && node !== document.body) {
@@ -42,11 +40,6 @@ const findScrollableAncestor = (start: HTMLElement | null): HTMLElement | null =
   return null;
 };
 
-/**
- * One branch choice of the New Worktree dialog, searchable: a dropdown on
- * desktop, a sheet on mobile. Matches rank first while searching; otherwise
- * local branches, then remote ones.
- */
 export function NewWorktreeBranchPicker({
   value,
   placeholder,
@@ -60,13 +53,11 @@ export function NewWorktreeBranchPicker({
 }: {
   value: string;
   placeholder: string;
-  /** The mobile sheet's title. */
   title: string;
   localBranches: string[];
   remoteBranches: string[];
   isLoading: boolean;
   isMobile: boolean;
-  /** Shown, but not applicable to the current choice. */
   disabled?: boolean;
   onSelect: (branch: PickedBranch) => void;
 }) {
@@ -102,7 +93,6 @@ export function NewWorktreeBranchPicker({
     return { ...section, branches: section.branches.slice(start, Math.max(start, end)) };
   }).filter((section) => section.branches.length > 0);
 
-  // A new query starts the list from the top.
   React.useEffect(() => {
     if (!open) return;
     if (isMobile) {
@@ -192,11 +182,9 @@ export function NewWorktreeBranchPicker({
       >
         <Command
           shouldFilter={false}
-          // Let cmdk handle navigation before stopping the menu's typeahead.
           onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
         >
           <CommandInput
-            // Chromium's focus scan skips candidates under the display: contents portal.
             autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
