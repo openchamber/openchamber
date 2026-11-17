@@ -8,8 +8,11 @@ const { readAsarFiles, findPackagedAppContentProblems } = require('./packaged-ap
 const web = 'node_modules/@openchamber/web';
 const helpers = [
   `${web}/build/server/lib/git/credential-helper.js`,
+  `${web}/build/server/lib/git/credential-helper-runtime.js`,
   `${web}/build/server/lib/git/ssh-wrapper.js`,
+  `${web}/build/server/lib/git/ssh-wrapper-runtime.js`,
   `${web}/build/server/lib/git/repository-credential-helper.js`,
+  `${web}/build/server/lib/git/repository-credential-helper-runtime.js`,
   `${web}/build/server/built-in-extensions/registry.json`,
 ];
 

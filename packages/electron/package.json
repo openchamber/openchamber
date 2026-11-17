@@ -64,8 +64,11 @@
       "node_modules/7zip-bin/win/**/*",
       "node_modules/@openchamber/web/build/server/built-in-extensions/**/*",
       "node_modules/@openchamber/web/build/server/lib/git/credential-helper.js",
+      "node_modules/@openchamber/web/build/server/lib/git/credential-helper-runtime.js",
       "node_modules/@openchamber/web/build/server/lib/git/ssh-wrapper.js",
-      "node_modules/@openchamber/web/build/server/lib/git/repository-credential-helper.js"
+      "node_modules/@openchamber/web/build/server/lib/git/ssh-wrapper-runtime.js",
+      "node_modules/@openchamber/web/build/server/lib/git/repository-credential-helper.js",
+      "node_modules/@openchamber/web/build/server/lib/git/repository-credential-helper-runtime.js"
     ],
     "files": [
       "dist-bundle/entry.mjs",

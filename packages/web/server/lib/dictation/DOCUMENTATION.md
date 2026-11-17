@@ -113,6 +113,10 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Invariants
 
+- The fork target `local/worker-process.js` stays a JavaScript bootstrap and
+  registers the source resolver before loading `worker-runtime.js`. Forked
+  processes have their own resolver state even when the parent loaded the hook.
+
 - Never load `sherpa-onnx-node` in the main server process.
 - Transcription happens on commit only; sessions never emit non-final
   transcripts. The `partial` messages a client receives are the concatenation

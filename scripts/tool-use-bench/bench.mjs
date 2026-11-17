@@ -10,7 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { withoutInjectedEnv } from '../../packages/web/server/lib/injected-env.js';
+if (!process.versions.bun) await import('../../packages/web/scripts/register-server-sources.mjs');
+const { withoutInjectedEnv } = await import('../../packages/web/server/lib/injected-env.js');
 
 const BENCH_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(BENCH_DIR, '../..');
