@@ -78,6 +78,22 @@ const runSessionCli = (args, timeoutMs = 120_000) => new Promise((resolveRun, re
   })
 })
 
+
+/**
+ * Assistant replies that belong to the current run (#2157): the messages
+ * after the pre-run boundary (the latest assistant message that existed
+ * before this invocation sent anything), in the chronological order the
+ * session CLI returns. A null boundary (fresh session) counts everything.
+ * If the boundary has scrolled out of the fetched window, everything in
+ * the window is newer than it, so everything counts.
+ */
+export const countRunReplies = (messages, boundaryId) => {
+  const list = Array.isArray(messages) ? messages : []
+  if (!boundaryId) return list.length
+  const index = list.findIndex((message) => message?.id === boundaryId)
+  return index < 0 ? list.length : list.length - index - 1
+}
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const base = ["--dir", options.dir, "--port", String(options.port)]
@@ -86,6 +102,12 @@ const main = async () => {
     const created = await runSessionCli(["create", ...base, "--title", options.title ?? `perf: long ${options.turns}`])
     sessionId = created.sessionId
   }
+  // Per-run validation boundary (#2157): the latest assistant reply that
+  // already exists before this invocation sends anything. On a reused
+  // --session, historical replies must not count toward this run's check.
+  const boundaryResult = await runSessionCli(["messages", ...base, "--session", sessionId, "--limit", "1", "--role", "assistant"])
+  const boundaryMessages = boundaryResult?.messages ?? []
+  const boundaryId = boundaryMessages.length > 0 ? (boundaryMessages[boundaryMessages.length - 1]?.id ?? null) : null
   const startedAt = Date.now()
   for (let turn = 1; turn <= options.turns; turn += 1) {
     const model = options.models[(turn - 1) % options.models.length]
@@ -98,17 +120,27 @@ const main = async () => {
   // server's cap), so this checks the most recent turns, which a broken
   // provider could not have answered either.
   const checked = Math.min(options.turns, 20)
-  const messages = await runSessionCli(["messages", ...base, "--session", sessionId, "--limit", String(checked), "--role", "assistant"])
-  const assistant = (messages?.messages ?? []).length
-  if (assistant < checked) throw new Error(`Only ${assistant} of the last ${checked} turns got an assistant reply; check the fixture provider.`)
+  // Fetch one extra message when a boundary exists: if the boundary is
+  // still inside the window it is the (checked + 1)-th, and the checked
+  // newest are this run's; if it scrolled out, the whole window is new.
+  const fetchLimit = boundaryId ? checked + 1 : checked
+  const messages = await runSessionCli(["messages", ...base, "--session", sessionId, "--limit", String(fetchLimit), "--role", "assistant"])
+  const assistant = countRunReplies(messages?.messages ?? [], boundaryId)
+  if (assistant < checked) throw new Error(`Only ${assistant} of this run's last ${checked} turns got an assistant reply; check the fixture provider.`)
   // Only the last turns are checked, so the count says so: a bare "20" next
-  // to 120 turns reads as 100 missing replies.
-  const summary = { sessionId, turns: options.turns, lastTurnsChecked: checked, lastTurnsAnswered: assistant, seconds: Math.round((Date.now() - startedAt) / 1000) }
+  // to 120 turns reads as 100 missing replies. The count is scoped to this
+  // run's replies (#2157); boundaryMessageId records the scope explicitly
+  // (null on a fresh session, where every reply is this run's).
+  const summary = { sessionId, turns: options.turns, lastTurnsChecked: checked, lastTurnsAnswered: assistant, boundaryMessageId: boundaryId, seconds: Math.round((Date.now() - startedAt) / 1000) }
   if (options.json) console.log(JSON.stringify(summary))
   else console.log(`Session ${sessionId}: ${options.turns} turns in ${summary.seconds}s; the last ${checked} all answered`)
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error)
-  process.exit(1)
-})
+// Guarded so the regression test (seed-long-session.test.mjs) can import
+// countRunReplies without running a seed.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error)
+    process.exit(1)
+  })
+}
