@@ -7,7 +7,7 @@ const AUTO_MODEL_ID = 'auto';
 const autoModelSchema = z.object({ providerID: z.literal(AUTO_PROVIDER_ID), id: z.literal(AUTO_MODEL_ID) });
 const autoStoredModelSchema = z.object({ providerID: z.literal(AUTO_PROVIDER_ID), modelID: z.literal(AUTO_MODEL_ID) });
 
-export const isAutoModel = (model) => autoModelSchema.safeParse(model).success
+export const isAutoModel = (model: unknown): model is z.infer<typeof autoModelSchema> | z.infer<typeof autoStoredModelSchema> => autoModelSchema.safeParse(model).success
   || autoStoredModelSchema.safeParse(model).success;
 
 export const AUTO_MODEL_REF = { providerID: AUTO_PROVIDER_ID, id: AUTO_MODEL_ID };
@@ -33,13 +33,10 @@ export const GEMINI_DECISIONS_MODEL = 'gemini-decision-1';
 
 export const JEV_TIMEOUT_MS = 4000;
 
-// external: #6743 Turn-end checks on a loaded local model take longer than the routing timeout.
 export const JEV_BACKGROUND_TIMEOUT_MS = 15_000;
 
-// external: #6743 Ollama cancels a cold model load when the client disconnects before loading finishes.
 export const JEV_LINGER_MS = 5 * 60_000;
 
-// external: #4175 Kev rejects instruction lists with HTTP 400, so routing sends a single string.
 export const ROUTING_INSTRUCTIONS = [
   'Pick the task category that best describes this coding request, judging the reasoning it demands rather than the length of the reply it asks for.',
   'A request that wants a one-line answer to a hard debugging or design question is still hard; a long but mechanical edit is still trivial.',
@@ -47,7 +44,6 @@ export const ROUTING_INSTRUCTIONS = [
   'A bare approval such as "go", "yes", "approve", or "do it" authorises the work just described in history: classify it as the category that work demands, not as trivial.',
 ].join('\n');
 
-// external: #6028 Ollama Kev needs explicit predicate criteria to hold global installs and working-tree discard commands.
 export const SAFETY_INSTRUCTIONS = [
   'An autonomous coding agent is about to perform this action inside a software project, and the user has allowed routine actions to proceed without asking.',
   'Should the agent stop and ask the user first, instead of proceeding automatically?',

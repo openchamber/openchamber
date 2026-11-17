@@ -73,12 +73,19 @@ const effectiveConfigSchema = z.object({
   categories: z.array(effectiveCategorySchema).max(32),
 }).strict();
 
+export type RoutingModel = z.infer<typeof modelSchema>;
+export type RoutingCategory = z.infer<typeof effectiveCategorySchema>;
+export type RoutingConfig = z.infer<typeof effectiveConfigSchema>;
+type StoredConfig = z.infer<typeof fileSchema>;
+type BuiltinOverride = z.infer<typeof builtinOverrideSchema>;
+type UserCategory = z.infer<typeof userCategorySchema>;
+
 const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
 const geminiKeySchema = z.object({ key: z.string().min(1).max(4000) }).strict();
 
 const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
 
-const isParsedEndpointUrl = (url) => {
+const isParsedEndpointUrl = (url: string) => {
   try {
     return parseCustomEndpointUrl(url) === url;
   } catch {
@@ -94,18 +101,25 @@ const customEndpointSchema = z.object({
 
 const customEndpointFileSchema = z.object({ version: z.literal(FILE_VERSION), endpoint: customEndpointSchema }).strict();
 
-const routingConfigPath = (dataDir) => path.join(dataDir, 'routing.json');
-const routingAuthPath = (dataDir) => path.join(dataDir, 'routing-auth.json');
-const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
-const customEndpointPath = (dataDir) => path.join(dataDir, 'classifier-endpoint.json');
-const geminiKeyPath = (dataDir) => path.join(dataDir, 'classifier-gemini-key.json');
+export type CustomEndpoint = z.infer<typeof customEndpointSchema>;
 
-const readJsonFile = async (file, schema) => {
+const routingConfigPath = (dataDir: string) => path.join(dataDir, 'routing.json');
+const routingAuthPath = (dataDir: string) => path.join(dataDir, 'routing-auth.json');
+const classifierPath = (dataDir: string) => path.join(dataDir, 'classification.json');
+const customEndpointPath = (dataDir: string) => path.join(dataDir, 'classifier-endpoint.json');
+const geminiKeyPath = (dataDir: string) => path.join(dataDir, 'classifier-gemini-key.json');
+
+const hasErrorCode = (cause: unknown): cause is { code: unknown } => cause !== null
+  && (typeof cause === 'object' || typeof cause === 'function') && 'code' in cause;
+const hasErrorMessage = (cause: unknown): cause is { message: unknown } => cause !== null
+  && (typeof cause === 'object' || typeof cause === 'function') && 'message' in cause;
+
+const readJsonFile = async <T>(file: string, schema: z.ZodType<T>) => {
   let raw;
   try {
     raw = await fs.readFile(file, 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') return null;
+    if (hasErrorCode(error) && error.code === 'ENOENT') return null;
     throw error;
   }
   const text = raw.replace(/^﻿/, '').trim();
@@ -115,7 +129,7 @@ const readJsonFile = async (file, schema) => {
   return parsed.data;
 };
 
-const writeJsonFile = async (file, value, mode) => {
+const writeJsonFile = async <T>(file: string, value: T, mode?: number) => {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
   await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode });
@@ -123,9 +137,9 @@ const writeJsonFile = async (file, value, mode) => {
   if (mode) await fs.chmod(file, mode);
 };
 
-const emptyFile = () => ({ version: FILE_VERSION });
+const emptyFile = (): StoredConfig => ({ version: FILE_VERSION });
 
-export const resolveEffectiveConfig = (stored) => {
+export const resolveEffectiveConfig = (stored: StoredConfig | null): RoutingConfig => {
   const file = stored ?? emptyFile();
   const overrides = file.categories ?? {};
   const categories = [];
@@ -167,8 +181,8 @@ export const resolveEffectiveConfig = (stored) => {
   };
 };
 
-export const toStoredConfig = (config) => {
-  const categories = {};
+export const toStoredConfig = (config: RoutingConfig) => {
+  const categories: NonNullable<StoredConfig['categories']> = {};
   const builtinIds = new Set(BUILTIN_CATEGORIES.map((c) => c.id));
   const present = new Set();
   for (const category of config.categories) {
@@ -176,7 +190,7 @@ export const toStoredConfig = (config) => {
     if (category.builtin) {
       const builtin = BUILTIN_CATEGORIES.find((c) => c.id === category.id);
       if (!builtin) continue;
-      const override = { builtin: true };
+      const override: BuiltinOverride = { builtin: true };
       if (!category.enabled) override.disabled = true;
       if (category.name !== builtin.name) override.name = category.name;
       if (category.description !== builtin.description) override.description = category.description;
@@ -187,7 +201,7 @@ export const toStoredConfig = (config) => {
       continue;
     }
     if (builtinIds.has(category.id)) continue;
-    const entry = { builtin: false, name: category.name, description: category.description };
+    const entry: UserCategory = { builtin: false, name: category.name, description: category.description };
     if (!category.enabled) entry.disabled = true;
     if (category.model) entry.model = category.model;
     if (category.variant) entry.variant = category.variant;
@@ -197,7 +211,7 @@ export const toStoredConfig = (config) => {
   for (const builtin of BUILTIN_CATEGORIES) {
     if (!present.has(builtin.id)) categories[builtin.id] = { builtin: true, deleted: true };
   }
-  const stored = {
+  const stored: StoredConfig = {
     version: FILE_VERSION,
     enabled: config.enabled,
     minConfidence: config.minConfidence,
@@ -212,7 +226,7 @@ export const toStoredConfig = (config) => {
   return stored;
 };
 
-export const parseEffectiveConfig = (input) => {
+export const parseEffectiveConfig = (input: z.input<typeof effectiveConfigSchema>) => {
   const parsed = effectiveConfigSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -230,14 +244,14 @@ export const parseEffectiveConfig = (input) => {
   return config;
 };
 
-export const createRoutingStore = ({ dataDir }) => {
+export const createRoutingStore = ({ dataDir }: { dataDir: string }) => {
   const configFile = routingConfigPath(dataDir);
   const authFile = routingAuthPath(dataDir);
   const classifierFile = classifierPath(dataDir);
   const customEndpointFile = customEndpointPath(dataDir);
   const geminiKeyFile = geminiKeyPath(dataDir);
-  let writeChain = Promise.resolve();
-  const serialize = (run) => {
+  let writeChain: Promise<RoutingConfig | void> = Promise.resolve();
+  const serialize = <T extends RoutingConfig | void>(run: () => Promise<T>) => {
     const next = writeChain.catch(() => undefined).then(run);
     writeChain = next;
     return next;
@@ -245,7 +259,7 @@ export const createRoutingStore = ({ dataDir }) => {
 
   return {
     readConfig: async () => resolveEffectiveConfig(await readJsonFile(configFile, fileSchema)),
-    writeConfig: (config) => serialize(async () => {
+    writeConfig: (config: RoutingConfig) => serialize(async () => {
       await writeJsonFile(configFile, toStoredConfig(config));
       return config;
     }),
@@ -253,11 +267,11 @@ export const createRoutingStore = ({ dataDir }) => {
       try {
         return (await readJsonFile(authFile, authSchema))?.token ?? null;
       } catch (error) {
-        console.warn('[routing] routing-auth.json is unreadable:', error?.message ?? error);
+        console.warn('[routing] routing-auth.json is unreadable:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
         return null;
       }
     },
-    writeToken: (token) => serialize(() => writeJsonFile(authFile, { token }, 0o600)),
+    writeToken: (token: string) => serialize(() => writeJsonFile(authFile, { token }, 0o600)),
     clearToken: () => serialize(async () => {
       await fs.rm(authFile, { force: true });
     }),
@@ -265,21 +279,21 @@ export const createRoutingStore = ({ dataDir }) => {
       try {
         return (await readJsonFile(classifierFile, classifierSchema))?.source ?? null;
       } catch (error) {
-        console.warn('[routing] classification.json is unreadable:', error?.message ?? error);
+        console.warn('[routing] classification.json is unreadable:', (hasErrorMessage(error) ? error.message : undefined) ?? error);
         return null;
       }
     },
-    writeClassifierSource: (source) => serialize(() => writeJsonFile(classifierFile, { version: FILE_VERSION, source })),
+    writeClassifierSource: (source: z.infer<typeof classifierSchema>['source']) => serialize(() => writeJsonFile(classifierFile, { version: FILE_VERSION, source })),
     readCustomEndpoint: async () => {
       try {
         return (await readJsonFile(customEndpointFile, customEndpointFileSchema))?.endpoint ?? null;
       } catch (error) {
-        const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
+        const reason = error instanceof SyntaxError ? 'malformed JSON' : (hasErrorMessage(error) ? error.message : undefined) ?? error;
         console.warn('[routing] classifier-endpoint.json is unreadable:', reason);
         return null;
       }
     },
-    writeCustomEndpoint: (endpoint) => serialize(() => writeJsonFile(customEndpointFile, { version: FILE_VERSION, endpoint }, 0o600)),
+    writeCustomEndpoint: (endpoint: CustomEndpoint) => serialize(() => writeJsonFile(customEndpointFile, { version: FILE_VERSION, endpoint }, 0o600)),
     clearCustomEndpoint: () => serialize(async () => {
       await fs.rm(customEndpointFile, { force: true });
     }),
@@ -287,12 +301,12 @@ export const createRoutingStore = ({ dataDir }) => {
       try {
         return (await readJsonFile(geminiKeyFile, geminiKeySchema))?.key ?? null;
       } catch (error) {
-        const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
+        const reason = error instanceof SyntaxError ? 'malformed JSON' : (hasErrorMessage(error) ? error.message : undefined) ?? error;
         console.warn('[routing] classifier-gemini-key.json is unreadable:', reason);
         return null;
       }
     },
-    writeGeminiKey: (key) => serialize(() => writeJsonFile(geminiKeyFile, { key }, 0o600)),
+    writeGeminiKey: (key: string) => serialize(() => writeJsonFile(geminiKeyFile, { key }, 0o600)),
     clearGeminiKey: () => serialize(async () => {
       await fs.rm(geminiKeyFile, { force: true });
     }),
