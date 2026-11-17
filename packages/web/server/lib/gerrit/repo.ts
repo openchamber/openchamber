@@ -5,24 +5,35 @@ import { normalizeGerritInstance } from './instance.js';
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 
-function gerritProjectOfPath(value) {
+export interface GerritRemote {
+  name: string;
+  fetchUrl: string;
+  pushUrl?: string;
+}
+
+export interface GerritRepositoryDependencies {
+  getRemotes?: (directory: string) => Promise<GerritRemote[]>;
+  getStatus?: (directory: string, options: { mode: 'light' }) => Promise<{ tracking?: string | null }>;
+}
+
+function gerritProjectOfPath(value: string) {
   const segments = value.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '').split('/').filter(Boolean);
   if (segments.length === 0 || segments.some((segment) => segment === '.' || segment === '..' || !SEGMENT.test(segment))) return null;
   const project = segments.join('/');
   return { ...splitProjectPath(project), project };
 }
 
-const matchScpRemote = (value) => (value.includes('://') ? null : value.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/));
+const matchScpRemote = (value: string) => (value.includes('://') ? null : value.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/));
 
-export function parseGerritRemoteUrl(raw, instance) {
+export function parseGerritRemoteUrl(raw: string, instance: string) {
   if (!isString(raw) || !raw.trim()) return null;
   const origin = normalizeGerritInstance(instance);
   const originUrl = new URL(origin);
   const value = raw.trim();
-  const build = (parsed) => (parsed ? { ...parsed, repoPath: parsed.project, url: `${origin}/admin/repos/${parsed.project}` } : null);
+  const build = (parsed: ReturnType<typeof gerritProjectOfPath>) => (parsed ? { ...parsed, repoPath: parsed.project, url: `${origin}/admin/repos/${parsed.project}` } : null);
 
   const scpMatch = matchScpRemote(value);
-  if (scpMatch) return scpMatch[1].toLowerCase() === originUrl.hostname.toLowerCase() ? build(gerritProjectOfPath(scpMatch[2])) : null;
+  if (scpMatch) return scpMatch[1]?.toLowerCase() === originUrl.hostname.toLowerCase() ? build(gerritProjectOfPath(scpMatch[2] ?? '')) : null;
 
   let url;
   try {
@@ -47,16 +58,16 @@ export function parseGerritRemoteUrl(raw, instance) {
   return build(gerritProjectOfPath(path));
 }
 
-const trackingRemoteName = (tracking) => {
+const trackingRemoteName = (tracking: string) => {
   if (!isString(tracking)) return '';
   const separator = tracking.indexOf('/');
   return separator > 0 ? tracking.slice(0, separator) : '';
 };
 
-export async function resolveGerritProjectsFromDirectory(directory, instance, explicitRemote, dependencies = {}) {
+export async function resolveGerritProjectsFromDirectory(directory: string, instance: string, explicitRemote?: string, dependencies: GerritRepositoryDependencies = {}) {
   const loadRemotes = dependencies.getRemotes ?? getRemotes;
   const loadStatus = dependencies.getStatus ?? getStatus;
-  const parseRemote = (remote) => parseGerritRemoteUrl(remote.pushUrl || remote.fetchUrl, instance)
+  const parseRemote = (remote: GerritRemote) => parseGerritRemoteUrl(remote.pushUrl || remote.fetchUrl, instance)
     ?? parseGerritRemoteUrl(remote.fetchUrl, instance);
   const remotes = await loadRemotes(directory);
   if (explicitRemote) {
@@ -65,11 +76,11 @@ export async function resolveGerritProjectsFromDirectory(directory, instance, ex
     return { repos: parsed ? [{ ...parsed, remoteName: explicitRemote }] : [] };
   }
   const status = await loadStatus(directory, { mode: 'light' });
-  const ranked = [];
-  for (const name of [trackingRemoteName(status?.tracking), 'origin', 'upstream', ...remotes.map((remote) => remote?.name)]) {
+  const ranked: string[] = [];
+  for (const name of [trackingRemoteName(status?.tracking ?? ''), 'origin', 'upstream', ...remotes.map((remote) => remote?.name)]) {
     if (isString(name) && name && !ranked.includes(name)) ranked.push(name);
   }
-  const repos = [];
+  const repos: Array<NonNullable<ReturnType<typeof parseGerritRemoteUrl>> & { remoteName: string }> = [];
   for (const name of ranked) {
     const remote = remotes.find((candidate) => candidate?.name === name);
     const parsed = remote ? parseRemote(remote) : null;
