@@ -80,10 +80,17 @@ const sanitizeHeaders = (headers) => {
 const hasHeaders = (headers) => Object.keys(headers).length > 0;
 
 const getTargetParam = (req) => {
+  // A repeated url parameter is ambiguous: never silently select its
+  // first value (#2324; the resolveDirectoryQuery precedent in the git
+  // routes). Express surfaces a repeat as an array; the raw-URL fallback
+  // below counts the values instead of taking the first.
+  if (Array.isArray(req.query?.url)) return null;
   let raw = typeof req.query?.url === 'string' ? req.query.url : '';
   if (!raw) {
     try {
-      raw = new URL(req.url || '/', 'http://127.0.0.1').searchParams.get('url') || '';
+      const values = new URL(req.url || '/', 'http://127.0.0.1').searchParams.getAll('url');
+      if (values.length > 1) return null;
+      raw = values[0] || '';
     } catch {
       raw = '';
     }

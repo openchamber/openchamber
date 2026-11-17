@@ -193,6 +193,56 @@ describe('realtime proxy', () => {
     }
   });
 
+  it('rejects an SSE proxy request with a repeated url parameter instead of dialing the first (#2324)', async () => {
+    const upstream = await startSseUpstream();
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
+
+    try {
+      const target = encodeURIComponent(upstream.origin + '/api/global/event');
+      const response = await fetch(origin + '/api/openchamber/realtime-proxy/sse?url=' + target + '&url=' + target, {
+        headers: { Origin: 'openchamber-ui://app' },
+      });
+
+      expect(response.status).toBe(404);
+      expect(upstream.requests).toHaveLength(0);
+    } finally {
+      runtime.stop();
+    }
+  });
+
+  it('closes a WebSocket proxy upgrade with a repeated url parameter instead of dialing the first (#2324)', async () => {
+    let upstreamConnections = 0;
+    const upstreamServer = http.createServer();
+    const upstreamWs = new WebSocketServer({ server: upstreamServer });
+    upstreamWs.on('connection', (socket) => {
+      upstreamConnections += 1;
+      socket.close();
+    });
+    const upstreamOrigin = await listen(upstreamServer);
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstreamOrigin });
+
+    try {
+      const target = encodeURIComponent(upstreamOrigin.replace(/^http:/, 'ws:') + '/api/global/event/ws');
+      const client = new WebSocket(origin.replace(/^http:/, 'ws:') + '/api/openchamber/realtime-proxy/ws?url=' + target + '&url=' + target, {
+        headers: { Origin: 'openchamber-ui://app' },
+      });
+      const closedCode = await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 2_000);
+        client.once('close', (code) => {
+          clearTimeout(timer);
+          resolve(code);
+        });
+      });
+
+      expect(closedCode).toBe(1008);
+      expect(upstreamConnections).toBe(0);
+      client.close();
+      upstreamWs.close();
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('proxies WebSocket upgrades using query params from the raw upgrade request URL', async () => {
     let upstreamRequest = null;
     const upstreamServer = http.createServer();
