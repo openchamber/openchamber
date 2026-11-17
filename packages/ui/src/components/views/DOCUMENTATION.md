@@ -93,6 +93,8 @@ hand drifted into the code, never scrolled, and the click after a release that
 was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
+`DiffView.tsx` composes the modules in `diffView/`; their ownership and
+hook-order invariants are in `diffView/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain
 only dirty paths scoped to runtime and directory; reopening invalidates those
