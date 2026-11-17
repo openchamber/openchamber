@@ -38,11 +38,8 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
         if (['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'].includes(node.tagName)) continue;
         const start = node.position?.start?.offset;
         const authored = start !== undefined && source[start] === '<';
-        // Only checkboxes survive, and the sanitizer disables them.
         if (node.tagName === 'input' && node.properties.type !== 'checkbox') continue;
         for (const key of Object.keys(node.properties)) {
-          // A document's own `<code class="language-x">` keeps its language;
-          // every other author class could reach the app's utility classes.
           const authoredLanguage = authored && key === 'className' && node.tagName === 'code'
             && Array.isArray(node.properties.className)
             && node.properties.className.every((name) => /^language-[\w#+.-]+$/.test(String(name)));
@@ -99,8 +96,6 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
   };
 }
 
-// Harden may normalize or remove custom schemes. Only validated generated
-// values survive the sanitizer and can restore the application navigation URL.
 export function rehypeRestoreMarkdownLinks() {
   return (tree: Root) => {
     function walk(parent: Root | Element): void {

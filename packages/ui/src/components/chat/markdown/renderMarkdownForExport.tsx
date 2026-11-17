@@ -11,10 +11,8 @@ import { loadMarkdownRendererModule } from '../markdownRendererLoader';
 import { useUiBlockComponent } from '../uiBlocks/useUiBlockComponent';
 import { fenceUiBlocks } from '../uiBlocks/taggedBlocks';
 
-/** Offline rendering shares the screen parser, policies and components. */
 export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null; width?: number; theme?: Theme }): Promise<HTMLElement> {
   const { MarkdownContent } = await loadMarkdownRendererModule();
-  // Diagrams draw synchronously below, so their renderer has to be here first.
   if (/mermaid/i.test(text)) await loadMermaidRenderers().catch(() => null);
   const image = options.purpose === 'image';
   const contentText = image ? fenceUiBlocks(text) : text;

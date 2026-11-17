@@ -21,8 +21,6 @@ const screenColors = {
   border: 'var(--interactive-border)',
 };
 
-// Keep the original 100-entry LRU across row remounts and fullscreen previews.
-// CSS variable colors let one geometry result serve every screen theme.
 function renderDiagram(renderers: MermaidRenderers, source: string, mode: 'svg' | 'ascii'): MermaidResult {
   const { renderMermaidASCII, renderMermaidSVG } = renderers;
   const key = `${mode}:${source}`;
@@ -49,8 +47,6 @@ function renderDiagram(renderers: MermaidRenderers, source: string, mode: 'svg' 
   return result;
 }
 
-// The viewer mutates viewBox inside this SVG. Unrelated toolbar/context updates
-// must leave that subtree alone; only a new diagram replaces its markup.
 const MermaidSvg = React.memo(function MermaidSvg({ svg, viewer }: { svg: string; viewer: boolean }) {
   return (
     <div
@@ -74,7 +70,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
   React.useEffect(() => {
     if (renderers || isIncomplete) return;
     let cancelled = false;
-    // A failed load keeps the source on screen, like a diagram that does not parse.
     loadMermaidRenderers().then((loaded) => { if (!cancelled) setRenderers(() => loaded); }, () => {});
     return () => { cancelled = true; };
   }, [renderers, isIncomplete]);
@@ -87,7 +82,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
 
   React.useEffect(() => {
     if (!host.current || !svg || purpose) return;
-    // Button visibility does not disable drag, pinch or modified-wheel zoom.
     const active = createMermaidViewerController(host.current);
     controller.current = active;
     return () => {
@@ -100,8 +94,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
     if (copyTimer.current) clearTimeout(copyTimer.current);
   }, []);
 
-  // Exports need self-contained colors and the original, uncropped geometry.
-  // Resolve only our known palette references; never serialize the panned DOM.
   const exportSvg = () => {
     const colors = {
       'var(--surface-elevated)': theme.colors.surface.elevated,
@@ -182,9 +174,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
   );
 
   return (
-    // The controls sit in a row of their own above the diagram, like a shown
-    // page's: they never cover it, and fading in moves nothing. A surface with
-    // its own header (the full-screen viewer) takes them there instead.
     <div data-streamdown="mermaid-frame" className="group/mermaid">
       {showToolbar && controls.toolbarSlot ? createPortal(buttons, controls.toolbarSlot) : null}
       {showToolbar && !controls.toolbarSlot && (

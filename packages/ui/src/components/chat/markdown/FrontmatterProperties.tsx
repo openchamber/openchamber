@@ -16,7 +16,6 @@ const PropertyValue = ({ value }: { value: FrontmatterValue }) => {
   return <span dir="auto" className="whitespace-pre-wrap">{value.text}</span>;
 };
 
-/** A document's frontmatter above its rendered body: a property table, or the block as written when it is not a YAML mapping. */
 export const FrontmatterProperties = ({ frontmatter }: { frontmatter: Frontmatter }) => {
   if (frontmatter.kind === 'raw') {
     return (

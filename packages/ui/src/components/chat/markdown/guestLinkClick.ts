@@ -15,13 +15,6 @@ import { createTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { useTrackerRegistry } from '@/lib/trackers/registry';
 import { useInputStore } from '@/sync/input-store';
 
-/**
- * Whether one of the app's own link readers claims the URL: a tracker item
- * (built in or an extension tracker), a repository issue or change request, or
- * a commit. Those keep their routes whatever the user's settings make of them,
- * so an extension never takes a link the app already knows. Read at click
- * time, so a chat link renders without these subscriptions.
- */
 export const isBuiltInLink = (url: string): boolean => {
   const descriptors = useSourceControlProviderRegistry.getState().ordered;
   if (createTrackerUrlMatcher(useTrackerRegistry.getState().ordered)(url)) return true;
@@ -29,13 +22,6 @@ export const isBuiltInLink = (url: string): boolean => {
   return commitShaOfUrl(url, descriptors) !== null;
 };
 
-/**
- * Does what the extension declared for a clicked identifier or link: opens it
- * with a `link` item, or puts a chip on the composer. False when the
- * extension is no longer active, or when a clicked `link` cannot open in a
- * panel with no project here, so the click keeps its usual meaning; an
- * identifier has no other meaning, so it says why instead.
- */
 export const runGuestLink = (
   claim: GuestLinkClaim,
   clicked: 'identifier' | 'link',
@@ -49,8 +35,6 @@ export const runGuestLink = (
     useInputStore.getState().setPendingGuestIssue(clampAttachRequest({ providerId: guest.id, id: claim.identifier, title: claim.identifier, url: claim.url }));
     return true;
   }
-  // On the phone only an extension that opted its panel in opens it: for any
-  // other, a link keeps its usual meaning and an identifier says why.
   if (!guestPanelOpensHere(guest)) {
     if (clicked === 'link') return false;
     toast.info(t('chat.chatInput.toast.guestNotOnPhone', { name: guest.name }));

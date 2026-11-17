@@ -23,11 +23,6 @@ type RowSize = { width: number; height: number };
 type RowContext = { report: (id: string, size: RowSize | null) => void; ready: boolean };
 const ImageRowContext = React.createContext<RowContext | null>(null);
 
-// A document preview scrolls inside its own panel, and that panel clips a
-// margin set on the viewport, so its media are measured against the panel.
-// Only an ancestor whose content is taller than itself counts: a table that
-// scrolls sideways also computes `overflow-y: auto`, and as the root it would
-// put every image in it near.
 const scrollParent = (element: HTMLElement): HTMLElement | null => {
   const view = element.ownerDocument.defaultView;
   for (let node = element.parentElement; node && view; node = node.parentElement) {
@@ -53,7 +48,6 @@ function useNearMedia(enabled: boolean, inScroller = false) {
   return { ref, setRef, near: !enabled || near };
 }
 
-/** Whether a `<source media>` query holds now; follows changes such as a resize. */
 function useMediaMatches(query: string | undefined): boolean {
   const subscribe = React.useCallback((onChange: () => void) => {
     if (!query) return () => {};
@@ -68,8 +62,6 @@ function useMediaMatches(query: string | undefined): boolean {
   );
 }
 
-// Whether a document `<picture>` is near the visible part of the preview; its
-// sources have no box of their own, so the picture is watched for them.
 const PictureNearContext = React.createContext<boolean | null>(null);
 
 type MediaLabelState = 'loading' | 'failed';
@@ -114,8 +106,7 @@ function useMediaSource(source: string, active: boolean, video = false) {
   const [loaded, setLoaded] = React.useState<LoadedSource | null>(null);
   const [failed, setFailed] = React.useState<LoadedSource | null>(null);
   React.useLayoutEffect(() => {
-    // Activity can reveal unchanged children without rendering them first.
-    // Remove a revoked document URL before that retained DOM is painted.
+    // external: https://react.dev/reference/react/Activity Activity can reveal retained DOM without rendering unchanged children first; revoked document URLs must be removed before paint.
     if (context?.mode === 'document') {
       setLoaded((current) => current?.signal.aborted ? null : current);
     }
@@ -151,9 +142,7 @@ function useMediaSource(source: string, active: boolean, video = false) {
   };
 }
 
-// Tailwind preflight gives images `height: auto`, which beats the height
-// attribute. A numeric pair (a GitHub screenshot, 1920 x 906) becomes a ratio
-// so the image scales with the column; a height alone stays that height.
+// external: https://tailwindcss.com/docs/preflight#images-are-constrained Tailwind sets image height to auto, overriding the height attribute; numeric dimension pairs supply the aspect ratio.
 const documentImageSize = (width: ImageProps['width'], height: ImageProps['height']): React.CSSProperties => {
   const h = height === undefined ? '' : String(height).trim();
   const w = width === undefined ? '' : String(width).trim();
@@ -195,14 +184,10 @@ function OwnedImage({
   const name = filename(source, alt);
   const assistant = context?.mode === 'assistant';
   const documentMode = context?.mode === 'document';
-  // A document image is read once it comes near the visible part of the
-  // preview; inside a `<picture>` the picture is watched instead.
   const pictureNear = React.useContext(PictureNearContext);
   const { ref, setRef, near: ownNear } = useNearMedia(assistant || documentMode && pictureNear === null, documentMode);
   const near = pictureNear ?? ownNear;
   const owner = context?.owner;
-  // Only assistant parts open the message gallery; tool output, reasoning and
-  // user text draw a plain picture, as before.
   const gallery = assistant && Boolean(context?.onShowPopup) && !linked;
   React.useEffect(() => owner?.register(source), [owner, source]);
   const active = Boolean(context && near && (!assistant || context.settled));
@@ -218,7 +203,6 @@ function OwnedImage({
   React.useEffect(() => {
     const element = ref.current;
     if (!owner || !drawn || !element || !gallery) return;
-    // A data URL holds its bytes and never expires, so the viewer needs no second read.
     return owner.addGallery({ source, filename: name, element, resolve: () => url?.startsWith('data:') ? Promise.resolve(url) : owner.resolve(source, false, true), load: () => owner.load(source) });
   }, [owner, drawn, source, name, ref, gallery, url]);
 
@@ -232,7 +216,6 @@ function OwnedImage({
       title={title}
       width={width}
       height={height}
-      // A document image keeps its box until its address arrives; without one it would show its alt text.
       className={cn(documentMode ? className : 'block h-auto max-h-[30rem] w-auto max-w-full object-contain', documentMode ? !url && 'invisible' : !drawn && 'hidden')}
       style={documentMode ? { ...style, ...documentImageSize(width, height) } : { ...style, width: row?.ready ? '100%' : style?.width }}
       data-oc-media-source={copySource(source)}
@@ -327,8 +310,6 @@ export function MarkdownSource({ node: _node, srcSet, media, ...props }: React.C
   const pictureNear = React.useContext(PictureNearContext);
   const scheme = context?.documentAssets?.colorScheme;
   const themed = scheme ? media?.replace(/\(\s*prefers-color-scheme\s*:\s*(light|dark)\s*\)/gi, (_feature, value: string) => value.toLowerCase() === scheme ? '(min-width: 0px)' : '(max-width: -1px)') : media;
-  // The browser never shows a source whose media does not hold, the other
-  // theme's for one, so its files are read only once it does.
   const matches = useMediaMatches(context?.mode === 'document' ? themed : undefined);
   const resolved = useResolvedSrcset(srcSet, context?.mode === 'document' && pictureNear !== false && matches);
   if (context?.mode !== 'document') return null;
@@ -415,8 +396,6 @@ export function MarkdownParagraph({ node, children, ...props }: React.ComponentP
   const bareText = bare?.type === 'element' && bare.children.length === 1 && bare.children[0]?.type === 'text' ? bare.children[0].value : '';
   const count = nodes?.length ?? 0;
   const onlyImages = count > 1 && nodes?.every((child) => child.type === 'element' && child.tagName === 'img');
-  // Equal-height image rows and bare clip URLs as players belong to assistant
-  // text and documents respectively, as they did before the port.
   const mode = useMarkdownMedia()?.mode;
   const ready = Boolean(mode === 'assistant' && onlyImages && sizes.size === count);
   const value = React.useMemo(() => ({ report, ready }), [report, ready]);
