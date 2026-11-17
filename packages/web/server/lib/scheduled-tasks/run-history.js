@@ -73,8 +73,18 @@ export const createScheduledTaskRunHistory = ({
       if (length > 0) fs.readSync(fd, buffer, 0, length, readStart);
       let raw = buffer.toString('utf8');
       if (readStart > 0) {
-        const firstNewline = raw.indexOf('\n');
-        raw = firstNewline === -1 ? '' : raw.slice(firstNewline + 1);
+        // Drop the first fragment only when the window truly begins
+        // mid-line: when the byte before readStart is a newline, the
+        // window starts exactly on a line boundary and its first row
+        // is complete and must be kept (#2267). A 0x0A byte never
+        // occurs inside a multi-byte UTF-8 sequence, so the byte
+        // check is exact.
+        const prevByte = Buffer.alloc(1);
+        fs.readSync(fd, prevByte, 0, 1, readStart - 1);
+        if (prevByte[0] !== 0x0a) {
+          const firstNewline = raw.indexOf('\n');
+          raw = firstNewline === -1 ? '' : raw.slice(firstNewline + 1);
+        }
       }
       for (const line of raw.split('\n')) {
         const trimmed = line.trim();
