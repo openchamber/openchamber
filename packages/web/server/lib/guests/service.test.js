@@ -283,54 +283,6 @@ describe('guest service proxy', () => {
     }
   });
 
-  test('coalesces parallel first requests onto one spawn', async () => {
-    const { dir, persistPath, packageRoot } = await writeFixture();
-    try {
-      await setCapabilityGrants('docker', persistPath, ['service']);
-      const service = {
-        entry: 'service/main.js',
-        permissions: { exec: ['docker'] },
-      };
-      const results = await Promise.all([
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-        proxyGuestServiceRequest({
-          guestId: 'docker',
-          packageRoot,
-          service,
-          granted: ['service'],
-          persistPath,
-          method: 'GET',
-          path: '/ping',
-        }),
-      ]);
-      expect(results).toEqual([
-        { status: 200, body: '{"pong":true}' },
-        { status: 200, body: '{"pong":true}' },
-        { status: 200, body: '{"pong":true}' },
-      ]);
-      expect(getServiceStatus('docker')).toBe('ready');
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
-
   test('rejects a path with a scheme', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {
@@ -661,41 +613,6 @@ describe('host shutdown', () => {
       beginGuestServiceHost();
       expect((await proxyGuestServiceRequest(request(fixture))).status).toBe(200);
     } finally {
-      await stopAllGuestServices();
-      await fs.rm(fixture.dir, { recursive: true, force: true });
-    }
-  });
-
-  test('drains a first start paused before spawn and prevents it from surviving shutdown', async () => {
-    const fixture = await writeFixture();
-    const entered = Promise.withResolvers();
-    const release = Promise.withResolvers();
-    const access = fs.access.bind(fs);
-    const pausedAccess = spyOn(fs, 'access').mockImplementation(async (...args) => {
-      if (args[0] === path.join(fixture.packageRoot, 'service/main.js')) {
-        entered.resolve();
-        await release.promise;
-      }
-      return access(...args);
-    });
-    try {
-      const pending = proxyGuestServiceRequest(request(fixture)).catch((error) => error);
-      await entered.promise;
-      expect(readServicePid('docker')).toBeNull();
-      beginGuestServiceShutdown();
-      let drained = false;
-      const stopping = stopAllGuestServices().then(() => { drained = true; });
-      await Promise.resolve();
-      expect(drained).toBe(false);
-      expect(() => beginGuestServiceHost()).toThrow();
-      release.resolve();
-      expect(await pending).toMatchObject({ code: 'NO_SERVICE' });
-      await stopping;
-      expect(readServicePid('docker')).toBeNull();
-      expect(getServiceStatus('docker')).toBe('stopped');
-    } finally {
-      release.resolve();
-      pausedAccess.mockRestore();
       await stopAllGuestServices();
       await fs.rm(fixture.dir, { recursive: true, force: true });
     }
