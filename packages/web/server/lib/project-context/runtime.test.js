@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
-import { CONTEXT_FILE_READ_MAX_BYTES, createProjectContextRuntime, parsePlanMarkdown } from './runtime.js';
+import { CONTEXT_FILE_READ_MAX_BYTES, PROJECT_TODO_ID_MAX_LENGTH, createProjectContextRuntime, parsePlanMarkdown } from './runtime.js';
 import { PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 
 const PROJECT_ID = 'path_dGVzdA';
@@ -158,6 +158,32 @@ describe('atomic todo mutations', () => {
     await fsPromises.writeFile(contextPath(), '{ malformed', 'utf8');
     await expect(guarded.createTodo(PROJECT_ID, { text: 'new' })).rejects.toThrow('malformed');
     expect(changes).toEqual([]);
+  });
+
+  test('rejects an oversized todo id and writes nothing (#2113)', async () => {
+    const oversizedId = 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH + 1);
+    await expect(runtime.createTodo(PROJECT_ID, { text: 'new', id: oversizedId })).rejects.toMatchObject({ status: 400 });
+    expect((await runtime.readContext(PROJECT_ID)).todos).toEqual([]);
+    const atBound = await runtime.createTodo(PROJECT_ID, { text: 'new', id: 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH) });
+    expect(atBound.todo.id).toHaveLength(PROJECT_TODO_ID_MAX_LENGTH);
+  });
+
+  test('repeated oversized-id creates cannot brick the stored context (#2113)', async () => {
+    const { todo } = await runtime.createTodo(PROJECT_ID, { text: 'keep' });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(runtime.createTodo(PROJECT_ID, { text: 'x', id: 'y'.repeat(900_000) })).rejects.toMatchObject({ status: 400 });
+    }
+    const context = await runtime.readContext(PROJECT_ID);
+    expect(context.todos.map((entry) => entry.id)).toEqual([todo.id]);
+  });
+
+  test('bulk save drops stored todos whose id exceeds the bound (#2113)', async () => {
+    const saved = await runtime.saveTodos(PROJECT_ID, [
+      { id: 'ok', text: 'keep', createdAt: 1 },
+      { id: 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH + 1), text: 'drop', createdAt: 1 },
+    ]);
+    expect(saved.todos.map((entry) => entry.id)).toEqual(['ok']);
+    expect((await runtime.readContext(PROJECT_ID)).todos.map((entry) => entry.id)).toEqual(['ok']);
   });
 });
 

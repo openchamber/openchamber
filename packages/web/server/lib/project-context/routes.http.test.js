@@ -110,6 +110,20 @@ describe('todo item routes', () => {
     await request(app).post(`${BASE}/todos`).send({ id: 3, text: 'C' }).expect(400);
   }));
 
+  it('rejects oversized todo ids on create and bulk save, keeping the context readable (#2113)', () => withRuntime(async ({ app }) => {
+    const oversizedId = 'x'.repeat(129);
+    await request(app).post(`${BASE}/todos`).send({ id: oversizedId, text: 'A' }).expect(400);
+    await request(app).put(`${BASE}/todos`).send({ todos: [{ id: oversizedId, text: 'A' }] }).expect(400);
+    // The #2113 repro: individually valid requests whose ids alone would
+    // push context.json past the 8 MiB read cap.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await request(app).post(`${BASE}/todos`).send({ id: 'y'.repeat(900_000), text: 'x' }).expect(400);
+    }
+    const created = await request(app).post(`${BASE}/todos`).send({ id: 'client-1', text: 'A' }).expect(201);
+    expect(created.body.todos.map((todo) => todo.id)).toEqual(['client-1']);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['client-1']);
+  }));
+
   it('answers a missing todo with 404 and malformed input with 400, writing nothing', () => withRuntime(async ({ app }) => {
     await request(app).delete(`${BASE}/todos/gone`).expect(404);
     await request(app).patch(`${BASE}/todos/gone`).send({ completed: true }).expect(404);
