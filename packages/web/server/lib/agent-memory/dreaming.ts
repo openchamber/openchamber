@@ -1,6 +1,101 @@
 import { z } from 'zod';
 
-import { asNonEmptyString, isRecord } from '../shared/guards.js';
+import { asNonEmptyString } from '../shared/guards.js';
+import { isMemoryRecord as isRecord } from './contracts.js';
+import type { MemoryChangedEvent, MemoryEntry, MemoryScope, MemoryTarget } from './contracts.js';
+import type { AgentMemoryRuntime, DreamState } from './runtime.js';
+import type { MemoryIndexMeasurement } from '../session-knowledge/contracts.js';
+import type { createHiddenSessionRegistry } from '../opencode/hidden-sessions.js';
+
+interface DreamProject {
+  id?: unknown;
+  path?: unknown;
+  defaultModel?: unknown;
+  defaultAgent?: unknown;
+  defaultVariant?: unknown;
+}
+
+interface DreamSettings {
+  projects?: unknown;
+  activeProjectId?: unknown;
+  agentMemoryDreamingModel?: unknown;
+  agentMemoryDreamingVariant?: unknown;
+  agentMemoryToolEnabled?: unknown;
+  agentMemoryDreamingEnabled?: unknown;
+  defaultModel?: unknown;
+  defaultAgent?: unknown;
+  defaultVariant?: unknown;
+}
+
+interface DreamModel {
+  providerID: string;
+  id: string;
+  variant?: string;
+}
+
+interface DreamCandidate {
+  project: DreamProject;
+  directory: string;
+  projectId: string;
+  entries: MemoryEntry[] | null;
+  state: DreamState;
+}
+
+interface DreamPass extends DreamCandidate {
+  entries: MemoryEntry[];
+  includeProject: boolean;
+  includeGlobal: boolean;
+  global: MemoryEntry[];
+}
+
+interface DreamPassTarget {
+  key: MemoryScope;
+  target: MemoryTarget;
+}
+
+interface DreamDependencies {
+  agentMemoryRuntime: AgentMemoryRuntime;
+  readSettings: () => Promise<DreamSettings | null>;
+  resolveProjectId: (directory: string) => Promise<string>;
+  measureIndex: (entries: { global: MemoryEntry[]; project: MemoryEntry[] }) => MemoryIndexMeasurement;
+  hiddenSessions: Pick<ReturnType<typeof createHiddenSessionRegistry>, 'has' | 'add'>;
+  buildOpenCodeUrl: (pathname: string, directory: string) => string | URL;
+  getOpenCodeAuthHeaders: () => DreamRequestHeaders;
+  emitMemoryChanged?: (event: MemoryChangedEvent) => void;
+  isDirectoryTrusted?: (directory: string) => boolean | Promise<boolean>;
+  resolveSessionDefaults: (input: { settings: DreamSettings | null; project: DreamProject }) => {
+    providerID: string | null;
+    modelID: string | null;
+    variant?: string | null;
+  };
+  isAutoModel?: (model: { providerID: string; modelID: string }) => boolean;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  setTimer?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+  passTimeoutMs?: number;
+  pollIntervalMs?: number;
+  requestTimeoutMs?: number;
+  log?: (message: string) => void;
+}
+
+interface DreamSessionRequest {
+  title: string;
+  location: { directory: string };
+  metadata: { hidden: boolean; openchamber: { kind: string } };
+  permissions: typeof DREAM_PERMISSIONS;
+  model?: DreamModel;
+}
+
+interface DreamRequestOptions {
+  directory?: string;
+  body?: DreamSessionRequest | { text: string };
+  signal?: AbortSignal;
+}
+
+interface DreamRequestHeaders {
+  [name: string]: string;
+}
 
 const DREAM_SESSION_KIND = 'memory-dream';
 
@@ -31,14 +126,14 @@ const DREAM_PERMISSIONS = [
   { action: 'shell', resource: 'git show*', effect: 'allow' },
 ]
 
-const splitModel = (value) => {
+const splitModel = (value: string | null): DreamModel | null => {
   const text = asNonEmptyString(value);
   const slash = text ? text.indexOf('/') : -1;
   if (!text || slash <= 0 || slash === text.length - 1) return null;
   return { providerID: text.slice(0, slash), id: text.slice(slash + 1) };
 };
 
-const describeEntries = (entries) => entries.map((entry) => JSON.stringify({
+const describeEntries = (entries: MemoryEntry[]) => entries.map((entry) => JSON.stringify({
   memoryId: entry.id,
   type: entry.type,
   title: entry.title,
@@ -47,7 +142,12 @@ const describeEntries = (entries) => entries.map((entry) => JSON.stringify({
   flagged: entry.flagged === true,
 })).join('\n');
 
-export const buildDreamPrompt = ({ directory, global, project, index }) => {
+export const buildDreamPrompt = ({ directory, global, project, index }: {
+  directory: string;
+  global: MemoryEntry[] | null | undefined;
+  project: MemoryEntry[] | null | undefined;
+  index: MemoryIndexMeasurement;
+}) => {
   const sections = [];
   if (project) sections.push(`## Project memory (scope "project", project at ${directory})\n\n${describeEntries(project) || '(empty)'}`);
   if (global) sections.push(`## The user's memory (scope "global")\n\n${describeEntries(global) || '(empty)'}`);
@@ -104,24 +204,24 @@ const mergedReportSchema = z.object({
   toDocs: z.array(z.string().min(1)).catch([]),
 });
 
-const readMergedCount = (messages) => {
+const readMergedCount = (messages: z.infer<typeof messagesSchema>): z.infer<typeof mergedReportSchema> => {
   for (const message of messages) {
     if (message.type !== 'assistant') continue;
     for (const part of message.content) {
       const match = part.type === 'text' && part.text ? /DREAM\s*(\{.*\})/.exec(part.text) : null;
-      if (!match) continue;
+      if (!match || match[1] === undefined) continue;
       try {
         const report = mergedReportSchema.safeParse(JSON.parse(match[1]));
         if (report.success) return report.data;
       } catch {
-        // A malformed line counts as no report.
+        continue;
       }
     }
   }
   return { project: 0, global: 0, toDocs: [] };
 };
 
-const readTurnFailure = (messages) => {
+const readTurnFailure = (messages: z.infer<typeof messagesSchema>) => {
   const newestIdle = messages.find((message) => message.type === 'idle');
   if (newestIdle?.outcome === 'failed') return newestIdle.error?.message || 'The model run failed';
   const lastAnswer = messages.find((message) => message.type === 'assistant');
@@ -130,7 +230,7 @@ const readTurnFailure = (messages) => {
   return null;
 };
 
-export const diffDream = (before, after) => {
+export const diffDream = (before: MemoryEntry[], after: MemoryEntry[]) => {
   const afterById = new Map(after.map((entry) => [entry.id, entry]));
   let deleted = 0;
   let rewritten = 0;
@@ -142,7 +242,7 @@ export const diffDream = (before, after) => {
   return { deleted, rewritten };
 };
 
-export const createMemoryDreaming = (deps) => {
+export const createMemoryDreaming = (deps: DreamDependencies) => {
   const {
     agentMemoryRuntime,
     readSettings,
@@ -165,16 +265,16 @@ export const createMemoryDreaming = (deps) => {
     log = (message) => console.log(`[memory-dreaming] ${message}`),
   } = deps;
 
-  let timer = null;
-  let running = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let running: Promise<void> | null = null;
   let stopped = true;
   let leftoversRemoved = false;
 
-  const request = async (method, pathname, { directory, body, signal } = {}) => {
+  const request = async (method: string, pathname: string, { directory, body, signal }: DreamRequestOptions = {}) => {
     const timeout = AbortSignal.timeout(requestTimeoutMs);
-    const headers = { ...getOpenCodeAuthHeaders() };
+    const headers: DreamRequestHeaders = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
-    const init = { method, headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
+    const init: RequestInit = { method, headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
     if (body) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(body);
@@ -182,43 +282,45 @@ export const createMemoryDreaming = (deps) => {
     const response = await fetchImpl(buildOpenCodeUrl(pathname, ''), init);
     if (!response.ok) throw new Error(`${method} ${pathname} answered ${response.status}`);
     const text = await response.text();
-    return text ? JSON.parse(text) : null;
+    const answer: unknown = text ? JSON.parse(text) : null;
+    return answer;
   };
 
   const activeSessionIds = async () => {
     const answer = await request('GET', '/api/session/active');
-    const data = isRecord(answer?.data) ? answer.data : isRecord(answer) ? answer : {};
+    const data = isRecord(answer) && isRecord(answer.data) ? answer.data : isRecord(answer) ? answer : {};
     return Object.keys(data).filter((id) => !hiddenSessions.has(id));
   };
 
   const removeLeftovers = async () => {
     if (leftoversRemoved) return;
-    let cursor = null;
+    let cursor: string | null = null;
     let complete = true;
     for (let page = 0; page < LEFTOVER_PAGES; page += 1) {
       const answer = await request('GET', `/api/session?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
-      const sessions = Array.isArray(answer?.data) ? answer.data : Array.isArray(answer) ? answer : [];
+      const sessions: unknown[] = isRecord(answer) && Array.isArray(answer.data) ? answer.data : Array.isArray(answer) ? answer : [];
       for (const session of sessions) {
-        if (session?.metadata?.openchamber?.kind !== DREAM_SESSION_KIND || hiddenSessions.has(session.id)) continue;
+        if (!isRecord(session) || !isRecord(session.metadata) || !isRecord(session.metadata.openchamber)
+          || session.metadata.openchamber.kind !== DREAM_SESSION_KIND || hiddenSessions.has(session.id)) continue;
         hiddenSessions.add(session.id);
-        await request('DELETE', `/api/session/${encodeURIComponent(session.id)}`).catch(() => { complete = false; });
+        await request('DELETE', `/api/session/${encodeURIComponent(String(session.id))}`).catch(() => { complete = false; });
       }
-      cursor = asNonEmptyString(answer?.cursor?.next);
+      cursor = asNonEmptyString(isRecord(answer) && isRecord(answer.cursor) ? answer.cursor.next : undefined);
       if (!cursor) break;
     }
     leftoversRemoved = complete;
   };
 
-  const changedSince = (entries, lastRunAt) => entries.filter((entry) => entry.updatedAt > (lastRunAt ?? 0)).length;
+  const changedSince = (entries: MemoryEntry[], lastRunAt: number | null) => entries.filter((entry) => entry.updatedAt > (lastRunAt ?? 0)).length;
 
-  const scopeIsDue = (state, entries, overflows) => {
+  const scopeIsDue = (state: DreamState, entries: MemoryEntry[], overflows: boolean) => {
     if (entries.length === 0) return false;
     const wait = state.record?.status === 'failed' ? RETRY_AFTER_FAILURE_MS : DUE_AFTER_MS;
     if (state.lastRunAt !== null && now() - state.lastRunAt < wait) return false;
     return overflows || changedSince(entries, state.lastRunAt) >= MIN_CHANGED_ENTRIES;
   };
 
-  const readScopeEntries = async (target, label) => {
+  const readScopeEntries = async (target: MemoryTarget, label: string) => {
     try {
       return (await agentMemoryRuntime.read(target)).entries;
     } catch (caught) {
@@ -227,15 +329,16 @@ export const createMemoryDreaming = (deps) => {
     }
   };
 
-  const findDuePass = async (settings) => {
-    const projects = Array.isArray(settings?.projects) ? settings.projects : [];
+  const findDuePass = async (settings: DreamSettings | null): Promise<DreamPass | null> => {
+    const projects: unknown[] = Array.isArray(settings?.projects) ? settings.projects : [];
     const [globalEntries, globalState] = await Promise.all([
       readScopeEntries({ scope: 'global' }, 'global memory'),
       agentMemoryRuntime.readDreamState({ scope: 'global' }),
     ]);
     const global = globalEntries ?? [];
-    const candidates = [];
+    const candidates: DreamCandidate[] = [];
     for (const project of projects) {
+      if (!isRecord(project)) continue;
       const directory = asNonEmptyString(project?.path);
       if (!directory || !(await isDirectoryTrusted(directory))) continue;
       const projectId = await resolveProjectId(directory).catch(() => '');
@@ -254,18 +357,19 @@ export const createMemoryDreaming = (deps) => {
       if (candidate.entries === null) continue;
       const overflows = measureIndex({ global, project: candidate.entries }).omitted > 0;
       if (scopeIsDue(candidate.state, candidate.entries, overflows)) {
-        return { ...candidate, includeProject: true, includeGlobal: globalDue, global };
+        return { ...candidate, entries: candidate.entries, includeProject: true, includeGlobal: globalDue, global };
       }
     }
     if (globalDue && candidates.length > 0) {
       const active = candidates.find((candidate) => candidate.project?.id === settings?.activeProjectId) ?? candidates[candidates.length - 1];
+      if (!active) return null;
       return { ...active, entries: active.entries ?? [], includeProject: false, includeGlobal: true, global };
     }
     return null;
   };
 
-  const resolveModel = (settings, project) => {
-    const chosen = splitModel(settings?.agentMemoryDreamingModel);
+  const resolveModel = (settings: DreamSettings | null, project: DreamProject) => {
+    const chosen = splitModel(asNonEmptyString(settings?.agentMemoryDreamingModel));
     if (chosen) {
       const variant = asNonEmptyString(settings?.agentMemoryDreamingVariant);
       if (variant) chosen.variant = variant;
@@ -274,28 +378,28 @@ export const createMemoryDreaming = (deps) => {
     const defaults = resolveSessionDefaults({ settings, project });
     if (!defaults.providerID || !defaults.modelID) return null;
     if (isAutoModel({ providerID: defaults.providerID, modelID: defaults.modelID })) return null;
-    const model = { providerID: defaults.providerID, id: defaults.modelID };
+    const model: DreamModel = { providerID: defaults.providerID, id: defaults.modelID };
     if (defaults.variant) model.variant = defaults.variant;
     return model;
   };
 
-  const runPass = async (settings, pass) => {
+  const runPass = async (settings: DreamSettings | null, pass: DreamPass) => {
     const { directory, projectId, includeProject, includeGlobal } = pass;
-    const targets = [
-      ...(includeProject ? [{ key: 'project', target: { scope: 'project', projectId } }] : []),
-      ...(includeGlobal ? [{ key: 'global', target: { scope: 'global' } }] : []),
+    const targets: DreamPassTarget[] = [
+      ...(includeProject ? [{ key: 'project', target: { scope: 'project', projectId } }] satisfies DreamPassTarget[] : []),
+      ...(includeGlobal ? [{ key: 'global', target: { scope: 'global' } }] satisfies DreamPassTarget[] : []),
     ];
-    const before = {};
+    const before: Partial<Record<MemoryScope, MemoryEntry[]>> = {};
     for (const { key, target } of targets) before[key] = (await agentMemoryRuntime.read(target)).entries;
 
-    let sessionID = null;
+    let sessionID: string | null = null;
     const model = resolveModel(settings, pass.project);
-    let error = null;
-    let merged = { project: 0, global: 0, toDocs: [] };
+    let error: string | null = null;
+    let merged: z.infer<typeof mergedReportSchema> = { project: 0, global: 0, toDocs: [] };
     const controller = new AbortController();
     const timeout = setTimer(() => controller.abort(), passTimeoutMs);
     try {
-      const session = {
+      const session: DreamSessionRequest = {
         title: 'Memory dreaming',
         location: { directory },
         metadata: { hidden: true, openchamber: { kind: DREAM_SESSION_KIND } },
@@ -320,10 +424,10 @@ export const createMemoryDreaming = (deps) => {
       const promptedAt = now();
       let seenRunning = false;
       for (;;) {
-        await new Promise((resolve) => setTimer(resolve, pollIntervalMs));
+        await new Promise<void>((resolve) => setTimer(resolve, pollIntervalMs));
         if (controller.signal.aborted) throw new Error('aborted');
         const active = await request('GET', '/api/session/active', { signal: controller.signal });
-        const data = isRecord(active?.data) ? active.data : isRecord(active) ? active : {};
+        const data = isRecord(active) && isRecord(active.data) ? active.data : isRecord(active) ? active : {};
         if (data[sessionID]) seenRunning = true;
         else if (seenRunning || now() - promptedAt > START_GRACE_MS) break;
       }
@@ -348,7 +452,9 @@ export const createMemoryDreaming = (deps) => {
     const finishedAt = now();
     for (const { key, target } of targets) {
       const after = (await agentMemoryRuntime.read(target)).entries;
-      const { deleted, rewritten } = diffDream(before[key], after);
+      const previous = before[key];
+      if (!previous) throw new Error('Missing memory snapshot');
+      const { deleted, rewritten } = diffDream(previous, after);
       const mergedHere = Math.min(merged[key], deleted);
       const changed = deleted + rewritten > 0;
       await agentMemoryRuntime.recordDream(target, {
@@ -362,7 +468,7 @@ export const createMemoryDreaming = (deps) => {
           error,
           toDocs: key === 'project' ? merged.toDocs.filter((id) => after.some((entry) => entry.id === id)) : [],
         },
-        snapshot: changed ? before[key] : null,
+        snapshot: changed ? previous : null,
         after: changed ? after.map((entry) => ({ id: entry.id, updatedAt: entry.updatedAt })) : null,
       });
       emitMemoryChanged(key === 'project' ? { scope: 'project', projectId } : { scope: 'global' });
@@ -371,7 +477,7 @@ export const createMemoryDreaming = (deps) => {
     return { error };
   };
 
-  const schedule = (ms) => {
+  const schedule = (ms: number) => {
     if (stopped) return;
     if (timer) clearTimer(timer);
     timer = setTimer(() => {
@@ -381,7 +487,7 @@ export const createMemoryDreaming = (deps) => {
     timer?.unref?.();
   };
 
-  const check = async () => {
+  const check = async (): Promise<void> => {
     if (running) return running;
     running = (async () => {
       let next = CHECK_INTERVAL_MS;
