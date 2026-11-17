@@ -121,6 +121,50 @@ session for it, since a scan's sessions are its lenses.
 
 ## Bot-managed tasks
 
+Separated servers use `mode: 'bots-only'` in the owner and
+`mode: 'exclude-bots'` in the agent. The default `all` retains single-account
+behavior. Filtering happens on startup, project refresh and manual admission,
+before scheduling or claiming any occurrence. The persisted claim predicate also
+checks ownership, including a manual run whose cached row changed owner on disk.
+`botId` or `botManaged` marks a row as unavailable to the agent. The owner only
+admits a row with a bot ID and no loop or suggested-scan ownership.
+
+The owner does not discover loops, construct existing-session scheduling,
+recover ordinary worktree cleanup journals, or contact OpenCode for scheduled
+Bot dispatch. Ordinary tasks and suggested scans remain in the agent. No
+ordinary session or worktree cleanup belongs to owner `bots-only` startup.
+
+`createOwnerBotConfig({ projectsDirPath, resolveProject?, fsImpl?, now? })` from
+`../bots/owner-config.js` supplies the owner persistence dependency without
+constructing `createProjectConfigRuntime` or decoding a project ID into a path.
+It uses the existing `<projectsDir>/<projectConfigFileStemOf(projectId)>.json`
+layout. An injected `resolveProject(id)` returns registered project metadata with
+the same canonical ID; a missing or different ID refuses the operation. It must
+resolve from configured metadata without reading the checkout.
+Its API is `readBotsSection`, `updateBotsSection`,
+`listScheduledTasks`, `upsertScheduledTask`, `deleteScheduledTask`,
+`updateScheduledTaskState`, `updateScheduledTaskStateIf`, and `filePathFor`.
+The section methods match `createBotsConfig`; the row methods match the existing
+scheduler and Bot scheduler adapters. Lists return only Bot rows. Mutations
+cannot take over or delete an ordinary row. Unknown document and task fields,
+existing state and canonical IDs survive unrelated writes. Malformed data and
+`<stem>.json.bots-migration-blocked` refuse reads and writes. Missing files are
+empty; write failures preserve the prior file. Each operation takes the existing
+cross-process file lock and writes a unique same-directory temporary file with
+mode `0600` before rename.
+
+### Why owner Bot config has a local adapter
+
+The ordinary project config runtime also reads shared setup from the checkout.
+The separated owner cannot open project files. A local adapter keeps the existing
+personal-config format and occurrence protocol within the owner's storage.
+
+### Why runtime modes filter before claims
+
+An absent `runBot` hook only rejects after a timer has claimed and changed a Bot
+row. Filtering at refresh and admission prevents the agent from owning a Bot
+occurrence and prevents owner startup from recovering ordinary cleanup work.
+
 `botTaskFor` in `../bots/events.js` projects each bot into a row with
 `id: bot-<botId>`, `botId` and `botManaged: true`. Project config normalization
 returns both ownership fields on reads and writes. A bot ID establishes managed

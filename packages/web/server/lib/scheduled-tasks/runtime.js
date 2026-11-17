@@ -296,11 +296,19 @@ export const createScheduledTasksRuntime = (deps) => {
     runSuggestedScan = null,
     // `(projectID, botId, occurrence) => { items, skipped }` from the bot runtime.
     runBot = null,
+    mode = 'all',
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
   } = deps;
+  if (!['all', 'bots-only', 'exclude-bots'].includes(mode)) throw new Error('Invalid scheduled task runtime mode');
+  const acceptsTask = (task) => {
+    const botOwned = Boolean(task?.botId || task?.botManaged);
+    if (mode === 'exclude-bots') return !botOwned;
+    if (mode === 'bots-only') return Boolean(task?.botId) && !task.suggestedScan && !task.loopFile;
+    return true;
+  };
 
   // Every OpenCode route lives under /api in v2 and the client appends it, so
   // the client only wants the origin. Directory scoping is a request header.
@@ -318,7 +326,7 @@ export const createScheduledTasksRuntime = (deps) => {
     },
   });
 
-  const existingSessionTasks = messageQueueRuntime ? createExistingSessionTasks({
+  const existingSessionTasks = mode !== 'bots-only' && messageQueueRuntime ? createExistingSessionTasks({
     projectConfigRuntime, messageQueueRuntime, createClient: createScopedClient,
     listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent,
   }) : null;
@@ -432,6 +440,13 @@ export const createScheduledTasksRuntime = (deps) => {
     if (!taskMap) {
       return;
     }
+    if (!acceptsTask(nextTask)) {
+      const key = buildTaskKey(projectID, nextTask.id);
+      clearTimerForKey(key);
+      queuedTaskKeys.delete(key);
+      taskMap.delete(nextTask.id);
+      return;
+    }
     taskMap.set(nextTask.id, nextTask);
   };
 
@@ -444,10 +459,13 @@ export const createScheduledTasksRuntime = (deps) => {
       nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
       updatedAt: Date.now(),
     };
-    const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
+    const result = mode !== 'all'
+      ? await projectConfigRuntime.updateScheduledTaskStateIf(projectID, task.id,
+        (candidate) => acceptsTask(candidate) && candidate.botId === task.botId, statePatch)
+      : await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
     if (result.task) {
       updateInMemoryTask(projectID, result.task);
-      if (result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
+      if (acceptsTask(result.task) && result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
         scheduleTask(projectID, result.task.id, result.task.state.nextRunAt);
       }
     }
@@ -488,7 +506,7 @@ export const createScheduledTasksRuntime = (deps) => {
     let tasks;
     // The chats root is not a repository: user-scope loops already run once
     // per project, and discovering them here would add one more run each.
-    if (projectPath && !isChatsScope(projectID)) {
+    if (mode !== 'bots-only' && projectPath && !isChatsScope(projectID)) {
       // Reconcile `.agents/loops` definitions with the persisted task list:
       // loop files are authoritative while present, removed files unschedule
       // their task, and runtime state is preserved (see loops.js).
@@ -497,6 +515,7 @@ export const createScheduledTasksRuntime = (deps) => {
     } else {
       tasks = await projectConfigRuntime.listScheduledTasks(projectID);
     }
+    tasks = tasks.filter(acceptsTask);
 
     setProjectTasks(projectID, tasks);
 
@@ -963,7 +982,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
   const rearmFromTaskOrCompute = (projectID, taskID, fallbackTask, fromMs) => {
     const latest = (tasksByProject.get(projectID)?.get(taskID)) || fallbackTask;
-    if (!latest?.enabled) {
+    if (!latest?.enabled || !acceptsTask(latest)) {
       return;
     }
     const base = Number.isFinite(fromMs) ? fromMs : Date.now();
@@ -981,7 +1000,7 @@ export const createScheduledTasksRuntime = (deps) => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
     // Manual runNow runs paused tasks too; only scheduled dispatches skip them.
-    if (!task || (reason !== 'manual' && !task.enabled)) {
+    if (!task || !acceptsTask(task) || (reason !== 'manual' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
 
@@ -1048,7 +1067,7 @@ export const createScheduledTasksRuntime = (deps) => {
         // persists across days, so a second-instance sync inside TASK_DUE_SLACK_MS
         // would otherwise suppress every armed occurrence after the first.
         const canClaimOccurrence = (candidate) => {
-          if (!candidate?.enabled) {
+          if (!candidate?.enabled || !acceptsTask(candidate) || candidate.botId !== task.botId) {
             return false;
           }
           const lastScheduledFor = candidate.state?.lastScheduledFor;
@@ -1097,6 +1116,7 @@ export const createScheduledTasksRuntime = (deps) => {
                 projectID,
                 taskID,
                 (candidate) => {
+                  if (!acceptsTask(candidate) || candidate.botId !== task.botId) return false;
                   const lastScheduledFor = candidate.state?.lastScheduledFor;
                   if (
                     Number.isFinite(lastScheduledFor)
@@ -1153,16 +1173,21 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       } else {
         try {
-          const startResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
+          const patch = {
             lastRunAt: runStartedAt,
             lastStatus: 'running',
             lastError: undefined,
             lastSessionId: undefined,
             updatedAt: runStartedAt,
-          });
+          };
+          const startResult = mode !== 'all'
+            ? await projectConfigRuntime.updateScheduledTaskStateIf(projectID, taskID,
+              (candidate) => acceptsTask(candidate) && candidate.botId === task.botId, patch)
+            : await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, patch);
           if (startResult.task) {
             updateInMemoryTask(projectID, startResult.task);
           }
+          if (mode !== 'all' && !startResult.updated) return { ok: false, skipped: true };
         } catch (startError) {
           const message = safeErrorMessage(startError);
           logger.warn?.('[ScheduledTasks] manual start state write failed', {
@@ -1469,7 +1494,7 @@ export const createScheduledTasksRuntime = (deps) => {
     started = true;
     let cleanups = [];
     try {
-      cleanups = await projectConfigRuntime.listScheduledWorktreeCleanups?.() ?? [];
+      if (mode !== 'bots-only') cleanups = await projectConfigRuntime.listScheduledWorktreeCleanups?.() ?? [];
     } catch (error) {
       logger.warn?.('[ScheduledTasks] failed to resume worktree cleanup', error?.message ?? error);
     }
