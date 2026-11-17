@@ -1,20 +1,18 @@
 import { type ConfigSlice, type DirectoryScopedConfig, type ConfigStore } from './types';
 import { captureConfigRuntimeContext, isConfigRuntimeContextCurrent } from './runtime';
-import { fromDirectoryKey, normalizeConfigPath as resolveConfigDirectory, toDirectoryKey, getProjectDefaultsForConfigDirectory } from './directories';
+import { fromDirectoryKey, normalizeConfigPath as resolveConfigDirectory, toDirectoryKey } from './directories';
+import { getProjectDefaultsForConfigDirectory } from './projectDefaults';
 import { markStartupTrace, measureStartupTrace } from '@/lib/startupTrace';
 import { opencodeClient } from '@/lib/opencode/client';
 import {
-    getConfigLoadKey,
     catalogLifecycle,
-    _inFlightAgents,
-    _agentsLoadGeneration,
     markCatalogLoaded,
     _agentsLoadedAt,
     _agentsStaleAt,
     persistLoadedCatalog,
-    clearProjectConfigError,
-    _agentsLoadErrors,
 } from './catalogLifecycle';
+import { getConfigLoadKey, _inFlightAgents, _agentsLoadGeneration } from './catalogRequests';
+import { clearProjectConfigError, _agentsLoadErrors } from './projectErrors';
 import { getSyncConfig } from '@/sync/sync-refs';
 import {
     normalizeOptionalString,
@@ -22,11 +20,12 @@ import {
     resolveDefaultAgentModelSelection,
     readFallbackModelPrefs,
     resolveSelectionWithManualGuard,
+    variantAfterResolve,
 } from './selectionResolution';
 import { configModelIdentifier } from '@/lib/opencode/projection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { hasLiveCatalog, variantAfterResolve } from './directorySnapshots';
+import { hasLiveCatalog } from './directorySnapshots';
 import { readProjectConfigError, isSameProjectConfigError } from '@/lib/opencode/configError';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
 
@@ -259,7 +258,7 @@ export const createAgentCatalog: ConfigSlice<'loadAgents'> = (set, get) => ({
                     opencodeDefaultAgent,
                     opencodeDefaultModel,
                     allowFallback: get().settingsDefaultsLoaded,
-                    fallbackPrefs: readFallbackModelPrefs(),
+                    fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
                 });
                 const resolvedAgentName = resolvedDefault.agentName ?? safeAgents[0].name;
                 const resolvedProviderId = resolvedDefault.providerId;

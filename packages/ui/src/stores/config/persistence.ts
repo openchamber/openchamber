@@ -1,7 +1,7 @@
 import { type ProviderWithModelList, type ConfigStore, type DirectoryScopedConfig } from './types';
 import { createDeferredSafeJSONStorage } from '../utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { isRecord } from './recordGuard';
+import { isRecord } from '@/lib/utils';
 import type { PersistOptions } from 'zustand/middleware';
 
 const ADD_PROVIDER_SENTINEL = "__add_provider__";

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { ModelMetadata } from '@/types';
 import type { DesktopSettings } from '@/lib/desktop';
@@ -283,6 +283,37 @@ const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+
+test('configuration subscriptions stay singleton when setup is called again', async () => {
+  const { subscribeConfigRuntimeChanges, subscribeConfigStoreChanges } = await import('./config/subscriptions');
+  const { configRuntime } = await import('./config/runtime');
+  const { useDirectoryStore } = await import('./useDirectoryStore');
+  const configSync = await import('@/lib/configSync');
+  const syncRefs = await import('@/sync/sync-refs');
+  const subscriptions = [
+    spyOn(configSync, 'subscribeToConfigChanges'),
+    spyOn(syncRefs, 'subscribeToSyncConfigChanges'),
+    spyOn(useDirectoryStore, 'subscribe'),
+    spyOn(useRoutingStore, 'subscribe'),
+    spyOn(useUIStore, 'subscribe'),
+    spyOn(useConfigStore, 'subscribe'),
+  ];
+  try {
+    const registrationCounts = subscriptions.map((subscription) => subscription.mock.calls.length);
+    subscribeConfigStoreChanges();
+    subscribeConfigStoreChanges();
+    for (const [index, subscription] of subscriptions.entries()) {
+      expect(subscription.mock.calls.length).toBe(registrationCounts[index]);
+    }
+  } finally {
+    for (const subscription of subscriptions) subscription.mockRestore();
+  }
+  subscribeConfigRuntimeChanges();
+  subscribeConfigRuntimeChanges();
+  const generation = configRuntime.generation;
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://singleton.example', runtimeKey: 'singleton' });
+  expect(configRuntime.generation).toBe(generation + 1);
+});
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {

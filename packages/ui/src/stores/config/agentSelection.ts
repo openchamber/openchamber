@@ -1,5 +1,5 @@
 import { type ConfigSlice, type DirectoryScopedConfig, type CurrentVariantSelection } from './types';
-import { isUnchangedSelection, resolveVariantFromSelection } from './directorySnapshots';
+import { isUnchangedSelection, resolveVariantFromSelection } from './selectionResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { findProviderModel, modelHasVariant, parseModelString } from './selectionResolution';

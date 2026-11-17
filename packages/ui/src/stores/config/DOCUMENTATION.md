@@ -28,9 +28,14 @@ the OpenCode client owns transport and wire-to-domain conversion.
 
 The composer installs the runtime listener before creating the store, then installs hydration and
 configuration listeners after creation, preserving the singleton's setup order.
+Subscription handles stay at module scope, so repeated setup cannot install
+duplicate listeners or repeat catalog hydration.
 
 ### Why request state stays with its owner
 
 Defaults, model metadata and initialization retain their own in-flight requests.
-Runtime reset calls their reset operations; catalog maps and counters share a
-catalog lifecycle owner so all slices observe the same invalidation state.
+Runtime reset calls their reset operations. Catalog freshness and epochs share
+a lifecycle owner; in-flight catalog requests and project errors have separate
+owners. Directory keys do not depend on project defaults or worktree mapping
+storage. Selection resolution receives settings readiness from its caller;
+the public selector reads it from the store.

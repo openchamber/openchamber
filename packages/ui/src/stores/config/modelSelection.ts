@@ -1,9 +1,10 @@
 import { type ConfigSlice, type DirectoryScopedConfig } from './types';
 import { AUTO_PROVIDER_ID, AUTO_MODEL_ID } from '@/lib/routing/autoModel';
 import { hasProviderModel, resolveConfiguredDefaultVariant } from './selectionResolution';
-import { isUnchangedSelection, variantResetForModelChange, resolveVariantFromSelection } from './directorySnapshots';
+import { isUnchangedSelection, variantResetForModelChange, resolveVariantFromSelection } from './selectionResolution';
 import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
-import { normalizeConfigPath, readProjectDefaults, getProjectDefaultsForConfigDirectory, fromDirectoryKey } from './directories';
+import { normalizeConfigPath, fromDirectoryKey } from './directories';
+import { readProjectDefaults, getProjectDefaultsForConfigDirectory } from './projectDefaults';
 import { rememberEffort } from '@/lib/modelEfforts';
 
 export const createModelSelection: ConfigSlice<

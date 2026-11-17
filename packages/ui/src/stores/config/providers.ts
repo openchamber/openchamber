@@ -1,27 +1,67 @@
 import { type ConfigSlice, type ConfigStore, type DirectoryScopedConfig, type ProviderModel, type ProviderWithModelList } from './types';
-import { toDirectoryKey, fromDirectoryKey, normalizeConfigPath as resolveConfigDirectory, getProjectDefaultsForConfigDirectory } from './directories';
+import { toDirectoryKey, fromDirectoryKey, normalizeConfigPath as resolveConfigDirectory } from './directories';
+import { getProjectDefaultsForConfigDirectory } from './projectDefaults';
 import { captureConfigRuntimeContext, isConfigRuntimeContextCurrent } from './runtime';
 import { markStartupTrace, measureStartupTrace } from '@/lib/startupTrace';
 import { opencodeClient } from '@/lib/opencode/client';
 import {
-    getConfigLoadKey,
-    _inFlightProviders,
     catalogLifecycle,
-    isSameProviderCatalog,
-    isSameDefaults,
     markCatalogLoaded,
     _providersLoadedAt,
     _providersStaleAt,
     persistLoadedCatalog,
 } from './catalogLifecycle';
+import { getConfigLoadKey, _inFlightProviders } from './catalogRequests';
+import { useConfigStore } from '../useConfigStore';
 import { ensureModelsMetadataFetch } from './metadata';
 import { EMPTY_PROVIDERS } from './selectors';
-import { resolveProviderModelSelection, inheritedDefaultsFor, readFallbackModelPrefs, parseModelString, modelHasVariant } from './selectionResolution';
-import { variantAfterResolve } from './directorySnapshots';
+import { resolveProviderModelSelection, inheritedDefaultsFor, readFallbackModelPrefs, parseModelString, modelHasVariant, variantAfterResolve } from './selectionResolution';
 import { findCatalogModel } from '@/lib/opencode/model';
 
 const PROVIDERS_RETRY_SOURCE = "loadProviders:retryAfterFailure";
 const PROVIDERS_RETRY_DELAY_MS = 3000;
+const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
+
+const isSameProviderCatalog = (previous: ProviderWithModelList[], next: ProviderWithModelList[]): boolean => {
+    if (previous === next) return true;
+    if (previous.length !== next.length) return false;
+    return JSON.stringify(previous) === JSON.stringify(next);
+};
+
+const isSameDefaults = (previous: { [key: string]: string }, next: { [key: string]: string }): boolean => {
+    const previousKeys = Object.keys(previous);
+    const nextKeys = Object.keys(next);
+    if (previousKeys.length !== nextKeys.length) return false;
+    return previousKeys.every((key) => previous[key] === next[key]);
+};
+
+export const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
+    const runtimeContext = captureConfigRuntimeContext();
+    const state = useConfigStore.getState();
+    const directoryKeys = Array.from(new Set([
+        state.activeDirectoryKey,
+        ...Object.keys(state.directoryScoped),
+    ])).filter((key) => key.length > 0);
+
+    state.invalidateProviderCache();
+
+    let nextIndex = 0;
+    const workerCount = Math.min(PROVIDER_CONFIG_REFRESH_CONCURRENCY, directoryKeys.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < directoryKeys.length) {
+            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+            const directoryKey = directoryKeys[nextIndex];
+            nextIndex += 1;
+            await useConfigStore.getState().loadProviders({
+                directory: fromDirectoryKey(directoryKey),
+                source,
+                fresh: true,
+            });
+        }
+    });
+
+    await Promise.all(workers);
+};
 
 export const createProviderCatalog: ConfigSlice<'invalidateProviderCache' | 'loadProviders'> = (set, get) => ({
     invalidateProviderCache: (directory) => {
@@ -222,7 +262,7 @@ export const createProviderCatalog: ConfigSlice<'invalidateProviderCache' | 'loa
                             isActive ? state.opencodeDefaultModel : baseSnapshot.opencodeDefaultModel,
                         ),
                         allowFallback: state.settingsDefaultsLoaded,
-                        fallbackPrefs: readFallbackModelPrefs(),
+                        fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
                     });
                     const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                         ? state.selectedProviderId

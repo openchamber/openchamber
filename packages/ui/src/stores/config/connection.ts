@@ -4,14 +4,16 @@ import { captureConfigRuntimeContext, isConfigRuntimeContextCurrent, configRunti
 import { markStartupTrace, measureStartupTrace } from '@/lib/startupTrace';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { fromDirectoryKey, resolveProjectDirectory, normalizeConfigPath as resolveConfigDirectory, isChatDraftOpen, getFallbackProjectDirectory, toDirectoryKey } from './directories';
+import { fromDirectoryKey, normalizeConfigPath as resolveConfigDirectory, toDirectoryKey } from './directories';
+import { resolveProjectDirectory } from './worktreeProjects';
+import { isChatDraftOpen, getFallbackProjectDirectory } from './projectDefaults';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveChatsRootDirectory } from '@/lib/chatDirectories';
 import { hydrateConfigCatalogFromCache } from './catalogHydration';
-import { _agentsLoadErrors } from './catalogLifecycle';
+import { _agentsLoadErrors } from './projectErrors';
 import { isOpenCodeTrustPending } from '@/lib/opencodeTrust';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
 

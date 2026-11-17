@@ -7,16 +7,16 @@ import {
     resolveDefaultAgentModelSelection,
     normalizeOptionalString,
     resolveSelectionWithManualGuard,
+    variantAfterResolve,
 } from './selectionResolution';
 import {
-    getProjectDefaultsForConfigDirectory,
     fromDirectoryKey,
     normalizeConfigPath as resolveConfigDirectory,
     toDirectoryKey,
-    readProjectDefaults,
     toConfigDirectoryKey,
 } from './directories';
-import { hasLiveCatalog, createEmptyDirectoryScopedConfig, variantAfterResolve } from './directorySnapshots';
+import { getProjectDefaultsForConfigDirectory, readProjectDefaults } from './projectDefaults';
+import { hasLiveCatalog, createEmptyDirectoryScopedConfig } from './directorySnapshots';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { notifyAutoUnavailable } from '@/lib/routing/autoUnavailableNotice';
@@ -34,7 +34,7 @@ export const createDefaultSelection: ConfigSlice<
 > = (set, get) => ({
     dropStaleAutoSelection: () => {
         const current = get();
-        if (!isStaleAutoSelection(current.currentProviderId, current.currentModelId)) return;
+        if (!isStaleAutoSelection(current.settingsDefaultsLoaded, current.currentProviderId, current.currentModelId)) return;
         const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(current.activeDirectoryKey));
         const resolved = resolveProviderModelSelection({
             providers: current.providers,
@@ -45,7 +45,7 @@ export const createDefaultSelection: ConfigSlice<
             ],
             inheritedDefaults: inheritedDefaultsFor(current.agents, current.currentAgentName, current.opencodeDefaultModel),
             allowFallback: true,
-            fallbackPrefs: readFallbackModelPrefs(),
+            fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
         });
         if (!resolved) return;
         set((state) => {
@@ -115,7 +115,7 @@ export const createDefaultSelection: ConfigSlice<
             opencodeDefaultAgent,
             opencodeDefaultModel,
             allowFallback: get().settingsDefaultsLoaded,
-            fallbackPrefs: readFallbackModelPrefs(),
+            fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
         });
 
         set((state) => {
@@ -188,7 +188,7 @@ export const createDefaultSelection: ConfigSlice<
             opencodeDefaultAgent: config ? normalizeOptionalString(config.default_agent) : snapshot?.opencodeDefaultAgent,
             opencodeDefaultModel: config ? configModelIdentifier(config.model) : snapshot?.opencodeDefaultModel,
             allowFallback: state.settingsDefaultsLoaded,
-            fallbackPrefs: readFallbackModelPrefs(),
+            fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
         });
         if (!resolved.providerId || !resolved.modelId) return null;
         return {
@@ -268,7 +268,7 @@ export const createDefaultSelection: ConfigSlice<
                 opencodeDefaultAgent,
                 opencodeDefaultModel,
                 allowFallback: state.settingsDefaultsLoaded,
-                fallbackPrefs: readFallbackModelPrefs(),
+                fallbackPrefs: readFallbackModelPrefs(get().settingsDefaultsLoaded),
             });
 
             if (!resolved.agentName) {

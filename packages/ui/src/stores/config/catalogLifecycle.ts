@@ -1,10 +1,10 @@
 import { type CatalogKind } from '@/lib/opencode/events';
-import { toConfigDirectoryKey, DIRECTORY_KEY_GLOBAL, fromDirectoryKey } from './directories';
-import { type ConfigRuntimeContext, isConfigRuntimeContextCurrent, captureConfigRuntimeContext } from './runtime';
+import { toConfigDirectoryKey, DIRECTORY_KEY_GLOBAL } from './directories';
+import { type ConfigRuntimeContext, isConfigRuntimeContextCurrent } from './runtime';
 import { type CachedCatalog, writeCachedCatalogWhenSettled } from '../configCatalogCache';
 import { useConfigStore } from '../useConfigStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { type ProviderWithModelList } from './types';
+import { _inFlightProviders, _inFlightAgents, _agentsLoadGeneration } from './catalogRequests';
 
 export const _providersLoadedAt = new Map<string, number>();
 export const _agentsLoadedAt = new Map<string, number>();
@@ -48,10 +48,6 @@ export const markConfigCatalogStale = (kind: CatalogKind, directory: string | nu
         markCatalogStale(_agentsLoadedAt, _agentsStaleAt, directoryKey);
     }
 };
-export const getConfigLoadKey = (context: ConfigRuntimeContext, directoryKey: string): string => (
-    JSON.stringify([context.generation, context.runtimeKey, directoryKey])
-);
-
 export const persistLoadedCatalog = (
     context: ConfigRuntimeContext,
     directoryKey: string,
@@ -68,47 +64,9 @@ export const persistLoadedCatalog = (
     );
 };
 
-export const _agentsLoadErrors = new Map<string, Error>();
-
-export const clearProjectConfigError = (directoryKey: string): void => {
-    if (!useConfigStore.getState().projectConfigErrors[directoryKey]) return;
-    useConfigStore.setState((state) => {
-        const next = { ...state.projectConfigErrors };
-        delete next[directoryKey];
-        return { projectConfigErrors: next };
-    });
-};
-
 export const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
     const at = loadedAt.get(key);
     return typeof at === 'number' && Date.now() - at < CONFIG_REFRESH_TTL_MS;
-};
-
-export const _inFlightProviders = new Map<string, Promise<void>>();
-export const _inFlightAgents = new Map<string, Promise<boolean>>();
-export const _agentsLoadGeneration = new Map<string, number>();
-
-export const invalidateConfigAgentsLoad = (directory?: string | null): void => {
-    const runtimeContext = captureConfigRuntimeContext();
-    const directoryKey = toConfigDirectoryKey(directory ?? fromDirectoryKey(useConfigStore.getState().activeDirectoryKey));
-    const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
-    _agentsLoadedAt.delete(directoryKey);
-    _agentsLoadGeneration.set(inFlightKey, (_agentsLoadGeneration.get(inFlightKey) ?? 0) + 1);
-    _inFlightAgents.delete(inFlightKey);
-    opencodeClient.invalidateAgentList(fromDirectoryKey(directoryKey));
-};
-
-export const isSameProviderCatalog = (previous: ProviderWithModelList[], next: ProviderWithModelList[]): boolean => {
-    if (previous === next) return true;
-    if (previous.length !== next.length) return false;
-    return JSON.stringify(previous) === JSON.stringify(next);
-};
-
-export const isSameDefaults = (previous: { [key: string]: string }, next: { [key: string]: string }): boolean => {
-    const previousKeys = Object.keys(previous);
-    const nextKeys = Object.keys(next);
-    if (previousKeys.length !== nextKeys.length) return false;
-    return previousKeys.every((key) => previous[key] === next[key]);
 };
 
 export const invalidateConfigCatalogsForReload = (

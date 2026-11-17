@@ -1,10 +1,14 @@
 import { type ProviderWithModelList, type ConfigStore, type ProviderModel, type ConfigSlice } from './types';
 import { toConfigDirectoryKey } from './directories';
 import { type Agent, findCatalogModel } from '@/lib/opencode/model';
-import { isMissingFromCatalog } from './selectionResolution';
+import { isMissingFromCatalog, isStaleAutoSelection as resolveStaleAutoSelection } from './selectionResolution';
 import { hasLiveCatalog } from './directorySnapshots';
+import { useConfigStore } from '../useConfigStore';
 import { resolveModelMetadata } from './metadata';
 import { filterVisibleAgents } from '../useAgentsStore';
+
+export const isStaleAutoSelection = (providerId?: string | null, modelId?: string | null): boolean =>
+    resolveStaleAutoSelection(useConfigStore.getState().settingsDefaultsLoaded, providerId, modelId);
 
 export const selectProvidersForDirectory = (
     state: Pick<ConfigStore, "providers" | "directoryScoped" | "activeDirectoryKey">,

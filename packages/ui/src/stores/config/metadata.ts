@@ -6,6 +6,7 @@ import { findCatalogModel } from '@/lib/opencode/model';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { markStartupTrace, measureStartupTrace } from '@/lib/startupTrace';
 import { captureConfigRuntimeContext, isConfigRuntimeContextCurrent } from './runtime';
+import { isRecord } from '@/lib/utils';
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -361,4 +362,3 @@ export const createMetadataActions: ConfigSlice<'invalidateModelMetadataCache'> 
 });
 
 export const resetModelsMetadataRequest = (): void => { modelsMetadataInFlight = null; };
-import { isRecord } from './recordGuard';

@@ -3,6 +3,9 @@ import { twMerge } from "tailwind-merge";
 import { matchesFuzzyQuery } from "@/lib/search/fuzzySearch";
 import type { I18nKey } from "@/lib/i18n";
 
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }

@@ -1,11 +1,10 @@
 import { parseModelIdentifier, parseModelSelection } from '@/lib/modelIdentifier';
 import { type Model, findCatalogModel, type Agent } from '@/lib/opencode/model';
-import { type ProviderWithModelList, type ProviderModelSelection, type DefaultAgentModelSelection, type GitModelSelection } from './types';
+import { type ConfigStore, type CurrentVariantSelection, type DirectoryScopedConfig, type ProviderWithModelList, type ProviderModelSelection, type DefaultAgentModelSelection, type GitModelSelection } from './types';
 import { listModelVariantIds, modelVariantNames } from '@/lib/modelVariants';
 import { type EffortChoice, resolveEffortChoice, readRememberedEffort } from '@/lib/modelEfforts';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
-import { useConfigStore } from '../useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { type ModelRef } from '@/lib/settings/parsers';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
@@ -16,13 +15,41 @@ const FALLBACK_MODEL_ID = "big-pickle";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 
+export const resolveVariantFromSelection = (selection: CurrentVariantSelection): string | undefined => {
+    if (selection.override === null) return undefined;
+    const variant = selection.override ?? selection.inherited;
+    return variant ?? undefined;
+};
+
+export const variantAfterResolve = (selection: CurrentVariantSelection | undefined, resolved: string | null | undefined): string | undefined => (
+    selection?.override === undefined ? resolved ?? undefined : resolveVariantFromSelection(selection)
+);
+
+const SELECTION_FIELDS = ["currentProviderId", "currentModelId", "currentAgentName", "selectionSource", "agentSelectionSource"] as const;
+type SelectionField = typeof SELECTION_FIELDS[number];
+
+export const isUnchangedSelection = (
+    state: Pick<ConfigStore, "activeDirectoryKey" | "directoryScoped" | SelectionField>,
+    next: Partial<Pick<DirectoryScopedConfig, SelectionField>>,
+): boolean => {
+    const snapshot = state.directoryScoped[state.activeDirectoryKey];
+    if (!snapshot) return false;
+    return SELECTION_FIELDS.every((field) => !(field in next) || (next[field] === state[field] && next[field] === snapshot[field]));
+};
+
+export const variantResetForModelChange = (
+    state: Pick<ConfigStore, "currentProviderId" | "currentModelId">,
+    providerId: string,
+    modelId: string,
+): Partial<Pick<DirectoryScopedConfig, "currentVariant" | "currentVariantSelection">> => (
+    state.currentProviderId === providerId && state.currentModelId === modelId
+        ? {}
+        : { currentVariant: undefined, currentVariantSelection: { override: undefined, inherited: undefined } }
+);
+
 export const parseModelString = (modelString: string): { providerId: string; modelId: string } | null => {
     return parseModelIdentifier(modelString);
 };
-
-
-
-
 
 export const normalizeOptionalString = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
@@ -72,9 +99,9 @@ export const hasProviderModel = (
     return findCatalogModel(provider.models, modelId) !== undefined;
 };
 
-export const isStaleAutoSelection = (providerId?: string | null, modelId?: string | null): boolean => {
+export const isStaleAutoSelection = (settingsDefaultsLoaded: boolean, providerId?: string | null, modelId?: string | null): boolean => {
     if (!providerId || !modelId || !isAutoModel(providerId, modelId)) return false;
-    if (!useConfigStore.getState().settingsDefaultsLoaded) return false;
+    if (!settingsDefaultsLoaded) return false;
     if (!useUIStore.getState().routingFeatureAvailable) return true;
     const routing = useRoutingStore.getState();
     return routing.loaded && !selectAutoReady(routing);
@@ -110,10 +137,11 @@ const pickConfiguredDefault = (
     providers: ProviderWithModelList[],
     catalogLoaded: boolean,
     candidates: ConfiguredDefault[],
+    settingsDefaultsLoaded: boolean,
 ): { providerId: string; modelId: string; variant: string | undefined } | null => {
     for (const candidate of candidates) {
         const parsed = candidate.model ? parseModelString(candidate.model) : null;
-        if (!parsed || isStaleAutoSelection(parsed.providerId, parsed.modelId)) continue;
+        if (!parsed || isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) continue;
         if (isMissingFromCatalog(providers, catalogLoaded, parsed.providerId, parsed.modelId)) continue;
         return { ...parsed, variant: candidate.variant };
     }
@@ -159,7 +187,7 @@ export const resolveProviderModelSelection = ({
         ?? resolveRememberedVariantForModel(providers, providerId, modelId)
     );
 
-    const preserveManual = preserveCurrent && !isStaleAutoSelection(currentProviderId, currentModelId);
+    const preserveManual = preserveCurrent && !isStaleAutoSelection(fallbackPrefs.settingsDefaultsLoaded, currentProviderId, currentModelId);
     if (currentProviderId && currentModelId && (preserveManual || hasProviderModel(providers, currentProviderId, currentModelId))) {
         return {
             providerId: currentProviderId,
@@ -170,7 +198,7 @@ export const resolveProviderModelSelection = ({
         };
     }
 
-    const configured = pickConfiguredDefault(providers, catalogLoaded, configuredDefaults);
+    const configured = pickConfiguredDefault(providers, catalogLoaded, configuredDefaults, fallbackPrefs.settingsDefaultsLoaded);
     if (configured) {
         return {
             providerId: configured.providerId,
@@ -182,7 +210,7 @@ export const resolveProviderModelSelection = ({
     }
 
     if (!allowFallback) return null;
-    const inherited = pickConfiguredDefault(providers, catalogLoaded, inheritedDefaults);
+    const inherited = pickConfiguredDefault(providers, catalogLoaded, inheritedDefaults, fallbackPrefs.settingsDefaultsLoaded);
     if (inherited) {
         return {
             providerId: inherited.providerId,
@@ -203,11 +231,12 @@ export const resolveProviderModelSelection = ({
 type FallbackModelPrefs = {
     hiddenModels: readonly ModelRef[];
     lastSelectedModel: string | undefined;
+    settingsDefaultsLoaded: boolean;
 };
 
-export const readFallbackModelPrefs = (): FallbackModelPrefs => {
+export const readFallbackModelPrefs = (settingsDefaultsLoaded: boolean): FallbackModelPrefs => {
     const { hiddenModels, lastSelectedModel } = useUIStore.getState();
-    return { hiddenModels, lastSelectedModel };
+    return { hiddenModels, lastSelectedModel, settingsDefaultsLoaded };
 };
 
 const isModelHidden = (hiddenModels: readonly ModelRef[], providerId: string, modelId: string): boolean => hiddenModels.some(
@@ -215,14 +244,14 @@ const isModelHidden = (hiddenModels: readonly ModelRef[], providerId: string, mo
 );
 
 const resolveLastSelectedModel = (
-    { hiddenModels, lastSelectedModel }: FallbackModelPrefs,
+    { hiddenModels, lastSelectedModel, settingsDefaultsLoaded }: FallbackModelPrefs,
     providers: ProviderWithModelList[],
     catalogLoaded: boolean,
 ): { providerId: string; modelId: string } | null => {
     const parsed = lastSelectedModel ? parseModelString(lastSelectedModel) : null;
     if (!parsed) return null;
     if (isModelHidden(hiddenModels, parsed.providerId, parsed.modelId)) return null;
-    if (isStaleAutoSelection(parsed.providerId, parsed.modelId)) return null;
+    if (isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) return null;
     if (isMissingFromCatalog(providers, catalogLoaded, parsed.providerId, parsed.modelId)) return null;
     return parsed;
 };
@@ -329,7 +358,7 @@ export const resolveDefaultAgentModelSelection = ({
     const configured = pickConfiguredDefault(providers, catalogLoaded, [
         { model: projectDefaultModel, variant: projectDefaultVariant },
         { model: settingsDefaultModel, variant: settingsDefaultVariant },
-    ]);
+    ], fallbackPrefs.settingsDefaultsLoaded);
     if (configured) {
         providerId = configured.providerId;
         modelId = configured.modelId;

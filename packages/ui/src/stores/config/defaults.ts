@@ -4,7 +4,8 @@ import { markStartupTrace } from '@/lib/startupTrace';
 import { loadDesktopSettings } from '@/lib/persistence';
 import { type ConfigSlice, type ConfigStore } from './types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getProjectDefaultsForConfigDirectory, fromDirectoryKey } from './directories';
+import { fromDirectoryKey } from './directories';
+import { getProjectDefaultsForConfigDirectory } from './projectDefaults';
 import { resolveGitGenerationModelSelection } from './selectionResolution';
 
 interface OpenChamberDefaults {
