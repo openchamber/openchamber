@@ -6,21 +6,8 @@ import { z } from 'zod';
 import { LOCALES, type Locale } from '@/lib/i18n/runtime';
 import { SHARE_DOCUMENT_ENTRY, SHARE_DOCUMENT_SHIMS } from './shims';
 
-/**
- * Which strings a shared page carries. The page runs the UI block renderer
- * without the app's locale store, and every locale's whole dictionary would
- * add megabytes to each page, so the build embeds only the keys the bundled
- * components name. They are read off the source of every app module the
- * entry reaches, following imports the way the bundle does (shims in place of
- * the modules they replace). Only components draw text, so keys named in
- * other modules (shortcut labels, error messages a page never shows) stay
- * out. A key built at run time from parts would not be found, and the
- * renderer has none.
- */
-
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const KEY_LITERAL = /['"`]([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9_-]+)+)['"`]/g;
-// Value imports and re-exports; `import type` adds nothing to the bundle.
 const IMPORT = /(?:^|[;\n}])\s*(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s*)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 const EXTENSIONS = ['.ts', '.tsx', '/index.ts', '/index.tsx'];
 const SHIMS = new Map<string, string>(Object.entries(SHARE_DOCUMENT_SHIMS));
@@ -40,7 +27,6 @@ const resolveSource = (specifier: string, importer: string): string | null => {
   return shim ? path.join(SOURCE_ROOT, shim) : found;
 };
 
-/** The app's own source files the bundle is built from. */
 function bundledSourceFiles(): string[] {
   const seen = new Set<string>();
   const pending = [path.join(SOURCE_ROOT, SHARE_DOCUMENT_ENTRY)];
@@ -57,17 +43,14 @@ function bundledSourceFiles(): string[] {
 
 type Dictionary = Record<string, string>;
 
-// A locale module, read by a path built at run time, so its shape is checked.
 const localeModuleSchema = z.object({ dict: z.record(z.string(), z.string()) });
 
-/** Every locale's text for the keys the bundled source names, in key order. */
 export async function collectShareDocumentMessages(): Promise<[Locale, Dictionary][]> {
   const dictionaries = await Promise.all(LOCALES.map(async (locale): Promise<[Locale, Dictionary]> => (
     [locale, localeModuleSchema.parse(await import(`../lib/i18n/messages/${locale}.ts`)).dict]
   )));
   const english = dictionaries.find(([locale]) => locale === 'en')?.[1] ?? {};
   const keys = new Set<string>();
-  // The generated file names every key it holds; reading it would keep them all.
   const drawn = bundledSourceFiles().filter((file) => (
     file !== SHARE_DOCUMENT_MESSAGES_PATH && /^(components|share-document)\//.test(path.relative(SOURCE_ROOT, file))
   ));

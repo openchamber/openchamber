@@ -9,20 +9,6 @@ import { SHARE_PAGE_DATA_ID, SHARE_PAGE_ROOT_ID, sharePageDataSchema } from './p
 import { SharePage } from './SharePage';
 import { darkScheme, darkTheme, lightTheme } from './themes';
 
-/**
- * A shared `ui` page: the chat's own UI block renderer, run in the document
- * the relay's viewer shows another person. The page carries its program as
- * JSON (`page.ts`); this mounts it with OpenChamber's default light and dark
- * themes (picked by the reader's system), the reader's language, and a host
- * that sends the form's answer to the viewer. The page waits like a form an
- * agent waits on, so it gets the note and the Send the chat adds.
- */
-
-// The app's stylesheet, its theme variables for both schemes, and what a page
-// on its own needs: it scrolls itself and sits on the theme's background.
-// One width for the whole page, by what it is: a questionnaire keeps a reading
-// column, a page the recipients only read (a report with tables and charts)
-// gets room for them. Wider blocks scroll sideways inside themselves.
 function installStyles(expectAnswer: boolean) {
   const generator = new CSSVariableGenerator();
   const style = document.createElement('style');
@@ -54,16 +40,13 @@ function mount() {
   let answerListener: ((answer: JsonValue) => void) | null = null;
   let sentAnswer: JsonValue | null = null;
   const submit = createShareSubmitter({
-    // An opaque-origin page can only address its parent as any origin.
     post: (message) => window.parent.postMessage(message, '*'),
     listen: (handler) => window.addEventListener('message', (event) => {
       if (event.source !== window.parent) return;
       const message = viewerMessageSchema.safeParse(event.data);
       if (message.success) handler(message.data);
     }),
-    // The viewer picks the reader's language from the same list; its pick wins.
     onInit: ({ locale, answer }) => {
-      // The recipient's app shows a page it already answered: frozen on that answer.
       if (answer !== undefined && answer !== null) {
         sentAnswer = answer;
         answerListener?.(answer);

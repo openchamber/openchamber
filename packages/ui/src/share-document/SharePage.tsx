@@ -31,13 +31,11 @@ function useSchemeTheme(): Theme {
   );
 }
 
-/** The program drawn with the chat's renderer, in the reader's language and system theme, answering through `submit`. */
 export function SharePage({ source, takesAnswer, initialLocale, subscribeLocale, subscribeAnswer, submit }: {
   source: string;
   takesAnswer: boolean;
   initialLocale: Locale;
   subscribeLocale: (listener: (locale: Locale) => void) => void;
-  /** An answer this page already sent, from the recipient's app that shows it again. */
   subscribeAnswer: (listener: (answer: JsonValue) => void) => void;
   submit: (data: JsonValue, summary: string) => Promise<void>;
 }) {
@@ -77,9 +75,6 @@ export function SharePage({ source, takesAnswer, initialLocale, subscribeLocale,
     setDarkThemePreference: noop,
   }), [currentTheme]);
 
-  // Once the viewer has the answer it replaces the page with its own "sent"
-  // screen; until then the form freezes on what was sent. A page that takes no
-  // answer draws like one the agent only shows: no note, no Send.
   const [sent, setSent] = React.useState<UiBlockAnswer | null>(null);
   React.useEffect(() => subscribeAnswer((answer) => {
     const data = uiBlockAnswerData.safeParse(answer);
