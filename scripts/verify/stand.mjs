@@ -10,11 +10,10 @@ import { DESIGN_PROJECT_FILES } from "../perf/fixture-conversations.mjs"
 import { fixtureProviderConfig } from "../perf/fixture-provider.mjs"
 import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
+import { bundledOpenCodeServerEnv, devOpenCodeEnv } from "../lib/bundled-opencode-server.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
-const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
-const WIN_BUNDLED_OPENCODE = join(process.env.LOCALAPPDATA ?? "", "Programs/@openchamberelectron/resources/opencode-cli/opencode.exe")
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
 // What the server keeps of the UI's settings: the base file and the
@@ -55,9 +54,9 @@ const standEnv = (info) => {
     env.USERPROFILE = info.home
     env.APPDATA = join(info.root, "appdata")
     env.LOCALAPPDATA = join(info.root, "localappdata")
-    if (existsSync(WIN_BUNDLED_OPENCODE)) env.OPENCODE_BINARY = WIN_BUNDLED_OPENCODE
   }
-  if (process.env.OPENCODE_BINARY || process.platform === "darwin") env.OPENCODE_BINARY = process.env.OPENCODE_BINARY || MAC_BUNDLED_OPENCODE
+  // A CLI the caller names, else the pinned OpenCode of this checkout, the one the desktop app bundles.
+  Object.assign(env, devOpenCodeEnv(process.env, () => bundledOpenCodeServerEnv(REPO_ROOT)))
   return env
 }
 

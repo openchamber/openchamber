@@ -2,7 +2,7 @@
 
 ## Ownership
 
-Electron owns native windows, privileged IPC, desktop host credentials, browser-panel sessions, SSH and tunnel lifecycle, and the in-process server's startup and shutdown. Shared UI and runtime selection belong to `packages/ui`; the server and relay tunnel client belong to `packages/web`. Build and release constraints live in [scripts/DOCUMENTATION.md](scripts/DOCUMENTATION.md). Commands and platform setup live in [README.md](README.md).
+Electron owns native windows, privileged IPC, desktop host credentials, browser-panel sessions, SSH and tunnel lifecycle, the in-process server's startup and shutdown, and the OpenCode server the app ships ([opencode-server/DOCUMENTATION.md](opencode-server/DOCUMENTATION.md)), which the in-process server starts. Shared UI and runtime selection belong to `packages/ui`; the server and relay tunnel client belong to `packages/web`. Build and release constraints live in [scripts/DOCUMENTATION.md](scripts/DOCUMENTATION.md). Commands and platform setup live in [README.md](README.md).
 
 ## Invariants
 
