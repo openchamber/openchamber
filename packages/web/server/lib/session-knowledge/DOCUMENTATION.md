@@ -202,6 +202,10 @@ depends on how the user works.
 
 ## When to draw a page
 
+### Invariants
+
+`ui-blocks-guidance.js` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated

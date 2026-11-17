@@ -43,17 +43,9 @@ export function createDevServerWatchCommand(options = {}) {
     spawnOptions: {
       cwd: webRoot,
       stdio: 'inherit',
-      // A shell an agent or the integrated terminal opens carries the app's
-      // own server settings (its UI password, `OPENCHAMBER_RUNTIME=desktop`,
-      // its web assets); the dev server would ask for that password and half
-      // act as the desktop. The record holds names only, so an inline
-      // override of a recorded name goes too; that fails closed (without
-      // `OPENCHAMBER_HOST` it stays on loopback), and
-      // `env -u OPENCHAMBER_INJECTED_ENV` keeps everything.
       env: {
         ...childEnv,
         OPENCHAMBER_RELAY_HOST: env.OPENCHAMBER_RELAY_HOST || 'off',
-        // The dev UI runs on its own loopback port (Vite); see allowsLocalDevOrigins.
         OPENCHAMBER_ALLOW_DEV_ORIGINS: '1',
       },
       windowsHide: true,
