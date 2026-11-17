@@ -82,6 +82,20 @@ raw non-ASCII header values.
 
 ## Decisions
 
+### Why the route remains JavaScript
+
+`inspect-image.ts` owns the local inspection options and result union. Its
+filesystem error guard preserves missing-file and permission/symlink failures;
+other failures still propagate.
+
+`routes.js` consumes `fitRenderPageImages` from
+`../openchamber-control/render-page.js`. That helper accepts an untyped
+inspection callback and returns an untyped image array, including its own
+`too-heavy` results. Its owning module must type that contract before the
+route can consume a checked discriminated union without a cast or new runtime
+validation. The same module's `renderPageImageSources` also infers an untyped
+source array. These contracts belong to the neighbouring folder's conversion.
+
 ### Why a weight budget per page and not a count
 
 A page named 19 posters and showed 12: a count says nothing about memory, and
