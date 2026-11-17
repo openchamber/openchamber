@@ -665,7 +665,7 @@ The create dialog fills the allowlist with the package registries the project's 
 
 A failure after `creating` removes what was made: the containers, the refs in the user's repository and the record, and the answer of the failed step is kept in the list as `state: 'failed'` with `failure: { code, message, details, cleanup }` until the user dismisses it with `DELETE /<id>`, so an error is never silent; when that clean-up itself failed, `cleanup` says so and the dismissal removes what is still there, so the space cannot come back in the list as damaged after the user was told it was gone. A creation under way is listed as `preparing` with its `step`, over the place's view of it, and refuses start, stop, remove and apply with `space_preparing` until it is ready or failed; a failed one refuses them with `space_creation_failed`. One action runs per space at a time: start, stop, remove, the journal, the preview and the apply take a lock on the space's id and a second action meets `space_busy`, so a remove from another client cannot pull the service refs from under an apply that is writing them. A start of a space whose history is `pending` or `failed` sends it again, because a stop right after the creation is the usual way it fails. The project must be one the host has registered, compared as the label's hash and the path, because the sidebar resolves a space to its project the same way. The request may spell the folder any way the host's `path.resolve` turns into the registered one, forward slashes on Windows among them, and the space keeps it as the settings name it. The four choices are parsed at the boundary, each field refusing with a code of its own: `project_not_registered`, `invalid_space_name`, `invalid_snapshot_mode`, `invalid_network`, and since 5d-4 `invalid_setup_commands` for the project's setup commands, which start in the background right after `ready`.
 
-Server bot workers use `journey.createBotSpace(request, { sourceDirectory, onAllocated })`. The registered project still authorizes creation and supplies the ownership label. The bot worktree owner verifies `sourceDirectory`; code-in, history, code-out and cleanup use that checkout. `onAllocated({ id, directory })` must persist the binding before the MCP subject is prepared or the selected place provisions its worker. A failed callback creates nothing. The call waits for readiness and retains the journey's existing rollback, root activation and grant handling. HTTP routes expose neither internal option. The bot adapter contract and its ordering mutation probe are in `../bots/production-adapters.md`.
+Server bot workers use `journey.createBotSpace(request, { sourceDirectory, source, onAllocated })`. The registered project still authorizes creation and supplies the ownership label. Single-account workers retain the verified `sourceDirectory` path. Separated workers also capture `source` before allocation, with the descriptor defined under "Front-door source". The journey persists it as additive `record.source` and passes that same source to code-in, background history, restart history, code-out, apply and ref cleanup. Provider lookups keep using the registered parent. `onAllocated({ id, directory })` must persist the binding before the MCP subject is prepared or the selected place provisions its worker. A failed callback creates nothing. The call waits for readiness and retains the journey's existing rollback, root activation and grant handling. HTTP routes expose none of these internal options. The bot adapter contract and its ordering mutation probe are in `../bots/production-adapters.md`.
 
 ### Why bot workers have an allocation callback
 
@@ -996,6 +996,39 @@ cannot choose ref names. Snapshotting uses the existing `takeSnapshot`, includin
 the user's ignore rules and clean filters, and persists bounded version-1
 metadata beside the agent's data under `space-transfer/<id>.json`.
 
+The additive `source` descriptor is either `{ kind: 'project', directory }` or
+`{ kind: 'bot-checkout', projectDirectory, projectId, botId, itemId, checkoutKey }`.
+`projectId` is the registered canonical project ID. `checkoutKey` is the existing
+item allocation key, `${itemId}:worktree`. It has no relationship to the space ID.
+Every transfer URL keeps `directory` set to the registered parent and carries the
+descriptor as a JSON `source` query parameter. The agent checks the parent and its
+project ID before resolving a Bot source through the injected
+`productionWorktrees.resolveTransferSource(source)` helper. That owner checks the
+authoritative item, private record, directory and Git metadata filesystem
+identities, repository identity, local branch and worktree topology. The
+descriptor accepts no checkout path. Ordinary unregistered directories remain
+refused.
+
+Snapshot metadata binds the resolved directory, exact source and fixed space ref.
+Every history, bundle, result, apply and cleanup operation rechecks this binding.
+Old metadata without `source` remains a project snapshot; it cannot become a Bot
+snapshot. A missing Bot sidecar refuses reconstruction even when a start ref
+exists. Repeated Bot cleanup succeeds without a sidecar only when its fixed ref
+namespace is already empty. Failed ref cleanup retains the host's source record.
+An unreadable record permits deleting the runtime while leaving unknown refs
+alone.
+
+For retained pre-separation Bot checkouts, the owner adapter reads only owner
+`bots/migration-paths.json` and captures the matching immutable entry before
+allocation. `record.trustedMigrationPath`, the snapshot sidecar and every
+transfer carry the same entry. The agent route passes it to
+`resolveTransferSource(source, { trustedMigrationPath })` and requires the exact
+descriptor and filesystem checks. The agent's `bot-worktrees/migration-paths.json`
+never establishes authority. A missing owner mapping fails with
+`BOT_MIGRATION_PATH_AUTHORITY_REQUIRED`. No descriptor or live checkout path is
+rewritten. The entry schema and execution request contract belong to
+[Bot checkouts](../bots/production-worktrees.md#retained-migration-paths).
+
 The front door checks metadata, object formats, shallow boundary ids, the fixed start ref and the
 actual commit chain. Clean snapshots have equal base, staged and start ids.
 Uncommitted snapshots have exactly one parent at each step, start to staged to
@@ -1045,6 +1078,15 @@ The agent's start ref remains authoritative. Removing a space delegates ref
 removal to the agent and removes that snapshot's metadata. A failed creation
 attempt cleans its start ref through the same route. Transport, metadata and
 bundle failures have explicit `agent_*` codes and never invoke local project git.
+
+### Why Bot transfer captures an owner descriptor
+
+A registered parent does not authorize arbitrary worktrees. The private Bot
+owner supplies a checked checkout from its persisted allocation, so the agent
+cannot choose a filesystem path for the front door to open. Keeping the source
+with the space and snapshot also prevents another valid checkout in the same
+repository from replacing it after restart. Front-door Git continues to open
+only operation-private mirrors.
 
 ### Existing spaces without agent metadata
 
@@ -1219,6 +1261,13 @@ apply as branch and apply as changes use the existing project implementation on
 the agent, including incremental applies, dry-run refusals and interrupted-apply
 refs. Failed imports do not move the project's result ref. A completed promotion
 survives a lost HTTP reply and can be fetched again safely.
+
+For Bot sources the export additionally returns
+`association: { spaceId, source }` after promotion. Bot adoption accepts the
+owner-observed `spaceId` and rechecks the agent's sidecar, private checkout source,
+start ref and that exact space's result ref before materializing a commit. The
+Bot owner persists this association in an interrupted adoption intent. A SHA
+promoted for another space supplies no authority for that request.
 
 ### Why the result bundle names the start as its prerequisite
 
@@ -1483,6 +1532,17 @@ docker manifest inspect node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb37
 The answer has `mediaType: application/vnd.oci.image.index.v1+json` and lists manifests for `linux/amd64`, `linux/arm64`, and `linux/ppc64le`, plus attestation entries with platform `unknown/unknown`. Node 24 dropped 32-bit `linux/arm`. An arch-specific digest answers with `application/vnd.oci.image.manifest.v1+json` and no platform list. `docker images --digests node` showed the same digest for the `24-bookworm` tag. Repeat both commands when you bump the digest. `docker buildx imagetools inspect` gives the same facts where buildx is installed. A bump also reads the image's own variables again for `hardening.js`, and adds the digest it replaces to `RETIRED_SPACE_BASE_IMAGES`, see "Retired images" under "Places page". The bump of 2026-10-08 from `node:22-bookworm` is the first.
 
 ## Tests
+
+`../agent-server/bot-space-transfer.test.js` drives real temporary Bot checkout
+owners through authenticated loopback routes and the existing local exec
+stand-in. It covers captured-source refusal, filesystem replacement, restart
+history, result promotion, exact-space adoption, interrupted adoption and ref
+cleanup. A migrated-path case copies only descriptors to a new agent data root,
+keeps the original checkout/inodes, and proves that an agent mapping alone fails.
+Disposable module copies remove checkout verification, transfer association and
+owner migration authority separately; the corresponding refusal assertions must turn red,
+then pass against the original owner. These checks prove transfer and local
+adoption behavior. They make no container-isolation or live-provider claim.
 
 `task-title.test.js` covers persisted ownership, old records, failed writes,
 small plain files, inside naming, control-stream reconnect seeding, hostile

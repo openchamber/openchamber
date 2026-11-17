@@ -209,7 +209,9 @@ export function createSpacesHost({
     registry,
     locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
     recall: async () => records.list()
-      .map(({ id, record }) => ({ placeId: record.placeId, id, purpose: record.purpose, name: record.name ?? id, project: record.repository === null ? '' : hashProjectDirectory(record.repository), created: record.created ?? '' })),
+      .map(({ id, record }) => ({ placeId: record.placeId, id, purpose: record.purpose, name: record.name ?? id,
+        project: record.repository === null ? '' : hashProjectDirectory(record.source?.kind === 'bot-checkout' ? record.source.projectDirectory : record.repository),
+        created: record.created ?? '' })),
   });
   const serverInside = createSpaceServerChannel({ exec: manager.exec });
   const gatekeeperChannel = makeGatekeeperChannel({ exec: manager.exec });

@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined } = {}) => {
+const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet, resolveDirectory = undefined, captureTransferSource = undefined } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -89,6 +89,7 @@ const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt =
     removeLogin: async (spaceId, provider) => { calls.push(['removeLogin', spaceId, provider]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
   const codeIn = {
+    captureTransferSource,
     bringCodeIn: async (request) => {
       calls.push(['bringCodeIn', request]);
       if (holdCodeIn) await codeInHeld;
@@ -142,6 +143,80 @@ const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncomm
 const steps = (events, spaceId) => events.filter((event) => event.spaceId === spaceId).map((event) => event.step);
 
 describe('bot worker allocation', () => {
+  it('captures retained-path authority before allocation and persists its exact immutable transfer association', async () => {
+    const sourceDirectory = '/home/me/previous-data/bot-worktrees/item';
+    const source = { kind: 'bot-checkout', projectDirectory: PROJECT, projectId: 'project-1', botId: 'bot-1', itemId: 'item-1', checkoutKey: 'item-1:worktree' };
+    const trustedMigrationPath = { projectId: source.projectId, itemId: source.itemId, directory: sourceDirectory,
+      directoryIdentity: '1:2', gitDirectory: '/home/me/project/.git/worktrees/item', gitIdentity: '1:3' };
+    let captured = false;
+    const f = journeyWith({ captureTransferSource: async (input) => {
+      expect(input.source).toEqual(source);
+      captured = true;
+      return { trustedMigrationPath };
+    } });
+    const made = await f.journey.createBotSpace(REQUEST, { sourceDirectory, source, onAllocated: async () => { expect(captured).toBe(true); } });
+    expect(f.records.read(made.id).record.trustedMigrationPath).toEqual(trustedMigrationPath);
+    expect(() => f.records.update(made.id, { trustedMigrationPath: { ...trustedMigrationPath, gitIdentity: '0:0' } })).toThrow('retained checkout authority');
+    await f.journey.previewApply(made.id);
+    await f.journey.removeSpace(made.id);
+    for (const [, input] of f.calls.filter(([name]) => ['bringCodeIn', 'sendHistory', 'bringCodeOut', 'describeApplyState', 'removeSpaceRefs'].includes(name))) {
+      expect(input.trustedMigrationPath).toEqual(trustedMigrationPath);
+    }
+  });
+
+  it('captures the transfer source before allocation and reuses it after restart, export, apply and removal', async () => {
+    const providerDirectories = [];
+    const hostProviders = { read: async (_provider, directory) => {
+      providerDirectories.push(directory);
+      return { name: 'Fixture provider', package: 'aisdk:@ai-sdk/openai-compatible', baseURL: 'https://model.example.test/v1', headers: {}, models: {}, key: null };
+    } };
+    const f = journeyWith({ hostProviders });
+    const source = { kind: 'bot-checkout', projectDirectory: PROJECT, projectId: 'canonical-project-id',
+      botId: 'bot-1', itemId: 'item-1', checkoutKey: 'item-1:worktree' };
+    const sourceDirectory = '/home/me/worktrees/bot-item';
+    const made = await f.journey.createBotSpace({ ...REQUEST, grants: [{ kind: 'custom', provider: 'fixture' }] }, { sourceDirectory, source, onAllocated: async () => {
+      source.checkoutKey = 'changed-after-capture';
+    } });
+    const captured = { ...source, checkoutKey: 'item-1:worktree' };
+    expect(f.records.read(made.id).record.source).toEqual(captured);
+    expect(() => f.records.update(made.id, { source })).toThrow('The code source of a space cannot change');
+    f.records.update(made.id, { history: 'failed' });
+    await f.journey.stopSpace(made.id);
+    const restarted = journeyWith({ place: f.place, dataDir: f.dataDir, hostProviders });
+    await restarted.journey.startSpace(made.id);
+    await restarted.journey.previewApply(made.id);
+    await restarted.journey.applySpace(made.id, { as: 'branch', branch: 'bot-result', removeAfterwards: false });
+    await restarted.journey.removeSpace(made.id);
+    const transfers = [...f.calls, ...restarted.calls].filter(([name]) => ['bringCodeIn', 'sendHistory', 'bringCodeOut', 'describeApplyState', 'applyAsBranch', 'removeSpaceRefs'].includes(name));
+    expect(transfers.length).toBeGreaterThanOrEqual(8);
+    for (const [, request] of transfers) expect(request).toMatchObject({ source: captured, repository: sourceDirectory, spaceId: made.id });
+    expect(providerDirectories.length).toBeGreaterThan(0);
+    expect(providerDirectories.every((directory) => directory === PROJECT)).toBe(true);
+  });
+
+  it('retains a failed source-ref cleanup and retries it after the runtime is gone', async () => {
+    const f = journeyWith({ failAt: 'removeSpaceRefs' });
+    const source = { kind: 'bot-checkout', projectDirectory: PROJECT, projectId: 'project-1', botId: 'bot-1', itemId: 'item-1', checkoutKey: 'item-1:worktree' };
+    const sourceDirectory = '/home/me/worktrees/bot-item';
+    const made = await f.journey.createBotSpace(REQUEST, { sourceDirectory, source });
+    expect(await f.journey.removeSpace(made.id)).toMatchObject({ removed: true, refsRemoved: false });
+    expect(f.records.read(made.id).record.source).toEqual(source);
+    expect(await f.place.list()).toEqual([]);
+    const restarted = journeyWith({ place: f.place, dataDir: f.dataDir });
+    expect(await restarted.journey.removeSpace(made.id)).toMatchObject({ removed: true, refsRemoved: true });
+    expect(restarted.calls.find(([name]) => name === 'removeSpaceRefs')[1]).toMatchObject({ repository: sourceDirectory, source, spaceId: made.id });
+    expect(f.records.read(made.id).status).toBe('missing');
+  });
+
+  it('refuses a source for a different registered parent before allocation', async () => {
+    const f = journeyWith();
+    let allocated = false;
+    await expect(f.journey.createBotSpace(REQUEST, { source: { kind: 'project', directory: '/different' },
+      onAllocated: async () => { allocated = true; } })).rejects.toMatchObject({ code: 'agent_project_mismatch' });
+    expect(allocated).toBe(false);
+    expect(await f.place.list()).toEqual([]);
+  });
+
   it('persists allocation before creation and transfers the owned checkout under its registered project', async () => {
     const { journey, records, calls, place } = journeyWith();
     let allocated = false;

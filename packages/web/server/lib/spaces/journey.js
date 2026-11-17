@@ -58,6 +58,7 @@ import { LOGIN_PROVIDERS, buildStartConfig, loginEndOf, loginEnded, loginGrantOf
 import { domainSchema, grantSchema, mcpConnectionSchema, mcpNameSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
+import { botMigrationPathSchema, transferSourceSchema } from './transfer-bundle.js';
 
 // The four choices of the create dialog, parsed at the boundary. Each field refuses with a code
 // of its own, so the dialog can point at the field.
@@ -102,6 +103,7 @@ const rootApprovalSchema = rootApprovalCodeSchema.extend({ response: rootActivat
 const HOSTD_UNAVAILABLE = new Set(['hostd_missing', 'hostd_unreachable', 'hostd_timeout', 'hostd_disconnected']);
 // A Windows path names its drive in either case; a POSIX path never starts with a letter and a colon.
 const withUpperDrive = (directory) => directory.replace(/^[a-z]:/, (drive) => drive.toUpperCase());
+const projectDirectoryOf = (record) => record?.source?.kind === 'bot-checkout' ? record.source.projectDirectory : record?.repository;
 
 const CREATE_REFUSALS = {
   purpose: ['invalid_space_purpose', 'Choose general or pr-fix-loop-approval when creating a new space.'],
@@ -359,7 +361,7 @@ export function createSpaceJourney({
   };
 
   /** Removes the space and everything the host kept for it, and says what did not go. */
-  const removeEverything = async (spaceId, repository) => {
+  const removeEverything = async (spaceId, repository, source = records.read(spaceId).record?.source, trustedMigrationPath = records.read(spaceId).record?.trustedMigrationPath) => {
     creationAccessFailures.delete(spaceId);
     const outcome = { removed: false, refsRemoved: null, failures: [] };
     // The subject goes first: a space on its way out calls no MCP connection, whatever else fails.
@@ -381,7 +383,10 @@ export function createSpaceJourney({
     }
     if (repository) {
       try {
-        await codeIn.removeSpaceRefs({ repository, spaceId });
+        const input = { repository, spaceId };
+        if (source) input.source = source;
+        if (trustedMigrationPath) input.trustedMigrationPath = trustedMigrationPath;
+        await codeIn.removeSpaceRefs(input);
         outcome.refsRemoved = true;
       } catch (error) {
         outcome.refsRemoved = false;
@@ -394,7 +399,7 @@ export function createSpaceJourney({
         }
       }
     }
-    if (forgetRecord) records.remove(spaceId);
+    if (forgetRecord && !(source && outcome.refsRemoved === false)) records.remove(spaceId);
     return outcome;
   };
 
@@ -445,8 +450,11 @@ export function createSpaceJourney({
     }
   };
 
-  const sendHistoryInBackground = ({ repository, spaceId, spacePath, base }) => {
-    codeIn.sendHistory({ repository, spaceId, spacePath, base })
+  const sendHistoryInBackground = ({ repository, spaceId, spacePath, base, source, trustedMigrationPath }) => {
+    const input = { repository, spaceId, spacePath, base };
+    if (source) input.source = source;
+    if (trustedMigrationPath) input.trustedMigrationPath = trustedMigrationPath;
+    codeIn.sendHistory(input)
       .then((result) => { records.update(spaceId, { history: result.status }); })
       .catch((error) => {
         logger.warn?.(`[spaces] the history of space ${spaceId} did not arrive: ${error?.details?.cause ?? error?.code ?? error?.message}`);
@@ -454,7 +462,7 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { placeId, projectDirectory, sourceDirectory = projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants, activation }) => {
+  const prepare = async (entry, { placeId, projectDirectory, sourceDirectory = projectDirectory, source, trustedMigrationPath, name, start, network, setupCommands, purpose, approvalModel, grants, activation }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
@@ -472,11 +480,17 @@ export function createSpaceJourney({
       await manager.createSpace({ id: entry.id, placeId, projectDirectory, name, purpose, onStep: (step) => progress(entry, step), startConfig, activation });
       created = true;
       // With the place, the name and the time, so the space is still listed while its place cannot be asked.
-      records.write(entry.id, { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: sourceDirectory });
+      const record = { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: sourceDirectory };
+      if (source) record.source = source;
+      if (trustedMigrationPath) record.trustedMigrationPath = trustedMigrationPath;
+      records.write(entry.id, record);
       progress(entry, 'setting_network');
       await gatekeeper.setNetwork(entry.id, network);
       progress(entry, 'bringing_code');
-      const arrived = await codeIn.bringCodeIn({ repository: sourceDirectory, spaceId: entry.id, mode: start });
+      const input = { repository: sourceDirectory, spaceId: entry.id, mode: start };
+      if (source) input.source = source;
+      if (trustedMigrationPath) input.trustedMigrationPath = trustedMigrationPath;
+      const arrived = await codeIn.bringCodeIn(input);
       records.update(entry.id, { spacePath: arrived.spacePath, base: arrived.base });
       entry.identityCopied = arrived.identityCopied;
       await deliverSettings(entry.id);
@@ -500,11 +514,11 @@ export function createSpaceJourney({
       onSpacesChanged();
       // In the background, while the agent can already start (journey step 2).
       if (setupCommands.length > 0) setup.start(entry.id, { projectPath: arrived.spacePath, commands: setupCommands });
-      sendHistoryInBackground({ repository: sourceDirectory, spaceId: entry.id, spacePath: arrived.spacePath, base: arrived.base });
+      sendHistoryInBackground({ repository: sourceDirectory, spaceId: entry.id, spacePath: arrived.spacePath, base: arrived.base, source, trustedMigrationPath });
     } catch (error) {
       const failure = failureOf(error);
       if (created) {
-        const cleanup = await removeEverything(entry.id, sourceDirectory);
+        const cleanup = await removeEverything(entry.id, sourceDirectory, source, trustedMigrationPath);
         if (cleanup.failures.length > 0) failure.cleanup = cleanup.failures;
       }
       logger.warn?.(`[spaces] creating space ${entry.id} failed at ${entry.step}: ${failure.code}`);
@@ -518,7 +532,7 @@ export function createSpaceJourney({
    * network. The place is checked inside, as decision 19 asks: nothing probes a runtime before
    * the user acts.
    */
-  const createSpace = async (request, { sourceDirectory, onAllocated, waitUntilReady = false } = {}) => {
+  const createSpace = async (request, { sourceDirectory, source: rawSource, onAllocated, waitUntilReady = false } = {}) => {
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     const parsed = createRequestSchema.safeParse(request ?? {});
     if (!parsed.success) {
@@ -531,12 +545,22 @@ export function createSpaceJourney({
     const placeId = parsed.data.placeId ?? places.list()[0]?.id;
     requirePlace(placeId);
     const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
+    const source = rawSource === undefined ? undefined : transferSourceSchema.parse(rawSource);
+    if (source && (source.kind === 'project' ? source.directory : source.projectDirectory) !== projectDirectory) {
+      throw new SpaceError('agent_project_mismatch', 'The code source must belong to the registered project.');
+    }
+    const captured = source && codeIn.captureTransferSource
+      ? await codeIn.captureTransferSource({ source, repository: sourceDirectory ?? projectDirectory }) : {};
+    const trustedMigrationPath = captured.trustedMigrationPath === undefined ? undefined : botMigrationPathSchema.parse(captured.trustedMigrationPath);
     const id = requireCreationId(placeId, purpose, parsed.data);
     const entry = {
       id,
       name,
       placeId,
       projectDirectory,
+      sourceDirectory: sourceDirectory ?? projectDirectory,
+      source,
+      trustedMigrationPath,
       directory: spaceProjectPath(id, sourceDirectory ?? projectDirectory),
       created: now().toISOString(),
       state: 'preparing',
@@ -551,7 +575,7 @@ export function createSpaceJourney({
     // HTTP callers supply only `request` and cannot override the code source.
     if (onAllocated) await onAllocated({ id, directory: entry.directory });
     pending.set(entry.id, entry);
-    const preparing = prepare(entry, { placeId, projectDirectory, sourceDirectory, name, start, network, setupCommands, purpose, approvalModel, grants, activation: parsed.data.rootActivation ?? null });
+    const preparing = prepare(entry, { placeId, projectDirectory, sourceDirectory, source, trustedMigrationPath, name, start, network, setupCommands, purpose, approvalModel, grants, activation: parsed.data.rootActivation ?? null });
     if (waitUntilReady) {
       await preparing;
       if (entry.failure) throw new SpaceError(entry.failure.code, entry.failure.message);
@@ -901,7 +925,7 @@ export function createSpaceJourney({
       const lost = grants.filter((grant) => !held.has(grant.id));
       if (lost.length === 0) continue;
       try {
-        const { restored } = await exclusive(space.id, () => restoreGrants(space.id, lost, record.repository));
+          const { restored } = await exclusive(space.id, () => restoreGrants(space.id, lost, projectDirectoryOf(record)));
         if (restored.length > 0) logger.info?.(`[spaces] said the grants ${restored.join(', ')} of space ${space.id} again`);
       } catch (error) {
         logger.warn?.(`[spaces] the grants of space ${space.id} were not said again: ${error?.code ?? error?.message ?? error}`);
@@ -1003,7 +1027,7 @@ export function createSpaceJourney({
       const projectDirectory = projects.get(space.project) ?? null;
       const { record } = records.read(space.id);
       const grants = record?.grants ?? [];
-      const projectPath = record?.repository ?? projectDirectory;
+      const projectPath = projectDirectoryOf(record) ?? projectDirectory;
       // A record without a space path is a creation that a previous host did not live to finish:
       // the containers run, the code never arrived, and the user would otherwise send the agent
       // into an empty folder. It is listed as a failed creation, whose one way out is Remove; a
@@ -1107,13 +1131,13 @@ export function createSpaceJourney({
     if (record) {
       await gatekeeper.setNetwork(spaceId, record.network);
       networkRestored = true;
-      grants = await restoreGrants(spaceId, record.grants, record.repository);
-      await rewriteProviderConfig(spaceId, record.grants, record.repository);
+      grants = await restoreGrants(spaceId, record.grants, projectDirectoryOf(record));
+      await rewriteProviderConfig(spaceId, record.grants, projectDirectoryOf(record));
       if (record.grants.some((grant) => grant.kind === 'model' || grant.kind === 'login')) repairLoginRowInBackground(spaceId);
       // A history that never arrived, or that failed, is sent again: a stop right after the
       // creation is the usual way it fails, and the space would otherwise stay shallow for good.
       if ((record.history === 'pending' || record.history === 'failed') && record.repository && record.spacePath && record.base) {
-        sendHistoryInBackground({ repository: record.repository, spaceId, spacePath: record.spacePath, base: record.base });
+        sendHistoryInBackground({ repository: record.repository, spaceId, spacePath: record.spacePath, base: record.base, source: record.source, trustedMigrationPath: record.trustedMigrationPath });
       }
     }
     await deliverSettings(spaceId);
@@ -1210,7 +1234,7 @@ export function createSpaceJourney({
     let window;
     let login = null;
     if (asked.kind === 'custom') {
-      const definition = await hostProviders.read(asked.provider, current.record.repository);
+      const definition = await hostProviders.read(asked.provider, projectDirectoryOf(current.record));
       if (!definition) throw new SpaceError('provider_not_found', `${asked.provider} is not a provider of your own in Settings. Add it there, then grant.`);
       if (headerOfPackage(definition.package) === null) throw new SpaceError('provider_not_supported', `${definition.name} cannot be given through the network filter yet: its SDK reads a key in a way the network filter does not know.`);
       window = customWindowOf(definition);
@@ -1251,7 +1275,7 @@ export function createSpaceJourney({
     }
     // A failure here answers the grant with it; the key is in the gatekeeper and the record, and
     // the next start writes the configuration and the row again.
-    if (configuresProvider(grant)) await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, current.record.repository));
+    if (configuresProvider(grant)) await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, projectDirectoryOf(current.record)));
     if (grant.kind === 'login') await spaceOpenCode.writeLogin(spaceId, grant.provider, login);
     return grant;
   };
@@ -1279,7 +1303,7 @@ export function createSpaceJourney({
       await syncMcpSubject(spaceId, record.grants);
       throw new SpaceError('space_record_unreadable', 'The MCP grant could not be remembered. Remove the space and create it again.');
     }
-    await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, record.repository));
+    await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, projectDirectoryOf(record)));
     return grant;
   };
 
@@ -1409,15 +1433,20 @@ export function createSpaceJourney({
       // A failed creation whose clean-up failed still has containers; those go now, or the space
       // comes back in the list as damaged. One that was cleaned up has nothing left to remove.
       const still = (await listAll()).spaces.some((space) => space.id === spaceId);
-      if (!still) return { id: spaceId, removed: true, refsRemoved: null, failures: [], chats: null };
-      return { id: spaceId, ...(await removeEverything(spaceId, waiting.projectDirectory)), chats: null };
+      if (!still && !waiting.failure?.cleanup?.length) return { id: spaceId, removed: true, refsRemoved: null, failures: [], chats: null };
+      return { id: spaceId, ...(await removeEverything(spaceId, waiting.sourceDirectory, waiting.source, waiting.trustedMigrationPath)), chats: null };
     }
-    const space = await requireListed(spaceId);
+    const retained = records.read(spaceId).record;
+    const space = await requireListed(spaceId).catch((error) => {
+      if (error.code === 'space_not_found' && retained?.source && retained.repository) return null;
+      throw error;
+    });
+    if (!space) return { id: spaceId, ...(await removeEverything(spaceId, retained.repository, retained.source, retained.trustedMigrationPath)), chats: null };
     // A creation that a previous host did not live to finish is a failed creation too: no chat
     // could have run in it, so nothing is saved and the archive is not asked.
     const chats = space.state === 'failed' ? null : await saveChatsOf(space, allowUnsaved);
-    const { record } = records.read(spaceId);
-    const outcome = await removeEverything(spaceId, record?.repository ?? space.projectDirectory);
+    const { record, status } = records.read(spaceId);
+    const outcome = await removeEverything(spaceId, status === 'unreadable' ? null : record?.repository ?? space.projectDirectory);
     onSpacesChanged();
     return { id: spaceId, ...outcome, chats };
   };
@@ -1562,20 +1591,27 @@ export function createSpaceJourney({
   const requireRepository = async (spaceId) => {
     requireNotPending(spaceId);
     const space = await requireListed(spaceId);
-    const { record } = records.read(spaceId);
+    const { record, status } = records.read(spaceId);
+    if (status === 'unreadable') throw new SpaceError('space_record_unreadable', 'The space record cannot be read.');
     const repository = record?.repository ?? space.projectDirectory;
     if (!repository) throw new SpaceError('project_not_registered', 'The project this space was made for is no longer registered, so its work has nowhere to go.');
     // Code out reaches into the space, so a stopped one would fail there as a generic failure of
     // the place; the dialog needs to know it can offer a start instead.
     if (space.state !== 'running') throw new SpaceError('space_not_running', 'The space is stopped. Start it to apply its work.');
-    return { space, repository, spacePath: record?.spacePath ?? space.directory };
+    const result = { space, repository, spacePath: record?.spacePath ?? space.directory };
+    if (record?.source) result.source = record.source;
+    if (record?.trustedMigrationPath) result.trustedMigrationPath = record.trustedMigrationPath;
+    return result;
   };
 
   /** Brings the work out and describes what an apply would do, for the apply dialog. */
   const previewApply = (spaceId) => exclusive(spaceId, async () => {
-    const { repository, spacePath } = await requireRepository(spaceId);
-    const brought = await codeOut.bringCodeOut({ repository, spaceId, spacePath });
-    const state = await codeOut.describeApplyState({ repository, spaceId });
+    const { repository, spacePath, source, trustedMigrationPath } = await requireRepository(spaceId);
+    const input = { repository, spaceId };
+    if (source) input.source = source;
+    if (trustedMigrationPath) input.trustedMigrationPath = trustedMigrationPath;
+    const brought = await codeOut.bringCodeOut({ ...input, spacePath });
+    const state = await codeOut.describeApplyState(input);
     return { ...brought, ...state };
   });
 
@@ -1590,11 +1626,14 @@ export function createSpaceJourney({
     if (!parsed.success) throw new SpaceError('invalid_apply_request', 'The work is applied as a branch, with its name, or as uncommitted changes.');
     const { as, removeAfterwards } = parsed.data;
     const branch = as === 'branch' ? parsed.data.branch : null;
-    const { repository, spacePath } = await requireRepository(spaceId);
-    const brought = await codeOut.bringCodeOut({ repository, spaceId, spacePath });
+    const { repository, spacePath, source, trustedMigrationPath } = await requireRepository(spaceId);
+    const input = { repository, spaceId };
+    if (source) input.source = source;
+    if (trustedMigrationPath) input.trustedMigrationPath = trustedMigrationPath;
+    const brought = await codeOut.bringCodeOut({ ...input, spacePath });
     const applied = as === 'branch'
-      ? { status: 'applied', ...(await codeOut.applyAsBranch({ repository, spaceId, branch })) }
-      : await codeOut.applyAsChanges({ repository, spaceId });
+      ? { status: 'applied', ...(await codeOut.applyAsBranch({ ...input, branch })) }
+      : await codeOut.applyAsChanges(input);
     let removal = null;
     let kept = null;
     if (removeAfterwards && applied.status === 'applied') {
@@ -1609,6 +1648,6 @@ export function createSpaceJourney({
   });
 
   // Server-only. The caller owns and verifies sourceDirectory as its item worktree.
-  const createBotSpace = (request, { sourceDirectory, onAllocated }) => createSpace(request, { sourceDirectory, onAllocated, waitUntilReady: true });
+  const createBotSpace = (request, { sourceDirectory, source, onAllocated }) => createSpace(request, { sourceDirectory, source, onAllocated, waitUntilReady: true });
   return { createSpace, createBotSpace, rootActivationOptions, readRootPasskeys, rootApprovalChallenge, completeRootApproval, listSpaces, setTaskTitle, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }
