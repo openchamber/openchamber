@@ -2,8 +2,8 @@
 import { z } from 'zod';
 
 const SLOTS = Object.freeze({
-  signing: { field: 'signingKey', legacySettingsKey: 'relaySigningKey' },
-  encryption: { field: 'encryptionKey', legacySettingsKey: 'relayEncryptionKey' },
+  signing: { field: 'signingKey', legacySettingsKey: 'relaySigningKey' } as const,
+  encryption: { field: 'encryptionKey', legacySettingsKey: 'relayEncryptionKey' } as const,
 });
 
 const jwkSchema = z.looseObject({ kty: z.string().min(1) });
@@ -13,22 +13,34 @@ const storeSchema = z.looseObject({
   encryptionKey: jwkPairSchema.optional(),
 });
 
-/** @typedef {z.infer<typeof jwkPairSchema>} RelayJwkPair */
-/** @typedef {'signing' | 'encryption'} RelayKeySlot */
+export interface RelayPublicJwk {
+  kty?: string | undefined;
+  crv?: string | undefined;
+  x?: string | undefined;
+  y?: string | undefined;
+}
+export interface RelayJwkPair { privateJwk: JsonWebKey; publicJwk: RelayPublicJwk }
+type RelayKeySlot = keyof typeof SLOTS;
+type IdentityFile = z.infer<typeof storeSchema>;
+type WritableIdentity = { [Field in 'signingKey' | 'encryptionKey']?: IdentityFile[Field] | RelayJwkPair };
+const legacySettingsSchema = z.looseObject({ relaySigningKey: z.unknown().optional(), relayEncryptionKey: z.unknown().optional() });
+export type RelayLegacySettings = z.infer<typeof legacySettingsSchema>;
+export interface RelaySettingsAccess {
+  readSettingsFromDiskMigrated: () => Promise<RelayLegacySettings>;
+  readSettingsStrict: () => Promise<RelayLegacySettings>;
+  writeSettingsToDisk: (settings: RelayLegacySettings) => Promise<void>;
+}
 
-const isJwkPair = (value) => jwkPairSchema.safeParse(value).success;
+const isJwkPair = (value: unknown): value is z.infer<typeof jwkPairSchema> => jwkPairSchema.safeParse(value).success;
+const hasErrorCode = (value: unknown): value is { code: unknown } => value !== null && typeof value === 'object' && 'code' in value;
 
-/**
- * @param {{
- *   fsPromises: typeof import('node:fs/promises'),
- *   path: typeof import('node:path'),
- *   dataDir: string,
- *   readSettingsFromDiskMigrated: () => Promise<object>,
- *   readSettingsStrict: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
- *   logger?: Pick<Console, 'warn'>,
- * }} deps
- */
+interface RelayKeyStoreDependencies extends RelaySettingsAccess {
+  fsPromises: typeof import('node:fs/promises');
+  path: typeof import('node:path');
+  dataDir: string;
+  logger?: Pick<Console, 'warn'>;
+}
+export type RelayKeyStore = ReturnType<typeof createRelayKeyStore>;
 export const createRelayKeyStore = ({
   fsPromises,
   path,
@@ -37,25 +49,25 @@ export const createRelayKeyStore = ({
   readSettingsStrict,
   writeSettingsToDisk,
   logger = console,
-}) => {
+}: RelayKeyStoreDependencies) => {
   const filePath = path.join(dataDir, 'relay-identity.json');
   let queue = Promise.resolve();
-  const serialized = (task) => {
+  const serialized = <T>(task: () => Promise<T>) => {
     const run = queue.then(task, task);
-    queue = run.catch(() => {});
+    queue = run.then(() => {}, () => {});
     return run;
   };
 
-  const readStore = async () => {
+  const readStore = async (): Promise<IdentityFile> => {
     let raw;
     try {
       raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error?.code === 'ENOENT') return {};
+      if (hasErrorCode(error) && error.code === 'ENOENT') return {};
       throw error;
     }
-    const corrupt = (cause) => new Error(`Relay identity file is corrupt: ${filePath} (fix or remove it, then retry)`, { cause });
-    let json;
+    const corrupt = (cause: unknown) => new Error(`Relay identity file is corrupt: ${filePath} (fix or remove it, then retry)`, { cause });
+    let json: unknown;
     try {
       json = JSON.parse(raw);
     } catch (cause) {
@@ -66,7 +78,7 @@ export const createRelayKeyStore = ({
     return parsed.data;
   };
 
-  const writeStore = async (store) => {
+  const writeStore = async (store: WritableIdentity) => {
     const directory = path.dirname(filePath);
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
@@ -81,7 +93,7 @@ export const createRelayKeyStore = ({
     }
   };
 
-  const scrubLegacySettings = async (store) => {
+  const scrubLegacySettings = async (store: WritableIdentity) => {
     try {
       const raw = await readSettingsStrict();
       const stale = Object.values(SLOTS)
@@ -96,14 +108,9 @@ export const createRelayKeyStore = ({
     }
   };
 
-  /**
-   * @param {RelayKeySlot} slot
-   * @param {() => Promise<RelayJwkPair>} generate Mints a new keypair; called only when no file holds one.
-   * @returns {Promise<RelayJwkPair>}
-   */
-  const getOrCreate = (slot, generate) => serialized(async () => {
+  const getOrCreate = (slot: RelayKeySlot, generate: () => Promise<RelayJwkPair>): Promise<RelayJwkPair> => serialized(async () => {
     const { field, legacySettingsKey } = SLOTS[slot];
-    let store = await readStore();
+    let store: WritableIdentity = await readStore();
     if (!isJwkPair(store[field])) {
       const legacy = (await readSettingsStrict())[legacySettingsKey];
       store = await readStore();
@@ -113,7 +120,9 @@ export const createRelayKeyStore = ({
       }
     }
     await scrubLegacySettings(store);
-    return store[field];
+    const pair = store[field];
+    if (!pair) throw new Error('Relay identity key is missing');
+    return pair;
   });
 
   let generation = 0;

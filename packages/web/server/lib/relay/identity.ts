@@ -6,17 +6,20 @@ import {
   signRelayMessage,
 } from './signing-key.js';
 import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey } from './e2ee.js';
+import type { RelaySigningDependencies } from './signing-key.js';
+import type { RelayPublicJwk } from './key-store.js';
 
-/**
- * @param {{
- *   crypto: typeof import('node:crypto'),
- *   relayKeyStore: ReturnType<typeof import('./key-store.js').createRelayKeyStore>,
- * }} deps
- */
-export const createRelayIdentityRuntime = (deps) => {
+export interface RelayIdentity {
+  serverId: string;
+  hostEncPubJwk: RelayPublicJwk;
+  hostEncPrivateKey: CryptoKey;
+  signRelayAuth: (role: string, connectionId?: string | null) => { ts: number; sig: string; pk: string };
+}
+
+export const createRelayIdentityRuntime = (deps: RelaySigningDependencies) => {
   const { crypto, relayKeyStore } = deps;
 
-  let cachedIdentity = null;
+  let cachedIdentity: RelayIdentity | null = null;
   let cachedGeneration = -1;
 
   const getOrCreateEncryptionKeypair = () => relayKeyStore.getOrCreate('encryption', async () => {
@@ -27,15 +30,7 @@ export const createRelayIdentityRuntime = (deps) => {
     return { privateJwk, publicJwk };
   });
 
-  /**
-   * @returns {Promise<{
-   *   serverId: string,
-   *   hostEncPubJwk: JsonWebKey,
-   *   hostEncPrivateKey: CryptoKey,
-   *   signRelayAuth: (role: string, connectionId?: string | null) => { ts: number, sig: string, pk: string },
-   * }>}
-   */
-  const getRelayIdentity = async () => {
+  const getRelayIdentity = async (): Promise<RelayIdentity> => {
     const generation = relayKeyStore.generation();
     if (cachedIdentity && cachedGeneration === generation) return cachedIdentity;
     const signing = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
@@ -44,7 +39,7 @@ export const createRelayIdentityRuntime = (deps) => {
     const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);
     const pk = Buffer.from(canonicalPublicJwkString(signing.publicJwk), 'utf8').toString('base64url');
 
-    const signRelayAuth = (role, connectionId) => {
+    const signRelayAuth: RelayIdentity['signRelayAuth'] = (role, connectionId) => {
       const ts = Date.now();
       const sig = signRelayMessage({ crypto }, signing.privateKey, `${ts}.${serverId}.${role}.${connectionId ?? ''}`);
       return { ts, sig, pk };
