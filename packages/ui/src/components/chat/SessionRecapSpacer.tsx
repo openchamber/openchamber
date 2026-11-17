@@ -8,17 +8,10 @@ interface SessionRecapNoteProps {
   isMobile: boolean;
 }
 
-// The model marks up its recap now and then; the note is plain text.
 const plainRecap = (recap: string): string => recap
   .replace(/`([^`]+)`/g, '$1')
   .replace(/\*\*([^*]+)\*\*/g, '$1');
 
-// Quiet one-paragraph recap of the agent's last reply. A hint about the
-// current state rather than part of the transcript: it lies over the empty
-// band the transcript keeps above the composer, right under the last
-// answer's footer (ChatContainer's tail spacer), and simply vanishes in place
-// once a new message makes it stale. Appears only after the 1-minute quiet
-// window.
 export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ sessionId, directory, isMobile }) => {
   const { visibleRecap } = useSessionAssistState(sessionId, directory);
   const { t } = useI18n();

@@ -10,15 +10,6 @@ import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError
 import { useSessions } from '@/sync/sync-context';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 
-/**
- * OpenCode's first-use web search question, as its own card instead of the
- * generic form. It answers the same form through the same reply path: one
- * click sends `{ [field]: option }`, "Not now" cancels the form (the search
- * fails and OpenCode asks again next time).
- *
- * The first step is allow / choose another provider / turn off; "choose"
- * makes OpenCode raise a second form listing the providers.
- */
 
 type ChoiceValue = 'allow' | 'choose' | 'disable';
 
@@ -112,7 +103,6 @@ const ConsentBody: React.FC<{
                 </Button>
             );
         }
-        // Provider names, or a choice this card does not know yet: OpenCode's label.
         return (
             <Button key={option.value} variant="outline" size="sm" disabled={pending} onClick={() => onAnswer(option.value)}>
                 {option.label}
@@ -140,7 +130,6 @@ const ConsentBody: React.FC<{
 const consentTitle = (consent: WebSearchConsent, t: ReturnType<typeof useI18n>['t']): string =>
     consent.step === 'choice' ? t('chat.webSearchConsent.title') : t('chat.webSearchConsent.providerTitle');
 
-/** Docked above the composer, in place of `FormDock`'s generic panel. */
 export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
     const { t } = useI18n();
     const sessions = useSessions();
@@ -169,7 +158,6 @@ export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSea
     );
 };
 
-/** Inline variant for the BTW sheet, which renders forms as cards. */
 export const WebSearchConsentCard: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
     const { t } = useI18n();
     const { pending, answer, dismiss } = useConsentReply(form, consent);

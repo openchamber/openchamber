@@ -8,7 +8,6 @@ export function useComposerExpansion(isBtwActive: boolean, isMobile: boolean) {
     const isExpandedInput = !isBtwActive && persistedExpandedInput;
     const isDesktopExpanded = isExpandedInput && !isMobile;
 
-    // Mobile fullscreen composer (entered via the drag handle's swipe-up).
     const isMobileExpanded = isExpandedInput && isMobile;
 
     const isComposerExpanded = isDesktopExpanded || isMobileExpanded;

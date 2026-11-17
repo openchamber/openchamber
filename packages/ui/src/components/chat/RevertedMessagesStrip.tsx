@@ -19,11 +19,6 @@ import {
     type RevertedMessageDockState,
 } from './revertedMessageDockState';
 
-/**
- * A one-line preview of a reverted prompt, read the way the navigator reads
- * it: the typed text, else a label for its attached context (a quote, a
- * terminal selection), else an attached filename, else `fallback`.
- */
 const getRevertedPreview = (
     parts: Part[],
     fallback: string,
@@ -43,19 +38,10 @@ interface RevertedMessagesStripProps {
     directory?: string;
 }
 
-/**
- * A staged revert, as a top row of the composer. OpenCode v2 stages a revert:
- * the messages after the revert point are hidden and the agent's file changes
- * from those turns are rolled back. The next message drops them for good
- * (OpenCode commits the revert before admitting it), so the only decision left
- * here is Restore, which puts the messages and the files back. One reverted
- * message is its own row; several collapse into a count that expands in place.
- */
 export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React.memo(({ sessionId, directory }) => {
     const { t } = useI18n();
     const descriptorOf = useSourceControlDescriptorOf();
     const [restoring, setRestoring] = React.useState(false);
-    // The list opens for one revert point; a new revert starts collapsed.
     const [expandedFor, setExpandedFor] = React.useState<string | null>(null);
     const listId = React.useId();
     const revertedStateRef = React.useRef<RevertedMessageDockState>(EMPTY_REVERTED_MESSAGE_DOCK_STATE);
@@ -69,9 +55,6 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
-        // Attached context arrives as synthetic messages around its prompt;
-        // folding it back on gives a quote-only prompt its label, and drops
-        // plugin plumbing. A background report stays its own row.
         const entries = attachSyntheticContext(revertedState.records.map((record) => ({ info: record.message, parts: record.parts })));
         return entries.flatMap(({ info, parts }) => {
             if (info.role === 'user') return [{ id: info.id, text: getRevertedPreview(parts, noTextContent, t, descriptorOf) }];
@@ -130,8 +113,6 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
     const expansionKey = `${revertedState.revertMessageID}:${items[0].id}`;
     const expanded = expandedFor === expansionKey;
 
-    // The header toggles the list, as the background commands header does;
-    // Restore stays on it, so the decision never hides behind the toggle.
     return (
         <div role="group" className="border-b border-edge" aria-label={t('chat.revertPopover.title')}>
             <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
@@ -162,7 +143,6 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
                 <ScrollableOverlay id={listId} outerClassName="max-h-40" className="overscroll-contain" disableHorizontal>
                     {items.map((item) => (
                         <div key={item.id} className={ROW_CLASS}>
-                            {/* Lines the text up with the header label after its icon. */}
                             <span className="size-3.5 shrink-0" aria-hidden="true" />
                             <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{item.text}</span>
                         </div>

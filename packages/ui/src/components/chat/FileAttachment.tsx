@@ -34,12 +34,10 @@ export const ActiveEditorFileSuggestion = memo(() => {
 
   const { filePath, fileName, relativePath, selection, fileSize } = activeEditorFile;
 
-  // Normalize to forward slashes for comparison
   const isFileAttached = attachedFiles.some(
     (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === filePath
   )
 
-  // Compute selection label using a compact range (single line shown as "N" not "N-N")
   let selectionRange = ''
   if (selection) {
     selectionRange = selection.startLine === selection.endLine
@@ -51,18 +49,15 @@ export const ActiveEditorFileSuggestion = memo(() => {
     (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === selectionLabel && f.vscodePath === filePath
   )
 
-  // Nothing to show — file is already attached and there's no (or already-attached) selection
   if (isFileAttached && (!selection || isSelectionAttached)) return null;
 
   const ext = fileName.split('.').pop() || '';
-  // Always show only the filename in the suggestion UI
   const displayName = fileName;
 
   const handleAddFile = () => {
     try {
       addVSCodeFileAttachment(filePath, fileName, fileSize);
     } catch (error) {
-      // The store names the cause (a file too large to send).
       if (error instanceof Error) toast.error(error.message);
     }
   };
@@ -74,7 +69,6 @@ export const ActiveEditorFileSuggestion = memo(() => {
     await addVSCodeSelectionAttachment(filePath, file);
   };
 
-  // If there is a selection, prefer showing the pin-selection UI only.
   const showSelectionPin = !!selection && !isSelectionAttached;
   const showFileAdd = !showSelectionPin && !isFileAttached;
 
@@ -145,7 +139,6 @@ const issueLinkIcon = (kind: Exclude<IssueLinkKind, 'repository-issue' | 'tracke
   kind === 'guest-issue' ? 'attachment-2' : 'git-pull-request'
 );
 
-/** An issue or PR link chip's mark: a repository issue wears its provider's, a tracker item its tracker's. */
 const IssueLinkIcon: React.FC<{ file: { mime?: string }; kind: IssueLinkKind; className?: string }> = ({ file, kind, className }) => {
   const provider = useSourceControlProvider(getRepositoryIssueLinkProvider(file));
   if (kind === 'repository-issue') return <ProviderIcon descriptor={provider} className={className} />;
@@ -157,7 +150,6 @@ interface MessageFilesDisplayProps {
   files: FilePart[];
   onShowPopup?: (content: ToolPopupContent) => void;
   compact?: boolean;
-  /** Compact only: replaces the default top margin, for placement above content. */
   className?: string;
 }
 
@@ -186,7 +178,6 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
   }, []);
 
 
-  // What a compact chip or thumbnail opens; a preview needs the message's popup.
   const resolveOpenTarget = (file: FilePart) => {
     const target = resolveAttachmentOpenTarget(file, fileItems);
     return target?.kind === 'popup' && !onShowPopup ? null : target;
@@ -197,7 +188,6 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
       return;
     }
 
-    // Text opens the text dialog and a PDF the document dialog, as compact tiles do.
     const target = resolveAttachmentOpenTarget(file, [file]);
     if (target?.kind === 'popup' && !target.popup.image) {
       onShowPopup({ ...target.popup, title: fileName });
@@ -219,10 +209,6 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
   if (fileItems.length === 0) return null;
 
   if (compact) {
-    // One strip for everything the message carries, images and files alike:
-    // tiles of one height, scrolled sideways when they do not fit, each
-    // opening what it shows. The height takes a file's two lines of name and
-    // its type line, and scales with the text size.
     const tileClass = 'relative flex-none snap-start h-16 rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring';
     return (
       <ScrollableOverlay outerClassName={cn('overlay-scrollbar-wrapper--no-gutter -mx-1 w-auto', className ?? 'mt-1.5')} className="px-1 py-0.5" fillContainer={false}>
@@ -234,7 +220,6 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
             const isImage = Boolean(file.mime?.startsWith('image/') && file.url) && !issueLinkKind;
             const sizeText = formatFileSize(file.size);
             const ext = fileName.includes('.') ? fileName.split('.').pop() ?? '' : '';
-            // A file tile reads like a small page: its name on top, what it is below.
             const kindText = [issueLinkKind ? null : ext.toUpperCase() || null, sizeText || null].filter(Boolean).join(' · ');
             const open = openTarget
               ? (event: React.MouseEvent) => openAttachment(openTarget, issueLinkKind ? event : undefined)
