@@ -63,3 +63,31 @@ test("style requires an explicit expected value", async () => {
     StepFailure,
   )
 })
+
+const fieldContext = (values) => ({
+  vars: {},
+  vocabulary: { message: { selector: "textarea", means: "A draft message." } },
+  page: {
+    query: () => "document.querySelectorAll('textarea')",
+    evaluate: async (expression) => {
+      assert.match(expression, /\.value/)
+      return values.length > 1 ? values.shift() : values[0]
+    },
+  },
+})
+
+test("field checks the current value and waits for a retained draft", async () => {
+  await runStep({ do: "field", on: "message", equals: "Retained draft" }, fieldContext(["", "Retained draft"]))
+  await runStep({ do: "field", on: "message", contains: "draft" }, fieldContext(["Retained draft"]))
+})
+
+test("field fails for a missing or mismatched input", async () => {
+  await assert.rejects(
+    runStep({ do: "field", on: "message", equals: "Retained draft", timeout: 0.001 }, fieldContext([null])),
+    /no field at message/,
+  )
+  await assert.rejects(
+    runStep({ do: "field", on: "message", equals: "Retained draft", timeout: 0.001 }, fieldContext(["Lost draft"])),
+    /expected "Retained draft"/,
+  )
+})

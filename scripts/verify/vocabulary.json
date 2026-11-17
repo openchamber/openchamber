@@ -279,5 +279,22 @@
   "app.colorMode": {"selector": "html.{mode}", "means": "The app rendered in its light or dark color mode."},
   "settings.themeById": {"selector": "[data-theme-id=\"{theme}\"][aria-selected=\"true\"]", "means": "The selected theme identified by its remembered id."},
   "settings.checkboxLabel": {"selector": "[role=\"dialog\"] [role=\"checkbox\"][aria-label=\"{label}\"]", "means": "A Settings checkbox by its accessible label, including nested reasoning options."},
-  "app.canvas": {"selector": "body", "means": "The app's painted page background, outside the Settings theme previews."}
+  "app.canvas": {"selector": "body", "means": "The app's painted page background, outside the Settings theme previews."},
+  "git.branch": {"selector": "[data-right-slot] .branch-selector__trigger", "means": "The current branch button in the Git panel header."},
+  "git.branchSearch": {"selector": "input[placeholder=\"Search branches...\"]", "means": "The search field in the branch picker."},
+  "git.option": {"selector": "[cmdk-item]", "means": "A branch picker option, including Create new branch; pair it with text."},
+  "git.newBranch": {"selector": "input[placeholder=\"New branch name\"]", "means": "The new branch name field in the branch picker."},
+  "git.action": {"selector": "[data-right-slot] button[aria-label=\"{label}\"]", "means": "A Git panel action by its label: stage, unstage, revert, commit or repository views."},
+  "git.list": {"selector": "[data-right-slot] [role=\"list\"][aria-label=\"Changed files\"]", "means": "The Git panel's staged and unstaged file groups."},
+  "git.row": {"selector": "[data-right-slot] [role=\"list\"][aria-label=\"Changed files\"] [role=\"button\"]", "means": "A changed file row in the Git panel; pair it with its file name."},
+  "git.group": {"selector": "[data-right-slot] [role=\"list\"][aria-label=\"Changed files\"] button[aria-expanded]:has(h3)", "means": "A Staged or Changes group heading that folds its file rows."},
+  "git.message": {"selector": "[data-right-slot] textarea[placeholder=\"Commit message\"]", "means": "The Git panel's commit message field."},
+  "git.historyCommit": {"selector": "[role=\"dialog\"] li > button:has(code)", "means": "A commit row in History or Git graph; a click expands its files."},
+  "git.historyFile": {"selector": "[role=\"dialog\"] li > button:has(span[title=\"{path}\"])", "means": "A commit's changed file in History or Git graph; a click opens its diff."},
+  "git.stashName": {"selector": "[role=\"dialog\"] input[placeholder=\"Stash name\"]", "means": "The optional name for a new stash."},
+  "git.stashSearch": {"selector": "[role=\"dialog\"] input[placeholder=\"Search stashes\"]", "means": "The stash list's search field."},
+  "git.stashRow": {"selector": "[role=\"dialog\"] div.group:has(button[aria-label=\"Apply\"])", "means": "A saved stash row with Apply, Pop and Drop buttons; pair it with its name."},
+  "git.stashAction": {"selector": "[role=\"dialog\"] button[aria-label=\"{label}\"]", "means": "An action on a stash row: Apply, Pop or Drop."},
+  "git.dirtyMessage": {"selector": "[role=\"dialog\"] input[placeholder=\"Commit message\"]", "means": "The commit message in the uncommitted-changes branch switch dialog."},
+  "git.createBranch": {"selector": "[role=\"menu\"] button[aria-label=\"Create\"]", "means": "The create button beside a new branch name; disabled while the name is empty."}
 }

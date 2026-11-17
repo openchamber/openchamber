@@ -130,6 +130,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `steady` `on`, `count`, `ms` | Fails if the count changes during `ms` |
 | `editor` `equals`, `contains`, `empty` | Waits for the composer's text |
 | `terminal.expect` `on`, `contains` or `equals` | Selects the visible canvas grid with a real drag and copies it with Cmd/Ctrl+C until its text matches; replaces the clipboard and leaves the output selected |
+| `field` `on`, `equals` or `contains` | Waits for an input or textarea's current value, such as a commit message retained after a failed save |
 | `url` `contains` | Waits for the address; `{var}` placeholders allowed |
 | `remember` `on`, `attr`, `as` | Stores an attribute of the element in a variable |
 | `clipboard` `equals`, `contains`, or `set` | Waits for the clipboard text, `{var}` placeholders allowed; `set` writes a marker first, so a copy that does nothing cannot pass on old content |

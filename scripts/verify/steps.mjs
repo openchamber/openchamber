@@ -369,6 +369,18 @@ const ACTIONS = {
     } while (Date.now() < deadline)
     fail(problem)
   },
+  async field(step, ctx) {
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let problem = null
+    do {
+      const actual = await ctx.page.evaluate(`(${ctx.page.query(target)}[${target.index}] ?? null)?.value ?? null`)
+      problem = actual === null ? `no field at ${describe(step)}` : expectText(actual, step, describe(step))
+      if (!problem) return
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(problem)
+  },
   async url(step, ctx) {
     const deadline = Date.now() + timeoutOf(step)
     let actual = ""
