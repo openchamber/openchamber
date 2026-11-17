@@ -4,13 +4,6 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { getHighlightedCode, highlightCode } from '@/components/chat/markdown/highlightedCode';
 
-// Shared static code highlighter for non-streaming code surfaces (tool
-// output, permission previews, diffs, sidebar file contents). Highlights
-// renders on the main thread, so code paints highlighted synchronously; only
-// until its import finishes does the escaped code paint first. Colors resolve
-// through the `--md-syntax-*` CSS variables on the host, so theme changes
-// never require re-highlighting.
-
 const escapeHtml = (text: string): string =>
   text
     .replace(/&/g, '&amp;')
@@ -30,8 +23,6 @@ const styleString = (style?: React.CSSProperties): string => {
     .join('');
 };
 
-// Normalize a highlighted or plain `<pre><code>` so it sits flush inside the
-// host: drop its own background/margin and apply wrap + caller code styles.
 const applyPreStyles = (host: HTMLElement, wrap: boolean, codeStyle?: React.CSSProperties): void => {
   const pre = host.querySelector('pre');
   if (pre) {
@@ -56,11 +47,8 @@ interface HighlightedCodeProps {
   code: string;
   language: string;
   className?: string;
-  /** Inline styles for the host container (mirrors react-syntax-highlighter `customStyle`). */
   style?: React.CSSProperties;
-  /** Inline styles applied to the `<code>` element (mirrors `codeTagProps.style`). */
   codeStyle?: React.CSSProperties;
-  /** Wrap long lines instead of horizontal scroll. */
   wrap?: boolean;
 }
 
@@ -76,8 +64,6 @@ export const HighlightedCode: React.FC<HighlightedCodeProps> = ({
   const hostRef = React.useRef<HTMLDivElement>(null);
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
 
-  // Synchronous first paint: highlighted once Highlights has loaded, escaped
-  // plain code otherwise.
   React.useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -85,7 +71,6 @@ export const HighlightedCode: React.FC<HighlightedCodeProps> = ({
     applyPreStyles(host, wrap, codeStyle);
   }, [code, language, wrap, codeStyle]);
 
-  // Otherwise wait for the Highlights import, then swap in. Guarded against stale results.
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
