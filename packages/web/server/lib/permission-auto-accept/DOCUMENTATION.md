@@ -4,6 +4,11 @@
 
 This module owns the authoritative per-session permission policy for web, desktop, and mobile runtimes. Policy is persisted in OpenChamber settings so permission handling survives UI disconnects and server restarts.
 
+## Invariants
+
+- A stored session entry that is neither a mode nor a pre-modes boolean is dropped on its own. One unreadable entry never discards the rest of the policy.
+- A partial `session.updated` keeps the parent and directory an earlier record established; a field the update does not name is not cleared.
+
 ## Policy
 
 Each session has a mode (`modes.js`):
@@ -14,7 +19,7 @@ Each session has a mode (`modes.js`):
 
 `permissionAutoAccept.sessions` maps session ids to modes. Inheritance uses the nearest explicit session value, so a child `ask` overrides a parent `auto`; descendants without an explicit value inherit from their nearest configured ancestor.
 
-Policies written before the modes stored booleans. The first read converts them and persists the result once: `false` becomes `ask`, `true` becomes `safety` when the old global safety-net switch in the routing config was on and `auto` otherwise (`resolveLegacyEnabledMode`). The settings sanitizer accepts both shapes so the converting write and older files pass.
+Policies written before the modes stored booleans. The first read converts them and persists the result once: `false` becomes `ask`, `true` becomes `safety` when the old global safety-net switch in the routing config was on and `auto` otherwise (`resolveLegacyEnabledMode`). The conversion is persisted at that first read because the old switch is gone once the routing config is next saved. The settings sanitizer accepts both shapes so the converting write and older files pass.
 
 ## Default mode
 
@@ -32,7 +37,7 @@ The fork event's `parentID` identifies the source transcript, not subagent linea
 
 ## Runtime
 
-`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record), never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
+`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record); a pending request belongs to a turn that is still running, so its location is already started. Never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
 
 Lineage comes from session events and, when unknown, from the session record in OpenCode. Only `session.created` or a fetched record proves a session has no parent: a `session.updated` is partial (title, usage) and leaves the parent unknown, so the next lookup fetches the record. After a restart, a running subagent's first event is such an update. A failed lookup is retried like a failed reply and then leaves the request for the user.
 
@@ -51,7 +56,7 @@ Both broadcasts (`updated` and `left-for-user`) go to the main WebSocket, the le
 ## Routes
 
 - `GET /api/permission-auto-accept` answers `{ sessions, modes, revision }`. `modes` is the policy; `sessions` is its on/off view (`ask` is off) for clients from before the modes.
-- `PUT /api/permission-auto-accept/sessions/:sessionId` takes `{ mode, directory }`; a body with only `enabled` (older clients, VS Code's bridge shape) means `auto` or `ask`.
+- `PUT /api/permission-auto-accept/sessions/:sessionId` takes `{ mode, directory }`. A boolean is still accepted from callers that know only on/off: older clients and VS Code's bridge send `enabled`, and scheduled tasks pass `true` to the runtime directly. `true` is `auto`, `false` is `ask`.
 
 These are normal authenticated OpenChamber runtime routes. They must not be added to browser URL-token allowlists.
 
