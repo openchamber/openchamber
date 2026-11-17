@@ -95,6 +95,51 @@ it('configures managed HTTPS through the web Git adapter, HTTP route and binding
   }
 });
 
+it('rejects repeated directory query parameters on the source-control read routes (#2292)', async () => {
+  const repository = { supported: true, repositoryId: 'repo_one', configRevision: 'config_one', bare: false,
+    remotes: [], transportRevision: 'private-transport' };
+  const resolveRepository = vi.fn(async () => repository);
+  const service = createBindingService({
+    resolveRepository,
+    resolveTransportRepository: async () => repository,
+    readTransportAccount: async () => { throw new Error('not used by read routes'); },
+    store: {
+      read: async () => ({ revision: 0, binding: null }),
+      compareAndSwap: async () => { throw new Error('not used by read routes'); },
+    },
+  });
+  const app = express();
+  app.use(express.json());
+  registerSourceControlRoutes(app, { bindingService: service });
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const route of ['/api/source-control/repository-context', '/api/source-control/binding']) {
+      resolveRepository.mockClear();
+
+      const single = await fetch(`${base}${route}?directory=${encodeURIComponent('/repo/a')}`);
+      expect(single.status).toBe(200);
+      expect(resolveRepository).toHaveBeenCalledTimes(1);
+      expect(resolveRepository).toHaveBeenCalledWith('/repo/a');
+      resolveRepository.mockClear();
+
+      const missing = await fetch(`${base}${route}`);
+      expect(missing.status).toBe(400);
+      expect(resolveRepository).not.toHaveBeenCalled();
+
+      const repeated = await fetch(`${base}${route}?directory=${encodeURIComponent('/repo/a')}&directory=${encodeURIComponent('/repo/b')}`);
+      expect(repeated.status).toBe(400);
+      expect((await repeated.json()).code).toBe('INVALID_SOURCE_CONTROL_BINDING');
+      // The ambiguous scope is rejected before any directory is resolved:
+      // neither repeated value may be selected for resolution.
+      expect(resolveRepository).not.toHaveBeenCalled();
+    }
+  } finally {
+    server.close();
+  }
+});
+
 describe('source-control provider registry', () => {
   it.each([
     ['SOURCE_CONTROL_BINDING_STALE', 409],
