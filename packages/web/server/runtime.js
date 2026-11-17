@@ -930,7 +930,7 @@ const getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEn
 const ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
 const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
 const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
-const isBundledOpenCodeCliPath = (...args) => openCodeEnvRuntime.isBundledOpenCodeCliPath(...args);
+const isBundledOpenCodePath = (...args) => openCodeEnvRuntime.isBundledOpenCodePath(...args);
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
@@ -1825,7 +1825,7 @@ const getOpenCodeCompatibility = async () => {
     return describeOpenCodeCompatibility(version, 'external', false);
   }
   const binary = ensureOpencodeCliEnv();
-  const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
+  const installation = isBundledOpenCodePath(binary) ? 'bundled' : 'managed';
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
   const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
   return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
@@ -1839,7 +1839,7 @@ const getOpenCodeUpgradeCapability = () => {
     isExternal: isExternalOpenCode,
     hasManagedProcess: Boolean(openCodeProcess),
     activeBinary,
-    isBundledBinary: isBundledOpenCodeCliPath,
+    isBundledBinary: isBundledOpenCodePath,
     pinnedByPolicy: Boolean(readEnterprisePolicy().opencodeBinary),
   });
 };

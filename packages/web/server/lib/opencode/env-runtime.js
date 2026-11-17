@@ -5,6 +5,7 @@ import path from 'node:path';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
+import { bundledOpenCodeServerLaunch, isBundledOpenCodeServer, resolveBundledOpenCodeServer } from './bundled-opencode-server.js';
 
 const SHELL_PROBE_TIMEOUT_MS = 5_000;
 const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
@@ -315,52 +316,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
   };
 
-  const bundledOpenCodeCliCandidates = () => {
-    const names = process.platform === 'win32' ? ['opencode.exe'] : ['opencode'];
-    const roots = [
-      process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR,
-      typeof process.resourcesPath === 'string' ? path.join(process.resourcesPath, 'opencode-cli') : null,
-    ]
-      .map((value) => (typeof value === 'string' ? value.trim() : ''))
-      .filter(Boolean);
+  const bundledOpenCodeServerDirectories = () => [
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR,
+    process.resourcesPath ? path.join(process.resourcesPath, 'opencode-server') : null,
+  ];
 
-    const candidates = [];
-    for (const root of roots) {
-      for (const name of names) {
-        candidates.push(path.join(root, name));
-      }
-    }
-    return candidates;
-  };
+  const isBundledOpenCodePath = (candidate) => isBundledOpenCodeServer(candidate, bundledOpenCodeServerDirectories());
 
-  const resolveBundledOpenCodeCliPath = () => {
-    for (const candidate of bundledOpenCodeCliCandidates()) {
-      if (isExecutable(candidate) && !isWindowsOpenCodeDesktopAppPath(candidate)) {
-        return candidate;
-      }
-    }
-    return null;
-  };
-
-  const canonicalExecutablePath = (candidate) => {
-    if (typeof candidate !== 'string' || !candidate.trim()) return null;
-    try {
-      return fs.realpathSync.native(candidate.trim());
-    } catch {
-      return path.resolve(candidate.trim());
-    }
-  };
-
-  const isBundledOpenCodeCliPath = (candidate) => {
-    const canonicalCandidate = canonicalExecutablePath(candidate);
-    if (!canonicalCandidate) return false;
-    return bundledOpenCodeCliCandidates().some((bundledCandidate) => (
-      canonicalExecutablePath(bundledCandidate) === canonicalCandidate
-    ));
-  };
-
-  const bundledOpenCodeCliFallback = () => {
-    const bundled = resolveBundledOpenCodeCliPath();
+  const bundledOpenCodeFallback = () => {
+    const bundled = resolveBundledOpenCodeServer(bundledOpenCodeServerDirectories());
     if (!bundled) return null;
     clearWslOpencodeResolution();
     state.resolvedOpencodeBinarySource = 'bundled';
@@ -402,7 +366,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
 
-    const bundled = bundledOpenCodeCliFallback();
+    const bundled = bundledOpenCodeFallback();
     if (bundled) return bundled;
 
     const resolvedFromPath = searchPathFor('opencode');
@@ -846,6 +810,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
       ? opencodePath.trim()
       : 'opencode';
 
+    if (isBundledOpenCodePath(fallbackBinary)) return bundledOpenCodeServerLaunch(fallbackBinary, resolveNodeCliPath);
+
     if (process.platform !== 'win32') {
       return { binary: fallbackBinary, args: [], wrapperType: null };
     }
@@ -1156,7 +1122,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     if (pin.pinned) return pin.binary;
 
     if (state.resolvedOpencodeBinary) {
-      if (state.useWslForOpencode) {
+      if (state.useWslForOpencode || state.resolvedOpencodeBinarySource === 'bundled') {
         return state.resolvedOpencodeBinary;
       }
       ensureOpencodeShimRuntime(state.resolvedOpencodeBinary);
@@ -1182,11 +1148,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return resolved;
       }
 
-      if (process.env.OPENCHAMBER_RUNTIME !== 'desktop' || state.resolvedOpencodeBinarySource !== 'bundled') {
+      if (state.resolvedOpencodeBinarySource !== 'bundled') {
         process.env.OPENCODE_BINARY = resolved;
+        prependToPath(path.dirname(resolved));
+        ensureOpencodeShimRuntime(resolved);
       }
-      prependToPath(path.dirname(resolved));
-      ensureOpencodeShimRuntime(resolved);
       state.resolvedOpencodeBinary = resolved;
       state.resolvedOpencodeBinarySource = state.resolvedOpencodeBinarySource || 'unknown';
       console.log(`Resolved opencode CLI: ${resolved}`);
@@ -1286,7 +1252,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
-    isBundledOpenCodeCliPath,
+    isBundledOpenCodePath,
     resolveManagedOpenCodeLaunchSpec,
     isExecutable,
     searchPathFor,

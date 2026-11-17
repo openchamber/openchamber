@@ -19,6 +19,16 @@ describe('summarizeOpenCodeTree', () => {
     expect(summarizeOpenCodeTree(parseProcessTable(PS), 500)).toEqual({ openCodeMb: 200, childProcesses: 3, childMb: 160 });
   });
 
+  it('counts the bundled server, which runs as the app executable under this server', () => {
+    const table = parseProcessTable([
+      '  400     1 307200 /Applications/OpenChamber.app/Contents/MacOS/OpenChamber',
+      '  700   400 409600 /Applications/OpenChamber.app/Contents/MacOS/OpenChamber',
+      '  710   700   2048 /Applications/OpenChamber.app/Contents/Resources/opencode-server/assets/@opencode/pty-darwin-arm64/bin/opencode-pty',
+    ].join('\n'));
+    expect(summarizeOpenCodeTree(table, 700, 400)).toEqual({ openCodeMb: 400, childProcesses: 1, childMb: 2 });
+    expect(summarizeOpenCodeTree(table, 400, 400)).toBeNull();
+  });
+
   it('says nothing when the pid is not an OpenCode process here', () => {
     const table = parseProcessTable(PS);
     expect(summarizeOpenCodeTree(table, 600)).toBeNull();

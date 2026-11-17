@@ -83,9 +83,12 @@ maintainer's own app and dev shell, on the same machine.
   `desktopUiPassword`, when the run needs the saved projects or hosts. A shell
   inside the desktop app inherits its `OPENCHAMBER_*` variables (UI password,
   dist dir, agent-tool URL and token) and `OPENCODE_PASSWORD`: start copies
-  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first, and use
-  `OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode`
-  when `~/.opencode/bin/opencode` lags the version the repo needs.
+  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first. When
+  `~/.opencode/bin/opencode` lags the version the repo needs, run the OpenCode
+  the desktop bundles instead: `bun run --cwd packages/electron prepare:opencode-server`,
+  then `OPENCHAMBER_BUNDLED_OPENCODE_SERVER_DIR=$PWD/packages/electron/resources/opencode-server`
+  for a server started from `packages/web/server` (the CLI's `serve` still needs a real
+  CLI in `OPENCODE_BINARY`).
 - **Dev server:** from the repo root, after the env is clean,
   `OPENCHAMBER_DATA_DIR=<scratch>/oc-data OPENCHAMBER_HMR_UI_PORT=5391 OPENCHAMBER_HMR_API_PORT=3991 bun run dev`
   in the background; the UI is at `http://127.0.0.1:5391/`. It runs React
@@ -173,11 +176,12 @@ To run the same probe against OpenCode's app on the stand's data, with
 ```bash
 HOME=$PWD/../state/home \
 OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
-/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+~/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4870
 ```
 
-It serves its web app at `/` and prints a throwaway `server password` in its
-log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+This needs the OpenCode CLI: the server the desktop bundles has no web app.
+The CLI serves its web app at `/` and prints a throwaway `server password` in
+its log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
 password, and connect; it lists the same sessions as `profile:serve`. Its
 controls carry `data-slot` and `data-component` attributes
 (`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),

@@ -28,7 +28,6 @@ import { AGENT_READ_FILES, agentReadFileContent, fixtureProviderConfig } from ".
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
 const FIXTURE_SCRIPT = join(REPO_ROOT, "scripts/perf/fixture-provider.mjs")
-const MAC_BUNDLED_OPENCODE = "/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode"
 
 const HELP = `Usage: bun run profile:serve -- [options]
 
@@ -48,8 +47,7 @@ Options:
   --fixture-port <port>    Fixture provider port (default: 4798); reused when
                            something already listens there
   --opencode-binary <path> OpenCode CLI (default: $OPENCODE_BINARY, else the
-                           one bundled in /Applications/OpenChamber.app on macOS,
-                           else the server's own resolution)
+                           opencode on PATH, which the CLI's serve requires)
   --help                   Show this help`
 
 const portInUse = (port) => new Promise((resolvePort) => {
@@ -71,8 +69,7 @@ export const isolatedEnv = (overrides = {}) => {
   return { ...env, ...overrides }
 }
 
-const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY
-  || (platform() === "darwin" && existsSync(MAC_BUNDLED_OPENCODE) ? MAC_BUNDLED_OPENCODE : null)
+const defaultOpencodeBinary = () => process.env.OPENCODE_BINARY || null
 
 const waitForPort = async (port, timeoutMs, child) => {
   const deadline = Date.now() + timeoutMs
