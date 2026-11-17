@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BotServiceError, branch, parse, providerResult, revision, sha, text } from './contracts.js';
+import { readGitHubBranchRules } from './branch-rules.js';
 
 const gitRef = z.object({ ref: text, object: z.object({ sha }) });
 const pullSchema = z.object({ number: revision, node_id: text, state: z.enum(['open', 'closed']),
@@ -7,7 +8,7 @@ const pullSchema = z.object({ number: revision, node_id: text, state: z.enum(['o
   base: z.object({ ref: branch, repo: z.object({ full_name: text }) }),
 });
 
-export function createGitHubAdapter(credential, target, { publishGit, beforeAdmission }) {
+export function createGitHubAdapter(credential, target, { publishGit, beforeAdmission, ownedBranch }) {
   const repository = `${target.owner}/${target.repo}`;
   const root = `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}`;
   const matchesRepo = (value) => value?.toLowerCase() === repository.toLowerCase();
@@ -32,7 +33,7 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
     parse(revision, number);
     const pull = providerResult(pullSchema, await credential.request({ path: `${root}/pulls/${number}` }));
     if (pull.number !== number || !matchesRepo(pull.base.repo.full_name) || !matchesRepo(pull.head.repo?.full_name)
-      || headSha && pull.head.sha !== headSha) throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'The GitHub pull request or its head changed.');
+      || headSha && pull.head.sha !== headSha || ownedBranch && pull.head.ref !== ownedBranch) throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'The GitHub pull request or its head changed.');
     return pull;
   };
   const readAuthorization = async (input) => {
@@ -93,7 +94,7 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
     }`, { owner: target.owner, repo: target.repo, ref: `refs/heads/${name}` });
     const ref = providerResult(z.object({ target: z.object({ oid: sha }), branchProtectionRule: z.object({
       requiresCommitSignatures: z.boolean(), requiresApprovingReviews: z.boolean(),
-      requiredApprovingReviewCount: z.number().int().nonnegative(), requiresStatusChecks: z.boolean(),
+      requiredApprovingReviewCount: z.number().int().nonnegative().nullable(), requiresStatusChecks: z.boolean(),
     }).nullable(), rules: z.object({ pageInfo: z.object({ hasNextPage: z.boolean() }),
       nodes: z.array(z.object({ type: text })).max(100) }) }), response.repository?.ref);
     const autoMergeAllowed = providerResult(z.boolean(), response.repository?.autoMergeAllowed);
@@ -110,7 +111,8 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
         if (result.state !== 'succeeded') throw new BotServiceError('BOT_REMOTE_AUTHORIZATION_ACTIVE', 'Remote auto-merge may still be active.', 'outcome-unknown');
         return result.result;
       }
-      if (operation === 'git.push') return publishGit({ credential, target, input, readBranch, readRules, graphql, root });
+      if (operation === 'git.push') return publishGit({ credential, target, input, readBranch, readRules,
+        readPublicationRules: (name) => readGitHubBranchRules(credential, target, name), graphql, root });
       if (operation === 'pr.open') {
         if (input.branch === input.base || await readBranch(input.branch) !== input.headSha) {
           throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'The bot branch changed before the pull request was opened.');
@@ -193,6 +195,7 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
         return status;
       }
       if (operation === 'github.rules') return readRules(input.branch);
+      if (operation === 'github.branch-rules') return readGitHubBranchRules(credential, target, input.branch);
       if (operation === 'github.branch') return { headSha: await readBranch(input.branch, true) };
       if (operation === 'github.pull') {
         const pull = await readPull(input.number, input.headSha);

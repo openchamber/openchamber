@@ -4,6 +4,7 @@ import { BotServiceError, providerResult, text, jiraTarget } from './contracts.j
 const issue = z.object({ id: text, key: text, fields: z.object({
   project: z.object({ key: text }), status: z.object({ id: text, name: text }),
   summary: z.string(), description: z.unknown().optional(),
+  issuetype: z.object({ id: text, name: text, subtask: z.boolean().optional() }).optional(),
 }) });
 const comment = z.object({ id: text, author: z.object({ accountId: text, accountType: text.optional() }),
   body: z.unknown(), created: z.string().refine((value) => Number.isFinite(Date.parse(value))),
@@ -21,12 +22,14 @@ const adf = (body) => ({ version: 1, type: 'doc', content: body.split('\n').map(
 export function createJiraAdapter(credential, target, { beforeQuestionWrite } = {}) {
   const path = `/rest/api/3/issue/${encodeURIComponent(target.issueKey)}`;
   const readIssue = async () => {
-    const result = providerResult(issue, await credential.request({ path: `${path}?fields=project,status,summary,description` }));
+    const result = providerResult(issue, await credential.request({ path: `${path}?fields=project,status,summary,description,issuetype` }));
     if (result.key !== target.issueKey || result.fields.project.key !== target.projectKey) {
       throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'The Jira issue no longer belongs to the selected project.');
     }
-    return { id: result.id, key: result.key, summary: result.fields.summary,
+    const current = { id: result.id, key: result.key, summary: result.fields.summary,
       status: result.fields.status, description: plainText(result.fields.description) };
+    if (result.fields.issuetype) current.issueType = result.fields.issuetype;
+    return current;
   };
   const readTransitions = async () => {
     return providerResult(z.object({ transitions: z.array(transition).max(200) }),

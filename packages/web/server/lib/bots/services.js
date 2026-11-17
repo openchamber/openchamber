@@ -15,14 +15,19 @@ import { createGitHubAdapter } from './services/github.js';
 import { createJiraAdapter, searchJiraIssues } from './services/jira.js';
 import { createDiscordAdapter } from './services/discord.js';
 import { publishBotGit } from './services/git.js';
+import { createBotPublicationAuthority } from './services/publication-authority.js';
 
 export { BotServiceError } from './services/contracts.js';
 
 const githubKinds = { 'git.push': 'bot-git-push', 'pr.open': 'change-request-create',
   'pr.comment': 'change-request-comment', 'pr.auto-merge': 'change-request-merge',
   'pr.disable-auto-merge': 'change-request-merge', 'pr.dequeue': 'change-request-merge' };
-const payloadDigest = (effect, input) => digestMutationInput({ key: effect.key, operation: effect.operation,
-  botId: effect.botId, itemId: effect.itemId, authority: effect.authority, target: effect.target, input });
+const payloadDigest = (effect, input) => {
+  const value = { key: effect.key, operation: effect.operation,
+    botId: effect.botId, itemId: effect.itemId, authority: effect.authority, target: effect.target, input };
+  if (effect.publicationBranch !== undefined) value.publicationBranch = effect.publicationBranch;
+  return digestMutationInput(value);
+};
 const sourceKey = (effect) => `bot:${effect.botId}:${effect.itemId}:${effect.key}`;
 const unknown = () => ({ state: 'outcome-unknown' });
 const convertError = (error) => {
@@ -34,6 +39,27 @@ const convertError = (error) => {
     'The bot service operation could not complete.', 'needs-you', error?.status ?? 500);
 };
 
+/** This check runs in the coordinator account. The execution account sees no approvals. */
+export const assertBotQuestionAuthority = (effect, input, value) => {
+  if (!['jira.question', 'discord.question'].includes(effect.operation)) return;
+  const result = questionAuthoritySchema.safeParse(value);
+  if (!result.success) throw new BotServiceError('BOT_QUESTION_AUTHORITY_REQUIRED', 'The question needs its current approved policy and selected recipients.');
+  const { policy, question } = result.data; const { route } = question;
+  const service = operations[effect.operation].service; const identity = effect.authority ?? effect;
+  const captured = { operation: route.operation, target: route.binding.target, identityId: route.binding.identityId,
+    identityRevision: route.binding.identityRevision, input: route.input };
+  const requested = { operation: effect.operation, target: effect.target, identityId: identity.identityId,
+    identityRevision: identity.identityRevision, input };
+  if (question.key !== effect.key || route.service !== service || policy.fingerprint !== input.policyFingerprint
+    || route.policyFingerprint !== input.policyFingerprint || digestMutationInput(captured) !== digestMutationInput(requested)
+    || digestMutationInput(route.recipients) !== digestMutationInput(input.recipients)
+    || input.recipients.some((recipient) => !policy.people.people.some((person) => person.id === recipient.personId && person[service] === recipient.serviceId))
+    || service === 'discord' && effect.target.guildId === 'dm'
+      && (input.recipients.length !== 1 || input.recipients[0].serviceId !== effect.target.recipientId)) {
+    throw new BotServiceError('BOT_QUESTION_RECIPIENT_DENIED', 'The question differs from its approved recipient selection or policy.');
+  }
+};
+
 /** Server-only. The engine journals prepare's descriptor before calling execute. */
 export function createBotServices({
   dataDir = process.env.OPENCHAMBER_DATA_DIR || path.join(os.homedir(), '.config', 'openchamber'),
@@ -42,57 +68,39 @@ export function createBotServices({
   policyOptions, fetchImpl, mutationStore = createMutationStore({ filePath: path.join(dataDir, 'source-control-mutations.json') }),
   auditStore = createSourceControlAuditStore({ filePath: path.join(dataDir, 'source-control-audit.json') }),
   git = {}, approvedDiscordPeople = async () => [], resolveQuestionAuthority = async () => null,
+  resolvePublication = async () => null, ownerAuthorityChecked = false,
 } = {}) {
   const resolve = createCredentialResolver({ identities, http: createProviderHttp({ fetchImpl, policyOptions }),
     jiraOAuthHttp: createJiraOAuthHttp({ fetchImpl, policyOptions }) });
   const mutations = createMutationExecutor({ store: mutationStore, auditStore, runtimeIdentity });
-  const adapter = (credential, target, beforeAdmission, beforeQuestionWrite) => {
+  const publication = createBotPublicationAuthority({ resolvePublication });
+  const adapter = (credential, target, beforeAdmission, beforeQuestionWrite, ownedBranch) => {
     if (credential.authority.service === 'github') return createGitHubAdapter(credential, target, {
       beforeAdmission,
+      ownedBranch,
       publishGit: (input) => publishBotGit({ ...input, policyOptions, ...git }),
     });
     if (credential.authority.service === 'jira') return createJiraAdapter(credential, target, { beforeQuestionWrite });
     return createDiscordAdapter(credential, target, { beforeQuestionWrite });
   };
   const validateQuestion = async (effect, input) => {
+    if (ownerAuthorityChecked) return;
     if (!['jira.question', 'discord.question'].includes(effect.operation)) return;
-    const result = questionAuthoritySchema.safeParse(await resolveQuestionAuthority({ botId: effect.botId, itemId: effect.itemId, key: effect.key }));
-    if (!result.success) throw new BotServiceError('BOT_QUESTION_AUTHORITY_REQUIRED', 'The question needs its current approved policy and selected recipients.');
-    const { policy, question } = result.data;
-    const { route } = question;
-    const service = operations[effect.operation].service;
-    const identity = effect.authority ?? effect;
-    const captured = { operation: route.operation, target: route.binding.target, identityId: route.binding.identityId,
-      identityRevision: route.binding.identityRevision, input: route.input };
-    const requested = { operation: effect.operation, target: effect.target, identityId: identity.identityId,
-      identityRevision: identity.identityRevision, input };
-    if (question.key !== effect.key || route.service !== service || policy.fingerprint !== input.policyFingerprint
-      || route.policyFingerprint !== input.policyFingerprint || digestMutationInput(captured) !== digestMutationInput(requested)
-      || digestMutationInput(route.recipients) !== digestMutationInput(input.recipients)
-      || input.recipients.some((recipient) => !policy.people.people.some((person) => person.id === recipient.personId && person[service] === recipient.serviceId))
-      || service === 'discord' && effect.target.guildId === 'dm'
-        && (input.recipients.length !== 1 || input.recipients[0].serviceId !== effect.target.recipientId)) {
-      throw new BotServiceError('BOT_QUESTION_RECIPIENT_DENIED', 'The question differs from its approved recipient selection or policy.');
-    }
-  };
-  const validateRevocationOwner = (effect, input) => {
-    if (['pr.disable-auto-merge', 'pr.dequeue'].includes(effect.operation) && input.branch !== `bot/${effect.itemId}`) {
-      throw new BotServiceError('BOT_SERVICE_TARGET_CHANGED', 'Revocation requires the exact owned bot branch.');
-    }
+    assertBotQuestionAuthority(effect, input, await resolveQuestionAuthority({ botId: effect.botId, itemId: effect.itemId, key: effect.key }));
   };
   const validateEffect = (value, rawInput) => {
     const effect = parse(effectSchema, value);
     const operation = operations[effect.operation];
     effect.target = parse(operation.target, effect.target);
     const input = parse(operation.input, rawInput);
-    validateRevocationOwner(effect, input);
+    publication.validate(effect, input);
     if (operation.service !== effect.authority.service || payloadDigest(effect, input) !== effect.inputDigest) {
       throw new BotServiceError('BOT_EFFECT_CHANGED', 'The bot effect differs from its durable authority or input.');
     }
     return { effect, input };
   };
-  const resolveEffect = async (effect) => {
-    if (effect.authority.service === 'discord' && effect.target.guildId === 'dm'
+  const resolveEffect = async (effect, input) => {
+    if (!ownerAuthorityChecked && effect.authority.service === 'discord' && effect.target.guildId === 'dm'
       && !(await approvedDiscordPeople(effect)).includes(effect.target.recipientId)) {
       throw new BotServiceError('BOT_DISCORD_PERSON_DENIED', 'The Discord recipient is absent from the approved people directory.');
     }
@@ -101,6 +109,7 @@ export function createBotServices({
     if (digestMutationInput(credential.authority) !== digestMutationInput(effect.authority)) {
       throw new BotServiceError('BOT_AUTHORITY_CHANGED', 'The selected bot identity changed after the effect was prepared.');
     }
+    await publication.assertCurrent(effect, input);
     return credential;
   };
   const mutationRecord = (effect, input) => {
@@ -109,10 +118,11 @@ export function createBotServices({
       actor: { provider: 'github', instance: 'github.com', accountId: authority.credentialId },
       target: { repositoryId: target.repositoryId,
         botAuthority: { botId: effect.botId, itemId: effect.itemId, identityId: authority.identityId,
-          identityRevision: authority.identityRevision, credentialRevision: authority.credentialRevision },
+           identityRevision: authority.identityRevision, credentialRevision: authority.credentialRevision },
         project: { id: `${target.owner}/${target.repo}`, owner: target.owner, name: target.repo },
       },
     };
+    if (effect.publicationBranch !== undefined) record.target.botAuthority.publicationBranch = effect.publicationBranch;
     if (input.number) record.target.number = input.number;
     if (input.branch) record.target.head = input.branch;
     if (input.base) record.target.base = input.base;
@@ -125,46 +135,55 @@ export function createBotServices({
     reconcile: () => provider.reconcile(effect.operation, input),
     classifyError: (error) => error?.state === 'outcome-unknown' ? 'outcome-unknown' : 'failed',
   });
+  const preflight = async (effect, input, provider) => {
+    if (effect.operation === 'pr.auto-merge' && !await mutations.read(sourceKey(effect))) {
+      const pull = await provider.read('github.pull', { number: input.number });
+      if (pull.state !== 'open') throw new BotServiceError('BOT_GITHUB_PULL_CLOSED', 'The bot pull request is closed.');
+      if (input.mode === 'auto-merge' && !(await provider.read('github.rules', { branch: pull.base })).autoMergeAllowed) {
+        throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
+      }
+    }
+    const service = effect.authority.service;
+    let origin = effect.authority.origin;
+    if (effect.operation === 'git.push') {
+      const rules = await provider.read('github.rules', { branch: input.base });
+      const destinationRules = input.localBranch === undefined ? [] : await provider.read('github.branch-rules', { branch: input.branch });
+      origin = rules.requiredSignatures || destinationRules.some((rule) => rule.type === 'required_signatures') ? 'https://api.github.com' : 'https://github.com';
+    }
+    const resource = service === 'github' ? `${effect.target.owner}/${effect.target.repo}`
+      : service === 'jira' ? effect.target.projectKey : `${effect.target.guildId}/${effect.target.channelId}`;
+    try { assertBotWriteAllowed({ service, origin, resource }, policyOptions); }
+    catch { throw new BotServiceError('enterprise_mode', 'Enterprise mode refuses this bot destination.', 'needs-you', 403); }
+  };
   return Object.freeze({
     async prepare(value) {
       const request = parse(requestSchema, value);
       const operation = operations[request.operation];
       const target = parse(operation.target, request.target);
       const input = parse(operation.input, request.input);
-      validateRevocationOwner(request, input);
       await validateQuestion({ ...request, target }, input);
       const credential = await resolve({ ...request, target, service: operation.service });
-      const effect = { key: request.key, operation: request.operation, botId: request.botId, itemId: request.itemId,
-        authority: credential.authority, target };
+      const effect = await publication.prepare({ key: request.key, operation: request.operation, botId: request.botId, itemId: request.itemId,
+        authority: credential.authority, target }, input);
       return { ...effect, inputDigest: payloadDigest(effect, input) };
+    },
+    async preflight(value, rawInput) {
+      const { effect, input } = validateEffect(value, rawInput);
+      try {
+        await validateQuestion(effect, input);
+        const credential = await resolveEffect(effect, input);
+        await preflight(effect, input, adapter(credential, effect.target, undefined, undefined, effect.publicationBranch));
+        return { inputDigest: effect.inputDigest };
+      } catch (error) { throw convertError(error); }
     },
     async execute(value, rawInput, { beforeAdmission, beforeDispatch } = {}) {
       const { effect, input } = validateEffect(value, rawInput);
       try {
         await validateQuestion(effect, input);
-        const credential = await resolveEffect(effect);
-        const provider = adapter(credential, effect.target, beforeAdmission, () => validateQuestion(effect, input));
-        if (effect.operation === 'pr.auto-merge' && !await mutations.read(sourceKey(effect))) {
-          // What a person can repair is refused before the engine admits
-          // dispatch: the effect stays prepared and Resume sends it afterwards.
-          const pull = await provider.read('github.pull', { number: input.number });
-          if (pull.state !== 'open') throw new BotServiceError('BOT_GITHUB_PULL_CLOSED', 'The bot pull request is closed.');
-          // Auto-merge is off by default on GitHub.
-          if (input.mode === 'auto-merge' && !(await provider.read('github.rules', { branch: pull.base })).autoMergeAllowed) {
-            throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
-          }
-        }
+        const credential = await resolveEffect(effect, input);
+        const provider = adapter(credential, effect.target, beforeAdmission, () => validateQuestion(effect, input), effect.publicationBranch);
+        await preflight(effect, input, provider);
         if (beforeDispatch) {
-          const service = effect.authority.service;
-          let origin = effect.authority.origin;
-          if (effect.operation === 'git.push') {
-            const rules = await provider.read('github.rules', { branch: input.base });
-            origin = rules.requiredSignatures ? 'https://api.github.com' : 'https://github.com';
-          }
-          const resource = service === 'github' ? `${effect.target.owner}/${effect.target.repo}`
-            : service === 'jira' ? effect.target.projectKey : `${effect.target.guildId}/${effect.target.channelId}`;
-          try { assertBotWriteAllowed({ service, origin, resource }, policyOptions); }
-          catch { throw new BotServiceError('enterprise_mode', 'Enterprise mode refuses this bot destination.', 'needs-you', 403); }
           // No content owner has been entered yet. A failed preflight leaves the
           // engine prepared; after this durable callback all failures reconcile.
           await beforeDispatch();
@@ -179,8 +198,8 @@ export function createBotServices({
     async reconcile(value, rawInput) {
       const { effect, input } = validateEffect(value, rawInput);
       try {
-        const credential = await resolveEffect(effect);
-        const provider = adapter(credential, effect.target);
+        const credential = await resolveEffect(effect, input);
+        const provider = adapter(credential, effect.target, undefined, undefined, effect.publicationBranch);
         if (effect.authority.service === 'github') {
           const existing = await mutations.read(sourceKey(effect));
           if (existing) {
@@ -217,7 +236,7 @@ export function createBotServices({
       }
       const target = parse(service === 'github' ? githubTarget : service === 'jira' ? jiraTarget : discordTarget, rawTarget);
       let input = rawInput;
-      if (['github.rules', 'github.branch'].includes(operation)) input = parse(z.object({ branch }).strict(), rawInput);
+      if (['github.rules', 'github.branch', 'github.branch-rules'].includes(operation)) input = parse(z.object({ branch }).strict(), rawInput);
       if (operation === 'github.pull') input = parse(z.object({ number: revision, headSha: sha.optional() }).strict(), rawInput);
       if (operation === 'github.authorization') input = parse(z.object({ number: revision, branch }).strict(), rawInput);
       const credential = await resolve({ identityId, identityRevision, service, target });

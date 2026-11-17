@@ -28,6 +28,13 @@ returns:
 - `read({ identityId, identityRevision, operation, target, input? })` performs a
   provider read using that exact identity.
 
+`resolvePublication({ repositoryId, botId, itemId })` resolves the private checkout
+owner's immutable reservation. A reserved effect captures `publicationBranch`;
+preparation and execution compare it with that owner, including the selected
+identity and local checkout. Without a reservation, historical operations retain
+the exact `bot/<itemId>` destination. Existing descriptors and digests remain
+unchanged during reconciliation.
+
 Operations are `git.push`, `pr.open`, `pr.comment`, `pr.auto-merge`, `pr.disable-auto-merge`, `pr.dequeue`,
 `jira.comment`, `jira.question`, `jira.transition`, `discord.send` and `discord.question`. Targets and inputs are
 strictly parsed by `contracts.js`. GitHub targets name `repositoryId`, `owner`
@@ -38,11 +45,11 @@ and returns Discord user IDs. Without that dependency, DM sends are refused.
 
 | Operation | Input |
 |---|---|
-| `git.push` | `{ directory, branch, headSha, baseSha, expectedRemoteSha: string \| null, base }` |
+| `git.push` | `{ directory, branch, localBranch?, headSha, baseSha, expectedRemoteSha: string \| null, base }` |
 | `pr.open` | `{ branch, base, headSha, title, body, draft? }` |
 | `pr.comment` | `{ number, headSha, body }` |
 | `pr.auto-merge` | `{ number, branch, headSha, baseSha, mode: 'auto-merge' \| 'queue', mergeMethod?: 'MERGE' \| 'SQUASH' \| 'REBASE' }` |
-| `pr.disable-auto-merge`, `pr.dequeue` | `{ number, branch }` with the exact `bot/<itemId>` branch |
+| `pr.disable-auto-merge`, `pr.dequeue` | `{ number, branch }` with the exact captured publication branch |
 | `jira.comment` | `{ body }` |
 | `jira.transition` | `{ transitionId, expectedStatusId }` |
 | `discord.send` | `{ body }` |
@@ -83,6 +90,18 @@ baseSha, merged, autoMerge, queued }`. It verifies the exact repository, PR and
 owned branch through REST and GraphQL. Revocation intentionally accepts a changed
 head. Legacy admission descriptors without branch/base remain parseable for
 read-only recovery; fresh dispatch requires both fields.
+
+`github.branch-rules` takes `{ branch }` and returns the effective active rules
+for a proposed publication name, including inherited parameters and provenance.
+It can read a branch that does not exist. A failed read remains an error.
+Private GitHub Free repositories can refuse this REST endpoint. In that case,
+an authorized GraphQL read must prove zero inherited rulesets and zero classic
+branch protections, both complete, before the adapter returns empty rules. Any
+rule owner, partial result or denied read preserves refusal.
+Investigation and fixing receive these constraints; GitHub enforces them on
+publication. `branch` is the remote destination, while `localBranch` identifies
+the private `bot/<itemId>` source ref. Inputs captured before this split keep
+their historical same-name behavior.
 
 `configureBotWorktreeIdentity({ directory, name, email })` in `git.js` writes worktree-local
 author settings and disables local commit signing. The checkout must be a linked
@@ -149,6 +168,10 @@ configuration and packaged Windows process behavior require authorized live QA.
   cloudId, clientId and clientSecret. Client secrets follow the same private-file
   contract; access tokens exist only in the resolved credential's memory.
 - GitHub App JWTs and installation tokens exist only for one operation in memory.
+- GitHub App installations grant Contents, Pull requests and Issues read/write,
+  plus Administration read for the branch-protection admission check. Each token
+  requests those permissions for the exact repository. Branch protection retains
+  GitHub's nullable approval count when review requirements are disabled.
 - Every content write checks `assertBotWriteAllowed` immediately before dispatch.
   All HTTPS requests reject redirects and use fixed provider origins. Basic Jira
   identities use configured Jira Cloud sites under `atlassian.net`. OAuth first
@@ -183,6 +206,11 @@ configuration and packaged Windows process behavior require authorized live QA.
 - Publication supports linear histories of at most 100 commits, 2,000 files per
   snapshot and 16 MiB of snapshot content. LFS pointers and gitlinks fail before
   publication because this adapter has no separate auxiliary transfer authority.
+- Signature admission checks the destination rules as well as the base branch.
+  A completed Git process with an exact porcelain rejection for the sole target
+  ref and GitHub's GH013 rule response is a definite refusal. Other unsuccessful
+  transfers retain unknown outcomes. Neither path changes rules or retries under
+  another branch name; raw process output never enters a receipt or error.
 - A lost comment has no safe reconciliation evidence. Its outcome stays unknown.
   Unique PR branches can reconcile only an exact repository, branch and base.
 - A question's selected recipients, policy fingerprint and provider operation are

@@ -12,7 +12,7 @@ import { accountCredential, gitHubTarget, HEAD, BASE, pullResponse, issueRespons
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-const harness = async (handler, { policyOptions = disconnectedPolicy, git } = {}) => {
+const harness = async (handler, { policyOptions = disconnectedPolicy, git, resolvePublication } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bot-services-test-'));
   cleanups.push(() => fs.rm(dataDir, { recursive: true, force: true }));
   const upstream = await controlledUpstream(handler);
@@ -23,7 +23,7 @@ const harness = async (handler, { policyOptions = disconnectedPolicy, git } = {}
     return account?.credentialRevision === revision ? account : null;
   } });
   const services = createBotServices({ dataDir, identities, fetchImpl: upstream.fetchImpl, policyOptions,
-    runtimeIdentity: { id: 'test-server', platform: 'web' }, git });
+    runtimeIdentity: { id: 'test-server', platform: 'web' }, git, resolvePublication });
   const identity = await identities.create({ kind: 'github-account', label: 'Chosen', accountId: 'account-one', credentialRevision: 1 });
   const prepare = (operation, input, target = gitHubTarget, selected = identity, key = 'effect-one') => services.prepare({
     key, operation, botId: 'bot-one', itemId: 'item-one', identityId: selected.id, identityRevision: selected.revision, target, input,
@@ -33,6 +33,32 @@ const harness = async (handler, { policyOptions = disconnectedPolicy, git } = {}
 const githubUser = (request) => request.headers.authorization === 'Bearer secret-account-two'
   ? { id: 99, login: 'user-99' } : { id: 42, login: 'user-42' };
 const commentInput = { number: 17, headSha: HEAD, body: 'A private bot response' };
+
+it('captures the private publication reservation and refuses another destination before dispatch', async () => {
+  const h = await harness((request) => ({ body: request.path === '/user' ? githubUser(request) : pullResponse() }), {
+    resolvePublication: async () => ({ publicationBranch: 'task/BUG-1', localBranch: 'bot/item-one', directory: '/owned',
+      identityId: h.identity.id, identityRevision: h.identity.revision }),
+  });
+  const input = { directory: '/owned', branch: 'task/BUG-1', localBranch: 'bot/item-one', base: 'main', baseSha: BASE,
+    headSha: HEAD, expectedRemoteSha: null };
+
+  const effect = await h.prepare('git.push', input);
+
+  expect(effect.publicationBranch).toBe('task/BUG-1');
+  await expect(h.prepare('git.push', { ...input, branch: 'task/BUG-2' })).rejects.toMatchObject({ code: 'BOT_SERVICE_TARGET_CHANGED' });
+  await expect(h.prepare('git.push', { ...input, localBranch: 'main' })).rejects.toMatchObject({ code: 'BOT_SERVICE_TARGET_CHANGED' });
+  expect(h.upstream.requests.some((request) => request.method !== 'GET')).toBe(false);
+});
+
+it('refuses an unreserved non-bot branch and a different item local branch', async () => {
+  const h = await harness((request) => ({ body: githubUser(request) }));
+  const input = { directory: '/owned', branch: 'task/BUG-1', localBranch: 'bot/item-one', base: 'main', baseSha: BASE,
+    headSha: HEAD, expectedRemoteSha: null };
+
+  await expect(h.prepare('git.push', input)).rejects.toMatchObject({ code: 'BOT_SERVICE_TARGET_CHANGED' });
+  await expect(h.prepare('git.push', { ...input, branch: 'bot/item-other', localBranch: 'bot/item-other' }))
+    .rejects.toMatchObject({ code: 'BOT_SERVICE_TARGET_CHANGED' });
+});
 
 it('uses the selected account independently of binding, journals bot authority, and replays once', async () => {
   const h = await harness((request) => ({ body: request.path === '/user' ? githubUser(request)
@@ -140,6 +166,7 @@ it('rotates App tokens per operation, verifies the JWT and refuses a different i
     if (request.path === '/app/installations/8') return { body: { id: 8, app_id: wrongInstallation ? 9 : 7, suspended_at: null } };
     if (request.path.endsWith('/access_tokens')) {
       expect(request.body.repositories).toEqual(['example']);
+      expect(request.body.permissions).toEqual({ contents: 'write', pull_requests: 'write', issues: 'write', administration: 'read' });
       minted += 1;
       return { body: { token: `installation-${minted}`, expires_at: new Date(Date.now() + 3_600_000).toISOString(), repositories: [{ full_name: 'acme/example' }] } };
     }
@@ -172,6 +199,21 @@ it('reads branch rules on a private repository whose plan refuses the REST rules
 
   expect(rules).toEqual({ branch: 'main', headSha: BASE, requiredSignatures: true, mergeQueue: true, autoMergeAllowed: true,
     legacyProtection: null, ruleTypes: ['required_signatures', 'merge_queue'] });
+});
+
+it.each([
+  { requiresApprovingReviews: false, requiredApprovingReviewCount: null },
+  { requiresApprovingReviews: true, requiredApprovingReviewCount: 1 },
+])('reads protected branches with approval requirements $requiredApprovingReviewCount', async (reviews) => {
+  const protection = { requiresCommitSignatures: false, requiresStatusChecks: true, ...reviews };
+  const h = await harness((request) => request.path === '/user' ? { body: githubUser(request) }
+    : { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: BASE }, branchProtectionRule: protection,
+      rules: { pageInfo: { hasNextPage: false }, nodes: [] } } } } } });
+
+  await expect(h.services.read({ identityId: h.identity.id, identityRevision: h.identity.revision,
+    operation: 'github.rules', target: gitHubTarget, input: { branch: 'main' } })).resolves.toMatchObject({
+    branch: 'main', requiredSignatures: false, legacyProtection: protection,
+  });
 });
 
 it('refuses a branch whose rules do not fit one page, so a later rule cannot go unread', async () => {
