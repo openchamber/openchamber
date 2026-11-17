@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createBotsConfig } from './config.js';
 import { createBotStore } from './store.js';
 import { createBotIdentityStore } from './identities.js';
-import { createBotServices, BotServiceError } from './services.js';
+import { createBotServices, BotServiceError, assertBotQuestionAuthority } from './services.js';
 import { createBotServiceContext } from './service-context.js';
 import { createProductionBotWorktrees } from './production-worktrees.js';
 import { createProductionBotPullRequests } from './production-pull-requests.js';
@@ -26,8 +26,9 @@ import { createBotAdapterState } from './adapter-state.js';
 import { createBotExecutionStore } from './execution-store.js';
 import { createBotPlacement } from './placement.js';
 import { createBotQuestions } from './questions.js';
+import { createBotHostTools } from './host-tools.js';
 import { botGit } from './production-git.js';
-import { readRepositoryPolicy } from './repository-policy.js';
+import { parseRepositoryPolicyFiles, readRepositoryPolicy } from './repository-policy.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createTokenSnapshotReader } from '../pr-fix-loop/token-usage.js';
 
@@ -54,14 +55,19 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
   permissionAutoAcceptRuntime, sessionKnowledgeRuntime, readSessionDefaults,
   buildOpenCodeUrl, getOpenCodeAuthHeaders, getSpacesHost, getSpaceArchive, messageQueueRuntime,
   notificationCenter, notify, broadcast, getFixLoopRuntime, disposeInstance,
-  reviewApps = [], logger = console, fetchImpl, policyOptions }) {
+  reviewApps = [], logger = console, fetchImpl, policyOptions, executionServices = null, withWatchAdmission }) {
   const config = createBotsConfig({ projectConfigRuntime });
   const store = createBotStore({ projectsDirPath: projectsDir });
-  const identities = createBotIdentityStore({ dataDir });
+  executionServices?.bindOwner({ dataDir, resolveProject, listProjects, store, config });
+  const identities = executionServices?.identities ?? createBotIdentityStore({ dataDir });
+  sessionKnowledgeRuntime = executionServices?.sessionKnowledgeRuntime ?? sessionKnowledgeRuntime;
+  readSessionDefaults = executionServices?.readSessionDefaults ?? readSessionDefaults;
+  const readPolicy = executionServices ? async (directory, approvals = {}) => parseRepositoryPolicyFiles(
+    await executionServices.readPolicyFiles(directory, { files: Object.keys(approvals) }), approvals) : readRepositoryPolicy;
   const events = createBotEvents();
   const attention = createBotAttention({ center: notificationCenter, notify });
-  const activity = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
-  const readTokens = createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+  const activity = executionServices ? null : createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+  const readTokens = executionServices ? null : createTokenSnapshotReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
   let runtime; let providers; let notices; let started = false; let stopping = false; let startup = null;
   const work = new Set();
   const observe = (promise) => {
@@ -69,16 +75,17 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
     work.add(operation); void operation.finally(() => work.delete(operation)); return operation;
   };
   const isolated = createBotIsolatedStages({ dataDir, getSpacesHost, resolveProject, sessionKnowledgeRuntime,
+    separated: Boolean(executionServices),
     resolveSpaceOptions: ({ bot, selection }) => readBotSpaceOptions(bot.space, selection),
-    handleTool: (request) => api.handleTool(request) });
+    handleTool: (request) => api.handleTool(request), readToolOutcome: (request) => runtime.readToolOutcome(request) });
   const journal = createBotExecutionStore({ store });
   const placement = createBotPlacement({ dataDir, journal, isolated, getSpaceArchive });
   const sessions = createBotHostSessions({ dataDir, isolated, clientFor, hostQueue: messageQueueRuntime,
+    hostExecution: executionServices?.hostSessions,
     resolvePlacement: placement.resolve,
     readHostTokens: readTokens, assertDispatch: (input) => { assertStarted(); return notices.assertDispatch(input); }, broadcast, sessionKnowledgeRuntime,
     isSessionArchived: (sessionId) => sessionService.sessionArchive.isArchived(sessionId) });
-  const services = createBotServices({ dataDir, identities, fetchImpl, policyOptions,
-    resolveQuestionAuthority: async ({ botId, itemId, key }) => {
+  const resolveQuestionAuthority = async ({ botId, itemId, key }) => {
       for (const project of await listProjects()) {
         const item = (await store.read(project.id)).items.find((entry) => entry.id === itemId && entry.botId === botId);
         if (!item) continue;
@@ -89,27 +96,49 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
         const settings = await config.read(project.id);
         const bot = settings.definitions.find((entry) => entry.id === botId && entry.enabled);
         if (!question?.route || !bot || bot.identity[question.route.service]?.identityId !== question.route.binding.identityId) return null;
-        return { policy: await readRepositoryPolicy(project.path, settings.approvals), question };
+        return { policy: await readPolicy(project.path, settings.approvals), question };
       }
       return null;
-    }, approvedDiscordPeople: async (effect) => {
+    };
+  const approvedDiscordPeople = async (effect) => {
     for (const project of await listProjects()) {
       const item = (await store.read(project.id)).items.find((entry) => entry.id === effect.itemId && entry.botId === effect.botId);
       if (!item) continue;
-      const policy = await readRepositoryPolicy(project.path, (await config.read(project.id)).approvals);
+      const policy = await readPolicy(project.path, (await config.read(project.id)).approvals);
       return policy.people.status === 'approved' ? policy.people.people.flatMap((person) => person.discord ? [person.discord] : []) : [];
     }
     return [];
-  } });
-  const context = createBotServiceContext({ identities, services, fetchImpl, policyOptions,
+  };
+  const assertOwnerAuthority = async (effect, input) => {
+    if (['jira.question', 'discord.question'].includes(effect.operation)) assertBotQuestionAuthority(effect, input,
+      await resolveQuestionAuthority({ botId: effect.botId, itemId: effect.itemId, key: effect.key }));
+    if ((effect.authority?.service ?? (effect.operation.startsWith('discord.') ? 'discord' : null)) === 'discord'
+      && effect.target.guildId === 'dm' && !(await approvedDiscordPeople(effect)).includes(effect.target.recipientId)) {
+      throw new BotServiceError('BOT_DISCORD_PERSON_DENIED', 'The Discord recipient is absent from the approved people directory.');
+    }
+  };
+  const services = executionServices ? { ...executionServices.services,
+    prepare: async (request) => { await assertOwnerAuthority(request, request.input); return executionServices.services.prepare(request); },
+    execute: (prepared, input, options = {}) => executionServices.services.execute(prepared, input, { ...options,
+      beforeDispatch: async () => { await assertOwnerAuthority(prepared, input); await options.beforeDispatch?.(); } }),
+  } : createBotServices({ dataDir, identities, fetchImpl, policyOptions,
+    resolvePublication: (request) => productionWorktrees.readPublication(request), resolveQuestionAuthority, approvedDiscordPeople });
+  const context = executionServices ? { ...executionServices.context,
+    serviceContext: async (request) => request.service === 'discord'
+      ? { discord: { ...(await executionServices.context.identityFor(request.bot, 'discord')),
+        target: await providers.resolveDiscordTarget(request) } }
+      : executionServices.context.serviceContext(request),
+  } : createBotServiceContext({ identities, services, fetchImpl, policyOptions,
     resolveDiscordTarget: (request) => providers.resolveDiscordTarget(request) });
-  const productionWorktrees = createProductionBotWorktrees({ dataDir, context, disposeInstance,
+  const productionWorktrees = executionServices?.worktrees ?? createProductionBotWorktrees({ dataDir, context, disposeInstance,
     readItem: async (projectId, itemId) => (await store.read(projectId)).items.find((item) => item.id === itemId) });
   const publications = createBotAdapterState({ dataDir, name: 'published-snapshots', schema: publicationSchema });
   const keyFor = ({ project, item }) => ({ projectId: project.id, itemId: item.id });
   const itemPlacement = ({ project, item, bot }) => placement.resolve({ projectId: project.id, itemId: item.id, bot, directory: item.worktree, sessions: item.sessions });
-  const sameTree = async (directory, left, right) => (await botGit(directory, ['rev-parse', `${left}^{tree}`])).trim()
-    === (await botGit(directory, ['rev-parse', `${right}^{tree}`])).trim();
+  const sameTree = async (request, left, right) => executionServices
+    ? productionWorktrees.sameTree({ ...request, left, right })
+    : (await botGit(request.item.worktree, ['rev-parse', `${left}^{tree}`])).trim()
+      === (await botGit(request.item.worktree, ['rev-parse', `${right}^{tree}`])).trim();
   const remove = async (request) => {
     await isolated.remove(request);
     return productionWorktrees.remove(request);
@@ -129,8 +158,10 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
       const current = await productionWorktrees.inspect(request);
       // Signed publication rewrites commit IDs while retaining immutable trees.
       if (current.headSha !== exported.resultSha && current.headSha === current.remoteSha
-        && await sameTree(request.item.worktree, current.headSha, exported.resultSha)) return current;
-      await productionWorktrees.adoptIsolated({ ...request, resultSha: exported.resultSha });
+        && await sameTree(request, current.headSha, exported.resultSha)) return current;
+      const adoption = { ...request, resultSha: exported.resultSha };
+      if (executionServices) adoption.spaceId = (await isolated.bindingFor({ projectId: request.project.id, itemId: request.item.id })).spaceId;
+      await productionWorktrees.adoptIsolated(adoption);
       return productionWorktrees.inspect(request);
     },
     acceptPublished: async (request) => {
@@ -144,13 +175,23 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
     if (!published) return isolated.executeIsolatedProof(input, options);
     const map = async (commit) => {
       const source = published.commitMap.find((entry) => entry.publishedSha === commit)?.sourceSha ?? commit;
-      if (!await sameTree(input.directory, source, commit)) throw new BotServiceError('BOT_GIT_COMMIT_MAP_INVALID', 'The published proof tree changed.');
+      const project = await resolveProject(binding.projectId);
+      const item = (await store.read(binding.projectId)).items.find((entry) => entry.id === binding.itemId && entry.botId === binding.botId);
+      if (!item || !await sameTree({ project, item }, source, commit)) throw new BotServiceError('BOT_GIT_COMMIT_MAP_INVALID', 'The published proof tree changed.');
       return source;
     };
     const result = await isolated.executeIsolatedProof({ ...input, testSha: await map(input.testSha), fixSha: await map(input.fixSha) }, options);
     return { ...result, testSha: input.testSha, fixSha: input.fixSha };
   } });
-  const baseStages = createBotStageSessions({ sessionService: { create: sessionService.create,
+  const baseStages = executionServices ? { ...executionServices.stages,
+    select: async (projectId, bot, stage) => bot.models[stage].useDefaults ? readSessionDefaults(projectId) : bot.models[stage],
+    create: (request, onCreated) => request.bot.isolated ? isolated.create(request, onCreated) : executionServices.stages.create(request, onCreated),
+    dispatch: (request) => (request.bot.isolated ? isolated : executionServices.stages).dispatch(request),
+    reconcile: (kind, request, sessionId) => (request.bot.isolated ? isolated : executionServices.stages).reconcile(kind, request, sessionId),
+    stop: (request) => (request.bot.isolated ? isolated : executionServices.stages).stop(request),
+    resume: (request) => (request.bot.isolated ? isolated : executionServices.stages).resume(request),
+    outcome: (request) => (request.bot.isolated ? isolated : executionServices.stages).outcome(request),
+  } : createBotStageSessions({ sessionService: { create: sessionService.create,
     send: (sessionId, payload) => (sessions.get(sessionId)?.stage === 'fixing' ? sessionService : readOnlySessionService).send(sessionId, payload) },
     clientFor, permissionAutoAcceptRuntime, sessionKnowledgeRuntime, activityProbe: activity, readSessionDefaults, readTokenSnapshot: readTokens, isolated });
   const trackRun = (request, sessionId) => sessions.track({ projectId: request.projectId, itemId: request.itemId,
@@ -203,7 +244,11 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
     }, onAttention: reportAttention });
   const sources = { ...createBotSources({ services, resolveJiraContext: (request) => providers.resolveJiraContext(request), discover: discovery.discover }), usage: discovery.usage };
   notices = createBotNotices({ store, config, readSession: sessions.readSession, queueFor: sessions.queueFor });
+  const hostTools = executionServices ? createBotHostTools({ dataDir, execution: executionServices.hostSessions,
+    handleTool: (request) => api.handleTool(request), readToolOutcome: (request) => runtime.readToolOutcome(request) }) : null;
   const { pullRequests, botWatch: productionBotWatch } = createProductionBotPullRequests({ context, services, getFixLoopRuntime, reviewApps,
+    execution: executionServices?.pullRequests, withWatchAdmission,
+    resolvePublication: (request) => productionWorktrees.readPublication(request),
     receiveFeedback: (projectId, itemId, event) => runtime.receiveFeedback(projectId, itemId, event) });
   const botWatch = { ...productionBotWatch, getOctokit: async (authority) => {
     // Existing PR watch ticks also reconcile head/base/policy and merged items.
@@ -212,7 +257,7 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
     return productionBotWatch.getOctokit(authority);
   } };
   const scheduler = createBotScheduler({ projectConfigRuntime, scheduledTasksRuntime });
-  const questions = createBotQuestions({ config, store, worktrees, context, services, attention, events });
+  const questions = createBotQuestions({ config, store, worktrees, context, services, attention, events, readPolicy, readBlame: executionServices?.blame });
   runtime = createBotsRuntime({ config, store, resolveProject, listProjects, stages, worktrees, services,
     serviceContext: context.serviceContext, runProof: async (input, options) => {
       const session = sessions.get(input.item.sessions.fixing);
@@ -223,10 +268,14 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
       if (!recorded || recorded.botId !== input.item.botId || recorded.hostDirectory !== input.directory) {
         throw new BotServiceError('BOT_PLACEMENT_MISMATCH', 'The proof must use its recorded execution placement.');
       }
+      if (executionServices && !recorded.isolated) return executionServices.runProof({ ...input, project: await resolveProject(session.projectId),
+        bot: { ...(await config.read(session.projectId)).definitions.find((entry) => entry.id === input.item.botId), isolated: recorded.isolated } }, options);
       return proof.run({ ...input, isolated: recorded.isolated }, options);
-    }, pullRequests, sources, attention, notices, scheduler, events, questions });
-  providers = createBotProviderRuntime({ dataDir, config, store, identities, services, runtime, listProjects, resolveProject,
-    serviceContext: context.serviceContext, onNeedsYou: reportAttention });
+    }, pullRequests, sources, attention, notices, scheduler, events, questions, readPolicy });
+  const providerOptions = { dataDir, config, store, identities, services, runtime, listProjects, resolveProject,
+    serviceContext: context.serviceContext, onNeedsYou: reportAttention, readPolicy };
+  if (executionServices) providerOptions.createGateway = executionServices.createGateway;
+  providers = createBotProviderRuntime(providerOptions);
   const refreshIndex = async (projectId) => {
     const settings = await config.read(projectId);
     for (const item of (await store.read(projectId)).items) {
@@ -274,6 +323,9 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
     if (entry.isolated && entry.stage === 'fixing' && wake) {
       // Never hold a project execution lock while servicing a tool call.
       observe(isolated.forwardTools({ spaceId, sessionId }).catch((error) => reportAttention({ ...entry, reason: failureCode(error) })));
+    }
+    if (!entry.isolated && entry.stage === 'fixing' && wake && hostTools) {
+      observe(hostTools.forward(entry).catch((error) => reportAttention({ ...entry, reason: failureCode(error) })));
     }
     // Pending permission/form requests already belong to live central attention.
     // Keeping the stage active lets the matching reply resume it naturally.
@@ -371,6 +423,9 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
         await isolated.forwardTools({ spaceId: binding.spaceId, sessionId: entry.sessionId })
           .catch((error) => reportAttention({ ...entry, reason: failureCode(error) }));
       })());
+      for (const entry of sessions.entries()) if (!entry.isolated && entry.stage === 'fixing' && hostTools) {
+        observe(hostTools.forward(entry).catch((error) => reportAttention({ ...entry, reason: failureCode(error) })));
+      }
       if (!stopping) await providers.start();
       if (!stopping) await discovery.start();
       return { failures: [...failures, ...recovered.failures] };

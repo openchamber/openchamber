@@ -2,7 +2,13 @@
 
 ## Ownership
 
-`host.js` constructs the production coordinator, config and item stores, identity and service owners, checkout and PR adapters, stages, source discovery, proof, notices, attention, provider lifecycle and scheduler projection. `host-sessions.js` owns the live bot-session index and dedicated isolated notice queues. The root server supplies existing runtime dependencies and registers this composition through `feature-routes-runtime.js`.
+`host.js` constructs the production coordinator, config and item stores, identity and service owners, checkout and PR adapters, stages, source discovery, proof, notices, attention, provider lifecycle and scheduler projection. `host-sessions.js` owns the live bot-session index and dedicated notice queues. The root server supplies existing runtime dependencies and registers this composition through `feature-routes-runtime.js`.
+
+In separated mode the owner injects typed agent execution services into the same
+coordinator. Secrets, Git, host sessions, knowledge and host proof stay on the
+agent. Both placements keep owner queues; host queues send through bounded
+execution operations. [Separated authority](separated-boundary.md) owns that
+contract. Single-account installations retain local execution adapters.
 
 `server/index.js` distinguishes a space server with the existing `OPENCHAMBER_SPACE_IDLE_STOP_FILE` marker. That process constructs `createBotChildServer` only. Its persistent inbox uses the authenticated agent-tool call context and existing UI-authenticated listener. It has no bot identities, service executor or coordinator. Host requests to the child inbox are explicitly refused before the OpenCode proxy.
 
@@ -16,11 +22,12 @@
 
 ## Invariants
 
-- Construction performs no provider reads or execution. The bootstrap continuation starts workers after OpenCode readiness, without delaying the HTTP listener or initial shell. Mutation requests received earlier return `BOT_HOST_NOT_READY`.
+- Construction performs no provider reads or execution. The local bootstrap continuation starts workers after OpenCode readiness; the front door starts owner recovery through typed agent services. Neither delays the HTTP listener or initial shell. Mutation requests received earlier return `BOT_HOST_NOT_READY`.
 - One watcher callback feeds host and space events. Item mutations, stage allocation and startup records populate the session index. Ordinary sessions and token deltas perform no Bot SDK or disk reads. Completed steps use the existing complete, cache-inclusive cumulative token reader. Discovery usage stays in its own ledger and contributes once to daily admission.
 - Permission and form waits remain active stages. Their existing live attention entries resolve through ordinary replies. Authorization, budget and execution failures require explicit item attention.
 - Isolated sessions resolve their recorded binding and current spaces host at each operation. Notices have separate host-owned persistence and a dispatcher-backed queue per session. Host session reads, queue transport and token readers are never substitutes for an isolated target.
 - The child persists a tool call before merging `openchamber.botToolPending` into session metadata. Translation preserves the resulting metadata event. The host checks the recorded space/session before pulling the inbox. Recovery also pulls pending calls for recorded active fixing sessions. No host tool credential enters a space.
+- Invalid tool inputs return `BOT_TOOL_INPUT_INVALID` with status 400 before item or effect writes. Strict action schemas remain enforced; the session can correct its input without explicit Resume. Operational failures retain durable attention and their original recovery rules.
 - Production space options come exclusively from `readBotSpaceOptions(bot.space, selection)`. Each stage gets exactly its selected provider's explicit grant, the configured network and no setup commands. Missing grants produce attention. Host logins and other spaces' grants supply no implicit authority.
 - `placement.js` persists an item's execution placement before session allocation. Stage creation, dispatch, stop, inspection, proof and notice routing use that placement. Changing the bot's isolation option affects new execution placements in either direction. Restart recovers older items from their isolated binding or first journaled stage snapshot, never from path spelling or current config. Conflicting captured history requires attention.
 - Item detail and answer/resume/stop responses expose `sessionDirectories`, keyed by session ID. Active and archived inspection use captured placement independently of current bot configuration, including after its deletion. Host sessions use the captured host checkout. Isolated sessions require a matching stage and session in the retained host-owned binding. After space removal, `getSpaceArchive().sessionDirectory(spaceId, sessionId)` supplies the imported session's current host archive directory only for that exact retained pair. Missing archive records disable the link. These reads need no container startup or OpenCode read.
@@ -30,7 +37,7 @@
 - Missing source identities produce durable, deduplicated attention items even before a stage session exists. Missing execution identities produce ordinary item attention through the coordinator. Push delivery remains the existing notification runtime's responsibility.
 - Pending investigation returns HTTP 202. Scheduler acknowledgement retains the same occurrence without treating pending work as an authoritative empty result. Discovery completion reruns that occurrence.
 - Existing PR-watch ticks wake coordinator reconciliation, including head/base/policy invalidation. A merged-watch settlement wakes closure; an unmerged close or failed watch produces attention. These callbacks do not await work that may drain the originating watch task.
-- Shutdown stops scheduler admission and cancels the coordinator before awaiting host startup, then drains the remaining Bot owners and dedicated queues before closing space transports. Startup checks shutdown intent before coordinator activation and after recovery, and cannot activate provider/discovery owners after Stop. A failed cleanup owner does not prevent the remaining owners from stopping.
+- Shutdown stops scheduler admission and cancels the coordinator before awaiting host startup, then drains the remaining Bot owners and dedicated queues before closing Space and agent transports. Startup checks shutdown intent before coordinator activation and after recovery, and cannot activate provider/discovery owners after Stop. A failed cleanup owner does not prevent the remaining owners from stopping.
 
 ## Decisions
 

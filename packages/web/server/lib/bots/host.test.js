@@ -74,6 +74,27 @@ const isolatedLifecycle = async () => {
 };
 
 describe('production bot host composition', () => {
+  it('rejects malformed tool input without pausing the item, then accepts a corrected report', async () => {
+    const f = await isolatedLifecycle(); await f.host.start();
+    await f.store.update('project', (snapshot) => ({ snapshot: { ...snapshot, items: snapshot.items.map((item) => ({ ...item, state: 'fixing', wait: undefined })) } }));
+    const before = (await f.host.runtime.detail('project', f.itemId)).item;
+    const evidence = [{ source: 'src/fix.js', summary: 'The regression is reproducible.' }];
+    for (const request of [
+      { action: 'item.report', input: { operationId: 'report', evidence } },
+      { action: 'item.ask', input: { operationId: 'ask', question: '' } },
+      { action: 'jira.comment', input: { operationId: 'comment' } },
+    ]) {
+      await expect(f.host.handleTool({ sessionId: f.sessionId, ...request })).rejects.toMatchObject({ code: 'BOT_TOOL_INPUT_INVALID', status: 400 });
+      expect((await f.host.runtime.detail('project', f.itemId)).item).toEqual(before);
+    }
+    await f.host.handleTool({ sessionId: f.sessionId, action: 'item.report', input: { evidence } });
+    const after = (await f.host.runtime.detail('project', f.itemId)).item;
+    expect(after.state).toBe('fixing');
+    expect(after.evidence).toContainEqual(evidence[0]);
+    expect(after.effects).toEqual(before.effects);
+    expect(f.calls.http).toEqual([]);
+  });
+
   it('resumes a budget-interrupted item in its captured space through a fresh production host', async () => {
     const f = await isolatedLifecycle(); await f.host.start();
     await f.host.runtime.recordUsage({ sessionId: f.sessionId, total: 5 });
