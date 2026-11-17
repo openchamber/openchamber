@@ -245,5 +245,20 @@
   "panel.tabClose": {"selector": "[data-right-slot] [role=\"button\"][aria-label=\"Close {label} tab\"]", "means": "The close mark of a right panel tab, shown while the pointer is over the tab."},
   "header.backToChat": {"selector": "button[aria-label=\"Back to chat\"]", "means": "The arrow in the header that leaves a page covering the chat (Archive, Stats) and shows the chat again."},
   "picker.favorite": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"option\"] button[aria-label=\"{label}\"]", "means": "The star on a model picker row: Favorite adds the model to Favorites, Unfavorite takes it out."},
-  "picker.favoriteRow": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"group\"][aria-label=\"Favorites\"] [role=\"option\"]", "means": "A model row in the Favorites section at the top of the model picker."}
+  "picker.favoriteRow": {"selector": "[role=\"listbox\"][aria-label=\"Models\"] [role=\"group\"][aria-label=\"Favorites\"] [role=\"option\"]", "means": "A model row in the Favorites section at the top of the model picker."},
+  "providers.button": {"selector": "[data-settings-view] [class~=\"@container\"] button", "means": "A Providers page action or card in the page body, excluding Settings search results; pair it with its visible label."},
+  "providers.field": {"selector": "[role=\"dialog\"] input[aria-label=\"{label}\"]", "means": "A labeled field in the custom provider form."},
+  "providers.invalid": {"selector": "[role=\"dialog\"] input[aria-label=\"{label}\"][aria-invalid=\"true\"]", "means": "A provider form field rejected on submit."},
+  "providers.search": {"selector": "[role=\"dialog\"] input[placeholder=\"Search providers\"]", "means": "The search field on the provider grid or connect picker."},
+  "providers.filter": {"selector": "[data-settings-item=\"providers.models\"] input", "means": "The filter over a provider's available models."},
+  "providers.model": {"selector": "[data-settings-item=\"providers.models\"] .divide-y > div", "means": "An available model row with its name, capabilities and visibility button."},
+  "providers.visibility": {"selector": "[data-settings-item=\"providers.models\"] button[aria-label=\"{label}\"]", "means": "The Hide model or Show model action on an available model; filter to the model first."},
+  "providers.fold": {"selector": "[role=\"dialog\"] button[aria-expanded][aria-controls]", "means": "A collapsible custom model row or client certificate section; pair it with its title."},
+  "providers.protocol": {"selector": "[role=\"dialog\"] [aria-label=\"API protocol\"]", "means": "The custom provider's API protocol selector."},
+  "providers.preview": {"selector": "[data-settings-item=\"providers.logo\"] img", "means": "The pending logo image preview in the custom provider form."},
+  "providers.alert": {"selector": "[role=\"dialog\"] [role=\"alert\"]", "means": "A model discovery failure under Find models."},
+  "providers.action": {"selector": "[role=\"dialog\"] button[aria-label=\"{label}\"]", "means": "An icon action in a provider form, such as Remove model or Remove header."},
+  "providers.iconOn": {"selector": "[role=\"group\"][aria-label=\"Provider icon\"] button[aria-label=\"{label}\"][aria-pressed=\"true\"]", "means": "The chosen fallback icon in a custom provider draft."},
+  "providers.protocolOption": {"selector": "[data-slot=\"select-item\"]", "means": "An API protocol in the open protocol selector; pair it with its name."},
+  "providers.heading": {"selector": "[data-settings-page-heading]", "means": "The provider page title, including the saved display name after reopening."}
 }
