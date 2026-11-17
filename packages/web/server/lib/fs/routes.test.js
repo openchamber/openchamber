@@ -1874,6 +1874,28 @@ describe('fs raw byte ranges', () => {
     expect(res.body).toEqual({ error: 'Specified path is not a file' });
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it('closes the handle when its stat rejects after the FIFO-safe open (#2298)', async () => {
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => { throw new Error('handle stat failed'); },
+      createReadStream: () => { throw new Error('must not stream when stat failed'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+      expect(res.statusCode).toBe(500);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
 
 describe('fs raw download Content-Disposition', () => {

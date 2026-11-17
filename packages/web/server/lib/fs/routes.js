@@ -1432,7 +1432,15 @@ export const registerFsRoutes = (app, dependencies) => {
       // judged from the opened handle, which names the file actually opened.
       const handle = await fsPromises.open(canonicalPath, nonBlockingOpenFlags(platform));
       if (typeof handle.stat === 'function') {
-        const handleStats = await handle.stat();
+        let handleStats;
+        try {
+          handleStats = await handle.stat();
+        } catch (error) {
+          if (typeof handle.close === 'function') {
+            await handle.close().catch(() => {});
+          }
+          throw error;
+        }
         if (!handleStats.isFile()) {
           if (typeof handle.close === 'function') {
             await handle.close();
