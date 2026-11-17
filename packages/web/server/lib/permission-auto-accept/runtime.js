@@ -9,8 +9,6 @@ const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_CACHE_LIMIT = 10000;
 const OUTCOME_CACHE_LIMIT = 1000;
 
-// A stored entry is a mode, or a boolean from before the modes existed; an
-// entry that is neither is dropped rather than failing the whole policy.
 const storedEntrySchema = z.union([z.boolean(), z.enum(PERMISSION_MODES)]).nullable().catch(null);
 const storedPolicySchema = z.object({
   sessions: z.record(z.string().min(1), storedEntrySchema).catch({}).default({}),
@@ -25,10 +23,6 @@ const forkedSessionSchema = z.object({ sessionID: z.string().min(1), parentID: z
 
 const hasLegacyEntries = (stored) => Object.values(stored.sessions).some((entry) => entry === true || entry === false);
 
-/**
- * `sessions` maps a session id to its mode. Returns whether any entry was a
- * pre-modes boolean, so the caller can persist the converted policy once.
- */
 const normalizePolicy = (value, legacyEnabledMode = 'auto') => {
   const stored = readStoredPolicy(value);
   const sessions = {};
@@ -48,16 +42,9 @@ export function createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
-  // The routing safety net, asked once per request in a `safety` session.
-  // `accept` replies; anything else leaves the request for the user. Absent
-  // means `safety` sessions wait for the user on every request.
   evaluatePermission = null,
   onPermissionReplied = null,
-  // What a pre-modes `true` becomes: `safety` when the old global safety-net
-  // switch was on, else `auto`. Asked only while converting such a policy.
   resolveLegacyEnabledMode = async () => 'auto',
-  // The mode a new top-level session starts in. The server inside an isolated space reads the
-  // file the host writes instead, since its own settings hold no default.
   readDefaultMode = async () => (await readSettingsFromDiskMigrated())?.[DEFAULT_MODE_SETTINGS_KEY],
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
@@ -71,13 +58,8 @@ export function createPermissionAutoAcceptRuntime({
   const pendingForkModes = new Map();
   const inFlight = new Map();
   const reconcilePromises = new Map();
-  // What the runtime did with each recent request, so notifications can tell a
-  // request the safety net held (the user must hear about it) from one it
-  // accepted.
   const outcomes = new Map();
 
-  // `sessions` keeps the on/off shape clients from before the modes read;
-  // `modes` is the policy itself.
   const snapshot = () => {
     const legacySessions = {};
     for (const [sessionId, mode] of Object.entries(policy.sessions)) legacySessions[sessionId] = isAutoAnsweringMode(mode);
@@ -89,8 +71,6 @@ export function createPermissionAutoAcceptRuntime({
     const stored = settings?.[SETTINGS_KEY];
     const legacyEnabledMode = hasLegacyEntries(readStoredPolicy(stored)) ? await resolveLegacyEnabledMode() : 'auto';
     const { policy: next, hadLegacy } = normalizePolicy(stored, legacyEnabledMode);
-    // Converted once: the answer to "was the safety net on" is gone after the
-    // routing config is next saved.
     if (hadLegacy) await persistSettings({ [SETTINGS_KEY]: next });
     return next;
   };
@@ -121,16 +101,10 @@ export function createPermissionAutoAcceptRuntime({
       });
       return snapshot();
     });
-    // Only this caller sees a failed save; the next update still writes.
     writePromise = result.catch(() => {});
     return result;
   };
 
-  /**
-   * `mode` is a permission mode; a boolean is accepted from callers that only
-   * know on/off (clients from before the modes, scheduled tasks) and means
-   * `auto` or `ask`.
-   */
   const setSessionPolicy = async (sessionId, mode, directory) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId is required');
     const next = toPermissionMode(mode);
@@ -145,12 +119,6 @@ export function createPermissionAutoAcceptRuntime({
     return result;
   };
 
-  /**
-   * A new top-level session starts in the default mode from Settings. Written
-   * once, at creation, so changing the default never reaches back into older
-   * sessions; a policy the creating flow already set wins. Subagents inherit
-   * from their parent instead.
-   */
   const applyDefaultMode = async (sessionId) => {
     await load();
     if (Object.hasOwn(policy.sessions, sessionId)) return;
@@ -163,19 +131,12 @@ export function createPermissionAutoAcceptRuntime({
     }));
   };
 
-  /**
-   * `complete` marks a full session record (`session.created`, or the session
-   * fetched from OpenCode), the only kind whose missing `parentID` proves a
-   * top-level session. Otherwise the parent stays unknown (`undefined`).
-   */
   const rememberSession = (info, directoryHint, { complete = false } = {}) => {
     if (!info || typeof info.id !== 'string' || !info.id) return;
-    // v2 session updates are partial (a rename carries only the title), so a
-    // field the update does not name keeps what an earlier record said.
     const previous = sessions.get(info.id);
     const parentID = sessionParentId(info)
       ?? (previous?.parentID !== undefined ? previous.parentID : (complete ? null : undefined));
-    // v2 keeps the directory on `location`; translated events already flatten it.
+    // external: https://github.com/anomalyco/opencode OpenCode v2 keeps a session's directory on `location`; translated events already flatten it.
     const directory = typeof info.directory === 'string' && info.directory
       ? info.directory
       : (typeof info.location?.directory === 'string' && info.location.directory
@@ -195,8 +156,7 @@ export function createPermissionAutoAcceptRuntime({
       headers: {
         Accept: 'application/json',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
-        // OpenCode 2.x scopes a request to a directory through this header;
-        // the pending-permission list and services behind it are per location.
+        // external: https://github.com/anomalyco/opencode OpenCode 2.x scopes a request to a directory with this header; the pending-permission list and services behind it are per location.
         ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
         ...getOpenCodeAuthHeaders(),
       },
@@ -213,18 +173,14 @@ export function createPermissionAutoAcceptRuntime({
 
   const getSession = async (sessionId, directory) => {
     const cached = sessions.get(sessionId);
-    // Only a partial update was seen: its parent is unknown, so ask OpenCode.
     if (cached && cached.parentID !== undefined) return cached;
     const info = await request(`/api/session/${encodeURIComponent(sessionId)}`, { directory: directory ?? cached?.directory });
     rememberSession(info?.data ?? info, directory, { complete: true });
     return sessions.get(sessionId) ?? null;
   };
 
-  /** The nearest explicit mode up the session's lineage. Throws when a session lookup fails. */
   const resolveLineageMode = async (sessionId, directory) => {
     await load();
-    // A default being written for a just-created session must be visible to
-    // its first permission request.
     await writePromise.catch(() => undefined);
     const seen = new Set();
     let current = sessionId;
@@ -251,26 +207,22 @@ export function createPermissionAutoAcceptRuntime({
     }));
   };
 
-  /** The nearest explicit mode up the session's lineage; unknown lineage fails closed to `ask`. */
   const resolveSessionMode = (sessionId, directory) => resolveLineageMode(sessionId, directory).catch(() => 'ask');
 
   const isSessionAutoAccepting = async (sessionId, directory) => isAutoAnsweringMode(await resolveSessionMode(sessionId, directory));
 
-  /** `replied`, `held` (left for the user by the safety net), or `ignored` (an `ask` session). */
   const replyOnce = async (permission, directory) => {
     if (!permission?.id || !permission?.sessionID) return 'ignored';
-    // A failed lineage lookup throws, so the request is retried like a failed reply.
     const mode = await resolveLineageMode(permission.sessionID, directory);
     if (mode === 'ask') return 'ignored';
     if (mode === 'safety') {
       const verdict = evaluatePermission ? await evaluatePermission(permission, directory) : null;
       if (verdict?.action !== 'accept') return 'held';
     }
-    // v2 scopes a permission reply under its session.
     await request(`/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`, {
       directory,
       method: 'POST',
-      // OpenCode 2.0.8 renamed the reply body field `reply` to `decision`.
+      // external: https://github.com/anomalyco/opencode OpenCode 2.0.8 renamed the reply body field reply to decision.
       body: { decision: 'once' },
     });
     return 'replied';
@@ -282,7 +234,6 @@ export function createPermissionAutoAcceptRuntime({
     if (outcomes.size > OUTCOME_CACHE_LIMIT) outcomes.delete(outcomes.keys().next().value);
   };
 
-  /** Resolves to whether the request was handled here (replied to, or deliberately held). */
   const processPermission = (permission, directory) => {
     if (!permission?.id) return Promise.resolve(false);
     const key = permission.id;
@@ -300,8 +251,6 @@ export function createPermissionAutoAcceptRuntime({
       return 'failed';
     })();
     rememberOutcome(key, outcome);
-    // A client hides a `safety` or `auto` session's request until it hears
-    // here that the request was not answered for the user.
     void outcome.then((result) => {
       if (result !== 'held' && result !== 'failed') return;
       broadcastGlobalUiEvent?.({
@@ -314,10 +263,6 @@ export function createPermissionAutoAcceptRuntime({
     return task;
   };
 
-  /**
-   * Whether the user can skip hearing about this request: it was, or is being,
-   * answered automatically. A held or unanswered request is not.
-   */
   const isPermissionAutoAnswered = async (sessionId, directory, permissionId) => {
     const wasReplied = async () => {
       const outcome = permissionId ? outcomes.get(permissionId) : undefined;
@@ -327,7 +272,6 @@ export function createPermissionAutoAcceptRuntime({
     try {
       mode = await resolveLineageMode(sessionId, directory);
     } catch {
-      // The reply path retries the lookup; its outcome is the answer.
       return wasReplied();
     }
     if (mode === 'auto') return true;
@@ -335,10 +279,6 @@ export function createPermissionAutoAcceptRuntime({
     return wasReplied();
   };
 
-  // A pending request belongs to a turn that is still running, so the
-  // directories worth asking are those of running sessions, which OpenCode
-  // already has started. A list without a directory would answer for
-  // OpenCode's own working directory only, and start it, MCP servers included.
   const runningSessionDirectories = async () => {
     const payload = await request('/api/session/active');
     const sessionIds = Object.keys(payload?.data ?? {});
@@ -388,8 +328,6 @@ export function createPermissionAutoAcceptRuntime({
         const fork = forkedSessionSchema.safeParse(payload.properties);
         if (!fork.success || pendingForkModes.has(fork.data.sessionID)) continue;
         const { sessionID, parentID } = fork.data;
-        // A fork is an independent session. Copy its source's effective mode
-        // once, without treating the fork event's parentID as subagent lineage.
         const task = inheritForkMode(sessionID, parentID, directory)
           .finally(() => { pendingForkModes.delete(sessionID); });
         pendingForkModes.set(sessionID, task);
@@ -409,14 +347,10 @@ export function createPermissionAutoAcceptRuntime({
         }
         continue;
       }
-      // A v2 permission request is `{ id, sessionID, action, resources, ... }`;
-      // only the id and session id are used to reply.
       if (payload.type === 'permission.asked') {
         void processPermission(payload.properties, directory ?? payload.properties?.directory);
         continue;
       }
-      // The routing safety net holds a request instead of replying; once the
-      // user answers it, stop tracking it.
       if (payload.type === 'permission.replied') {
         const permissionId = payload.properties?.requestID;
         if (typeof permissionId === 'string' && permissionId) onPermissionReplied?.(permissionId);
@@ -464,7 +398,6 @@ export function registerPermissionAutoAcceptRoutes(app, runtime) {
   app.put('/api/permission-auto-accept/sessions/:sessionId', async (req, res) => {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory : undefined;
-      // Clients from before the modes send only `enabled`.
       const mode = req.body?.mode ?? req.body?.enabled;
       res.json(await runtime.setSessionPolicy(req.params.sessionId, mode, directory));
     } catch (error) {
