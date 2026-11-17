@@ -44,6 +44,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { operatorChildrenI18n } from './operator-children.i18n';
 import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -244,6 +245,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
   ...worktreeArchiveI18n.es,
+  ...operatorChildrenI18n.es,
   ...omniSearchI18n.es,
   ...overviewI18n.es,
   ...isolatedSpacesI18n.es,

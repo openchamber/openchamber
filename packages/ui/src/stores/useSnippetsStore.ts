@@ -16,14 +16,11 @@ export interface SnippetDraft {
   description?: string;
 }
 
-/** A write either lands, or fails because the name is taken, or fails otherwise. */
 type SnippetWriteResult = { ok: true } | { ok: false; reason: 'taken' | 'failed' };
 
-/** The quick "save as snippet" dialog: text from a message, a selection or the composer. */
 export interface SnippetQuickCreate {
   name?: string;
   content: string;
-  /** Runs once the snippet is saved, with the name it got. */
   onSaved?: (name: string) => void;
 }
 
@@ -32,7 +29,6 @@ interface SnippetsStore {
   isLoading: boolean;
   selectedSnippetName: string | null;
   snippetDraft: SnippetDraft | null;
-  /** The editor holds edits that switching to another snippet would drop. */
   hasUnsavedChanges: boolean;
   quickCreate: SnippetQuickCreate | null;
 
@@ -43,11 +39,9 @@ interface SnippetsStore {
   closeQuickCreate: () => void;
   loadSnippets: () => Promise<boolean>;
   createSnippet: (name: string, content: string, options?: { aliases?: string[]; description?: string; scope?: SnippetScope }) => Promise<SnippetWriteResult>;
-  /** `name` renames the snippet, `scope` moves it to the other folder. */
   updateSnippet: (name: string, updates: { name?: string; scope?: SnippetScope; content?: string; aliases?: string[]; description?: string }) => Promise<SnippetWriteResult>;
   deleteSnippet: (name: string) => Promise<boolean>;
   expandText: (text: string) => Promise<string>;
-  /** What a snippet body sends once used, saved or not. */
   previewSnippet: (content: string) => Promise<string>;
   getSnippetByName: (name: string) => Snippet | undefined;
 }
@@ -56,24 +50,10 @@ const writeFailure = (status: number): SnippetWriteResult => ({ ok: false, reaso
 
 const SNIPPETS_LOAD_CACHE_TTL_MS = 5000;
 let lastLoadedAt = 0;
-/**
- * Advances on every local change. A load started before a change answers with
- * the list from before it, so it neither commits nor serves later callers.
- */
 let registryGeneration = 0;
 let loadInFlight: { generation: number; promise: Promise<boolean> } | null = null;
-/**
- * The directory the loaded list is complete for; undefined until a load
- * succeeds, and again from a local change until the reload lands.
- */
 let registryDirectory: string | null | undefined;
 
-/**
- * Snippets are files on disk that another window, client or editor can add,
- * so the loaded list stands for the directory's registry only as long as the
- * load cache does. Only such a list may rule out an expansion without asking
- * the server.
- */
 const isRegistryCurrent = (directory: string | null): boolean => (
   registryDirectory === directory && Date.now() - lastLoadedAt < SNIPPETS_LOAD_CACHE_TTL_MS
 );
@@ -84,7 +64,6 @@ const invalidateRegistry = () => {
   registryDirectory = undefined;
 };
 
-// The server's own pattern (`lib/opencode/snippets.js`), names compared lowercase.
 const SNIPPET_TOKEN = /#([a-z0-9_-]+)/gi;
 
 const namesKnownSnippet = (text: string, snippets: readonly Snippet[]): boolean => {
@@ -113,10 +92,6 @@ const getRequestDirectory = (): string | null => {
   return null;
 };
 
-/**
- * The server's expansion: `text` is a prompt to expand, `content` a snippet
- * body to preview as it would send.
- */
 const requestExpansion = async (directory: string | null, body: { text: string } | { content: string }): Promise<string | undefined> => {
   const headers = new Headers({ 'Content-Type': 'application/json' });
   if (directory) headers.set('x-opencode-directory', directory);
@@ -158,15 +133,10 @@ export const useSnippetsStore = create<SnippetsStore>()(
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             const response = await runtimeFetch(`/api/config/snippets${queryParams}`, {
               headers: { 'Cache-Control': 'no-cache', ...(directory ? { 'x-opencode-directory': directory } : {}) },
-              // runtimeFetch joins concurrent identical config reads unless the
-              // request carries a signal. A read after a local change must not
-              // join one started before it.
               signal: new AbortController().signal,
             });
             if (!response.ok) throw new Error('Failed to load snippets');
             const snippets: Snippet[] = await response.json();
-            // A local change landed while this read was in flight: its list is
-            // from before the change. Answer with the read that follows it.
             if (generation !== registryGeneration) return get().loadSnippets();
             set({ snippets, isLoading: false });
             lastLoadedAt = Date.now();
@@ -224,9 +194,6 @@ export const useSnippetsStore = create<SnippetsStore>()(
             console.error('[SnippetsStore] Failed to update:', (await response.json().catch(() => null))?.error);
             return writeFailure(response.status);
           }
-          // A rename or a move gives the snippet another file. The list and
-          // the selection follow it in one step, so the editor never looks
-          // up a name the list no longer has.
           const payload: { snippet?: Snippet } = await response.json().catch(() => ({}));
           const saved = payload.snippet;
           if (saved) {
@@ -266,8 +233,6 @@ export const useSnippetsStore = create<SnippetsStore>()(
       expandText: async (text) => {
         if (!/#[a-z0-9_-]+/i.test(text)) return text;
         const directory = getRequestDirectory();
-        // "fix #42" names no snippet: skip the round trip when the current
-        // directory's list is loaded and none of its triggers appears.
         if (isRegistryCurrent(directory) && !namesKnownSnippet(text, get().snippets)) return text;
         return (await requestExpansion(directory, { text })) ?? text;
       },

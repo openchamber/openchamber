@@ -1,7 +1,5 @@
 import type { EasterEggCopy } from './types';
 
-// The commit counts that get a line start at ten, so the zero, one and two
-// plural forms never show and are left out.
 export const copy: EasterEggCopy = {
   draftTitle: {
     everyday: [
@@ -39,7 +37,6 @@ export const copy: EasterEggCopy = {
     newYearsDay: ['بداية نظيفة للعام.'],
   },
   push: {
-    // Friday evening is already the weekend in much of the Arabic-speaking world.
     fridayEvening: [],
     smallHours: [
       { title: 'تم الدفع في {time}.', description: 'الراحة مستحقة تمامًا.' },

@@ -10,13 +10,9 @@ const trimPartialSource = (range: Range, original: Node, clone: Node): void => {
   }
 };
 
-/** Clone selected DOM without letting a partial code shell copy its full source. */
 export const cloneSelectionContent = (range: Range): DocumentFragment => {
   const fragment = range.cloneContents();
   const common = range.commonAncestorContainer;
-  // Only the two boundary ancestor chains can be partially cloned. Each chain
-  // becomes the first/last child path in the fragment; contained middle
-  // subtrees keep their metadata without a scan or a positional query match.
   for (const edge of ['start', 'end'] as const) {
     const ancestors: Node[] = [];
     let original: Node | null = edge === 'start' ? range.startContainer : range.endContainer;
@@ -34,7 +30,6 @@ export const cloneSelectionContent = (range: Range): DocumentFragment => {
   return fragment;
 };
 
-/** Restore a missing ancestor using the same source-coverage rule as the fragment. */
 export const cloneSelectionAncestor = (range: Range, original: Element): Node => {
   const clone = original.cloneNode(false);
   trimPartialSource(range, original, clone);

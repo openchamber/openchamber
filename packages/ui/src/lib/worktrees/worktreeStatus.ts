@@ -17,20 +17,10 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeM
   };
 }
 
-// Deleting a worktree force-removes its files and force-deletes its branch, so
-// skipping the confirmation is allowed only when nothing would be lost: no
-// uncommitted changes, and every commit already on the branch's upstream or,
-// for a branch never pushed, on the base branch (`aheadBase`, e.g. origin/main).
-// A never-pushed branch whose base could not be compared opens the dialog.
 export function canDeleteWorktreeWithoutConfirm(status: WorktreeMetadata['status']): boolean {
   return Boolean(status && !status.isDirty && (status.upstream || status.aheadBase) && status.ahead === 0);
 }
 
-// The delete dialog offers deleting the worktree's branch only when that is
-// not the default branch of a remote and no other checkout holds it: a
-// worktree can end up on `main`. The server keeps both branches regardless;
-// this keeps the dialog from offering what it would refuse. A failed read
-// offers nothing.
 export async function canDeleteWorktreeBranch(projectDirectory: string, worktree: Pick<WorktreeMetadata, 'path' | 'branch'>): Promise<boolean> {
   const branch = (worktree.branch ?? '').replace(/^refs\/heads\//, '').trim();
   if (!branch) return false;
@@ -50,18 +40,11 @@ export async function canDeleteWorktreeBranch(projectDirectory: string, worktree
   }
 }
 
-// Resolving a project's root (primary worktree) requires shelling out to
-// `git rev-parse`, whose answer is effectively static for the lifetime of a
-// session — the location of a repo's git directory does not change while the
-// app is open. Caching it (with in-flight dedupe) collapses what used to be an
-// N² burst of `/api/fs/exec` calls into roughly one resolution per directory.
 const RESOLVED_ROOT_TTL_MS = 60_000;
 const RESOLVED_ROOT_CACHE_MAX_ENTRIES = 500;
 const RESOLVED_ROOT_CACHE_MAX_BYTES = 1024 * 1024;
 const resolvedRootCache = new Map<string, { root: string; resolvedAt: number }>();
 const inFlightRootResolves = new Map<string, Promise<string>>();
-// Bumped on every invalidation so a resolution that was already in flight when
-// the cache was invalidated does not write its now-stale result back.
 let resolveCacheEpoch = 0;
 
 const resolvedRootEntryBytes = (directory: string, root: string): number => directory.length + root.length;
@@ -88,21 +71,11 @@ const setResolvedRootCacheEntry = (directory: string, root: string): void => {
   }
 };
 
-/**
- * Invalidate cached project-root resolutions. Call this when the worktree
- * topology changes (e.g. after creating or removing a worktree), since that can
- * alter which primary root a directory resolves to. With no argument, the whole
- * cache is cleared.
- */
 export function invalidateResolvedProjectRootCache(directory?: string): void {
-  // Bumping the epoch prevents any in-flight resolution from re-seeding the
-  // cache with its pre-invalidation result once it settles.
   resolveCacheEpoch += 1;
   if (typeof directory === 'string' && directory) {
     const normalized = normalizePath(directory);
     resolvedRootCache.delete(normalized);
-    // Drop the in-flight entry too, so callers arriving during the window
-    // trigger a fresh resolution instead of receiving the stale in-flight one.
     inFlightRootResolves.delete(normalized);
     return;
   }
@@ -117,7 +90,6 @@ const computeProjectRoot = async (directory: string): Promise<string> => {
 export const resolveProjectRoot = async (directory: string): Promise<string> => {
   const cached = resolvedRootCache.get(directory);
   if (cached && Date.now() - cached.resolvedAt < RESOLVED_ROOT_TTL_MS) {
-    // Refresh recency without extending TTL.
     resolvedRootCache.delete(directory);
     resolvedRootCache.set(directory, cached);
     return cached.root;
@@ -134,7 +106,6 @@ export const resolveProjectRoot = async (directory: string): Promise<string> => 
   const startEpoch = resolveCacheEpoch;
   const promise = computeProjectRoot(directory)
     .then((root) => {
-      // Skip the write-back if the cache was invalidated while we resolved.
       if (resolveCacheEpoch === startEpoch) {
         setResolvedRootCacheEntry(directory, root);
       }
@@ -165,10 +136,6 @@ export async function getRootBranch(
     const projectRoot = await resolveProjectRoot(normalizedPath).catch(() => normalizedPath);
     if (!isCurrent()) throw new Error('Runtime instance changed');
 
-    // Fast path: when a project directory *is* its own root (i.e. not a linked
-    // worktree), the caller's already-known branch refers to the root branch,
-    // so we can skip a redundant git status round-trip. For linked worktrees the
-    // root branch differs from the worktree's branch, so we must fetch it.
     const knownBranch = options?.knownBranch?.trim();
     if (knownBranch && projectRoot === normalizedPath) {
       return knownBranch;

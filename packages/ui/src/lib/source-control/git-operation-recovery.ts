@@ -2,11 +2,6 @@ import { z } from 'zod';
 import type { GitAPI, GitNetworkOperation, GitNetworkOperationPlan, GitNetworkOperationRequest } from '@/lib/api/types';
 import type { GitOperationRead } from '@/lib/boundGitNetworkOperation';
 
-/**
- * The step results a successful sync may carry: the fetch ran, and the pull
- * and the push each either ran or had nothing to do (`skipped`: nothing came
- * in, or the remote already held the commit).
- */
 export const isCompleteSyncSuccess = (steps: GitNetworkOperation['stepResults']): boolean => Boolean(steps
   && steps.length === 3
   && steps.some((result) => result.step === 'fetch' && result.status === 'succeeded')
@@ -63,8 +58,7 @@ const digest = async (value: string): Promise<string> => {
     return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  // FIPS 180-4 sections 5 and 6.2. Plain HTTP lacks SubtleCrypto, but must match
-  // existing v1 fingerprints exactly. This is not an authentication/credential primitive.
+  // external: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf Sections 5 and 6.2 define SHA-256 for v1 fingerprints on plain HTTP.
   const padded = new Uint8Array(Math.ceil((input.length + 9) / 64) * 64);
   padded.set(input);
   padded[input.length] = 0x80;
@@ -105,7 +99,6 @@ const digest = async (value: string): Promise<string> => {
   return Array.from(state, (word) => word.toString(16).padStart(8, '0')).join('');
 };
 
-// Keep target equality stable across the server's durable public-snapshot redaction.
 const durableTargetText = (target: GitNetworkOperation['target']): string => JSON.stringify(target, (key, value) => {
   if (key === 'forceWithLease') return undefined;
   if (key !== 'displayUrl') return value;
@@ -193,7 +186,6 @@ export const createGitOperationRecoveryOwner = (storage: () => RecoveryStorage) 
     const references = load();
     const candidate = references.find((reference) => reference.runtimeKey === runtimeKey && reference.operationId === read.operation.operationId);
     if (!candidate || !await matches(candidate, read.runtimeKey, read.operation) || !isCurrent()) return;
-    // Re-read after digest work so another operation's intervening write cannot be lost.
     save(load().filter((reference) => JSON.stringify(reference) !== JSON.stringify(candidate)));
   };
 
@@ -201,7 +193,8 @@ export const createGitOperationRecoveryOwner = (storage: () => RecoveryStorage) 
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => snapshot,
     runtimeKey: hash,
-    hydrate: () => { try { load(); } catch { /* The snapshot exposes the fail-closed storage state. */ } },
+    // oxlint-disable-next-line no-empty
+    hydrate: () => { try { load(); } catch {  } },
     assertWritable: () => {
       const references = load();
       if (references.length + reservations.size >= MAX_REFERENCES) throw new PendingGitOperationError('capacity', references);
@@ -216,7 +209,6 @@ export const createGitOperationRecoveryOwner = (storage: () => RecoveryStorage) 
       const pending = references.filter((reference) => reference.runtimeKey === key && reference.repositoryId === repositoryId);
       if (pending.length || reservations.has(scope)) throw new PendingGitOperationError('pending', pending);
       if (references.length + reservations.size >= MAX_REFERENCES) throw new PendingGitOperationError('capacity', references);
-      // Plan creates only an unexecuted server record. Confirm storage is writable before even creating that record.
       save(references);
       reservations.add(scope);
       try {
@@ -237,10 +229,10 @@ export const createGitOperationRecoveryOwner = (storage: () => RecoveryStorage) 
           const operation = await git.getNetworkOperation(reference.operationId);
           if (!isCurrent() || !await matches(reference, runtimeKey, operation) || !isCurrent()) return null;
           const read: GitOperationRead = { runtimeKey, operation, availability: 'available' };
-          try { await complete(read, isCurrent); } catch { /* Keep the proven result visible while its durable blocker remains. */ }
+          // oxlint-disable-next-line no-empty
+          try { await complete(read, isCurrent); } catch {  }
           return read;
         } catch {
-          // NOT_FOUND after a server restart is an unknown outcome, not success or a failed mutation.
           return null;
         }
       })().finally(() => { reconciling.delete(key); });

@@ -3,11 +3,6 @@ import assert from 'node:assert/strict';
 import { isString } from '../shared/guards.js';
 import { joinProjectPath } from '../source-control/project-path.js';
 
-// A walkthrough source resolves to one or more diff *sections*. A section is a
-// patch plus the scope its hunk ids live in; keeping staged and working-tree
-// changes in separate scopes means a stop written against staged code never
-// silently re-anchors onto an unstaged edit of the same lines.
-
 const WORKING_TREE_SCOPES = new Set(['all', 'staged', 'working']);
 
 export class WalkthroughSourceError extends Error {
@@ -18,9 +13,6 @@ export class WalkthroughSourceError extends Error {
   }
 }
 
-/**
- * Normalize and validate an untrusted source descriptor from the client.
- */
 export function parseSource(raw) {
   if (!raw || typeof raw !== 'object') {
     throw new WalkthroughSourceError('source is required');
@@ -48,8 +40,6 @@ export function parseSource(raw) {
     if (!Number.isInteger(number) || number <= 0) {
       throw new WalkthroughSourceError('pr sources require a positive number');
     }
-    // A host that keeps revisions (Gerrit's patchsets) may name one by its
-    // full commit SHA; without it the change request's current one is read.
     let revision;
     if (raw.revision !== undefined) {
       if (!isString(raw.revision) || !/^[0-9a-f]{40}$/i.test(raw.revision)) {
@@ -57,8 +47,6 @@ export function parseSource(raw) {
       }
       revision = raw.revision.toLowerCase();
     }
-    // `linked`: read wherever the repository is, for a change request a link
-    // named outside the bound network (`validatePullRequestContext`).
     const withRevision = (source) => {
       if (revision) source.revision = revision;
       if (raw.linked === true) source.linked = true;
@@ -67,13 +55,6 @@ export function parseSource(raw) {
     if (raw.sourceRepo !== undefined) {
       const { owner, repo } = raw.sourceRepo ?? {};
       try {
-        // Owners are a single segment on GitHub and a namespace path on GitLab
-        // (subgroups included). Each segment allows the same characters as a
-        // repo name with dots kept internal, so "." and ".." can never be a
-        // segment. Downstream the owner is only compared against the bound
-        // repository's network, never turned into a filesystem path.
-        // An empty owner is a path-style provider's top-level project (Gerrit's
-        // `demo`); the routes accept it only for such a provider.
         if (owner !== '') assert.match(owner, /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*(?:\/[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)*$/);
         assert.match(repo, /^[a-zA-Z0-9_.-]+$/);
       } catch {
@@ -85,7 +66,6 @@ export function parseSource(raw) {
   }
 
   if (raw.kind === 'commit') {
-    // Sources are content-addressed: accept a full object id, never a moving ref.
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.hash)) {
       throw new WalkthroughSourceError('commit sources require a full commit hash');
     }
@@ -99,22 +79,14 @@ export function parseSource(raw) {
   throw new WalkthroughSourceError(`Unknown source kind "${String(raw.kind)}"`);
 }
 
-/**
- * Stable string form of a source, used as the pointer key and as part of the
- * cache key. Must not change shape casually — it addresses persisted files.
- */
 export function sourceKey(source) {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
   if (source.kind === 'commit') return `commit:${source.hash}`;
   const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
-  // A named revision is its own walkthrough; the current one keeps the key it always had.
   return source.revision ? `${pr}@${source.revision}` : pr;
 }
 
-// `git diff` never reports untracked files, so a brand-new file would be
-// invisible in a walkthrough of local work. The batch helper resolves the
-// repository once and bounds how many diff processes run at a time.
 const untrackedSections = async (directory) => {
   const untracked = await listUntrackedPaths(directory);
   if (untracked.length === 0) return [];

@@ -11,7 +11,6 @@ const pullSchema = z.object({
   autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullable(),
 });
 
-/** Read only after a refused merge, or to cancel/reconcile a waiting merge. */
 export async function readWaitingMerge(octokit, project, target) {
   const data = await octokit.graphql(`query($owner: String!, $repo: String!, $number: Int!, $base: String!) {
     repository(owner: $owner, name: $repo) {
@@ -27,7 +26,6 @@ export async function readWaitingMerge(octokit, project, target) {
   return { pull: parsed.data.repository.pullRequest, hasQueue: parsed.data.repository.mergeQueue !== null };
 }
 
-/** Preserve bypass semantics: the ordinary merge is always attempted first. */
 export async function enableMergeWhenReady(octokit, project, target, method) {
   let waiting;
   try { waiting = await readWaitingMerge(octokit, project, target); }
@@ -56,8 +54,6 @@ export async function cancelWaitingMerge(octokit, project, target) {
       dequeuePullRequest(input: { id: $id }) { mergeQueueEntry { id } }
     }`, { id: pull.id });
     if (!Object.hasOwn(data ?? {}, 'dequeuePullRequest')) throw invalidProviderPayload('GitHub did not confirm dequeue');
-    // Dequeue can also clear auto-merge. Re-read before issuing a disable
-    // against a request that may no longer exist.
     ({ pull } = await readWaitingMerge(octokit, project, target));
     if (pull.state === 'MERGED') return { merged: true };
     if (pull.isInMergeQueue) throw invalidProviderPayload('GitHub did not confirm leaving the merge queue');

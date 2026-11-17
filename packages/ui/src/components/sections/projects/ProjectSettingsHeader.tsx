@@ -28,7 +28,6 @@ type ProjectIdentityFormState = ReturnType<typeof useProjectIdentityForm>;
 
 type IconMode = 'symbol' | 'image';
 
-/** The project's icon as the sidebar draws it, from the form's unsaved state. */
 const ProjectIconPreview: React.FC<{ form: ProjectIdentityFormState; className?: string }> = ({ form, className }) => {
   const { currentTheme } = useThemeSystem();
   const { project } = form;
@@ -75,7 +74,6 @@ const ProjectIconPreview: React.FC<{ form: ProjectIdentityFormState; className?:
 
 const ICON_CELL_CLASS = 'flex h-8 w-8 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]';
 
-/** Colour and icon, edited together: the colour paints the symbol and fills the background behind an image. */
 const ProjectAppearancePicker: React.FC<{
   form: ProjectIdentityFormState;
   onUploadClick: () => void;
@@ -92,7 +90,6 @@ const ProjectAppearancePicker: React.FC<{
 
   const pickSymbol = (key: string | null) => {
     form.setIcon(key);
-    // The sidebar draws the image whenever there is one, so a symbol needs it gone.
     if (form.effectiveHasImageIcon) form.handleRemoveImageIcon();
   };
 
@@ -186,15 +183,9 @@ const ProjectAppearancePicker: React.FC<{
   );
 };
 
-/**
- * The top of the project page: the icon, which opens the colour and icon
- * picker, the name, edited in place, and the path.
- */
 export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }> = ({ form }) => {
   const { t } = useI18n();
   const fileInputRef = form.fileInputRef;
-  // Inside the Settings dialog the popup portals into the dialog, or the
-  // dialog's focus trap and stacking would hide it.
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
   const syncPortal = (target: EventTarget | null) => {
     const dialog = target instanceof HTMLElement ? target.closest('[data-slot="dialog-content"], [role="dialog"]') : null;
@@ -205,7 +196,6 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
 
   return (
     <div className="flex min-w-0 items-center gap-3">
-      {/* Outside the popup: the system file picker takes focus, which closes the popup. */}
       <input
         ref={fileInputRef}
         type="file"
@@ -227,7 +217,6 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
           className="relative flex h-12 w-12 shrink-0 items-center justify-center oc-tile-inset rounded-xl hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] data-[popup-open]:bg-interactive-selection"
         >
           <ProjectIconPreview form={form} className="h-6 w-6" />
-          {/* Says the tile is a control: it opens the icon and colour picker. */}
           <span
             aria-hidden="true"
             className="absolute -bottom-1 -end-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-[var(--interactive-border)] bg-background text-muted-foreground"
@@ -248,7 +237,6 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
         </Popover.Portal>
       </Popover.Root>
 
-      {/* Name and path together are as tall as the tile, so the three read as one block. */}
       <div className="min-w-0 flex-1 space-y-0.5">
         <Input
           data-settings-item="projects.name"

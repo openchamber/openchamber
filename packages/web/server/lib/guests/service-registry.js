@@ -1,32 +1,3 @@
-// Guest service pid registry and boot reaper.
-//
-// A graceful shutdown stops every guest service (`service.js`), but a host that
-// dies hard (SIGKILL, an OOM kill, power loss) takes its in-memory runtime map
-// with it and leaves the services running with no parent. They keep their
-// loopback port and whatever sockets or locks they hold until the next reboot.
-//
-// So every spawn writes one file, `<pid>.json`, into a registry directory, and
-// removes it once the child exits. A starting host reads that directory and
-// stops each recorded service that is still running and whose host is gone.
-// One file per process: web and desktop share a data directory and run at the
-// same time, and each host only ever writes and deletes its own files.
-//
-// A pid alone proves nothing once its process is gone, because the OS hands
-// pids out again. Before a kill the reaper checks two things:
-//   1. The process is the service that was recorded. On Linux and macOS its
-//      environment must carry the service token whose SHA-256 the record holds
-//      (`/proc/<pid>/environ`, `ps -E`); the token itself never reaches the
-//      disk. Windows does not expose another process's environment, so there
-//      the command line must name the recorded entry script and the executable
-//      must be the recorded host binary.
-//   2. Its host is gone. On Unix a parent pid changes only when the parent
-//      dies, so a parent other than the recorded owner means the owner exited.
-//      Windows never reparents, so there the owner pid must be dead.
-// A process that fails the first check is no longer ours and its record goes.
-// A process that cannot be read is left alone and its record stays.
-//
-// Everything here is asynchronous: the server shares its event loop with the
-// desktop shell's UI traffic.
 
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -36,7 +7,6 @@ import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
-/** The service's bearer, set by `service.js` in every service environment. */
 export const SERVICE_TOKEN_ENV = 'OPENCHAMBER_SERVICE_TOKEN';
 
 const STOP_GRACE_MS = 5_000;
@@ -57,7 +27,6 @@ const windowsProcessSchema = z.object({
   executablePath: z.string().nullable(),
 });
 
-/** `{openchamberDataDir}/guest-services`. */
 export const guestServiceRegistryDir = (dataDir) => path.join(dataDir, 'guest-services');
 
 const digestToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
@@ -66,11 +35,6 @@ const sleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
 
-/**
- * Builds the registry over injectable OS access. Production uses the default
- * instance exported below; tests pass their own platform, process and
- * child-process helpers instead of mocking node builtins.
- */
 export const createGuestServiceRegistry = ({
   fs = fsp,
   execFileAsync = promisify(execFile),
@@ -82,7 +46,7 @@ export const createGuestServiceRegistry = ({
       signalProcess(pid, 0);
       return true;
     } catch (error) {
-      // EPERM: the process exists, it just is not ours to signal.
+      // external: https://nodejs.org/api/process.html#processkillpid-signal EPERM means the process exists but cannot be signalled.
       return error?.code === 'EPERM';
     }
   };
@@ -129,7 +93,7 @@ export const createGuestServiceRegistry = ({
         fs.readFile(`/proc/${pid}/environ`, 'utf8'),
         fs.readFile(`/proc/${pid}/stat`, 'utf8'),
       ]);
-      // `pid (comm) state ppid ...`; comm may itself hold spaces and parens.
+      // external: https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html The parenthesized comm field can contain spaces and parentheses.
       const [, parentPid] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
       const prefix = `${SERVICE_TOKEN_ENV}=`;
       const token = environ.split('\0').find((line) => line.startsWith(prefix))?.slice(prefix.length) ?? null;
@@ -139,8 +103,6 @@ export const createGuestServiceRegistry = ({
     }
   };
 
-  // macOS and the BSDs: `ps -E` appends the environment of a process the
-  // caller owns to its command line.
   const readPsProcess = async (pid) => {
     try {
       const { stdout } = await execFileAsync('ps', ['-E', '-ww', '-o', 'ppid=,command=', '-p', String(pid)], {
@@ -189,7 +151,6 @@ export const createGuestServiceRegistry = ({
     return info.parentPid === record.ownerPid ? 'owned' : 'orphaned';
   };
 
-  // Same sequence as a host stop: SIGTERM, then SIGKILL after the grace period.
   const stopProcess = async (pid) => {
     try {
       signalProcess(pid, 'SIGTERM');
@@ -222,8 +183,6 @@ export const createGuestServiceRegistry = ({
     } catch {
       return { inspected: 0, reaped: 0 };
     }
-    // A host that died between the write and the rename of a record leaves its
-    // temp file behind; the writer's pid is in the name.
     await Promise.all(entries.map(async (name) => {
       const writer = name.match(/\.json\.tmp-(\d+)-[0-9a-f]+$/);
       if (writer && !isPidAlive(Number.parseInt(writer[1], 10))) {
@@ -250,7 +209,6 @@ export const createGuestServiceRegistry = ({
         await fs.rm(filePath, { force: true });
         return state === 'orphaned';
       } catch (error) {
-        // A corrupt record, or one that vanished: drop it and move on.
         if (error instanceof SyntaxError) await fs.rm(filePath, { force: true }).catch(() => {});
         return false;
       }

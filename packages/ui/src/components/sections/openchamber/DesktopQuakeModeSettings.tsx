@@ -20,7 +20,6 @@ const formatHeight = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
 type DesktopQuakeModeSettingsProps = {
   quake: DesktopQuakeMode;
-  // The Mini Chat global combo, a conflict source for the Quake recorder.
   miniChatCombo: string | null;
   onReleaseMiniChatShortcut: () => void;
 };
@@ -38,8 +37,6 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
     () => getCustomizableShortcutActions().find((action) => action.id === 'quake_mode_global') ?? null,
     [],
   );
-  // Recording the Mini Chat combo offers a replace instead of a silent
-  // collision the main process would then refuse to register.
   const recorderOverrides = React.useMemo(
     () => (miniChatCombo ? { ...shortcutOverrides, mini_chat_global: miniChatCombo } : shortcutOverrides),
     [miniChatCombo, shortcutOverrides],

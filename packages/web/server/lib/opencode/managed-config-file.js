@@ -7,22 +7,8 @@ import { EXTENSION_AUTHORING_COMMAND, materializeAuthoringSkill } from '../guest
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
-/**
- * Built-in OpenCode plugins OpenChamber switches off for its managed child.
- *
- * `opencode.browser` only works when OpenCode's own desktop app attaches a
- * browser to the session; OpenChamber does not implement that protocol, so its
- * tools always fail with `browser.disconnected` and agents conclude browsing is
- * unavailable instead of using `openchamber_web`. A project config that lists
- * `opencode.browser` still re-enables it, because that layer sits above ours.
- */
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 
-/**
- * OpenCode's own `experimental_image_generate` tool (2.2.1+, on by default
- * since 2.2.2), switched off while `openchamber_image` is
- * on, so the agent sees one image tool, the one using the model the user chose.
- */
 const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
 
 /**
@@ -81,7 +67,6 @@ export const createManagedConfigRuntime = ({
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
-  /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
   const writeConfigFile = async ({ disabled, directories, extensionPlugins, permissions, policies, skills, commands }) => {
@@ -90,8 +75,6 @@ export const createManagedConfigRuntime = ({
     if (policies.length > 0) config.policies = policies;
     if (permissions.length > 0) config.permissions = permissions;
     const text = `${JSON.stringify(config, null, 2)}\n`;
-    // Temp + rename: OpenCode reacts to the write immediately, and a partial
-    // read would make it drop every managed plugin until the next change.
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
@@ -102,11 +85,6 @@ export const createManagedConfigRuntime = ({
     }
   };
 
-  /**
-   * Materialize the plugins the current settings ask for and return their
-   * directories in load order, with the permission rules their tools need.
-   * Directories exist on disk before the config file names them.
-   */
   const materializeEnabledPlugins = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
     const includeControl = settings?.agentControlToolEnabled !== false;
@@ -116,7 +94,6 @@ export const createManagedConfigRuntime = ({
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
-    // Read at every write: a policy change rewrites this file (index.js).
     const includeShare = includeRender && isSharingAvailable();
     const includeImage = settings?.agentImageToolEnabled === true;
     const includeSecret = settings?.agentSecretToolEnabled !== false;
@@ -130,8 +107,6 @@ export const createManagedConfigRuntime = ({
       directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeTerminal, includeWorkflow }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
-    // Only while an option is on: otherwise every limit error would cost the
-    // plugin a round trip to hear "do nothing".
     if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
@@ -145,12 +120,6 @@ export const createManagedConfigRuntime = ({
 
   let writing = null;
   let writeAgain = false;
-  /**
-   * One write at a time. The catalog is read before the file is written, so
-   * two refreshes could land in read order and bring back what a pause just
-   * removed; a request during a write runs the whole read-then-write once
-   * more instead, so the file always ends with the newest catalog.
-   */
   const writeLatestConfigFile = () => {
     if (writing) {
       writeAgain = true;
@@ -167,11 +136,6 @@ export const createManagedConfigRuntime = ({
     return writing;
   };
 
-  /**
-   * Environment for a managed OpenCode child: the callback URL and per-child
-   * token are always present, so a tool enabled later in the session can still
-   * call back without a restart.
-   */
   const buildManagedChildEnv = async () => {
     const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
     if (ownsConfigFile()) {

@@ -8,11 +8,6 @@ import { isRunInScope } from './project-scope';
 import { useSavedWorkflows, useSavedWorkflowsStore } from './saved';
 import { useProjectWorkflowRuns, useWorkflowRunsStore } from './store';
 
-/**
- * Which run the Workflows panel shows, per session (or per directory where
- * no session is open). Memory only: one the panel has not been pointed at
- * shows its session's newest run, else the project's.
- */
 interface WorkflowPanelState {
   selectedBySession: Record<string, string>;
   select: (sessionId: string, runId: string) => void;
@@ -25,11 +20,6 @@ export const useWorkflowPanelStore = create<WorkflowPanelState>((set) => ({
 
 type PanelTabs = readonly { mode: ContextPanelMode }[];
 
-/**
- * Whether the rail offers the Workflows panel: while workflows are shown,
- * while the project has a run or a saved workflow, or a Workflows tab is open,
- * so an open panel never loses its icon.
- */
 export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
   const available = useUIStore(selectWorkflowsShown);
   const scope = useWorkflowProjectScope(directory);
@@ -38,7 +28,6 @@ export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | nu
   return available && (runs.length > 0 || saved.length > 0 || tabs.some((tab) => tab.mode === 'workflows'));
 };
 
-/** The same answer outside React, for the surface-switch shortcut. */
 export const isWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
   if (!selectWorkflowsShown(useUIStore.getState())) return false;
   if (tabs.some((tab) => tab.mode === 'workflows')) return true;
@@ -49,7 +38,6 @@ export const isWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | nul
   return hasRun || (useSavedWorkflowsStore.getState().byDirectory[scope.savedDirectory]?.length ?? 0) > 0;
 };
 
-/** Shows `runId` in the Workflows panel of `directory`, opening the panel. */
 export const openWorkflowRunInPanel = (directory: string, sessionId: string, runId: string): void => {
   useWorkflowPanelStore.getState().select(sessionId, runId);
   useUIStore.getState().openContextPanelTab(directory, { mode: 'workflows' });

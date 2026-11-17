@@ -1,45 +1,14 @@
-/**
- * Local end of the dev-server tunnel.
- *
- * Binds a loopback listener on this machine and pipes every connection to a
- * dev server on the OpenChamber host. The point of binding a real local port —
- * rather than serving the remote page under a path on some other origin — is
- * that the page then has its own origin at the root of its own host. Absolute
- * URLs resolve, cookies scope correctly, HMR sockets connect, and nothing has
- * to be rewritten.
- *
- * Lives in the web package because it needs a WebSocket client, which this
- * package already depends on; the desktop shell drives it over IPC.
- */
 import net from 'node:net';
 import { WebSocket } from 'ws';
 
-/**
- * What one connection may buffer while its WebSocket is still connecting.
- *
- * Enough for a request with generous headers, far short of a body worth
- * holding: a local process could otherwise keep writing into a stalled
- * handshake and grow the desktop app's memory without limit.
- */
 const MAX_PENDING_BYTES = 256 * 1024;
-/** A handshake that has not completed by now is not going to. */
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 const SPACE_ID = /^[0-9a-f]{12}$/;
 
-/**
- * The host's own tunnel, or the one of an isolated space on that host: a
- * tunnel that names the space's root as its `directory` is forwarded by the
- * host to the server inside the space, which dials the port on its own
- * loopback, the space's.
- */
 const toWebSocketUrl = (baseUrl, port, spaceId) => {
   const parsed = new URL('/api/dev-tunnel', baseUrl);
-  // WHATWG URL silently ignores a protocol assignment that crosses from a
-  // non-special scheme (custom app protocols, relay-virtual URLs) to `ws:`.
-  // Without this check the stale scheme survives into `new WebSocket(...)`,
-  // which then throws inside the connection handler and takes the whole
-  // process down; rejecting here fails the open() call cleanly instead.
+  // external: https://url.spec.whatwg.org/#url-scheme-state Protocol assignment cannot cross from a non-special app scheme to ws; reject before opening a connection.
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`The remote base URL must be http(s); got "${parsed.protocol}"`);
   }
@@ -54,7 +23,6 @@ export const createDevTunnelClient = ({
   handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
   maxPendingBytes = MAX_PENDING_BYTES,
 } = {}) => {
-  /** Keyed by base URL, space and remote port, so repeat opens reuse one listener. */
   const tunnels = new Map();
   const tunnelKey = (baseUrl, remotePort, spaceId) => `${baseUrl}|${spaceId ?? ''}|${remotePort}`;
 
@@ -70,11 +38,6 @@ export const createDevTunnelClient = ({
   };
 
   return {
-    /**
-     * Opens (or reuses) a tunnel and resolves with the local port to browse.
-     * Rejects if the listener cannot bind; per-connection failures close only
-     * that connection, so one failed request cannot take the tunnel down.
-     */
     async open({ baseUrl, port, headers = {}, spaceId = null }) {
       const remotePort = Number.parseInt(String(port), 10);
       if (!Number.isInteger(remotePort) || remotePort <= 0 || remotePort > 65535) {
@@ -95,9 +58,6 @@ export const createDevTunnelClient = ({
         socket.setNoDelay(true);
         sockets.add(socket);
 
-        // A synchronous throw here would be an uncaught exception in the
-        // connection handler and crash the process; one bad connection must
-        // fail alone.
         let upstream;
         try {
           upstream = new WebSocket(target, { headers, perMessageDeflate: false });
@@ -130,8 +90,6 @@ export const createDevTunnelClient = ({
           for (const chunk of pendingWrites) upstream.send(chunk);
           pendingWrites = [];
           pendingBytes = 0;
-          // The local end was held back while there was nowhere to put its
-          // bytes; there is somewhere now.
           socket.resume();
         });
         upstream.on('message', (data) => {
@@ -145,9 +103,6 @@ export const createDevTunnelClient = ({
         upstream.on('close', teardown);
 
         socket.on('data', (chunk) => {
-          // Bytes can arrive before the WebSocket handshake completes; buffering
-          // them is what keeps the first HTTP request intact. The buffer is
-          // bounded, and the local end is paused rather than trusted to stop.
           if (upstream.readyState === WebSocket.OPEN) {
             upstream.send(chunk);
             return;
@@ -192,7 +147,6 @@ export const createDevTunnelClient = ({
       return closeTunnel(tunnelKey(String(baseUrl || '').trim(), Number.parseInt(String(port), 10), spaceId));
     },
 
-    /** Closes every tunnel; used when the desktop switches runtime or quits. */
     closeAll() {
       for (const key of [...tunnels.keys()]) closeTunnel(key);
     },

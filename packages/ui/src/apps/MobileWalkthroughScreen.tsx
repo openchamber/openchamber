@@ -19,19 +19,10 @@ import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
-/**
- * The walkthrough of what the phone's Changes shows, pushed over its list the
- * way a file's diff is. It opens on the contents (what the change is about and
- * its steps); a step opens the stream there, with the step list and arrows in
- * the header. The model, the language and Regenerate wait in the options
- * sheet, except before the first walkthrough, when the empty state offers them.
- */
 export const MobileWalkthroughScreen: React.FC<{
   directory: string;
   target: WalkthroughTarget;
-  /** What is being walked through, such as "Commit · e1d7e102". */
   subtitle: string;
-  /** Moves when the subject's content moves, so the walkthrough reads again. */
   revision: string;
   visible: boolean;
   onBack: () => void;
@@ -41,8 +32,6 @@ export const MobileWalkthroughScreen: React.FC<{
   const { view } = review;
   const commentOrigin = React.useMemo(() => diffCommentOriginFromTarget(target), [target]);
   const [optionsOpen, setOptionsOpen] = React.useState(false);
-  // The walkthrough being read, by when it was generated: a new one starts
-  // again from its contents.
   const generatedAt = review.entry.result?.generatedAt ?? null;
   const [readingAt, setReadingAt] = React.useState<string | null>(null);
   const reading = view !== null && readingAt !== null && readingAt === generatedAt;

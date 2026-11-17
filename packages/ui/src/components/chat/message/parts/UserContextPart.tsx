@@ -16,53 +16,25 @@ import { ReceivedPageCard } from '../../sharePages/received/ReceivedPageCard';
 import { readBrowserAnnotationPrompt } from '@/lib/browser/annotationPrompt';
 import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
 
-/**
- * A context item attached to a user message: an inline code comment, a
- * terminal selection, a browser annotation, or GitHub PR context.
- *
- * The quoted material renders as a messenger-style reply: the quote behind an
- * accent bar at the line's start, in muted text, clamped to a few lines (click
- * toggles the full quote), with a source caption above it when the source
- * says something (a file, a terminal, a page). The user's comment follows
- * below as regular message text, and pairs stand apart by space, so each
- * comment reads as the reply to the quote right above it.
- */
 
-/** The bar every quote stands behind, collapsed and expanded alike. */
 const QUOTE_BAR_CLASS = 'border-s-3 border-primary/45 ps-3';
 
 const ContextCard: React.FC<{
     icon: IconName;
     summary: string;
-    /** Full untruncated context, shown on hover. */
     title?: string;
     body: string;
     text: string;
-    /** Render the quote in the code font (code, terminal output, CI logs). */
     mono?: boolean;
-    /**
-     * The caption only repeats what the bar already says (a quote from this
-     * chat): it is read to screen readers but not drawn, and the collapsed
-     * row shows the quote itself.
-     */
     captionless?: boolean;
-    /**
-     * Message-level collapse: with collapsible messages on, the whole user
-     * message (text parts and cards alike) shares one expanded state, so a
-     * collapsed card is a two-line preview and a click asks the message to
-     * expand instead of toggling anything of its own.
-     */
     collapsed?: boolean;
     onExpand?: () => void;
-    /** Scroll to where the quote came from; a click on the quote does it, and the label is its tooltip. */
     reveal?: { label: string; onReveal: () => void };
-    /** The message's file names: `[name]` in the user's comment renders as a file chip. */
     attachmentFilenames: readonly string[];
 }> = ({ icon, summary, title, body, text, mono, captionless, collapsed, onExpand, reveal, attachmentFilenames }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
-    // A captionless card with no quote has nothing else to show.
     const showCaption = !captionless || !hasBody;
     const caption = (
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -82,9 +54,6 @@ const ContextCard: React.FC<{
     ) : null;
 
     if (collapsed) {
-        // Two lines at most: the quote's first line (or the source caption
-        // where the source says more), and the user's comment under it.
-        // contextPartsPastCollapse counts the same lines.
         const handleKeyDown = (event: React.KeyboardEvent): void => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
@@ -112,8 +81,6 @@ const ContextCard: React.FC<{
         );
     }
 
-    // A quote from this chat leads to its source: the original shows it whole,
-    // so a click goes there. Other quotes have nowhere to go and unfold instead.
     const activateQuote = reveal ? reveal.onReveal : () => setExpanded((value) => !value);
     const handleQuoteKeyDown = (event: React.KeyboardEvent): void => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -163,14 +130,12 @@ const basename = (path: string): string => {
 
 const UserContextPart: React.FC<{
     payload: ContextPartPayload;
-    /** Message-level collapse state, shared with the text parts. */
     collapsed?: boolean;
     onExpand?: () => void;
     attachmentFilenames: readonly string[];
 }> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
-    // A part without a provider was written before providers other than GitHub existed: a pull request.
     const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
 
@@ -207,8 +172,6 @@ const UserContextPart: React.FC<{
                 />
             );
         case 'browser-annotation': {
-            // The prompt is written for the model (selectors, bounds, styles);
-            // the card shows what the user pointed at and what they said.
             const annotation = readBrowserAnnotationPrompt(payload.prompt);
             return (
                 <ContextCard
@@ -278,7 +241,6 @@ const UserContextPart: React.FC<{
         case 'guest-pr':
         case 'session':
         case 'session-message':
-            // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
         case 'shared-page':
             return <ReceivedPageCard payload={payload} />;

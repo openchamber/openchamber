@@ -1,8 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 
-// Browser transport percent-encodes directory hints and marks them explicitly.
-// Only marked values are decoded so literal percent sequences from direct API
-// clients are preserved.
 const safeDecodeMarkedURIComponent = (value, encoding) => {
   if (encoding !== 'uri') return value;
   try { return decodeURIComponent(value); } catch { return value; }
@@ -16,9 +13,6 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     readSettingsFromDiskMigrated,
     getReadSettingsFromDiskMigrated,
     sanitizeProjects,
-    // `refuseDirectory(candidate)` answers the reason a directory may not be used on this host,
-    // or null. It runs before the path is looked at, so a refused directory is never touched and
-    // never falls back to another one. The isolated-spaces host refuses `/spaces/...` with it.
     refuseDirectory = () => null,
   } = dependencies;
   const realpathCache = createRealpathCache({
@@ -52,11 +46,6 @@ export const createProjectDirectoryRuntime = (dependencies) => {
         return { ok: false, error: 'Specified path is not a directory' };
       }
       const realPath = await realpathCache.resolve(resolved);
-      // `requestedDirectory` is the pre-realpath candidate the caller asked
-      // for. Callers that address files in the user-visible path space (the
-      // file tree, the read-family FS routes) need it when the project root
-      // is itself a symlink and the canonical `directory` no longer contains
-      // the paths the client sends.
       return { ok: true, directory: realPath, requestedDirectory: resolved };
     } catch (error) {
       const err = error;
@@ -96,13 +85,6 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       : readSettingsFromDiskMigrated;
     const settings = await readSettings();
 
-    // `lastDirectory` reflects the directory the UI is currently browsing —
-    // useDirectoryStore.setDirectory() persists it on every navigation.
-    // Prefer it over activeProjectId, because the user may have navigated
-    // away from the project that was last "clicked" in the sidebar (e.g. via
-    // `go to parent`, directory picker, or a deep link), leaving
-    // activeProjectId stale. Fetches scoped to the stale project would 400
-    // with "Path is outside of active workspace".
     if (typeof settings.lastDirectory === 'string' && settings.lastDirectory.trim()) {
       const validated = await validateDirectoryPath(settings.lastDirectory);
       if (validated.ok) {

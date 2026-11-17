@@ -6,6 +6,42 @@ classification model) or the small model as an independent progress check. Built
 architecture (session-assist is the structural template): the loop lives in
 the web server and survives UI disconnects.
 
+## Ownership
+
+This module owns objective storage, goal creation, objective routes and the
+server-side progress loop. OpenChamber's session metadata store owns persistence
+and calls `notifyGoalChanged` after saving a goal. OpenCode owns session execution;
+the UI owns arming goals and presenting their state.
+
+## Invariants
+
+- Goal writes re-read OpenChamber's metadata and check the logical goal id so a
+  replacement or clear during a tick drops the stale write. Metadata updates
+  preserve neighbouring feature payloads.
+- Objective storage validates session ids before filesystem access. Metadata
+  contains a flag, never a caller-supplied path, so it cannot select arbitrary files.
+- A file-backed objective is read on every tick to support live edits. An
+  unreadable file uses inline text when available; without either, the tick
+  sends no continuation with an empty objective.
+- Synthetic messages count as user-shaped pending work for quiescence, but
+  completion notices do not start a new round for background-command waiting.
+- Audits select the newest non-summary assistant's execution information.
+  A compaction's summarization model and agent must not become the checker input.
+- Consecutive truncation checks use completed, non-summary assistant turns and
+  creation timestamps, with array position breaking ties. Unknown timestamps
+  are excluded so unrelated messages cannot hide known chronology.
+- Checker provider and model are written together. Jev clears the provider so
+  the UI cannot pair its model with a previous small-model provider.
+- Background audit content stays on the session's provider unless the user
+  explicitly selects a small model. Passing the preferred provider preserves
+  that boundary; configuring a classifier for another feature is not goal consent.
+- The job list is read again after the message tail so work started by that
+  turn, including subagent shells and images, holds the audit before it nudges
+  the agent over running work.
+- A wakeup received during an in-flight tick remains pending until that tick
+  ends. Mid-goal edits leave its pending read intact, and an abort lets an
+  in-flight tick reach its own pause check, so cancellation cannot strand a goal.
+
 ## Goal payload (`metadata.openchamber.goal`)
 
 ```
@@ -94,7 +130,9 @@ before touching the filesystem). Rationale: metadata rides every
    ~250ms for an explicit Resume so the nudge feels immediate — since setting
    a goal on an idle session emits no status transition.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
-   - fetch session (skip sub-agent sessions), require an `active` goal.
+   - fetch session (skip sub-agent sessions and workflow agents; a session an
+     agent runs for its own work, `ownWork`, keeps its goal), require an
+     `active` goal.
      A failed session read skips the audit and continuation. It retries after
      15, 30, then 60 seconds. After another failure, it re-reads goal metadata
      and settles a still-active goal as `blocked` with a reason and the usual
@@ -154,9 +192,11 @@ before touching the filesystem). Rationale: metadata rides every
      `tokensBaseline` (the same snapshot of the newest pre-goal turn,
      captured on the first tick). Compaction (an assistant message with
      `summary: true`) breaks the snapshot chain, so accounting is segmented:
-     the summary message closes the segment into `tokensCommitted` (the
-     summary turn read the whole context, so its snapshot prices the
-     compaction itself) and the next segment starts with a zero baseline.
+     the summary message closes the segment into `tokensCommitted` from the
+     latest known pre-summary snapshot, with previously displayed usage as a
+     continuity floor. OpenCode reports the summary's own tokens as zero, so
+     the summarization call is uncounted. The next segment starts with a zero
+     baseline.
      `tokensUsed = tokensCommitted + current segment`, kept monotonic so
      unflagged context shrinks never move the budget backwards;
    - a user abort pauses the goal instead of blocking it: the event path in
@@ -342,6 +382,26 @@ ordering used by create and scheduled goals.
   idles undercount (acceptable: budget is a guardrail, not billing).
 
 ## Decisions
+
+### Why quiet windows still require live checks and not elapsed-time assumptions
+
+Quiet windows coalesce status bursts and duplicate updates; they provide no
+race guarantee. Resume uses a short delay because live activity and tail checks
+still prevent a continuation over a busy session.
+
+### Why bounded shell waiting and not indefinite waiting
+
+A round waits for its background commands because their results wake the session
+and an early audit can prompt over unfinished work. A command still running after
+30 minutes is likely a server, so the loop audits the turn as it stands; goal
+instructions require stopping commands that never finish before each final report.
+
+### Why accounting persists before prompting and not after
+
+The accounting write precedes the prompt so a failed prompt leaves a saved turn
+count and waits for another idle tick. Reversing the order can double-charge a
+turn. A fresh tail read after the audit drops a continuation if the user sends
+another message meanwhile.
 
 ### Why failed session and activity reads retry before blocking
 

@@ -6,7 +6,6 @@ import { useI18n } from '@/lib/i18n';
 import { SIDEBAR_SECTION_NAME_MAX } from '@/lib/sidebarSections';
 import { closePinListRequest, createPinListWithSection, useSidebarSectionsUiStore } from './sectionActions';
 
-/** Names a new pin list for Pin to; the list gets its own section and the work is pinned into it. */
 export const NewPinListDialog: React.FC = () => {
   const { t } = useI18n();
   const request = useSidebarSectionsUiStore((state) => state.pinListRequest);

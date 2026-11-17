@@ -11,10 +11,8 @@ const contains = (root, directory) => {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
-// A registered project on a hung mount must not hold the settings write queue.
 const PROJECT_ASSESS_TIMEOUT_MS = 2000;
 
-/** The root of the linked worktree holding `directory` (its `.git` is a pointer file), or null. */
 const findLinkedWorktreeRoot = async (directory) => {
   for (let current = directory; ; current = path.dirname(current)) {
     const info = await fs.promises.lstat(path.join(current, '.git')).catch(() => null);
@@ -23,12 +21,6 @@ const findLinkedWorktreeRoot = async (directory) => {
   }
 };
 
-/**
- * Register one session destination without changing any window's selection.
- * The answer names the session's canonical folder: a session OpenCode recorded
- * under a symlinked spelling of that folder (`/tmp` for `/private/tmp`) is
- * moved there first, since clients match sessions to projects by that path.
- */
 export const registerSessionProjectRoutes = (app, {
   validateDirectoryPath, openCodeTrust, registerSessionProject, resolveSessionDirectory, moveSession, emitWorktreeChanged,
   linkedWorktreeRoot = findLinkedWorktreeRoot,
@@ -47,22 +39,14 @@ export const registerSessionProjectRoutes = (app, {
       if (respelled && !(recorded && (await validateDirectoryPath(recorded)).directory === directory)) {
         return res.status(409).json({ error: 'The session directory changed' });
       }
-      // Finish one-time trust seeding before acquiring the settings write queue.
       await openCodeTrust.assess(directory, { fresh: true });
       let worktreeOf = null;
       const project = await registerSessionProject(async (projects) => {
-        // Check again at the write boundary: the configuration can change
-        // between answering the dialog and registering the destination.
         const { assessment, trusted } = await openCodeTrust.assess(directory, { fresh: true });
         if (!trusted) throw Object.assign(new Error('Folder trust is required'), { code: OPENCODE_TRUST_REQUIRED });
         const existing = projects.filter((entry) => contains(entry.path, directory))
           .sort((left, right) => right.path.length - left.path.length)[0];
         if (existing) return existing;
-        // A linked worktree lives outside its repository's folder. It belongs
-        // to the project that registered the repository; the client may not
-        // have listed it yet when a session moves into it. A folder beside a
-        // registered project in the same checkout shares the repository but is
-        // no worktree that project lists, so it registers as its own project.
         const worktreeRoot = assessment.repositoryKey === assessment.directory ? null : await linkedWorktreeRoot(directory);
         if (worktreeRoot) {
           for (const entry of projects) {
@@ -80,14 +64,11 @@ export const registerSessionProjectRoutes = (app, {
         return { id: createProjectIdFromPath(directory), path: directory, label: path.basename(directory) || directory, addedAt: Date.now(), lastOpenedAt: Date.now() };
       });
       if (respelled) {
-        // A move made during registration wins; this one would undo it.
         if (await resolveSessionDirectory(parsed.data.sessionId) !== recorded) {
           return res.status(409).json({ error: 'The session directory changed' });
         }
-        // A running session takes the move at its next step boundary.
         await moveSession(parsed.data.sessionId, directory);
       }
-      // Clients list the new worktree under its project on this event.
       if (worktreeOf) emitWorktreeChanged?.({ directories: [worktreeOf.path, directory], at: Date.now() });
       return res.json({ project, directory });
     } catch (error) {

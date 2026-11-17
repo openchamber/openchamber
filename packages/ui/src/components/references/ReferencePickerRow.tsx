@@ -27,7 +27,6 @@ const toLabels = (labels: ReadonlyArray<Label | TrackerLabel> | undefined): Chip
     (labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
 );
 
-// GitHub serves any size; a row needs 32 px (16 px at 2x), not the full image.
 const rowAvatarUrl = (url: string): string => {
     try {
         const parsed = new URL(url);
@@ -39,7 +38,6 @@ const rowAvatarUrl = (url: string): string => {
     }
 };
 
-/** Who an item belongs to: avatar, or the name's initial, then the name. */
 const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
     const { broken, onError } = useAvatarImage(avatarUrl);
     return (
@@ -67,7 +65,7 @@ export const ReferenceLabelChips: React.FC<{ labels: ChipLabel[]; max?: number }
                     key={label.name}
                     className={cn('max-w-[9rem] truncate typography-micro', REFERENCE_META_TEXT)}
                 >
-                    {/* `align-middle` centres on the lowercase letters, not the line box. */}
+                    {}
                     <span
                         className="me-1 inline-block size-1.5 rounded-full align-middle"
                         style={{ backgroundColor: label.color ?? 'var(--surface-muted-foreground)' }}
@@ -80,7 +78,6 @@ export const ReferenceLabelChips: React.FC<{ labels: ChipLabel[]; max?: number }
     );
 };
 
-/** A parent item's children: finished of all, or only how many when not all were counted. */
 const SubIssueCount: React.FC<{ progress: TrackerProgress }> = ({ progress }) => {
     const { t } = useI18n();
     const label = progress.more
@@ -94,7 +91,6 @@ const SubIssueCount: React.FC<{ progress: TrackerProgress }> = ({ progress }) =>
     );
 };
 
-/** A discussion's category: its emoji, when it has one, and its name. */
 export const DiscussionCategory: React.FC<{ category: RepositoryDiscussionReference['category'] }> = ({ category }) => (
     <span className="inline-flex min-w-0 max-w-[12rem] items-center gap-1">
         {category.emoji ? <span aria-hidden className="shrink-0">{category.emoji}</span> : null}
@@ -112,13 +108,10 @@ export const ChecksGlyph: React.FC<{ checks: CISummary | null }> = ({ checks }) 
 
 type RowProps = {
     item: ReferencePickerItem;
-    /** An open PR's checks and mergeability, once they have arrived. */
     pullStatus: ChangeRequestListStatus | null;
     highlighted: boolean;
-    /** Null in single-choice mode, where rows have no checkbox. */
     checked: boolean | null;
     diffIncluded: boolean;
-    /** Names the repository on every row, as it does on a fork's upstream items: the list spans several. */
     showRepository?: boolean;
     now: number;
     onHighlight: () => void;
@@ -160,7 +153,6 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             aria-selected={highlighted}
             className={cn(
                 'group flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors',
-                // The sidebar's session rows: the same tints for the chosen row and hover.
                 highlighted ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
             )}
             onClick={onHighlight}

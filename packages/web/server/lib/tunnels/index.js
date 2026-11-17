@@ -60,7 +60,6 @@ export function createTunnelService({
     return result;
   };
 
-  // Mutex to prevent concurrent tunnel starts from orphaning child processes.
   let startLock = Promise.resolve();
 
   const start = async (rawRequest, options = {}) => {

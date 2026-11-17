@@ -59,15 +59,8 @@ export const resolveProjectForSessionDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
-  /**
-   * The host project of the space `directory` lies in, when the caller subscribed to it (a
-   * render that must follow the space list arriving); read from the spaces store otherwise.
-   */
   spaceProjectDirectory: string | null = spaceProjectDirectoryOf(directory),
 ): ProjectEntry | null => {
-  // An isolated space's directory (`/spaces/<id>/...`) lies under no project on the host: its
-  // session belongs to the project the space was made from, as a worktree's belongs to its
-  // repository's.
   if (spaceProjectDirectory) return resolveProjectForDirectory(projects, spaceProjectDirectory);
   const directProject = resolveProjectForDirectory(projects, directory);
   const worktreeResolution = resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory);

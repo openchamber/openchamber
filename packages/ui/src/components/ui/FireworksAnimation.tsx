@@ -4,11 +4,9 @@ import { holidayOrnamentScale, type FireworksBurst, type FireworksShow } from '.
 import { HolidayOrnamentIcon, type HolidayOrnament } from './holidayOrnaments';
 import '@/styles/fireworks.css';
 
-// New Year: a salute of streaks with glowing heads that droop as they fade.
 const SALUTE_COUNT = 12;
 const SALUTE_DURATION_MS = 1300;
 
-// Every day: paper confetti thrown up and out, tumbling as it falls.
 const CONFETTI_COUNT = 22;
 const CONFETTI_DURATION_MS = 1900;
 const CONFETTI_CUTS = [
@@ -18,14 +16,11 @@ const CONFETTI_CUTS = [
   { width: 9, height: 5 },
 ] as const;
 
-// Halloween: a few ghosts float up and out of each burst while candy flies
-// in every direction and drops.
 const GHOST_ANGLES = [-155, -115, -65, -25].map((degrees) => (degrees * Math.PI) / 180);
 const CANDY_COUNT = 6;
 const GHOST_DURATION_MS = 1900;
 const CANDY_DURATION_MS = 1300;
 
-// Other holidays: drawn things thrown like confetti, turning slower so they stay readable.
 const HOLIDAY_COUNT = 18;
 const HOLIDAY_DURATION_MS = 2100;
 
@@ -38,14 +33,12 @@ const ringVectors = (count: number, step: number) => Array.from({ length: count 
 
 const SALUTE_VECTORS = ringVectors(SALUTE_COUNT, 18);
 
-// A fixed spread per piece, so every throw looks alike and nothing re-rolls on render.
 const noise = (n: number) => {
   const x = Math.sin(n * 12.9898) * 43758.5453;
   return x - Math.floor(x);
 };
 
 const CONFETTI_PIECES = Array.from({ length: CONFETTI_COUNT }, (_, index) => {
-  // Mostly upward: within 145 degrees either side of straight up.
   const angle = -Math.PI / 2 + (noise(index + 1) - 0.5) * Math.PI * 1.6;
   const speed = 0.55 + noise(index + 7) * 0.6;
   return {
@@ -83,7 +76,6 @@ const particleStyle = (x: number, y: number, delay: number, extra: BurstStyle = 
   ...extra,
 });
 
-// A waving sheet ghost, drawn in line art like the logo.
 const GhostIcon = () => (
   <svg viewBox="14 5 88 97" aria-hidden="true">
     <path
@@ -96,7 +88,6 @@ const GhostIcon = () => (
   </svg>
 );
 
-// A wrapped sweet: a striped body between two twisted ends.
 const CandyIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true">
     <path className="firework-candy-wrapper" d="M7.6 10.2 3.4 7.4C2.6 9.5 2.6 14.5 3.4 16.6L7.6 13.8ZM16.4 10.2 20.6 7.4C21.4 9.5 21.4 14.5 20.6 16.6L16.4 13.8Z" />
