@@ -116,13 +116,14 @@ const stopTree = async (child) => {
 }
 
 /** Starts the fixture provider unless one already listens on `port`. */
-export const startFixture = async ({ port, logFile, verifyControl = false }) => {
+export const startFixture = async ({ port, logFile, verifyControl = false, onSpawn }) => {
   if (await portInUse(port)) return { pid: null, reused: true, stop: async () => undefined }
   const child = spawn(process.execPath, [FIXTURE_SCRIPT, String(port), ...(verifyControl ? ["--verify-control"] : [])], {
     detached: true,
     stdio: ["ignore", logFile ? "pipe" : "ignore", logFile ? "pipe" : "ignore"],
     env: isolatedEnv(),
   })
+  onSpawn?.(child)
   if (logFile) {
     const log = createWriteStream(logFile)
     child.stdout.pipe(log)

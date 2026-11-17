@@ -337,7 +337,7 @@ const connectBrowser = async (port) => {
   return root
 }
 
-export const startBrowser = async ({ chrome, headed = false }) => {
+export const startBrowser = async ({ chrome, headed = false, onSpawn }) => {
   const executable = resolveChrome(chrome)
   const port = await reservePort()
   const profile = resolveProfileDir(null, "verify")
@@ -350,6 +350,7 @@ export const startBrowser = async ({ chrome, headed = false }) => {
   profile.removeAfter(child)
   const spawnFailed = new Promise((_, reject) => child.once("error", (error) => reject(new Error(`Chrome did not start: ${error.message}`))))
   const connecting = Promise.resolve().then(() => {
+    onSpawn?.(child, profile.dir)
     if (child.pid) prioritizeWindowsProcess(child.pid)
     return connectBrowser(port)
   })

@@ -9,6 +9,7 @@ Sections: *Ownership*, *Running it*, *The feature map*, *Steps*, *Invariants*, *
 - `zones/*.json` is the feature map: per zone, its source files, its features (each with its own source files where they are narrower than the zone's) (what, how to reach, what proves it) and their scenarios as steps.
 - `vocabulary.json` names every part of the UI a step points at (`composer.send`, `sidebar.row`, `diff.added`) with its selector and one line saying what it is. It is the shared name for each thing, and the one place a selector changes when the markup does.
 - `stand.mjs` starts and resets the isolated instance, `browser.mjs` drives Chrome, `steps.mjs` runs steps, `changed.mjs` picks the scenarios a change touches, `run.mjs` is the command.
+- `processes.mjs` owns process identities and recovery records under this checkout's `tmp/verify/owners`. `process-guardian.mjs` waits for the runner's pipe to close and reaps that run if its owner died without cleanup.
 
 The stand reuses `scripts/perf`: `cdp.mjs` for Chrome, `fixture-provider.mjs` for the model, `fixture-conversations.mjs` for the scratch project and the scripted agent turns.
 
@@ -43,6 +44,8 @@ start "" /b /wait /high bun run verify -- composer > C:\Users\openc\verify-compo
 ```
 
 `node --test scripts/verify/platform.test.mjs` checks the fixture entrypoint, isolated Git configuration, the installed virtualizer patch and repeated Windows fixture shutdown without starting the app. A frozen install can report no changes while leaving a corrupted installed patch in place; this smoke test catches the broken virtualizer before a browser warm-up.
+
+`node --test scripts/verify/processes.test.mjs scripts/verify/stand.test.mjs` covers process ownership, detached children, an exited group leader, abrupt runner death, stale-run recovery, live/foreign-run protection and PID reuse. `VERIFY_LIFECYCLE_TEST=1 node --test scripts/verify/lifecycle.test.mjs` opts into five real stand/browser runs: success, a failing scenario, a thrown error, SIGINT and SIGTERM. They run sequentially and verify that no process identity, command line or cwd from the stand survives, and that its root and Vite cache are gone.
 
 ### Running only what a change touches
 
@@ -149,7 +152,8 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Every scenario starts from the same state: all sessions deleted, linked worktrees and scenario branches removed, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything.
 - The model is the fixture provider, so answers are the same every run. `offline/no-answer` is a provider whose server refuses connections. No scenario calls a real model.
 - Tools run without asking, except a read of a `*.secret` file and a web fetch: those ask, so a scenario can raise a permission request by having the agent read such a file, or hold a session on the user with a scripted fetch.
-- A stopped run leaves nothing: the dev server's process group, the fixture, Chrome and its profile, the stand folder and the Vite cache of its port are removed on exit, on failure, and on Ctrl-C or SIGTERM, startup included.
+- A stopped run leaves nothing: the API, Vite, OpenCode, PTY daemons, fixture, Chrome and its helpers are tracked through OS process identities and the stand's isolated directories. Cleanup continues after a wrapper or group leader exits, escalates remaining processes, and removes the stand folder, Chrome profile and port-specific Vite cache only after the tree is gone. Failure in browser cleanup still runs stand cleanup. Startup errors and both runner signals take the same path.
+- Every new stand first names and reaps abandoned stands of this checkout. PID alone, a reused port or a matching process name establishes no ownership. A live runner, including `--keep`, and a stand of another checkout are never reaped.
 - A scenario during which the page reloaded or hot-updated on its own fails, whatever its steps saw: a source file changed under it (another session editing the checkout, or your own edit mid-run), so its result proves nothing. The failure says so; rerun with the source still.
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
 
@@ -165,7 +169,7 @@ Ctrl+Enter cleanup uses the same request precondition before Stop.
 
 ### Why Windows stops process trees
 
-Windows has no POSIX process groups or group signals. The stand and fixture use `taskkill /PID <owned pid> /T /F` there to stop the children they started; macOS keeps its existing group signals. Windows uses the installed OpenChamber app's bundled OpenCode when present, resolving its path before redirecting the stand's user directories.
+Windows has no POSIX process groups or group signals. The stand uses `taskkill /PID <owned pid> /T /F` there, and macOS/Linux send signals to identified members, escalating survivors to SIGKILL. Windows uses the installed OpenChamber app's bundled OpenCode when present, resolving its path before redirecting the stand's user directories.
 
 Shutdown drains process log pipes for at most 1 s, then detaches and closes them before flushing the log file. A descendant retaining an inherited pipe must not prevent the runner from finishing cleanup.
 
@@ -178,6 +182,18 @@ Windows browser teardown asks Chrome to close over CDP before falling back to ki
 The Windows runner explicitly gives itself, its API, Vite and Chrome High process priority. `start /high bun run verify` alone leaves these children at Normal, where windowless runs became slow enough to exceed control API timeouts. Vite runs through its Node entrypoint on Windows so the priority applies to the actual server. Other platforms retain the existing process launches and priorities.
 
 Windows reset reads the global session list directly, including archived and child sessions. The CLI's 4 s control-request budget was too short for cleanup after a server restart; housekeeping can wait up to 120 s for the same raw list the reset already uses for child sessions. Scenario actions retain the CLI and its existing request budgets. Reset follows continuation cursors through the terminal empty page: OpenCode can return a cursor even on a short page. A failed or malformed page, or a repeated cursor, stops the reset before anything is deleted.
+
+### Why a wrapper's exit does not finish cleanup
+
+`bun run dev:server` can exit before its shell, server and managed OpenCode have stopped. OpenCode's detached PTY daemon is outside that group too. Waiting only for the direct child's `exit`, or skipping an already exited leader, left those processes alive. Cleanup snapshots descendants, group members with surviving identity evidence, and processes whose cwd or command names the isolated root. It waits for those processes themselves, including detached children.
+
+The registry records PID and birth time before readiness and survives removal of the stand root. Updates publish complete JSON by atomic rename; `ps` identities use the C locale. A guardian waits on an inherited pipe rather than polling: EOF lets it recover the same record when the runner dies without `finally`, including Windows forced termination. Normal cleanup removes the record and waits for the guardian to exit.
+
+Every parent edge requires a child born at or after its current parent. Windows retains creator PIDs after exit, so a reused PID can otherwise adopt unrelated older processes. Windows termination targets the validated identities individually; `taskkill /T` would follow the unvalidated numeric parent links again.
+
+API and Vite launches use a small leader that stays alive until tree cleanup and reports the target's exit over IPC. This keeps their group identity valid when a wrapper exits before a late-spawned helper can be snapshotted. Its command also names the isolated root, covering the interval between spawn and registration.
+
+Old runs without a registry are recognized only through `stand.json` in this checkout's artifacts and their isolated cwd, command paths or API/Vite environment. A standalone wrapper name or port is insufficient evidence. This migration reads candidate process environments locally and never logs them.
 
 ### Why a dev instance and not the production build
 
