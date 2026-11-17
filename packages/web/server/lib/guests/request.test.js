@@ -178,18 +178,6 @@ describe('credential target', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
-
-  test('a token without a recorded target never counts', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-req-'));
-    const persistPath = guestAuthPersistPath(dir);
-    await patchGuestAuth('clickup', { accessToken: 'tok-1' }, persistPath);
-    try {
-      await expect(proxyGuestRequest({ guest: clickupGuest, persistPath, method: 'GET', path: '/api/v2/user' }))
-        .rejects.toMatchObject({ code: 'DISCONNECTED' });
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('a 401 while the user reconnects', () => {

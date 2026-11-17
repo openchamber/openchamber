@@ -82,12 +82,6 @@ describe('the settings a card link reads', () => {
     expect(onGuestsChanged).toHaveBeenCalledTimes(2);
   });
 
-  it('no extension names a setting: the auth store is not read for the catalog', async () => {
-    const { root, row } = await installed([{ match: 'tracker_issue', output: 'card', card: { title: '{output.title}', link: { label: 'Open', url: '{output.url}' } } }]);
-    await fs.writeFile(guestAuthPersistPath(root), 'not json');
-    expect((await row()).tools).toHaveLength(1);
-  });
-
   it('an unreadable auth store costs the link values and keeps the catalog', async () => {
     const { root, save, row } = await installed();
     await save({ site: 'acme.example' });

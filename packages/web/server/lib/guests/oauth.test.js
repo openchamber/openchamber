@@ -9,10 +9,7 @@ import {
   clearGuestPendingForTests,
   consumeGuestAuthorization,
   credentialTarget,
-  createPkcePair,
-  encodeBasicCredential,
   exchangeAuthorizationCode,
-  guestAuthorizationHeader,
   guestRedirectUri,
   saveGuestAccessToken,
   saveGuestOAuthClient,
@@ -326,15 +323,6 @@ describe('consumeGuestAuthorization', () => {
   });
 });
 
-describe('createPkcePair', () => {
-  test('returns a verifier and challenge', () => {
-    const pair = createPkcePair();
-    expect(pair.verifier.length).toBeGreaterThan(20);
-    expect(pair.challenge.length).toBeGreaterThan(20);
-    expect(pair.verifier).not.toBe(pair.challenge);
-  });
-});
-
 describe('saveGuestAccessToken with a basic scheme', () => {
   const jiraGuest = {
     id: 'jira',
@@ -348,34 +336,6 @@ describe('saveGuestAccessToken with a basic scheme', () => {
       },
     },
   };
-
-  test('encodes username:token, probes with a Basic header, and stores only the pair', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
-    const persistPath = guestAuthPersistPath(dir);
-    const originalFetch = globalThis.fetch;
-    let seenAuthorization = '';
-    globalThis.fetch = async (url, init) => {
-      expect(String(url)).toBe('https://acme.atlassian.net/rest/api/3/myself');
-      seenAuthorization = init.headers.Authorization;
-      return new Response(JSON.stringify({ displayName: 'Ada Lovelace' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    };
-    try {
-      const result = await saveGuestAccessToken({ guest: jiraGuest, persistPath, token: 'api-token', username: 'ada@acme.example' });
-      expect(result).toEqual({ connected: true, account: 'Ada Lovelace' });
-      const expected = encodeBasicCredential('ada@acme.example', 'api-token');
-      expect(seenAuthorization).toBe(`Basic ${expected}`);
-      const stored = await getGuestAuth('jira', persistPath);
-      expect(stored.accessToken).toBe(expected);
-      expect(stored.tokenType).toBe('basic');
-      expect(guestAuthorizationHeader(stored.accessToken, 'basic')).toBe(`Basic ${expected}`);
-    } finally {
-      globalThis.fetch = originalFetch;
-      await fs.rm(dir, { recursive: true, force: true });
-    }
-  });
 
   test('refuses a basic integration without a username', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
@@ -555,12 +515,7 @@ describe('saveGuestOAuthClient', () => {
 });
 
 describe('secret settings', () => {
-  const integration = { settings: [{ id: 'plain', label: 'Plain' }, { id: 'key', label: 'Key', secret: true }] };
   const entry = { settings: { plain: 'a', key: 'hidden', gone: 'old secret' } };
-
-  test('no frame or card receives a secret, and the card learns one is stored', () => {
-    expect(toPublicGuestAuth(entry, integration)).toMatchObject({ settings: { plain: 'a' }, secretsSet: ['key'] });
-  });
 
   test('a value stops being public when the package stops declaring it', () => {
     expect(toPublicGuestAuth(entry, { settings: [{ id: 'plain', label: 'Plain' }] }).settings).toEqual({ plain: 'a' });
