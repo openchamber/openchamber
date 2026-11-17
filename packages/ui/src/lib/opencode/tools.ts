@@ -186,6 +186,7 @@ const reviveQuestionsField = (value: unknown): unknown[] | undefined => {
       if (Array.isArray(revived)) return revived
       if (asRecord(revived)) return [revived]
     } catch {
+      // Not JSON — fall through to undefined.
     }
     return undefined
   }

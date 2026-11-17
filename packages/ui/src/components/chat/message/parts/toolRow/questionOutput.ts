@@ -42,6 +42,7 @@ export const coerceQuestionOptions = (value: unknown): CoercedQuestionOption[] =
             if (Array.isArray(revived)) return revived.filter(isOptionRecord)
             if (isOptionRecord(revived)) return [revived]
         } catch {
+            // Not JSON — no options.
         }
         return []
     }
