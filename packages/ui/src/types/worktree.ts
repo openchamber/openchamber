@@ -1,10 +1,6 @@
 export interface WorktreeMetadata {
   provenance?: import('@/lib/api/types').GitContributorWorktreeProvenance;
 
-  /**
-   * Worktree origin.
-   * - sdk: created/managed by OpenCode SDK worktrees
-   */
   source?: 'sdk';
 
   path: string;
@@ -15,27 +11,16 @@ export interface WorktreeMetadata {
 
   label: string;
 
-  /** SDK worktree name (slug), if available. */
   name?: string;
 
-  /**
-   * The task this worktree is for, from its branch description: the agent
-   * names it once the task is clear, the user can rename it. Absent until then.
-   */
   title?: string;
 
-  /** When the user pinned the task to the top of the sidebar; absent while unpinned. */
   pinnedAt?: number;
 
-  /** The user's pin list the pin is filed in (`lib/sidebarSections.ts`); absent for Pinned. */
   pinList?: string;
 
   kind?: 'pr' | 'standard';
 
-  /**
-   * Branch/ref this worktree was created from (intended integration target).
-   * For SDK worktrees this is typically the user-selected base branch.
-   */
   createdFromBranch?: string;
 
   relativePath?: string;
@@ -45,21 +30,14 @@ export interface WorktreeMetadata {
     ahead?: number;
     behind?: number;
     upstream?: string | null;
-    /** Base ref `ahead` was counted against when there is no upstream. */
     aheadBase?: string | null;
   };
 
-  // --- Phase 1: canonical worktree attachment fields ---
-
-  /** Canonical root path for the worktree (same as path for secondary worktrees). */
   worktreeRoot?: string;
 
-  /** Operational status of this worktree. */
   worktreeStatus?: 'pending' | 'ready' | 'missing' | 'invalid' | 'not-a-repo';
 
-  /** Git HEAD state classification. */
   headState?: 'branch' | 'detached' | 'unborn';
 
-  /** How this worktree was attached to a session. */
   worktreeSource?: 'existing' | 'created-for-session';
 }
