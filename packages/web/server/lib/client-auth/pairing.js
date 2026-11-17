@@ -13,13 +13,8 @@ const normalizeOptionalString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-// Placeholder shown in the pending-devices list when the operator did not type a
-// name. It is a DISPLAY default only — the stored label stays null so redeem can
-// fall back to the device's own reported name instead of this placeholder.
 const PAIRING_LABEL_PLACEHOLDER = 'Pair new device';
 
-// The operator's typed device label, capped. Returns null when unset so callers
-// can distinguish "no name given" from a real name.
 const normalizeStoredLabel = (value) => {
   const normalized = normalizeOptionalString(value);
   if (!normalized) return null;
@@ -74,8 +69,6 @@ const publicSession = (session) => ({
   usesRelay: session.usesRelay === true,
 });
 
-// A pending session is one that can still be redeemed: not used, not cancelled,
-// not expired.
 const isPendingSession = (session) => !session.usedAt
   && !session.cancelledAt
   && Number.isFinite(Date.parse(session.expiresAt))
@@ -169,8 +162,6 @@ export const createClientPairingRuntime = ({
       const cancelledAt = Date.parse(session.cancelledAt || '');
       const inactiveAt = Number.isFinite(usedAt) ? usedAt : cancelledAt;
       if (Number.isFinite(inactiveAt)) return inactiveAt >= cutoff;
-      // Never used or cancelled: drop once the session itself has expired —
-      // it can no longer be redeemed and would otherwise sit in the store forever.
       const expiresAt = Date.parse(session.expiresAt || '');
       return !Number.isFinite(expiresAt) || expiresAt > now;
     });
@@ -201,13 +192,11 @@ export const createClientPairingRuntime = ({
     });
   };
 
-  // Sessions that can still be redeemed (link created, device not yet connected).
   const listPendingSessions = async () => withStoreMutation(async () => {
     const store = await readStore();
     return store.sessions.filter(isPendingSession).map(publicSession);
   });
 
-  // Relay-transport demand from pairing: any still-redeemable relay session.
   const hasActiveRelaySession = async () => withStoreMutation(async () => {
     const store = await readStore();
     return store.sessions.some((session) => session.usesRelay === true && isPendingSession(session));
@@ -261,11 +250,6 @@ export const createClientPairingRuntime = ({
       if (!session.allowedClientKinds.includes(normalizedKind)) throw redeemError();
       if (!constantTimeEqual(session.secretHash, hashSecret(normalizedSecret), crypto)) throw redeemError();
 
-      // The operator's typed pairing label is THIS server's name for the device
-      // (shown in the device list) and wins outright. The device's self-reported
-      // label is only a fallback: on a re-pair with the same dedupeKey,
-      // createClient keeps the replaced record's label over it, so a rescan
-      // without a typed name does not reset the device to the app default.
       const result = await remoteClientAuthRuntime.createClient({
         label: normalizeOptionalString(session.label),
         fallbackLabel: normalizeOptionalString(clientLabel)
