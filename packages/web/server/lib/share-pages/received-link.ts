@@ -1,13 +1,14 @@
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { pinnedRelayUrl } from '../relay/service.js';
 import { relayHttpBase, resolveShareRelayBase } from './relay-client.js';
+import type { ShareRelaySettings } from './contracts.js';
 
 export const PUBLIC_SHARE_ORIGIN = 'https://share.openchamber.dev';
 
 const SHARE_ID_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const LINK_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-export const allowedReceiveBases = (settings) => {
+export const allowedReceiveBases = (settings: ShareRelaySettings | null | undefined) => {
   if (isEnterpriseMode()) {
     const pinned = pinnedRelayUrl();
     return pinned === null ? [] : [relayHttpBase(pinned)];
@@ -16,14 +17,16 @@ export const allowedReceiveBases = (settings) => {
 };
 
 export class ShareLinkError extends Error {
-  constructor(message, code) {
+  code: 'invalid_link' | 'link_not_allowed';
+
+  constructor(message: string, code: ShareLinkError['code']) {
     super(message);
     this.name = 'ShareLinkError';
     this.code = code;
   }
 }
 
-export const parseShareLink = (raw, allowedBases) => {
+export const parseShareLink = (raw: string | null | undefined, allowedBases: string[]) => {
   let url;
   try {
     url = new URL(String(raw ?? '').trim());
@@ -35,7 +38,7 @@ export const parseShareLink = (raw, allowedBases) => {
   }
   const match = /^(.*)\/p\/([^/]+)$/.exec(url.pathname);
   const key = url.hash.slice(1);
-  if (!match || !SHARE_ID_PATTERN.test(match[2]) || !LINK_KEY_PATTERN.test(key)) {
+  if (!match || match[2] === undefined || !SHARE_ID_PATTERN.test(match[2]) || !LINK_KEY_PATTERN.test(key)) {
     throw new ShareLinkError('This is not a share link', 'invalid_link');
   }
   const base = `${url.origin}${match[1]}`.replace(/\/+$/, '');

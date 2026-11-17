@@ -21,15 +21,15 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
 
 ## Files
 
-- `expiry.js`: two working days, local time, weekends skipped.
-- `crypto.js`: the host side of the crypto contract in the header of the
+- `expiry.ts`: two working days, local time, weekends skipped.
+- `crypto.ts`: the host side of the crypto contract in the header of the
   relay's `src/share/viewer.ts`.
-- `relay-client.js`: availability, which relay, signing, `POST /p`,
+- `relay-client.ts`: availability, which relay, signing, `POST /p`,
   `POST /p/states`, `POST /p/:id/close`.
-- `store.js`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
+- `store.ts`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
 - `runtime.js`: groups, uploads, the poller, delivery, cancel.
 - `routes.js`: the card's routes, and the received pages' routes.
-- `received-link.js`, `received-store.js`, `received-runtime.js`: pages other
+- `received-link.ts`, `received-store.ts`, `received-runtime.js`: pages other
   people shared, opened in this app (*Receiving side*, below).
 
 ## Contract with the UI
@@ -118,7 +118,7 @@ Every change to a group is broadcast on the OpenChamber control stream as
   recipient still preparing, open, locked or with an undelivered answer is
   never removed, nor the group just saved. After removal the card's GET
   answers 404; the answer itself stays in the session as its message.
-- Relay replies are parsed at the boundary (`relay-client.js`): a state entry
+- Relay replies are parsed at the boundary (`relay-client.ts`): a state entry
   that does not match the relay's shape is dropped, never half-applied.
 - Cancel reads the share's state first and never withdraws an answered share;
   the answer is taken instead and the call answers 409. A submit between that
@@ -231,6 +231,35 @@ Invariants:
   characters and JSON data over 16,000 characters is refused.
 
 ## Decisions
+
+### Why the runtimes and routes remain JavaScript
+
+`../shared/guards.js` exposes boolean results for `isString` and
+`isPlainObject`, so the runtimes cannot narrow external values through those
+checks. `isString` also accepts boxed strings; replacing it with a primitive
+string check changes acceptance. Their owner must supply an honest narrowing
+contract before these runtimes convert. `../openchamber-control/error.js`
+assigns detail fields dynamically, so its inferred error type omits the `code`
+that routes read. The routes wait for that owner's error contract.
+
+### Why file errors have a local guard
+
+Filesystem failures arrive as external values. Both stores recognize any
+object or function carrying `code: 'ENOENT'`, including inherited properties,
+without requiring an `Error` instance. Other failures still propagate.
+
+### Why the permission assertion runs only on POSIX
+
+Windows reports writable file mode bits as `0666` even when creation requests
+`0600`; those bits do not describe its access-control list. The receiving test
+checks owner-only mode bits on POSIX and still checks stored secrets on every
+platform. Store creation modes stay unchanged.
+
+### Why PIN sampling iterates the random word
+
+The random array contains exactly 1 word. Iteration exposes that occupied
+element to strict indexed-access checking while preserving rejection sampling
+and its random draws.
 
 ### Why PIN generation uses rejection sampling and not only modulo
 

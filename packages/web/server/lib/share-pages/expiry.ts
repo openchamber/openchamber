@@ -3,11 +3,11 @@ const HOUR_MS = 60 * 60 * 1000;
 const SHARE_WORKING_DAYS = 2;
 const WORKING_MS = SHARE_WORKING_DAYS * 24 * HOUR_MS;
 
-const isWeekend = (date) => date.getDay() === 0 || date.getDay() === 6;
+const isWeekend = (date: Date) => date.getDay() === 0 || date.getDay() === 6;
 
-const nextLocalMidnight = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+const nextLocalMidnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
 
-export const workingDaysDeadline = (start) => {
+export const workingDaysDeadline = (start: number) => {
   let cursor = start;
   let remaining = WORKING_MS;
   while (remaining > 0) {
@@ -24,7 +24,7 @@ export const workingDaysDeadline = (start) => {
   return cursor;
 };
 
-export const shareDeadline = (start, hours) => {
+export const shareDeadline = (start: number, hours?: number) => {
   const longest = workingDaysDeadline(start);
   if (hours === undefined) return longest;
   return Math.min(longest, start + Math.round(hours * HOUR_MS));
