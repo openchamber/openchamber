@@ -35,6 +35,22 @@ describe('submodule discovery', () => {
     expect(Object.isFrozen(result.modules[0])).toBe(true);
   });
 
+  it('skips a .gitmodules entry whose path has no gitlink, as Git does', () => {
+    const result = parseSubmoduleManifest({
+      gitmodulesConfig: configOutput([
+        ['submodule.alpha.path', 'vendor/alpha'],
+        ['submodule.alpha.url', '../alpha.git'],
+        ['submodule.vendored.path', 'vendor/vendored'],
+        ['submodule.vendored.url', 'https://example.com/team/vendored.git'],
+      ]),
+      gitlinks: gitlinkOutput([[SHA_A, 'vendor/alpha']]),
+    });
+
+    expect(result.modules).toEqual([
+      { name: 'alpha', path: 'vendor/alpha', url: '../alpha.git', update: 'checkout', gitlink: SHA_A },
+    ]);
+  });
+
   it.each([
     ['https://example.com/team/app.git', '../library.git', 'https://example.com/team/library.git'],
     ['https://example.com/a/b/app.git', '../../shared.git', 'https://example.com/a/shared.git'],

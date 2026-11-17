@@ -139,7 +139,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
     if (seenPaths.has(modulePath)) throw manifestError(`Submodule path ${modulePath} is duplicated`);
     seenPaths.add(modulePath);
     const commit = gitlinksByPath.get(modulePath);
-    if (!commit) throw manifestError(`Submodule ${entry.name} has no matching gitlink`);
+    if (!commit) continue;
     const update = entry.update?.toLowerCase() ?? 'checkout';
     if (entry.update !== undefined) {
       if (entry.update.startsWith('!') || !UPDATE_MODES.has(update)) {
