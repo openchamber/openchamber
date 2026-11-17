@@ -184,7 +184,6 @@ export const createAgentMemoryActions = (dependencies) => {
       try {
         enabled = await isAgentMemoryEnabled();
       } catch {
-        // An unreadable setting closes the surface rather than opening it.
         enabled = false;
       }
       if (!enabled) {

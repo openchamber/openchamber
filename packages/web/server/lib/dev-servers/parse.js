@@ -1,37 +1,23 @@
-/**
- * Parsers for listening-socket enumeration.
- *
- * Two platforms, two formats, one shape out. Both parsers are pure so the
- * fiddly parts — grouped records, IPv6 brackets, wildcard binds — are covered
- * by tests instead of by running the tools.
- */
 
-/** Hosts that mean "this machine" when a socket reports its bind address. */
 const LOOPBACK_TOKENS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
-/** Wildcard binds are reachable over loopback too. */
 const WILDCARD_TOKENS = new Set(['*', '0.0.0.0', '[::]', '::']);
 
-/**
- * Ports that are listening but are never the thing a user wants to preview.
- * Kept deliberately short: guessing too aggressively hides real dev servers.
- */
 const IGNORED_PORTS = new Set([
-  22,    // ssh
-  53,    // dns
-  445,   // smb
-  631,   // cups
-  5432,  // postgres
-  3306,  // mysql
-  6379,  // redis
-  27017, // mongodb
-  9229,  // node inspector
+  22,
+  53,
+  445,
+  631,
+  5432,
+  3306,
+  6379,
+  27017,
+  9229,
 ]);
 
 const splitHostPort = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
 
-  // IPv6 arrives bracketed: [::1]:5173
   if (raw.startsWith('[')) {
     const close = raw.indexOf(']');
     if (close === -1) return null;
@@ -51,11 +37,6 @@ const toPort = (value) => {
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
 };
 
-/**
- * True when a bind address can be reached from this machine over loopback.
- * A socket bound to a specific LAN address only is intentionally excluded:
- * `http://localhost:<port>` would not reach it.
- */
 export const isLocallyReachableHost = (host) => {
   const value = String(host || '').trim().toLowerCase();
   return LOOPBACK_TOKENS.has(value) || WILDCARD_TOKENS.has(value);
@@ -63,14 +44,6 @@ export const isLocallyReachableHost = (host) => {
 
 const isIgnoredDevPort = (port) => IGNORED_PORTS.has(port);
 
-/**
- * Parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcn`.
- *
- * The `-F` format emits one field per line, prefixed by a letter, and is
- * stateful: `p`/`c` lines open a process record and every following `n` line
- * belongs to it until the next `p`. A single process commonly reports the same
- * port twice (IPv4 and IPv6), so results are de-duplicated by port.
- */
 export const parseLsofListeners = (output) => {
   const byPort = new Map();
   let pid = null;
@@ -93,9 +66,6 @@ export const parseLsofListeners = (output) => {
     }
     if (tag !== 'n') continue;
 
-    // `n` values look like `*:5173`, `127.0.0.1:5173`, or `[::1]:5173`.
-    // Established sockets contain `->`; LISTEN filtering should exclude them,
-    // but the guard keeps a mixed invocation honest.
     if (value.includes('->')) continue;
 
     const parsed = splitHostPort(value);
@@ -112,13 +82,6 @@ export const parseLsofListeners = (output) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-/**
- * Parses `lsof -a -d cwd -p <pids> -F pn`: the folder each process runs in.
- *
- * Same stateful `-F` format: an `n` line names the current directory of the
- * process opened by the `p` line above it. A process that exited between the
- * two calls is simply missing from the map.
- */
 export const parseLsofCwds = (output) => {
   const byPid = new Map();
   let pid = null;
@@ -140,11 +103,6 @@ export const parseLsofCwds = (output) => {
   return byPid;
 };
 
-/**
- * Parses `netstat -ano -p TCP` on Windows, where no per-process command name is
- * available without a second call; `command` stays empty and callers fall back
- * to the port alone.
- */
 export const parseNetstatListeners = (output) => {
   const byPort = new Map();
 
@@ -168,12 +126,6 @@ export const parseNetstatListeners = (output) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-/**
- * Narrows raw listeners to the ones worth offering as a preview target.
- *
- * `ownPorts` removes OpenChamber's own listeners — offering the user a preview
- * of the app they are already looking at is pure noise.
- */
 export const selectDevServerCandidates = (listeners, { ownPorts = [], ownPids = [] } = {}) => {
   const excludedPorts = new Set(ownPorts.filter((port) => Number.isInteger(port)));
   const excludedPids = new Set(ownPids.filter((pid) => Number.isInteger(pid)));
@@ -186,28 +138,15 @@ export const selectDevServerCandidates = (listeners, { ownPorts = [], ownPids = 
   });
 };
 
-/** Linux reports LISTEN as state 0A in /proc/net/tcp. */
 const PROC_STATE_LISTEN = '0A';
-/** Wildcard binds, as /proc writes them: IPv4 0.0.0.0 and IPv6 :: */
 const PROC_WILDCARD_ADDRESSES = new Set(['00000000', '00000000000000000000000000000000']);
-/** Loopback: 127.0.0.1 (little-endian per word) and ::1 */
 const PROC_LOOPBACK_ADDRESSES = new Set(['0100007F', '00000000000000000000000001000000']);
 
-/**
- * Parses `/proc/net/tcp` and `/proc/net/tcp6`.
- *
- * Supplements `lsof` with other users' listeners and works when the binary
- * is unavailable, including in minimal containers.
- *
- * No process name or pid: mapping a socket to its owner means walking every
- * /proc/<pid>/fd, which is far more work than the label is worth.
- */
 export const parseProcNetTcpListeners = (output) => {
   const byPort = new Map();
 
   for (const line of String(output || '').split('\n')) {
     const parts = line.trim().split(/\s+/);
-    // sl, local_address, rem_address, st, ...
     if (parts.length < 4) continue;
     if (parts[3] !== PROC_STATE_LISTEN) continue;
 

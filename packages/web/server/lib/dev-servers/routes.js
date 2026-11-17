@@ -1,15 +1,3 @@
-/**
- * Dev-server discovery.
- *
- * Answers "what is listening on this machine that I could preview". The old
- * approach guessed from `package.json` scripts, which told us what *could* be
- * started, never what was actually running — so it was wrong exactly when the
- * user needed it. Enumerating listening sockets reports the truth.
- *
- * Discovery is advisory. A failed scan reports failure; it never reports an
- * empty list, because a caller cannot tell "nothing is running" from "the scan
- * broke" and would render the wrong empty state.
- */
 import fsPromises from 'node:fs/promises';
 
 import {
@@ -21,7 +9,6 @@ import {
 } from './parse.js';
 
 const SCAN_TIMEOUT_MS = 2_500;
-/** Enumeration is cheap but not free; a short cache absorbs panel re-renders. */
 const CACHE_TTL_MS = 3_000;
 
 const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) => {
@@ -49,12 +36,6 @@ const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) =>
   child.on('close', (code) => finish(code === 0 || stdout ? stdout : null));
 });
 
-/**
- * Reads the kernel's socket tables, which list every listener whoever owns it.
- * Containers routinely ship without `lsof`, and an unprivileged `lsof` exits
- * cleanly while leaving out other users' sockets, such as the root-owned
- * `docker-proxy` behind a published container port.
- */
 const readProcListeners = async (readFile) => {
   const tables = await Promise.all(['/proc/net/tcp', '/proc/net/tcp6'].map(
     (path) => readFile(path, 'utf8').catch(() => null),
@@ -63,7 +44,6 @@ const readProcListeners = async (readFile) => {
   return tables.flatMap((table) => (table === null ? [] : parseProcNetTcpListeners(table)));
 };
 
-/** The first entry for a port wins, so list the source with a pid and command first. */
 const mergeListenersByPort = (listeners) => {
   const byPort = new Map();
   for (const entry of listeners) {
@@ -72,12 +52,6 @@ const mergeListenersByPort = (listeners) => {
   return [...byPort.values()].sort((left, right) => left.port - right.port);
 };
 
-/**
- * Adds the folder each listener's process runs in, which tells a project's dev
- * server apart from the OS services and app helpers listening beside it. One
- * batched call for every pid; when it fails the listeners stay as they were,
- * without a folder, since the ports themselves are still known.
- */
 const withProcessDirectories = async (spawn, listeners) => {
   const pids = [...new Set(listeners.map((entry) => entry.pid).filter((pid) => Number.isInteger(pid)))];
   if (pids.length === 0) return listeners;
@@ -126,7 +100,6 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
 
       const result = await scan();
       if (!result.ok) {
-        // Not cached: a transient failure should not suppress the next attempt.
         return result;
       }
 

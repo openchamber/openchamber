@@ -108,8 +108,6 @@ export const createManagedTunnelConfigRuntime = (deps) => {
         tunnels: sanitizeManagedRemoteTunnelConfigEntries(next?.tunnels),
       });
     });
-    // Settings saves with tunnel presets wait on this queue, so a failed write
-    // must not replay its error into every later save.
     persistManagedRemoteTunnelConfigLock = result.catch(() => {});
     return result;
   };

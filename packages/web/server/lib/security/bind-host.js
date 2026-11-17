@@ -39,9 +39,6 @@ export const getUnauthenticatedLanErrorMessage = (host) =>
   + 'Set --ui-password or OPENCHAMBER_UI_PASSWORD before exposing it over LAN, '
   + 'or set OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true to accept the risk.';
 
-// OPENCHAMBER_LAN_URL: the address other devices on the LAN reach this server
-// at, for setups where the server cannot see it (a Docker container sees its
-// bridge address, not the host's). An http(s) origin; anything else is ignored.
 export const readAdvertisedLanUrl = (env = process.env, logger = console) => {
   const raw = String(env?.OPENCHAMBER_LAN_URL ?? '').trim();
   if (!raw) return null;

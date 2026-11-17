@@ -19,6 +19,15 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
 - `packages/web/server/lib/tunnels/providers/ngrok.js`: Ngrok quick tunnel provider implementation.
 - `packages/web/server/lib/tunnels/providers/tailscale.js`: Tailscale Serve (tailnet only) and Funnel (public) provider; the process itself lives in `../tailscale-tunnel.js`.
 
+## Invariants
+
+- Tunnel starts run under one mutex so concurrent starts cannot orphan child
+  processes. A failed preset write releases the queue without replaying its
+  failure into every later settings save.
+- An absent HTTPS port remains undefined for provider defaults. A noninteger
+  becomes invalid and reaches the same capability validation as an explicitly
+  unsupported port; saved defaults apply only to modes listing that port.
+
 ## HTTPS port
 A mode that takes an HTTPS port lists the allowed ones in its capability descriptor (`httpsPorts`). Validation, the Settings select and the CLI all read that list, so it exists once. The saved `tunnelHttpsPort` setting applies only to such modes; an explicit `httpsPort` for any other mode is refused. A start whose port differs from the running tunnel's replaces it.
 

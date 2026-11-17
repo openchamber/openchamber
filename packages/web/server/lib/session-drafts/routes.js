@@ -1,33 +1,19 @@
 import express from 'express';
 import { z } from 'zod';
 
-/**
- * Drafts of new sessions the user started and left before sending, shared by
- * every client of this server so a draft begun on the desktop shows, and can
- * be sent, on the phone too. See DOCUMENTATION.md next to this file.
- *
- * The record lives in `session-drafts.json`; each attachment's bytes in their
- * own file under `session-drafts/<draft id>/<attachment id>`, read back
- * through the attachment route.
- */
 
 const FILE_NAME = 'session-drafts.json';
 const ATTACHMENT_DIRECTORY = 'session-drafts';
 const MAX_DRAFTS = 200;
 const MAX_TEXT_LENGTH = 200_000;
 const MAX_ATTACHMENTS = 20;
-// The body carries attachments as base64 data URLs, a third larger than the files.
 const MAX_BODY = '40mb';
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
-// An id names a file or folder under the drafts folder, so it starts with a
-// letter or digit: `.` and `..` would leave it.
 const id = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/);
 
 const storedAttachmentSchema = z.discriminatedUnion('kind', [
-  // Bytes stored here, from a file the user attached from their device.
   z.object({ kind: z.literal('data'), id, filename: z.string().max(1024), mimeType: z.string().max(256), size: z.number().int().nonnegative() }),
-  // A file on this server's disk, attached by path.
   z.object({ kind: z.literal('path'), id, filename: z.string().max(1024), mimeType: z.string().max(256), size: z.number().int().nonnegative(), path: z.string().min(1).max(4096) }),
 ]);
 
@@ -49,7 +35,6 @@ const incomingAttachmentSchema = z.object({
   filename: z.string().max(1024),
   mimeType: z.string().max(256),
   size: z.number().int().nonnegative(),
-  /** New bytes: a base64 data URL. Absent for an attachment the draft already holds. */
   dataUrl: z.string().startsWith('data:').optional(),
   path: z.string().min(1).max(4096).optional(),
 });
@@ -68,7 +53,6 @@ const decodeDataUrl = (dataUrl) => {
   return Buffer.from(dataUrl.slice(comma + 1), 'base64');
 };
 
-/** What a client gets: everything but where the bytes live. */
 const toPublicDraft = (draft) => ({
   id: draft.id,
   directory: draft.directory,
@@ -81,7 +65,6 @@ const toPublicDraft = (draft) => ({
     mimeType: attachment.mimeType,
     size: attachment.size,
     kind: attachment.kind,
-    // Only a server file has a path; JSON leaves an undefined key out.
     path: attachment.kind === 'path' ? attachment.path : undefined,
   })),
   createdAt: draft.createdAt,
@@ -101,7 +84,6 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
   const attachmentRoot = path.join(openchamberDataDir, ATTACHMENT_DIRECTORY);
   const draftFolder = (draftId) => {
     const folder = path.resolve(attachmentRoot, draftId);
-    // Checked again where the bytes go, whatever the id rule above lets through.
     if (path.dirname(folder) !== path.resolve(attachmentRoot)) throw new Error('Invalid session draft id');
     return folder;
   };
@@ -117,7 +99,6 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
     return pending;
   };
 
-  /** The stored drafts. A file that is not a store is a failure, never an empty list. */
   const readStore = async () => {
     const raw = await fsPromises.readFile(filePath, 'utf8').catch((error) => {
       if (error?.code === 'ENOENT') return null;
@@ -193,8 +174,6 @@ export const registerSessionDraftRoutes = (app, dependencies) => {
             if (kept.kind === 'data') bytes += kept.size;
             attachments.push(kept);
           }
-          // An attachment with neither bytes nor a path that the draft does
-          // not hold is dropped: there is nothing to keep of it.
         }
         const at = now();
         const draft = {

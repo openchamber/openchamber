@@ -8,10 +8,6 @@ const settleSchema = z.object({ ticket: z.string().min(1), applied: z.boolean() 
 const PLUGIN_ID = 'openchamber-limit-failover';
 const ROUTE = '/api/openchamber/limit-failover';
 
-/**
- * A failure that reports an account we switched to this recently most likely
- * comes from a request sent with the previous account before the switch.
- */
 const SWITCH_GRACE_MS = 60_000;
 
 const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
@@ -22,9 +18,6 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   exports: { '.': './index.js' },
 }, null, 2)}\n`;
 
-// No imports: OpenCode loads the entry from its own directory, where nothing
-// is installed. It reaches the server through the callback address and token
-// the agent tool runtime puts into the managed child's environment.
 const PLUGIN_SOURCE = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.budget-limit", "provider.model-budget-limit", "provider.rate-limit"])
 const ROUTE = ${JSON.stringify(ROUTE)}
 
@@ -137,17 +130,9 @@ export const createLimitFailoverRuntime = ({
 }) => {
   const pluginDirectory = path.join(instanceDir, 'limit-failover', PLUGIN_ID);
 
-  /** Credential id -> when its limit lifts. */
   const exhaustedUntil = new Map();
-  /** Credential id -> when this runtime made it active. */
   const switchedAt = new Map();
-  /**
-   * `session:credential` -> when that session last used its one grace retry
-   * on that account, or caused the switch to it. Only entries newer than the
-   * account's switch count, so a later switch back gets a fresh grace.
-   */
   const settledAt = new Map();
-  /** Ticket id -> a switch the plugin was told to make and has not reported on yet. */
   const tickets = new Map();
 
   const openTicket = (at, ticket) => {
@@ -163,7 +148,6 @@ export const createLimitFailoverRuntime = ({
     for (const [key, when] of settledAt) {
       if (when <= at - SWITCH_GRACE_MS) settledAt.delete(key);
     }
-    // A plugin that never reported back (OpenCode stopped mid-switch) leaves nothing to announce.
     for (const [id, ticket] of tickets) {
       if (ticket.openedAt <= at - SWITCH_GRACE_MS) tickets.delete(id);
     }
@@ -184,11 +168,6 @@ export const createLimitFailoverRuntime = ({
     return false;
   };
 
-  /**
-   * The next account after the active one, in the provider's own order, that
-   * has not run out. With no stored account active (an environment key, or
-   * the active one could not be read) every stored account is a candidate.
-   */
   const nextCredential = (report, at) => {
     const { credentials, activeCredentialID } = report;
     const start = credentials.findIndex((credential) => credential.id === activeCredentialID);
@@ -198,11 +177,6 @@ export const createLimitFailoverRuntime = ({
     return order.find((candidate) => !isExhausted(candidate.id, at)) ?? null;
   };
 
-  /**
-   * What the plugin should do about one reported failure:
-   * `activate-credential`, `switch-model`, `retry` (the active account changed
-   * after this request went out) or `none`.
-   */
   const decideNow = async (report) => {
     const at = now();
     const failure = classifyLimitFailure(report, at);
@@ -226,8 +200,6 @@ export const createLimitFailoverRuntime = ({
       const next = nextCredential(report, at);
       if (next) {
         settledAt.set(`${report.sessionID}:${next.id}`, at);
-        // Another session's report already chose this account and its plugin
-        // has not activated it yet: same answer, no second announcement.
         if (switchedAt.has(next.id)) return { action: 'activate-credential', credentialID: next.id };
         switchedAt.set(next.id, at);
         const ticket = openTicket(at, {
@@ -264,11 +236,6 @@ export const createLimitFailoverRuntime = ({
     return { action: 'none' };
   };
 
-  /**
-   * The plugin's outcome for a ticket. An applied switch is announced to every
-   * client; a failed one is forgotten, so the account it named is not treated
-   * as just switched to.
-   */
   const settle = (ticketID, applied) => {
     const ticket = tickets.get(ticketID);
     if (!ticket) return false;
@@ -282,9 +249,6 @@ export const createLimitFailoverRuntime = ({
     return true;
   };
 
-  // One decision at a time: sessions on the same account fail together, and
-  // the second report must see the switch the first one made (it then gets a
-  // grace retry) instead of switching again.
   let queue = Promise.resolve();
   const decide = (report) => {
     const result = queue.then(() => decideNow(report));

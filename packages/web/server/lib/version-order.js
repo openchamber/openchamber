@@ -1,6 +1,3 @@
-// Version order for update checks and release notes: semver precedence,
-// so a Canary build (2.5.4-canary.20261030.6) sorts after 2.5.3, before
-// 2.5.4, and Canary builds of one release by day and run.
 
 function parseVersionForComparison(value) {
   const normalized = String(value || '').replace(/^v/, '').split('+')[0];
@@ -17,9 +14,6 @@ function parseVersionForComparison(value) {
   };
 }
 
-// Semver precedence of two pre-release tags: numeric identifiers compare as
-// numbers and before text, so 2.5.4-canary.20261031.7 follows
-// 2.5.4-canary.20261030.6.
 function comparePrerelease(a, b) {
   const length = Math.max(a.length, b.length);
   for (let index = 0; index < length; index += 1) {

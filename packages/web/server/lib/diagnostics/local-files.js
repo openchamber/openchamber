@@ -37,8 +37,6 @@ const LEGACY_PROXY_LABELS = new Map([
   ['session.list', ['/api/session', 'forwardSanitizedSessionListRequest']],
   ['message.list', ['/api/session/:sessionID/message', 'forwardMessageListRequest']],
 ]);
-// Both listeners report the same shared /api/event SSE reader failure. Match
-// entire known messages; the surrounding log line may contain private data.
 const STREAM_FAILURES = new Map([
   ['Message stream WS proxy error: TypeError: fetch failed', ['message-stream WS', 'fetch failed', 'upstream_connect_or_read']],
   ['[PushWatcher] disconnected fetch failed', ['PushWatcher', 'fetch failed', 'upstream_connect_or_read']],
@@ -64,15 +62,11 @@ const SSH_MESSAGES = [
   { pattern: /^Replacing the managed server on remote port \d{1,5}: it is bound to\b/, action: 'remote server bind replaced' },
 ];
 
-// Never export arbitrary log text: it may be a prompt, path, token, URL or provider response.
-// Fixed vocabulary is the only information admitted from free-form log lines.
 export const classifyLogLine = (line, source) => {
   const matched = TIMESTAMP.exec(line);
   if (!matched) return null;
-  // Without a timezone a log timestamp is local wall time, not UTC.
   const at = Date.parse(matched[1].replace(',', '.').replace(' ', 'T'));
   if (!Number.isFinite(at)) return null;
-  // electron-log encloses the timestamp in brackets; web logs do not.
   const afterTimestamp = line.slice(matched.index + matched[0].length).replace(/^\]\s*/, '').trimStart();
   const level = /^\[(info|warn|error|debug)\]\s*/i.exec(afterTimestamp);
   const body = level ? afterTimestamp.slice(level[0].length) : afterTimestamp;
@@ -87,8 +81,6 @@ export const classifyLogLine = (line, source) => {
     event.detail = `route=/api/event function=createUpstreamSseReader stage=${streamFailure[2]} message="${streamFailure[1]}"`;
     return event;
   }
-  // The desktop log also contains failed HTTP access records. Never copy the
-  // path, query, request ID or timing from a free-form line into the export.
   const request = source === 'desktop' || source === 'web'
     ? /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\/\S{1,2048}) - ([45]\d\d) with id [A-Za-z0-9:]{8,64} in \d{1,6}ms$/.exec(body)
     : null;
@@ -102,7 +94,6 @@ export const classifyLogLine = (line, source) => {
     event.detail = 'message="Cannot find latest-mac.yml in the latest release artifacts" http=404';
   }
   if (action === 'api proxy failed') {
-    // Lines written before proxy errors used the fixed format.
     const oldProxy = /^\[proxy\] OpenCode (SSE|session\.get|session\.list|message\.list) proxy error: fetch failed$/.exec(body);
     if (oldProxy) {
       const [route, handler] = LEGACY_PROXY_LABELS.get(oldProxy[1]);
@@ -120,8 +111,6 @@ export const classifyLogLine = (line, source) => {
   return event;
 };
 
-// SSH manager messages include remote stderr and sometimes host names. Read them
-// only inside the native process; return a fixed vocabulary to the renderer.
 export const classifySshLogLine = (line, source) => {
   const match = /^\[(\d{13})\] \[(INFO|WARN|ERROR)\] (.*)$/.exec(line);
   if (!match) return null;
@@ -224,7 +213,6 @@ const readKnownFile = async (file, source) => {
   }
 };
 
-/** Read only fixed application log locations. Never accept a path from the renderer. */
 export async function collectLocalFileDiagnostics({ electronLogPath, home = os.homedir(), env = process.env, webPort, journal = serverDiagnosticJournal } = {}) {
   const dataDir = env.OPENCHAMBER_DATA_DIR || path.join(home, '.config', 'openchamber');
   const sources = [

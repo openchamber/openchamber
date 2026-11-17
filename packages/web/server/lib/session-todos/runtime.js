@@ -1,10 +1,3 @@
-/**
- * The agent's todo list of each session, from OpenCode's experimental
- * `todowrite` tool. OpenCode keeps no state for it: the list is the input of
- * the session's newest completed `todowrite` call before its revert boundary.
- * This server keeps that list per session from the event stream and finds it
- * in the history once, when a session is first asked for. See DOCUMENTATION.md.
- */
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
@@ -15,9 +8,7 @@ const FILE_VERSION = 1;
 const TOOL_NAME = 'todowrite';
 const FLAG_KEY = 'todo';
 const PAGE_SIZE = 50;
-/** Sessions kept on disk; the least recently changed go first. */
 const MAX_SESSIONS = 2000;
-/** Calls between their start and their end; a call whose end never came is dropped first. */
 const MAX_OPEN_CALLS = 500;
 const MAX_TODOS = 200;
 const MAX_TODO_LENGTH = 2000;
@@ -33,7 +24,7 @@ const todoSchema = z.object({
   status: z.enum(['pending', 'in_progress', 'completed', 'cancelled']).catch('pending'),
 });
 
-/** OpenCode's own reading of a list: an item needs text; an unknown status is pending. Null for no list. */
+// external: https://github.com/anomalyco/opencode A todo item needs text; unknown statuses resolve to pending.
 const parseTodos = (value) => {
   const list = z.array(z.unknown()).safeParse(value);
   if (!list.success) return null;
@@ -70,7 +61,6 @@ const pageSchema = z.object({
   cursor: z.object({ next: z.string().nullish() }).nullish(),
 });
 
-// The wire event and the message parts this module reads; anything else passes.
 const wireEventSchema = z.object({
   type: z.string(),
   created: z.number().finite().optional().catch(undefined),
@@ -90,8 +80,6 @@ const todoCallSchema = z.object({
 });
 const messageContentSchema = z.object({ content: z.array(z.unknown()).catch([]) });
 
-// Every event of the stream reaches this module, text deltas included; only
-// these are parsed. A call's own events are parsed only for a followed call.
 const SESSION_EVENT_TYPES = new Set([
   'session.tool.input.started',
   'session.revert.staged',
@@ -102,10 +90,7 @@ const SESSION_EVENT_TYPES = new Set([
 ]);
 const CALL_EVENT_TYPES = new Set(['session.tool.called', 'session.tool.success', 'session.tool.failed']);
 
-/**
- * `OPENCODE_FLAGS` as OpenCode reads it: `todo` or `-todo` decides, `all`
- * turns it on unless the list opts it out. Undefined when the list says nothing.
- */
+// external: https://github.com/anomalyco/opencode OPENCODE_FLAGS resolves todo/-todo before the all flag.
 export const flagFromOverrides = (overrides) => {
   const entries = new Map((overrides ?? '')
     .split(',')
@@ -116,12 +101,7 @@ export const flagFromOverrides = (overrides) => {
   return entries.get('all') === true ? true : undefined;
 };
 
-/**
- * The flag as OpenCode resolves it from the location's config documents
- * (lowest priority first): `experimental.todo` from the highest document that
- * sets `experimental`, else `experimental.all_flags: true` from the highest
- * document that sets `all_flags`. Undefined when the config says nothing.
- */
+// external: https://github.com/anomalyco/opencode Todo config uses the highest document setting experimental, then all_flags.
 export const flagFromConfig = (entries) => {
   const documents = entries
     .map((entry) => configEntrySchema.safeParse(entry))
@@ -133,10 +113,9 @@ export const flagFromConfig = (entries) => {
   return allFlags?.all_flags === true ? true : undefined;
 };
 
-/** Flags default to on in OpenCode's local and `dev` channel builds, off in releases. */
+// external: https://github.com/anomalyco/opencode Experimental flags default on for local/dev builds and off for releases.
 export const flagOnByDefault = (version) => version === 'local' || version.startsWith('0.0.0-dev-');
 
-/** The newest completed `todowrite` call in one assistant message, or null. */
 const todosInMessage = (message) => {
   const parsed = messageContentSchema.safeParse(message);
   const content = parsed.success ? parsed.data.content : [];
@@ -174,29 +153,13 @@ export const createSessionTodosRuntime = ({
 }) => {
   const filePath = path.join(dataDir, FILE_NAME);
 
-  // Starts from the clock so an answer after a restart still reads as newer.
   let revision = now();
-  /**
-   * sessionId → { directory, todos, checkedThrough, updatedAt, verified, generation }.
-   * `checkedThrough` is a time by which every finished agent message is
-   * accounted for: a later look at the history stops at the first message
-   * that finished by then. A message still streaming at that time is looked
-   * at again, since a call in it may have ended unseen. `verified` (memory
-   * only) means the event stream has been followed without a gap since the
-   * list was right; `generation` changes with every write, so a history read
-   * that an event overtook does not commit.
-   */
   const records = new Map();
-  /** callId → { sessionId, directory, todos } for `todowrite` calls that started and have not ended. */
   const openCalls = new Map();
-  /** directory → Promise<boolean>: whether the tool is on there. */
   const flags = new Map();
-  /** Directories where a `todowrite` call was seen since their config last changed. */
   const observed = new Set();
   let versionRead = null;
-  /** sessionId → Promise of the running history read. */
   const reads = new Map();
-  // One history read at a time, so opening several old sessions does not load OpenCode.
   let lane = Promise.resolve();
   let generation = 0;
   let persistTimer = null;
@@ -206,7 +169,7 @@ export const createSessionTodosRuntime = ({
 
   const headers = (directory) => {
     const result = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-    // v2 scopes by header and rejects non-ASCII header values.
+    // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Directory headers are percent-encoded because raw non-ASCII values are rejected.
     if (directory) result['x-opencode-directory'] = encodeURIComponent(directory);
     return result;
   };
@@ -222,7 +185,6 @@ export const createSessionTodosRuntime = ({
     return unwrapOpenCodeResponse(await response.json());
   };
 
-  // ----- Persistence -----
 
   const writeFile = () => {
     const sessions = {};
@@ -268,17 +230,14 @@ export const createSessionTodosRuntime = ({
     } catch {
       parsed = { success: false };
     }
-    // Derived data: a file this version cannot read is rebuilt from the history.
     if (!parsed.success) return;
     for (const [sessionId, value] of Object.entries(parsed.data.sessions)) {
       const record = storedRecordSchema.safeParse(value);
       if (!sessionIdSchema.safeParse(sessionId).success || !record.success || records.has(sessionId)) continue;
-      // Events may have been missed while this server was down.
       records.set(sessionId, { ...record.data, todos: parseTodos(record.data.todos) ?? [], verified: false, generation: ++generation });
     }
   };
 
-  // ----- State changes -----
 
   const announce = (sessionId, directory, todos) => {
     revision += 1;
@@ -306,7 +265,6 @@ export const createSessionTodosRuntime = ({
     announce(sessionId, records.get(sessionId).directory, todos);
   };
 
-  /** The history behind the list changed: it is looked up again from the start on the next read. */
   const invalidate = (sessionId) => {
     const record = records.get(sessionId);
     if (!record) return;
@@ -315,7 +273,6 @@ export const createSessionTodosRuntime = ({
     announce(sessionId, record.directory, null);
   };
 
-  // ----- Events -----
 
   const processPayload = (payload) => {
     const kind = payload?.type;
@@ -343,7 +300,7 @@ export const createSessionTodosRuntime = ({
         const call = openCalls.get(data.id);
         if (!call) return;
         openCalls.delete(data.id);
-        // The tool hands its list back as metadata, the same as its input.
+        // external: https://github.com/anomalyco/opencode todowrite returns its input list in metadata.todos.
         const todos = parseTodos(data.metadata?.todos) ?? call.todos;
         if (!todos) return;
         const at = event.data.created ?? now();
@@ -376,15 +333,9 @@ export const createSessionTodosRuntime = ({
     }
   };
 
-  /**
-   * A gap in OpenCode's stream may hide calls and config changes: everything
-   * is checked again when asked, and clients are told to ask, since their own
-   * connection to this server may not have dropped.
-   */
   const onConnected = () => {
     openCalls.clear();
     flags.clear();
-    // The flag may have been turned off unseen.
     observed.clear();
     versionRead = null;
     for (const [sessionId, record] of records) {
@@ -394,7 +345,6 @@ export const createSessionTodosRuntime = ({
     broadcast({ type: 'openchamber:session-todos', properties: { revision, sessionId: null, directory: null, todos: null } });
   };
 
-  // ----- Whether the tool is on -----
 
   const readVersion = () => {
     versionRead ??= readJson('/api/info').then((info) => infoSchema.parse(info).version);
@@ -410,7 +360,6 @@ export const createSessionTodosRuntime = ({
     return flagOnByDefault(await readVersion());
   };
 
-  /** Throws when it cannot be told; the caller keeps what it shows. */
   const isEnabled = async (directory) => {
     if (observed.has(directory)) return true;
     let pending = flags.get(directory);
@@ -424,17 +373,14 @@ export const createSessionTodosRuntime = ({
     return pending;
   };
 
-  // ----- The history -----
 
   const readPage = async (sessionId, cursor) => {
-    // The type filter travels with every page; the order rides in the cursor.
     const query = cursor
       ? { limit: String(PAGE_SIZE), cursor, type: 'assistant' }
       : { limit: String(PAGE_SIZE), order: 'desc', type: 'assistant' };
     return pageSchema.parse(await readJson(`/api/session/${encodeURIComponent(sessionId)}/message`, { query }));
   };
 
-  /** Creation time of the session's revert boundary, null without one. */
   const readBoundary = async (sessionId) => {
     const session = sessionSchema.parse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`));
     const messageId = session.revert?.messageID;
@@ -443,16 +389,8 @@ export const createSessionTodosRuntime = ({
     return createdSchema.parse(message).time.created;
   };
 
-  /**
-   * Walks the session's agent messages newest first until the newest
-   * completed `todowrite` call before the revert boundary, or until a message
-   * that finished by the time the stored list accounts for. A walk that
-   * reaches the start of the history without a call settles on "no list".
-   * `newest` is the latest finish time the walk saw, the next `checkedThrough`.
-   */
   const findInHistory = async (sessionId, checkedThrough) => {
     const boundary = await readBoundary(sessionId);
-    // A revert this server did not see may have hidden the stored list's call.
     const stopAt = boundary !== null && checkedThrough !== null && checkedThrough >= boundary ? null : checkedThrough;
     let newest = null;
     let cursor;
@@ -484,7 +422,6 @@ export const createSessionTodosRuntime = ({
     const run = lane.then(async () => {
       if (stopped) return;
       const found = await findInHistory(sessionId, before?.checkedThrough ?? null);
-      // An event wrote a newer list meanwhile.
       if ((records.get(sessionId)?.generation ?? null) !== startedAt) return;
       const todos = found.todos ?? before?.todos ?? [];
       const unchanged = before && found.todos === null;
@@ -503,11 +440,6 @@ export const createSessionTodosRuntime = ({
     return tracked;
   };
 
-  /**
-   * What the Work Status section shows for a session: `off` while the tool is
-   * off in the session's directory (and for an isolated space, whose history
-   * this server cannot read), else the list. Throws when it cannot be told.
-   */
   const read = async (sessionId, directory) => {
     if (isSpaceDirectory(directory) || !(await isEnabled(directory))) return { revision, state: 'off' };
     if (!records.get(sessionId)?.verified) await refreshFromHistory(sessionId, directory);

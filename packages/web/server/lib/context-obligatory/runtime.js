@@ -32,14 +32,6 @@ const buildContextPrompt = (entries) => {
   ].join('\n');
 };
 
-/**
- * Re-injects the messages the user pinned as obligatory after a compaction.
- *
- * Both the pinned list and the cursor live in OpenChamber's own session
- * metadata store — v2 accepts session metadata only at create time.
- * `readSessionMetadata` reads it and `persistContextCursor` records how far we
- * got; without both seams the runtime stays inert.
- */
 export const createContextObligatoryRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -74,25 +66,20 @@ export const createContextObligatoryRuntime = ({
   const tick = async (sessionId, directory) => {
     const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory });
     if (sessionParentId(session)) return;
-    // Pins and the cursor are OpenChamber's, not OpenCode's.
     const stored = { metadata: await readSessionMetadata(sessionId) };
     const state = readContextState(stored);
 
-    // Project knowledge needs nothing here: it lives in the session's
-    // instruction entries, which OpenCode carries through compaction.
     if (state.messages.length === 0) return;
 
     const recent = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     });
-    // v2 pages messages as `{ data, cursor }`, newest first, and a compaction
-    // is its own message role rather than an assistant message flagged
-    // `summary`.
+    // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Message pages are newest-first data/cursor envelopes and compaction has its own role.
     const recentMessages = Array.isArray(recent?.data) ? recent.data : [];
     if (recentMessages.length === 0) return;
     const summary = recentMessages.find((message) => message?.type === 'compaction' && message?.status === 'completed');
-    // A v2 compaction message has only `time.created`; `status` says it finished.
+    // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Completed compactions have time.created and a finished status.
     if (!summary?.id) return;
     if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
@@ -101,7 +88,7 @@ export const createContextObligatoryRuntime = ({
         `/api/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(pinned.id)}`,
         { directory },
       );
-      // A user message carries `text`; an assistant one carries `content[]`.
+      // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 User messages carry text and assistant messages carry content arrays.
       const parts = Array.isArray(message?.content)
         ? message.content
         : (typeof message?.text === 'string' ? [{ type: 'text', text: message.text }] : []);
@@ -118,8 +105,7 @@ export const createContextObligatoryRuntime = ({
       .sort((left, right) => left.pinned.createdAt - right.pinned.createdAt);
     if (entries.length === 0) return;
 
-    // v2 has no inline synthetic parts, and the model/agent selection lives on
-    // the session, so the restored context is simply its own synthetic message.
+    // external: https://www.npmjs.com/package/@opencode/client/v/2.3.0 Synthetic context is a separate message; model and agent selection belongs to the session.
     await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
       directory,
       method: 'POST',
@@ -129,9 +115,6 @@ export const createContextObligatoryRuntime = ({
       },
     });
 
-    // A merge patch: the store folds this into whatever else the session's
-    // `openchamber` namespace holds, so a concurrent goal or assist write is
-    // not clobbered.
     await persistContextCursor(sessionId, directory, {
       openchamber: { context_obligatory_last_compaction_message_id: summary.id },
     });

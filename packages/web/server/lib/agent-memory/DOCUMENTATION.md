@@ -23,6 +23,8 @@ keeping them apart keeps an agent mistake out of the user's notes.
 
 ## Invariants
 
+- An unreadable feature setting keeps both actions and routes closed, because
+  failure to read consent cannot expose a store the user may have disabled.
 - A store that cannot be read is a failure, never an empty store (`read`).
 - A missing file is authoritative empty. An existing document must be an object
   with an `entries` array before individual entries are sanitized. Invalid

@@ -9,16 +9,11 @@ import { TUNNEL_MODE_FUNNEL, TunnelServiceError } from './tunnels/types.js';
 const STARTUP_TIMEOUT_MS = 30000;
 const COMMAND_TIMEOUT_MS = 10000;
 
-// The Mac App Store and Standalone apps keep the CLI inside the app bundle.
-// Their "CLI integration" puts a /bin/sh wrapper on PATH that runs the binary
-// as its child, so a signal to the wrapper never reaches Tailscale and the
-// tunnel would outlive Stop. The bundle binary is therefore run directly.
 const MAC_APP_CLI_PATH = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
 
 const OPERATOR_HELP = 'Tailscale does not let this user share ports. Run: sudo tailscale set --operator=$USER';
 
-// The macOS app binary picks between opening its window and acting as the CLI
-// by looking at terminal variables, which a desktop app's child process lacks.
+// external: https://github.com/tailscale/tailscale/blob/main/cmd/tailscale/tailscale.go The macOS app binary needs CLI mode when launched without terminal variables.
 const withCliEnv = (env) => ({ ...env, TAILSCALE_BE_CLI: '1' });
 
 export function resolveTailscaleTarget({
@@ -54,7 +49,7 @@ export function checkTailscaleAvailable({ target = resolveTailscaleTarget(), spa
   return { available: true, path: target.command, version: outputOf(result).split('\n')[0] || null };
 }
 
-// BackendState names come from tailscale/ipn/backend.go.
+// external: https://github.com/tailscale/tailscale/blob/main/ipn/backend.go BackendState names follow the Tailscale backend states.
 export function checkTailscaleRunning({ target, spawnSyncImpl = spawnSync }) {
   const result = runTailscale(target, ['status', '--json'], spawnSyncImpl);
   let state = '';
@@ -79,11 +74,6 @@ export function checkTailscaleRunning({ target, spawnSyncImpl = spawnSync }) {
   return { ready: false, detail: `Tailscale is not running${output ? `: ${output}` : '.'}` };
 }
 
-// The CLI prints the address under "Available within your tailnet:" or
-// "Available on the internet:"; it is always on the tailnet's ts.net domain.
-// Before HTTPS or Funnel is on for the tailnet, it prints an approval link
-// (seen live as https://login.tailscale.com/f/serve?node=...) and waits for
-// the user to open it. Any other link, such as a notice, is skipped.
 export function readTailscaleOutput(text) {
   for (const match of text.matchAll(/https:\/\/[^\s"'<>]+/gi)) {
     let url;
@@ -107,9 +97,7 @@ const lastOutputLine = (output) => {
   return line ? `: ${line}` : '';
 };
 
-// Runs `tailscale serve|funnel` in the foreground. Tailscale ties a foreground
-// config to the CLI's session and drops it when the process ends, so stopping
-// the child is the whole cleanup on every platform.
+// external: https://tailscale.com/kb/1242/tailscale-serve Foreground Serve/Funnel configuration belongs to the CLI session and ends with its process.
 export async function startTailscaleTunnel({
   port,
   mode,

@@ -126,8 +126,6 @@ function modeIntentFallback(mode) {
   return undefined;
 }
 
-// Absent stays undefined so the provider picks its default; anything that is
-// not a whole number becomes NaN and fails validation with the allowed list.
 function normalizeHttpsPort(value) {
   if (value === undefined || value === null || value === '') {
     return undefined;

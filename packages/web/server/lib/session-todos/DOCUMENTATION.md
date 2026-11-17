@@ -17,6 +17,9 @@ the data dir, the `/api/session-todos/:sessionId` route and the
 
 ## Invariants
 
+- Revisions begin from the current clock so a post-restart answer sorts newer
+  than the prior process's list. Restarted lists remain unverified until checked
+  against history, because persisted data cannot account for missed events.
 - While the tool is off in a directory, the route answers `off` and reads no
   history; the UI lists no Tasks section. The event handling costs nothing
   there: an OpenCode with the tool off emits no `todowrite` calls.

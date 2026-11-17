@@ -1,10 +1,5 @@
 import { execFile } from 'node:child_process';
 
-// How much OpenCode is holding right now, for the diagnostic export: the
-// directories it has loaded and the processes it started. Every loaded
-// directory runs its own copy of the user's local MCP servers, so these two
-// numbers explain most "OpenChamber uses N GB" reports. Counts and sizes only;
-// no path, name or command leaves this module.
 
 const REQUEST_TIMEOUT_MS = 4_000;
 const PS_TIMEOUT_MS = 4_000;
@@ -16,7 +11,6 @@ const listProcessesWithPs = () => new Promise((resolve, reject) => {
   });
 });
 
-/** `ps -o pid=,ppid=,rss=,comm=` output as pid → { ppid, rssKb, command }. Lines that do not parse are skipped. */
 export function parseProcessTable(text) {
   const table = new Map();
   for (const line of text.split('\n')) {
@@ -27,11 +21,6 @@ export function parseProcessTable(text) {
   return table;
 }
 
-/**
- * The process tree under `rootPid`, or null when that pid is not an OpenCode
- * process on this machine (OpenCode on another host or inside WSL reports a
- * pid that means nothing here).
- */
 export function summarizeOpenCodeTree(table, rootPid) {
   const root = table.get(rootPid);
   if (!root || !/opencode/i.test(root.command)) return null;
@@ -56,10 +45,6 @@ export function summarizeOpenCodeTree(table, rootPid) {
   return { openCodeMb: Math.round(root.rssKb / 1024), childProcesses: count, childMb: Math.round(rssKb / 1024) };
 }
 
-/**
- * `locations` is null when OpenCode did not answer; `processes` is null when
- * they cannot be counted here (Windows, OpenCode elsewhere, `ps` failed).
- */
 export async function readOpenCodeLoad({ buildOpenCodeUrl, getOpenCodeAuthHeaders, platform = process.platform, listProcesses = listProcessesWithPs, fetchImpl = fetch }) {
   const readJson = async (route) => {
     const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
@@ -70,7 +55,6 @@ export async function readOpenCodeLoad({ buildOpenCodeUrl, getOpenCodeAuthHeader
     return response.json();
   };
 
-  // Listing loaded locations does not start one.
   const [locations, info] = await Promise.allSettled([readJson('/api/debug/location'), readJson('/api/info')]);
   const locationCount = locations.status === 'fulfilled' && Array.isArray(locations.value) ? locations.value.length : null;
   const pid = info.status === 'fulfilled' && Number.isInteger(info.value?.pid) ? info.value.pid : null;

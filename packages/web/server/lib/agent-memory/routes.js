@@ -45,8 +45,6 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Agent memory is disabled', disabled: true });
       }
     } catch {
-      // An unreadable settings file must not silently expose a surface the
-      // user may have turned off.
       return res.status(503).json({ error: 'Agent memory availability is unknown' });
     }
     return next();

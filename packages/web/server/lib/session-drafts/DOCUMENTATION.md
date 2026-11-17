@@ -16,6 +16,15 @@ sidebar on the phone too and opens there with its attachments.
 - Ids are letters, digits, `_`, `.` and `-`, so no id leaves the folder.
 - At most 200 drafts, 20 attachments and 25 MB of attachment bytes per draft.
 
+## Invariants
+
+- Draft and attachment ids start with a letter or digit, excluding `.` and
+  `..`, and destination paths are checked again before writing bytes. An id
+  cannot escape the draft folder even if an earlier validator changes.
+- Request limits account for base64's extra third of attachment size. Client
+  responses expose server paths only for path attachments and omit the private
+  storage location of uploaded bytes.
+
 ## Routes
 
 - `GET /api/session-drafts`: every draft, without where the bytes live.

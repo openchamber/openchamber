@@ -1,45 +1,11 @@
-/**
- * Raw byte tunnel to a dev server running on the OpenChamber host.
- *
- * This is what lets a desktop client preview a dev server that lives on another
- * machine without rewriting anything. The client binds its own local port and
- * pipes it here; the page is then served from a real origin at the root of its
- * own host, so absolute URLs, cookies, HMR sockets, and DevTools all behave
- * exactly as they do locally. No HTML is inspected or modified.
- *
- * Security posture: the reachable set is the same list dev-server discovery
- * offers the user, not "any loopback port". Without that restriction an
- * authenticated client could dial arbitrary local services on the host —
- * databases, admin panels, the OpenCode API — through this socket.
- *
- * Authentication differs from the browser-facing sockets on purpose. Those
- * demand an allowed `Origin`, which is a CSRF defence: a hostile page can make
- * a browser open a WebSocket carrying the user's ambient cookies, and the
- * origin is what exposes it. This tunnel's client is the desktop shell, not a
- * browser, and it authenticates with an explicit bearer token. So:
- *
- * - With an `Origin` header, the request came from a browser context and the
- *   usual origin check applies unchanged.
- * - With no `Origin`, the request must carry client-token auth or a short-lived
- *   URL token. The URL-token case is used only by the trusted renderer through
- *   the E2EE relay; the UI-auth allowlist limits it to this exact path.
- */
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 const DEV_TUNNEL_WS_PATH = '/api/dev-tunnel';
-/** One page load opens many sockets; the cap is per host, not per page. */
 const MAX_CONCURRENT_SOCKETS = 64;
 const CONNECT_TIMEOUT_MS = 5_000;
-/**
- * Discovery offers a port bound to either loopback family, and `localhost`
- * resolves to `::1` first on many systems, so a dev server started with its
- * defaults may listen on IPv6 only. Dialing just `127.0.0.1` refused every
- * connection to such a server while the panel listed it as available.
- */
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1'];
-/** Bytes the page may send before the dev server connection is up. */
 const MAX_PENDING_BYTES = 256 * 1024;
 
 const parseRequestedPort = (url) => {
@@ -72,11 +38,6 @@ export function createDevTunnelRuntime({
   const wsServer = new WebSocketServer({ noServer: true });
   let openSockets = 0;
 
-  /**
-   * A port is reachable only while discovery still reports it. Re-checked on
-   * every upgrade rather than cached, so a dev server that stops listening
-   * stops being reachable.
-   */
   const isAllowedPort = async (port) => {
     const result = await discoverDevServers();
     if (!result?.ok) return false;
@@ -117,8 +78,6 @@ export function createDevTunnelRuntime({
       upstream.on('data', (chunk) => {
         if (socket.readyState !== socket.OPEN) return;
         socket.send(chunk);
-        // Stop reading from the dev server while the socket drains, otherwise a
-        // fast response against a slow client buffers the whole body in memory.
         if (socket.bufferedAmount > 1_000_000) {
           upstream.pause();
           const resume = () => {
@@ -183,9 +142,6 @@ export function createDevTunnelRuntime({
   const upgradeHandler = (req, socket, head) => {
     if (!isDevTunnelPath(req.url)) return;
     const port = parseRequestedPort(req.url);
-    // Every refusal is logged with its reason: the desktop only sees its local
-    // connection close, which the panel cannot tell apart from a dev server
-    // that is still starting. Never logs the URL, which may carry a token.
     const refuse = (status, reason) => {
       logger.warn?.(`[dev-tunnel] refused port ${port ?? 'unknown'}: ${reason}`);
       rejectWebSocketUpgrade(socket, status, reason);

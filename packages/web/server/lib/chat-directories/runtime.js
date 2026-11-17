@@ -4,8 +4,6 @@ import { z } from 'zod';
 import { canonicalDirectoryPath } from '../fs/canonical-path.js';
 
 const PAGE_SIZE = 200;
-// A session written on every page moves past the cursor each time; give up
-// rather than chase it forever.
 const MAX_PAGES = 1_000;
 const READ_TIMEOUT_MS = 10_000;
 const QUARANTINE_PREFIX = '.reclaiming-';
@@ -89,12 +87,9 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
   let owner = null;
   let connected = false;
   let directoriesBySession = new Map();
-  // Session ids the host stream named while an inventory read was running.
   let touched = null;
   const forkReads = new Map();
   const pending = new Map();
-  // Claimed folders already sentenced whose removal failed; retried by their
-  // private quarantine path, never by the reusable chat path.
   const failedRemovals = new Set();
   let revision = 0;
   let requested = null;
@@ -115,9 +110,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
 
   const readSignal = () => AbortSignal.any([controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)]);
 
-  // Oldest first: OpenCode orders pages by update time, so a session written
-  // during the read moves past the cursor and is read again instead of being
-  // skipped. The later copy wins.
   const listSessions = async (client) => {
     const sessions = new Map();
     const cursors = new Set();
@@ -139,9 +131,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     return sessions;
   };
 
-  // A complete list, plus every session the stream wrote to during it that the
-  // list missed: a write moves a session across the cursor, and most writes
-  // (archives, messages) never reach the translated events.
   const readInventory = async () => {
     const client = createClient();
     touched = new Set();
@@ -162,8 +151,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     }
   };
 
-  // Moves the folder out of its reusable pathname, so nothing destroyed later
-  // can be a folder that took the name after the identity check.
   const claim = async (captured) => {
     const [identity, parentIdentity] = await Promise.all([
       fs.lstat(captured.target, { bigint: true }), fs.lstat(captured.parent, { bigint: true }),
@@ -187,9 +174,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
     return null;
   };
 
-  // Puts a claimed folder back without replacing whatever took its name: mkdir
-  // takes the free name, and a rename replaces only that still-empty folder.
-  // Windows cannot rename onto a folder, so there the placeholder goes first.
   const release = async (claimed) => {
     try {
       await fs.mkdir(claimed.target);
@@ -224,7 +208,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
   const refresh = (reason) => {
     if (requested !== 'connect') requested = reason;
     if (running) return running;
-    // Defer the read so a cascade's deletion events share one inventory.
     running = Promise.resolve().then(async () => {
       while (requested && !stopped && connected && adoptOwner()) {
         const reason = requested;
@@ -283,7 +266,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
           if (claims.length === 0) continue;
           if (!isCurrent()) { retry(); continue; }
 
-          // A session that took a claimed folder meanwhile gets it back.
           const fresh = await resolveReferences(await readInventory());
           while (claims.length > 0) {
             if (!isCurrent()) { retry(); break; }
@@ -295,7 +277,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
         } catch (error) {
           if (!stopped) logger.warn('[chat-directories] could not verify chat folder references:', error.message);
         } finally {
-          // Lost authority or a failed check: nothing claimed is destroyed.
           for (const { claimed } of claims.splice(0)) await release(claimed);
         }
       }
@@ -332,8 +313,6 @@ export const createChatDirectoryCleanupRuntime = ({ roots, createClient, getOwne
       revision += 1;
       return refresh('connect');
     },
-    // Events missed while the stream is down can add references, so removal
-    // waits for the next connection and its complete inventory.
     onDisconnected() {
       connected = false;
       revision += 1;

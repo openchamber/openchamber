@@ -230,7 +230,6 @@ import { applyOutboundProxyFromEnv } from './lib/outbound-proxy.js';
 import { applySystemCertificates } from './lib/system-ca.js';
 import { readOpenCodeLoad } from './lib/diagnostics/opencode-load.js';
 
-// Background CLI launches enter here in a fresh process, without CLI defaults.
 applyConnectAttemptTimeout();
 applySystemCertificates();
 applyOutboundProxyFromEnv();
@@ -269,15 +268,6 @@ function headerIncludesEventStream(value) {
   return false;
 }
 
-/**
- * SSE endpoint paths that must never be compressed by the compression middleware.
- *
- * The compression middleware filter runs before route handlers, so
- * `res.getHeader('Content-Type')` is still undefined at that point.
- * This means the Accept-header check alone is not sufficient for
- * non-standard clients (e.g. curl, fetch) that omit Accept.
- * Path-based exclusion acts as a deterministic fallback.
- */
 const SSE_PATH_PREFIXES = [
   '/api/event',
   '/api/global/event',
@@ -378,19 +368,12 @@ const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeMode
 const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
 const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
 
-// Every OpenChamber-owned file and folder hangs off one root: the default
-// `~/.config/openchamber`, or `OPENCHAMBER_DATA_DIR` when set. The user
-// folders (`projects/`, `themes/`, `speech-models/`) are copied into a custom
-// root once at startup (`migrateLegacyUserDirs`), because they used to ignore
-// the variable.
 const OPENCHAMBER_DEFAULT_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_CONFIG_ROOT = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : OPENCHAMBER_DEFAULT_CONFIG_ROOT;
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
-// OPENCHAMBER_CHATS_DIR relocates managed chat worktrees — needed when the
-// OpenCode server runs as a separate user that cannot traverse $HOME.
 const OPENCHAMBER_CHATS_DIR = process.env.OPENCHAMBER_CHATS_DIR && process.env.OPENCHAMBER_CHATS_DIR.trim()
   ? path.resolve(process.env.OPENCHAMBER_CHATS_DIR.trim())
   : path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats');
@@ -430,23 +413,17 @@ const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZen
 
 const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
-// OpenChamber's own plugin switches. They never touch the user's OpenCode
-// config: the managed child reads them from the config layer OpenChamber owns.
 const pluginSwitchStore = createPluginSwitchStore({ filePath: path.join(OPENCHAMBER_DATA_DIR, 'plugin-switches.json') });
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
 const PUSH_OPEN_TAGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-open-tags.json');
 const openCodeTrust = createOpenCodeTrust({
   storePath: path.join(OPENCHAMBER_DATA_DIR, 'opencode-trust.json'),
-  // Declared further down; first read on the first check, after startup.
   listKnownDirectories: async () => {
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []).map((project) => project.path);
   },
 });
-// Server features reach OpenCode through clients of their own, with folders
-// the UI hands them. Every such request passes the same trust check as the
-// proxy. Installed before any runtime below captures `fetch`.
 globalThis.fetch = guardOpenCodeFetch({
   fetchImpl: globalThis.fetch,
   openCodeTrust,
@@ -509,7 +486,6 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
   normalizeDirectoryPath,
   getReadSettingsFromDiskMigrated: () => readSettingsFromDiskMigrated,
   sanitizeProjects,
-  // A space's directory never runs on the host, whatever route carries it.
   refuseDirectory: (candidate) => spacesHost?.refuseDirectory(candidate) ?? null,
 });
 
@@ -537,18 +513,13 @@ const settingsRuntime = createSettingsRuntime({
   upsertManagedRemoteTunnelToken,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   onManagedPluginSettingsChanged: () => managedConfigRuntime?.refreshManagedConfigFile(),
-  // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
-  // Running spaces hear the new default at once; the save does not wait for them.
   onPermissionDefaultModeChanged: (mode) => {
     void spacesHost?.journey.changePermissionDefault(mode).catch((error) => {
       console.warn(`[spaces] the default permission mode did not reach the running spaces: ${error?.code ?? error?.message ?? error}`);
     });
   },
-  // Declared further down; settings are only saved once the server serves requests.
-  // A folder OpenCode may not open yet must not become the one server-side
-  // reads fall back to.
   onLastDirectoryChanged: (directory) => {
     void openCodeTrust.isTrusted(directory).then((trusted) => {
       if (trusted) openCodeLifecycleRuntime.noteCurrentDirectory(directory);
@@ -576,7 +547,6 @@ const pushRuntime = createPushRuntime({
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
-  // clientPushAccess needs this runtime, so it is created later: read it per send.
   getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
@@ -584,9 +554,6 @@ const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...ar
 const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
 const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
 const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
-// Set once the notification trigger runtime exists (declared later). When a UI
-// client reports it became visible, reset the native push badge set — the same
-// moment the device zeroes its icon badge on becomeActive, keeping them in sync.
 let clearPendingPushBadge = () => {};
 const updateUiVisibility = (token, visible, platform) => {
   if (visible === true) clearPendingPushBadge();
@@ -598,7 +565,6 @@ const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
 const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
 const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
 
-// Host relay identity keys, shared by the push relay and the private relay.
 const relayKeyStore = createRelayKeyStore({
   fsPromises,
   path,
@@ -651,19 +617,12 @@ const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
 });
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
-// OpenChamber-owned events (queue changes, archive state) travel on the shared
-// control stream, not on OpenCode's event proxy. One broadcaster so every owner
-// reaches the same clients.
 const broadcastOpenChamberUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiOpenChamberEventClients,
   wsClients: uiNotificationWsClients,
   writeSseEvent,
 });
 
-// Permission modes and requests left for the user go where the global events
-// go (the main WebSocket, and the notification stream an isolated space's host
-// reads) and to the control stream: a window whose main event stream runs over
-// SSE reads only that one, and without them it hides requests for good.
 const broadcastControlSseEvent = createGlobalUiEventBroadcaster({
   sseClients: uiOpenChamberEventClients,
   wsClients: new Set(),
@@ -674,16 +633,8 @@ const broadcastPermissionUiEvent = (payload) => {
   broadcastGlobalUiEvent(payload);
 };
 
-/**
- * Per-session OpenChamber state (goal progress, the assist recap, the
- * obligatory-context cursor, pinned notes) lives in OpenCode's session
- * metadata. The store merge-patches it there and migrates what older
- * OpenChamber versions kept in `sessions-metadata.json`.
- */
 const sessionMetadataStore = createSessionMetadataStore({
   dataDir: OPENCHAMBER_DATA_DIR,
-  // Called, not captured: the OpenCode URL and auth helpers are declared
-  // further down and only ever used once a request arrives.
   openCode: {
     read: (...args) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).read(...args),
     write: (sessionID, metadata, options) => createOpenCodeSessionMetadata({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).write(sessionID, metadata, options).then(() => sessionLineage.noteMetadata(sessionID, metadata) && permissionAutoAcceptRuntime.forgetSession(sessionID)),
@@ -694,15 +645,10 @@ const readStoredSessionMetadata = (sessionID, options) => sessionMetadataStore.g
 
 const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } = {}) => {
   const metadata = await sessionMetadataStore.setSessionMetadata(sessionID, patch, { directory });
-  // The full merged object, so a client that missed an earlier patch does not
-  // have to reconstruct it.
   broadcastOpenChamberUiEvent({
     type: 'openchamber:session-metadata',
     properties: { sessionID, metadata },
   });
-  // The write itself arms the goal loop: it is the authoritative signal and
-  // does not depend on the event stream being connected.
-  // Called, not captured: the runtime is declared further down.
   if (patch?.openchamber && 'goal' in patch.openchamber) {
     void Promise.resolve(sessionGoalRuntime.notifyGoalChanged(sessionID, directory, metadata))
       .catch((error) => console.warn('[session-goal] could not arm after a goal change:', error?.message ?? error));
@@ -710,7 +656,6 @@ const persistSessionMetadataPatch = async (sessionID, patch, { directory = '' } 
   return metadata;
 };
 
-/** A metadata change decided against the record at write time; broadcast only when it changed. */
 const updateSessionMetadataWith = async (sessionID, decide, { directory = '' } = {}) => {
   const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
   if (result.changed) {
@@ -726,7 +671,6 @@ const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
-  // Called, not captured: the OpenCode URL and auth helpers are declared further down.
   readTurnStart: (sessionId) => createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).readTurnStart(sessionId),
   buildOpenCodeUrl: (...args) => buildOpenCodeUrl(...args),
   getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
@@ -755,7 +699,6 @@ const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
-  // Switching where notes and todos live moves them under the context lock.
   switchNotesTodosStorage: (projectId, change) => projectContextRuntime.switchNotesTodosStorage(projectId, change),
 });
 
@@ -778,19 +721,11 @@ const agentMemoryRuntime = createAgentMemoryRuntime({
   userConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
 });
 
-/**
- * One switch for everything memory-related. It gates the tool, these routes,
- * and the session index alike, so turning memory off leaves nothing behind
- * that still reads or writes the store. The session index also needs the
- * tool, which only an OpenCode we launched has.
- */
 const isAgentMemoryEnabled = async () => {
   const settings = await readSettingsFromDiskMigrated().catch(() => null);
   return settings?.agentMemoryToolEnabled === true;
 };
 
-// HMR-persistent state via globalThis
-// These values survive Vite HMR reloads to prevent zombie OpenCode processes
 const hmrStateRuntime = createHmrStateRuntime({
   globalThisLike: globalThis,
   os,
@@ -800,7 +735,6 @@ const hmrStateRuntime = createHmrStateRuntime({
 const hmrState = hmrStateRuntime.getOrCreateHmrState();
 hmrStateRuntime.ensureUserProvidedOpenCodePassword(hmrState);
 
-// Non-HMR state (safe to reset on reload)
 let healthCheckInterval = null;
 let server = null;
 let expressApp = null;
@@ -819,8 +753,6 @@ let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
-// The isolated-spaces host: the place, the manager and the dispatcher. Null while the feature's
-// switch is off, and then nothing of the feature runs (decision 19 in the module's DOCUMENTATION.md).
 let spacesHost = null;
 let activeTunnelController = null;
 let globalWatcherStartPromise = null;
@@ -835,8 +767,6 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let dictationRuntime = null;
-// Built once the HTTP server exists (it hooks `upgrade`); the browser
-// provider router is built earlier and reaches it through this holder.
 let guestSurfaceRuntime = null;
 let realtimeProxyRuntime = null;
 let relayServiceInstance = null;
@@ -850,7 +780,6 @@ const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
 let openCodeAuthPassword = initialOpenCodeAuthState.openCodeAuthPassword;
 let openCodeAuthSource = initialOpenCodeAuthState.openCodeAuthSource;
 
-// Sync helper - call after modifying any HMR state variable
 const syncToHmrState = () => {
   hmrStateRuntime.syncStateFromRuntime(hmrState, {
     openCodeProcess,
@@ -864,7 +793,6 @@ const syncToHmrState = () => {
   });
 };
 
-// Sync helper - call to restore state from HMR (e.g., on module reload)
 const syncFromHmrState = () => {
   const restored = hmrStateRuntime.restoreRuntimeFromState({
     hmrState,
@@ -880,8 +808,6 @@ const syncFromHmrState = () => {
   openCodeAuthSource = restored.openCodeAuthSource;
 };
 
-// Module-level variables that shadow HMR state
-// These are synced to/from hmrState to survive HMR reloads
 let openCodeProcess = hmrState.openCodeProcess;
 let openCodePort = hmrState.openCodePort;
 let openCodeBaseUrl = hmrState.openCodeBaseUrl ?? null;
@@ -955,9 +881,6 @@ const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(..
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
-// Plugin-registered providers exist only inside the running OpenCode process.
-// Small-model callers resolve them through this connection; without it they
-// stay on the file-based resolution and plugin models remain unreachable.
 configureOpenCodeRuntimeProviders({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1050,10 +973,6 @@ notificationTemplateRuntime = createNotificationTemplateRuntime({
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
 });
 
-// Extension notification channels (`provides: ["notifications"]`): the user's
-// notifications go to the service of every approved, connected channel, and
-// the service reaches its server only through these handles on the callback
-// listener. Accounts live in their own store; the service never sees a token.
 const notificationChannelHandles = createOutboundHandles();
 setHostCallbackRoute(NOTIFICATIONS_OUTBOUND_PATH, {
   refusal: notificationChannelHandles.refusal,
@@ -1081,7 +1000,6 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   sendPushToAllUiSessions,
   sendApnsToAllUiSessions,
   clearApnsNotifications,
-  // Pushed notifications nobody handled yet, so a restart can still clear them.
   openPushTagsStore: {
     read: async () => {
       try {
@@ -1101,9 +1019,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   readSessionMetadata: readStoredSessionMetadata,
-  // Read at call time: the isolated-spaces switch turns the host on and off live.
   spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,
-  // Declared further down; only ever called after startup.
   isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
   deliverToExtensionChannels: (delivery) => extensionNotificationChannels.deliver(delivery),
 });
@@ -1112,13 +1028,8 @@ const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSen
 const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
-// Which sessions are subsessions: per-turn work skips them without reading.
 const sessionLineage = createSessionLineage();
 
-// Unread marks are OpenCode's (`time.idle` / `time.viewed`); the baseline keeps
-// turns that ended before OpenChamber read them from all showing as unread.
-// Read now, so a turn that ends before the first client asks is not counted
-// as old.
 const unreadBaseline = createUnreadBaseline({ dataDir: OPENCHAMBER_DATA_DIR });
 void unreadBaseline.get();
 
@@ -1133,12 +1044,9 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   persistSessionAssist: (sessionID, directory, assist) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { assist } }, { directory }),
-  // Declared further down; only ever called after startup.
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
-  // Declared further down; only ever called after startup.
   evaluateTurn: (input) => sessionWorkRuntime.evaluateTurnEnd(input),
   lineage: sessionLineage,
-  // Clients hold a left chat's OpenCode location until its assist is done.
   onPendingChange: ({ sessionId, directory, pending }) => broadcastOpenChamberUiEvent({
     type: 'openchamber:session-assist',
     properties: { sessionID: sessionId, directory: directory || null, pending },
@@ -1160,8 +1068,6 @@ const sessionGoalRuntime = createSessionGoalRuntime({
     return result.changed;
   },
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
-    // The goal settle notification replaces the per-turn ready notifications
-    // (suppressed while the goal is active) — so it obeys the same toggle.
     const settings = await readSettingsFromDisk();
     if (settings.notifyOnCompletion === false) {
       return;
@@ -1195,18 +1101,12 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   },
 });
 
-/** A directory-scoped OpenCode client for one session-route call. */
 const openCodeSessionClient = (directory) => createOpenCodeClient({
   baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
   headers: getOpenCodeAuthHeaders(),
   directory,
 });
 
-/**
- * Owns what a session must be told about the project's knowledge. Every sender
- * asks it — the UI over HTTP, scheduled tasks and agent-dispatched sessions in
- * process — so the answer cannot differ between them.
- */
 const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
 const guestAgentContext = createGuestAgentContext({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
@@ -1217,11 +1117,8 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   readExtensionInstructions: guestAgentContext.instructionText,
   projectContextRuntime,
   agentMemoryRuntime,
-  // Called, not captured: the resolver is declared further down, and taking a
-  // reference here would read it before it exists.
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
-  // The plugin carrying the tool exists only in an OpenCode we launched.
   isMemoryToolAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
     return isAgentMemoryEnabled();
@@ -1249,11 +1146,9 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   },
   isWorkflowAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    // Declared further down; only ever called after startup.
     return isWorkflowToolEnabled();
   },
   readSessionMetadata: readStoredSessionMetadata,
-  // Pins are read from and written to OpenChamber's own store.
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
   instructionEntries: {
     put: (sessionID, directory, key, value) => openCodeSessionClient(directory)
@@ -1270,8 +1165,6 @@ const contextObligatoryRuntime = createContextObligatoryRuntime({
   persistContextCursor: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
 });
 
-// Keeps the prompt cache of the sessions the user picked warm while they sit
-// idle; the per-session counterpart of OpenCode's `warming` config.
 const sessionWarmingRuntime = createSessionWarmingRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
@@ -1280,19 +1173,10 @@ const sessionWarmingRuntime = createSessionWarmingRuntime({
 });
 sessionWarmingRuntime.start();
 
-// The tracker registry, one per server. Tracker and source-control ids share
-// one namespace (tracked items, the read cache), so the source-control ids are
-// refused here and an overlap fails at startup.
 const trackerRegistry = createTrackerRegistry(undefined, {
   foreignIds: sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id),
 });
-// Session events for every tracker that posts session comments: each one's
-// runtime starts on the first event and a failed load is retried later, so a
-// tracker that fails to load leaves the others running and is not silent for good.
 const trackerSessionStatus = createTrackerSessionStatus({ registry: trackerRegistry });
-// Session events for extension services (`contributes.sessionEvents`): one
-// request per event per subscribed service, with the ready notification's
-// gates on "the turn is finished". The catalog decides who receives what.
 const extensionSessionEvents = createExtensionSessionEvents({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   proxyServiceRequest: proxyGuestServiceRequest,
@@ -1301,12 +1185,10 @@ const extensionSessionEvents = createExtensionSessionEvents({
   getOpenCodeAuthHeaders,
   fetchLastAssistantMessageText,
   readSessionMetadata: readStoredSessionMetadata,
-  // Both declared further down; only ever called after startup.
   isSessionAutoAccepting: (sessionId, directory, requestId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, requestId),
   isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
 });
 
-// Services that run with nobody asking: kept up, or woken on their clock.
 const extensionServiceLifetime = createServiceLifetime({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   proxyServiceRequest: proxyGuestServiceRequest,
@@ -1315,9 +1197,6 @@ const extensionServiceLifetime = createServiceLifetime({
   persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
 });
 
-// Sessions marked `metadata.hidden: true`, such as a dreaming pass over the
-// agent memory or a plugin's own: no client and no server-side consumer sees
-// their events or records.
 const hiddenSessions = createHiddenSessionRegistry();
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
@@ -1328,8 +1207,6 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   deltaCoalesceWindowMs: resolveDeltaCoalesceWindowMs(),
 });
 
-// Jev model routing and the permission safety net. Every failure keeps the
-// user's own model or the auto-accept reply it was asked about.
 const routingRuntime = createRoutingRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
@@ -1338,8 +1215,6 @@ const routingRuntime = createRoutingRuntime({
   isSessionWarm: (sessionId, cacheLifetimeMs) => sessionWarmingRuntime.isSessionWarm(sessionId, cacheLifetimeMs),
 });
 
-// "In work": Jev opens a session when real work starts in it and hints when a
-// turn looks like the end of it. The same turn-end call gates session assist.
 const sessionWorkRuntime = createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1364,27 +1239,21 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
-  // Only a space's environment names this file: the host writes the user's default there.
   readDefaultMode: process.env.OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE
     ? () => readSpacePermissionDefault(process.env.OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE)
     : undefined,
 });
 permissionAutoAcceptRuntime.start();
-// A request the safety net held still needs the user, so only one that was
-// actually answered automatically skips the notification.
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
   (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
 );
 
-// Auto-review runs its loop here, so a closed tab or a locked phone does not
-// stop it; while a run goes, the reviewed session's queue waits for it.
 const autoReviewRuntime = createAutoReviewRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   sessionKnowledgeRuntime,
   broadcastUiEvent: broadcastOpenChamberUiEvent,
-  // Declared right below; only called once a run ends.
   onRunSettled: (sessionId) => messageQueueRuntime.release(sessionId),
   onRunEnded: (ended) => notificationTriggerRuntime.notifyAutoReviewEnded(ended),
   routeSend: ({ sessionId, directory, text }) => (
@@ -1394,15 +1263,11 @@ const autoReviewRuntime = createAutoReviewRuntime({
 });
 autoReviewRuntime.start();
 
-// Queued follow-up messages are delivered by the server so a closed tab or a
-// dropped connection no longer strands them (VS Code keeps its UI-side queue).
 const messageQueueRuntime = createMessageQueueRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   sessionKnowledgeRuntime,
-  // OpenCode's event SSE proxy cannot carry OpenChamber-owned events. Use the
-  // shared control stream for SSE clients and the existing WS fan-out.
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   resolveAutoSelection: (send) => routingRuntime.resolveAutoSelection(send),
   persistSessionGoal: (sessionID, directory, goal) =>
@@ -1416,33 +1281,25 @@ const messageQueueRuntime = createMessageQueueRuntime({
 });
 messageQueueRuntime.start();
 
-// Sessions an agent dispatched with `returnResult` report back to it: their
-// final answer lands in the dispatching session and wakes it.
 const dispatchResultsRuntime = createDispatchResultsRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   dataDir: OPENCHAMBER_DATA_DIR,
-  // Declared further down; only ever called after startup.
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
 });
 dispatchResultsRuntime.start();
 
-// An agent waiting on its pull request: followed through the tracked-items
-// service (attached when the routes create it), woken with one message.
 const prWatchRuntime = createPrWatchRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   broadcastUiEvent: broadcastOpenChamberUiEvent,
   dataDir: OPENCHAMBER_DATA_DIR,
   readCleanupOnMerge: async () => (await readSettingsFromDiskMigrated())?.mergedWorktreeCleanupEnabled === true,
-  // Declared further down; only ever called after startup.
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 prWatchRuntime.start(globalMessageStreamHub);
-// Waits extensions offer agents (`contributes.waits`): checked on their
-// services, woken with one message; the catalog decides who may wake whom.
 const extensionWaitsRuntime = createExtensionWaitsRuntime({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   proxyServiceRequest: proxyGuestServiceRequest,
@@ -1451,19 +1308,15 @@ const extensionWaitsRuntime = createExtensionWaitsRuntime({
   getOpenCodeAuthHeaders,
   dataDir: OPENCHAMBER_DATA_DIR,
   broadcastUiEvent: broadcastOpenChamberUiEvent,
-  // Declared further down; only ever called after startup.
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 extensionWaitsRuntime.start(globalMessageStreamHub);
-// Pages an agent showed with answerLater: open until the user answers, the
-// answer delivered to the session as a message.
 const laterPagesRuntime = createLaterPages({
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   broadcastUiEvent: broadcastOpenChamberUiEvent,
-  // Declared further down; only ever called after startup.
   readArchiveState: (sessionID, options) => openChamberSessionService.sessionArchive.archiveState(sessionID, options),
 });
 laterPagesRuntime.start(globalMessageStreamHub);
@@ -1472,14 +1325,11 @@ const mergeFollowRuntime = createMergeFollowRuntime({
   notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
 });
 
-// Agent workflows: scripts that fan a task out to many agents, run here while
-// the agent that asked stays free. Off until the user turns the tool on.
 const readWorkflowSettings = () => readSettingsFromDiskMigrated().catch(() => null);
 const isWorkflowToolEnabled = async () => (await readWorkflowSettings())?.agentWorkflowToolEnabled === true;
 const workflowAgentSessions = createWorkflowAgentSessions({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  // Declared further down; only ever called after startup.
   waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
   globalEventHub: globalMessageStreamHub,
 });
@@ -1487,7 +1337,6 @@ const workflowRuntime = createWorkflowRuntime({
   store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR, lighten: lightenWorkflowRun }),
   agentSessions: workflowAgentSessions,
   postSynthetic: workflowAgentSessions.postSynthetic,
-  // Declared further down; only ever called after startup.
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
   isEnabled: isWorkflowToolEnabled,
   startsWithoutApproval: async () => (await readWorkflowSettings())?.agentWorkflowAutoApprove === true,
@@ -1497,8 +1346,6 @@ const workflowRuntime = createWorkflowRuntime({
 void workflowRuntime.start().catch((error) => {
   console.warn('[workflows] failed to restore runs:', error?.message ?? error);
 });
-// Pages an agent shares with other people through the relay; their answers
-// come back into the session that shared them (lib/share-pages).
 const sharePagesRuntime = createSharePagesRuntime({
   crypto,
   store: createSharePageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
@@ -1513,7 +1360,6 @@ const sharePagesRuntime = createSharePagesRuntime({
 void sharePagesRuntime.start().catch((error) => {
   console.warn('[share-pages] failed to start:', error?.message ?? error);
 });
-// Pages other people shared, opened here with their link and PIN.
 const receivedPagesRuntime = createReceivedPagesRuntime({
   crypto,
   store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
@@ -1523,16 +1369,12 @@ const receivedPagesRuntime = createReceivedPagesRuntime({
   allowedBases: async () => allowedReceiveBases(await readSettingsFromDiskMigrated().catch(() => null)),
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
 });
-// Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type !== 'connect') return;
   void workflowRuntime.deliverPending();
   void sharePagesRuntime.poll();
 });
 
-// Full-text search over this server's conversations (user messages and agent
-// replies). Opt-in: off by default, and off means idle. The index is derived
-// data in the data dir, fed from the same event stream; see lib/message-search.
 const messageSearchRuntime = createMessageSearchRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
@@ -1546,15 +1388,11 @@ const messageSearchRuntime = createMessageSearchRuntime({
   },
 });
 
-// The agent's todo list per session, from OpenCode's experimental `todowrite`
-// tool. Idle while the tool is off; see lib/session-todos.
 const sessionTodosRuntime = createSessionTodosRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   globalEventHub: globalMessageStreamHub,
-  // Declared further down; only ever called after startup. An external
-  // OpenCode's environment is unknown, so only its config counts there.
   getFlagOverrides: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv()?.OPENCODE_FLAGS,
   isSpaceDirectory,
   broadcast: (event) => broadcastOpenChamberUiEvent(event),
@@ -1585,8 +1423,6 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
-  // Turns already running when the stream (re)connects sent no start this
-  // server saw; OpenCode's running list names them.
   onConnect: async () => {
     void chatDirectoryCleanupRuntime.onConnected();
     const readAt = Date.now();
@@ -1595,10 +1431,6 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   },
 });
 
-// A folder is checked once each time OpenCode opens it: the trust answer
-// holds until OpenCode reports the folder closed. While the stream is down
-// closings go unreported, so answers fall back to a short life, and a new
-// connection starts them over.
 globalMessageStreamHub.subscribeEvent((event) => {
   if (event?.payload?.type !== 'location.shutdown') return;
   const directory = event.payload.location?.directory ?? event.directory;
@@ -1607,10 +1439,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
 globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type === 'connect') {
     openCodeTrust.followLocations(true);
-    // A goal whose idle event fell while the stream was down has no timer.
     void sessionGoalRuntime.recoverActiveGoals();
-    // Hidden sessions that already exist (a pass that outlived its server, a
-    // plugin's) are learned before their next event can reach a client.
     void hiddenSessions.seed(async (cursor) => {
       const query = cursor ? `?limit=200&cursor=${encodeURIComponent(cursor)}` : '?limit=200';
       const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), { headers: getOpenCodeAuthHeaders() });
@@ -1619,23 +1448,16 @@ globalMessageStreamHub.subscribeStatus((status) => {
   } else if (status?.type === 'disconnect' || status?.type === 'error') openCodeTrust.followLocations(false);
 });
 
-// Session-assist subscribes to the hub directly: it needs the envelope's
-// directory to route its own OpenCode calls to the right instance.
 console.log('[session-assist] listening for session events');
 globalMessageStreamHub.subscribeEvent((event) => {
   const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
     ? event.directory
     : '';
-  // The hub translates v2 wire events into the server's vocabulary once; these
-  // consumers were written against it and stay unaware of the wire shape.
   for (const payload of event?.translated?.() ?? []) {
-    // The user cancelled the turn: stop the OpenChamber tool actions that
-    // turn still has running (a browser action, a memory write). OpenCode 2
-    // gives the plugin no abort signal, so this is where the cancel lands.
+    // external: https://github.com/anomalyco/opencode OpenCode 2 supplies no plugin abort signal; turn cancellation stops pending OpenChamber actions here.
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
     }
-    // The turn ended, so nobody here waits on a page of this session any more.
     if (payload.type === 'session.idle' || payload.type === 'session.error') {
       openChamberControlService.releaseAnswerWaits(payload.properties?.sessionID);
     }
@@ -1651,11 +1473,6 @@ globalMessageStreamHub.subscribeEvent((event) => {
   }
 });
 
-/**
- * Browser bridges hand us the raw v2 wire payload (they forward it untouched to
- * the client). The synthetic OpenChamber frames the UI also expects are derived
- * from the translated event, so the translation happens here.
- */
 const processForwardedEventPayload = (payload, emitSyntheticEvent, { spaceId = null } = {}) => {
   if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
     return;
@@ -1692,8 +1509,6 @@ const processForwardedServerEvent = (payload, emitSyntheticEvent, spaceId = null
       sessionID: sessionId,
       status,
       timestamp: Date.now(),
-      // The event that starts a turn carries its own start; it may reach this
-      // bridge before the session runtime has recorded it.
       turnStartedAt: running ? (properties.turnStartedAt ?? sessionRuntime.getRunningTurnStart(sessionId) ?? undefined) : undefined,
       metadata: {
         attempt: typeof statusInfo.attempt === 'number'
@@ -1730,20 +1545,14 @@ const mcpOAuthSignIn = createMcpOAuthSignIn({
 });
 
 const serverUtilsRuntime = createServerUtilsRuntime({
-  // Read lazily: the archive store is created with the session service further
-  // down, while the proxy is registered later still.
   getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
   getUnreadBaseline: () => unreadBaseline.get(),
   getStoredSessionMetadata: () => sessionMetadataStore.listUnmigrated(),
-  // Isolated spaces: with the switch on, the session list carries every space's sessions and
-  // the global SSE stream their events. Called, not captured: the host is made in `main`.
   getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
   getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
   hiddenSessions,
   openCodeTrust,
   mcpOAuthSignIn,
-  // The checkout gate loads a folder's saved setup state on its first request,
-  // so a worktree that failed before a restart stays closed from the start.
   readWorktreeBootstrapStatus: (directory) => getWorktreeBootstrapGateStatus(directory, { bootstrapStore: worktreeBootstrapStore }),
   fs,
   os,
@@ -1791,8 +1600,6 @@ const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(
 const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
 const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
 
-// Variables from Settings for the processes OpenChamber starts: the managed
-// OpenCode, Git, the terminal and command execution (lib/environment).
 const environmentStore = createEnvironmentStore({
   filePath: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'environment.json'),
 });
@@ -1804,8 +1611,6 @@ const environmentRuntime = createEnvironmentRuntime({
   store: environmentStore,
   listProjects: listConfiguredProjects,
   spawn,
-  // The terminal's PATH: a packaged server starts with a minimal one, where
-  // direnv, devenv or nix would not be found.
   commandBaseEnv: () => ({ ...process.env, PATH: buildAugmentedPath() }),
   readOpenCodeServiceEnv: () => readOpenCodeServiceEnv(OPENCODE_CONFIG_DIR),
   isEnterpriseMode: () => isEnterpriseMode(),
@@ -1824,7 +1629,6 @@ const staticRoutesRuntime = createStaticRoutesRuntime({
   readSettingsFromDiskMigrated,
   normalizePwaAppName,
   normalizePwaOrientation,
-  // uiAuthController is created at startup, after this runtime: read it per request.
   isRequestAuthorized: (req, res) => isRequestAuthorized(req, res, { tunnelAuthController, uiAuthController }),
 });
 const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
@@ -1850,8 +1654,6 @@ const featureRoutesRuntime = createFeatureRoutesRuntime({
   trackerSessionStatus,
   pluginSwitchStore,
   isPluginSwitchAvailable: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
-  // Declared below. A user who sets OPENCODE_CONFIG owns that file, so the
-  // managed runtime answers `updated: false` and the switch needs a restart.
   refreshPluginSwitches: async () => (
     managedConfigRuntime
       ? managedConfigRuntime.refreshManagedConfigFile()
@@ -1964,10 +1766,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
-  // Most-recently-used directories first: OpenCode initializes each directory
-  // lazily on first request (seconds on large session stores), so the
-  // lifecycle warms these right after readiness — before the UI's first
-  // interactive request would otherwise pay that cost.
   getWarmupDirectories: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (!settings) return [];
@@ -1982,10 +1780,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
         directories.push(project.path);
       }
     }
-    // A deleted project would fail every read scoped to it, and the first entry
-    // also scopes server-side reads that have no directory of their own.
-    // Warming a folder runs its OpenCode plugins, so only trusted ones warm;
-    // the rest wait for the user to open them.
     const existing = await Promise.all([...new Set(directories)].map(async (directory) => (
       (await fs.promises.stat(directory).catch(() => null))?.isDirectory()
         && await openCodeTrust.isTrusted(directory).catch(() => false)
@@ -1995,15 +1789,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     return existing.filter(Boolean);
   },
   noProjectDirectory: OPENCHAMBER_CHATS_DIR,
-  // A managed restart can move OpenCode to a NEW port (the old one may stay
-  // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
-  // on any platform). Rebind the message-stream upstream readers to the current port
-  // so the UI keeps receiving events instead of staying pinned to the old
-  // process (#2638). The runtime is created later by the startup pipeline;
-  // by the time any restart runs, it is assigned.
+  // external: #2638 A managed restart can change the upstream port, so event readers reconnect to the current endpoint.
   onOpenCodeRestarted: () => {
-    // A restart reloads plugins: provider ports, credentials and the provider
-    // list itself can all differ from what was cached.
     resetOpenCodeRuntimeProviders();
     try {
       messageStreamRuntime?.rebindUpstream();
@@ -2022,16 +1809,12 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
 });
 
-// Quota lookups, voice keys and routing read provider credentials from the
-// running OpenCode (`GET /api/credential`), plus the values of the variables a
-// managed OpenCode takes keys from, read from the environment it was given.
 configureOpenCodeCredentials(openCodeCredentialSource({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getLaunchEnvironment: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
   getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
 }));
-// A new worktree runs the start command OpenCode keeps on the project record.
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
 const getOpenCodeCompatibility = async () => {
@@ -2043,7 +1826,6 @@ const getOpenCodeCompatibility = async () => {
   const binary = ensureOpencodeCliEnv();
   const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
   const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
-  // A CLI pinned by the administrator is theirs to replace, never ours.
   const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
   return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
 };
@@ -2068,7 +1850,6 @@ const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.r
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
-// Git routes fill this bridge after the scheduler is created.
 const scheduledWorktreeBridge = createUnregisteredScheduledWorktreeBridge();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
@@ -2143,10 +1924,6 @@ const emitSessionCreatedEvent = (event) => {
     }
   }
 };
-/**
- * Maps a session directory onto the project whose memory it belongs to, so a
- * session running in a worktree writes to the project the panel shows.
- */
 const resolveMemoryProjectId = createMemoryProjectResolver({
   listProjectPaths: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -2156,16 +1933,10 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
   managedProjectRoots: [...new Set([path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR])],
 });
 
-/**
- * Tells open panels that the service changed what it remembers, so what it just
- * stored is visible without reopening anything.
- */
 const emitAgentMemoryChangedEvent = (event) => {
   for (const client of uiOpenChamberEventClients) {
     try {
       writeSseEvent(client, {
-        // The UI listens for exactly this name (`lib/openchamberEvents.ts`);
-        // under any other name the Memory panel only catches up on reload.
         type: 'openchamber:agent-memory-changed',
         properties: {
           scope: event.scope,
@@ -2178,8 +1949,6 @@ const emitAgentMemoryChangedEvent = (event) => {
   }
 };
 
-// Dreaming: the agent memory tidies itself in a hidden session, once a day when
-// there is something to tidy and nothing else runs (`lib/agent-memory/dreaming.js`).
 const memoryDreaming = createMemoryDreaming({
   agentMemoryRuntime,
   readSettings: () => readSettingsFromDiskMigrated(),
@@ -2193,9 +1962,6 @@ const memoryDreaming = createMemoryDreaming({
   resolveSessionDefaults,
   isAutoModel,
 });
-// The catalog a scheduled run resolves its model against, read through the
-// same client the rest of the server uses. Every writer that stores a model
-// goes through the service, so one reader keeps one rule.
 const readModelCatalog = createModelCatalogReader({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -2227,7 +1993,6 @@ const openChamberSessionService = createOpenChamberSessionService({
   worktreeBootstrapStore,
   hydrateWorktreeCheckout: featureRoutesRuntime.hydrateBoundCheckout,
   createChangeRequestWorktree: featureRoutesRuntime.createChangeRequestWorktree,
-  // Holds the archive file (`session-archive.js`) beside the instance it describes.
   dataDir: OPENCHAMBER_DATA_DIR,
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
@@ -2237,15 +2002,9 @@ const openChamberSessionService = createOpenChamberSessionService({
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
   readProjectSetup: (projectID) => projectConfigRuntime.readProjectSetup(projectID),
 });
-// Browser actions are published to whichever OpenChamber clients are connected;
-// the one owning the browser panel answers. `emitRequest` returns the number of
-// clients reached so the broker can fail fast when nobody is listening.
 const browserControlBroker = createBrowserControlBroker({
   createId: () => `browser-${crypto.randomUUID()}`,
   emitRequest: (request) => {
-    // Opening a page only needs a panel to open it in; everything else needs a
-    // client that can actually drive one. Counting the right clients is what
-    // lets the broker say "not here" instead of timing out.
     const needsBrowserView = request.action !== 'browser.open';
     let delivered = 0;
     for (const client of uiOpenChamberEventClients) {
@@ -2269,10 +2028,6 @@ const browserControlBroker = createBrowserControlBroker({
   },
 });
 
-/**
- * Tells every client the selected browser provider was dropped back to the
- * in-app browser, so Settings shows the change and the user hears why.
- */
 const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
   for (const client of uiOpenChamberEventClients) {
     try {
@@ -2285,8 +2040,6 @@ const emitBrowserProviderResetEvent = ({ guestId, guestName }) => {
     }
   }
 };
-// Every browser action passes through here: the in-app view by default, or an
-// extension service chosen in Settings → OpenChamber Tools.
 const browserControlRouter = createBrowserControlRouter({
   broker: browserControlBroker,
   readSettings: () => readSettingsFromDiskMigrated(),
@@ -2301,9 +2054,6 @@ const browserControlRouter = createBrowserControlRouter({
   },
 });
 
-// "Show this file" reaches every connected client; the ones showing that
-// project open it. Nothing comes back, so the count of clients reached is the
-// only signal the agent gets.
 const fileOpenRequester = createFileOpenRequester({
   emit: (request) => {
     let delivered = 0;
@@ -2325,8 +2075,6 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
   broadcastUiNotification,
 });
 
-// Secrets the user saved for an agent (secret.request). Each file is deleted
-// 24 hours after it was written: on start, and hourly while the server runs.
 const secretFiles = createSecretFiles({ directory: path.join(OPENCHAMBER_DATA_DIR, 'secrets') });
 void secretFiles.sweep();
 setInterval(() => { void secretFiles.sweep(); }, 60 * 60 * 1000).unref();
@@ -2339,7 +2087,6 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
   }) : null;
 
 const announceGuestMarksChanged = () => broadcastOpenChamberUiEvent({ type: 'openchamber:guest-marks-changed', properties: {} });
-// A mark lives as long as the process that set it.
 onGuestServiceEnded((guestId) => {
   if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
 });
@@ -2394,13 +2141,7 @@ const openChamberControlService = createOpenChamberControlService({
   browserUploads: browserUploadStore,
   fileOpen: fileOpenRequester,
   projectContextRuntime,
-  // The resolver session knowledge reads pinned notes and plans through, so
-  // what an agent writes is what the next session is given.
   resolveProjectContextId: resolveMemoryProjectId,
-  // On by default; a plugin generated before it was switched off must not
-  // keep writing.
-  // Like file.open: every connected window hears it, the ones showing that
-  // project open the plan.
   showPlan: (request) => {
     let delivered = 0;
     for (const client of uiOpenChamberEventClients) {
@@ -2417,7 +2158,6 @@ const openChamberControlService = createOpenChamberControlService({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentKnowledgeToolEnabled !== false;
   },
-  // On by default, like knowledge.
   isRenderToolEnabled: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentRenderToolEnabled !== false;
@@ -2427,9 +2167,6 @@ const openChamberControlService = createOpenChamberControlService({
     return settings?.agentSecretToolEnabled !== false;
   },
   secretFiles,
-  // A page that waits for the user's answer shows the session as waiting
-  // the way a form does: the pending list the clients seed from, a live event
-  // for the clients already connected, and the "Input needed" notification.
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
     if (change.type === 'waiting') {
@@ -2439,7 +2176,6 @@ const openChamberControlService = createOpenChamberControlService({
       };
       broadcastOpenChamberUiEvent(payload);
       void maybeSendPushForTrigger(payload);
-      // Server-made, so it never passes through the hub loop: told here.
       extensionSessionEvents.processPayload(payload, change.directory);
       return;
     }
@@ -2451,8 +2187,6 @@ const openChamberControlService = createOpenChamberControlService({
     void maybeSendPushForTrigger(settled);
     extensionSessionEvents.processPayload(settled, change.directory);
   },
-  // The tool is off by default; a plugin generated before it was switched off
-  // must not keep paging the user.
   notifyUser: async (input) => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (settings?.agentNotifyToolEnabled !== true) {
@@ -2482,16 +2216,11 @@ const openChamberControlService = createOpenChamberControlService({
   dispatchResults: dispatchResultsRuntime,
   prWatch: prWatchRuntime,
   extensionWaits: extensionWaitsRuntime,
-  // Refused inside an isolated space (503), as waits and pr.watch are: the host's chat cannot answer there.
   laterPages: process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE ? null : laterPagesRuntime,
   workflowRuntime,
   sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
-  // The module the quota routes load, loaded on the first read: the same
-  // instance, extension providers included.
   loadQuota: () => import('./lib/quota/index.js'),
-  // The terminal runtime is created later in startup, so the read takes it
-  // when it is asked for rather than capturing null now.
   getTerminalRuntime: () => terminalRuntime,
 });
 
@@ -2509,7 +2238,6 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
-  // These steps need a running OpenCode; a retry runs them once it starts.
   if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
   finishOpenCodeBootstrap();
 };
@@ -2518,19 +2246,12 @@ const finishOpenCodeBootstrap = () => {
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
-  // The global watcher used to start only for desktop notifications; the
-  // session-assist runtime also rides its event hub, so it now starts
-  // unconditionally once OpenCode is up.
   void ensureGlobalWatcherStarted().catch((error) => {
     console.warn(`Global event watcher startup failed: ${error?.message || error}`);
   });
-  // Entries the sweep cannot push now stay in the legacy file and are pushed on
-  // the session's next write or the next start.
   void waitForOpenCodeReady()
     .then(() => sessionMetadataStore.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
-  // Archive state OpenChamber kept before OpenCode held it moves to OpenCode in
-  // one pass (`session-archive.js`).
   void waitForOpenCodeReady()
     .then(() => openChamberSessionService.sessionArchive.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session archive migration failed:', error?.message ?? error));
@@ -2614,8 +2335,6 @@ const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(.
 
 async function main(options = {}) {
   beginGuestServiceHost({ registryDir: guestServiceRegistryDir(OPENCHAMBER_DATA_DIR) });
-  // Again at start: the desktop shell merges the login shell's environment,
-  // where proxy variables often live, after this module first loaded.
   applyOutboundProxyFromEnv();
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
@@ -2631,13 +2350,11 @@ async function main(options = {}) {
     instanceDir,
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
-    // A v2 tool call carries no directory, only the session it runs in.
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
     getActivePort: () => {
       const address = server?.address?.();
       return typeof address === 'object' && address ? address.port : null;
     },
-    // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
   });
   limitFailoverRuntime = createLimitFailoverRuntime({
@@ -2661,8 +2378,6 @@ async function main(options = {}) {
     openchamberVersion: OPENCHAMBER_VERSION,
     readPluginDenials: () => pluginSwitchStore.denials(),
   });
-  // A policy that changes while the app runs: the managed file lists what the
-  // catalog now refuses until it is rewritten, and every card re-reads the catalog.
   stopEnterprisePolicyWatch = watchEnterprisePolicy({
     onChange: () => {
       managedConfigRuntime.refreshManagedConfigFile().catch((error) => {
@@ -2673,13 +2388,6 @@ async function main(options = {}) {
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
-  // Pairing transports advertised to the create-device dialog. LAN reachability is
-  // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
-  // a specific non-loopback host → that host), NOT from how the UI was opened — so
-  // "Local network" works even when the UI is opened on localhost, and is absent
-  // when the server is only bound to loopback (a LAN link would not connect).
-  // The IPv4 the requesting client actually reached this server on (if any).
-  // Strips the IPv6-mapped prefix; loopback means "not a LAN path".
   const requestReachedLanAddress = (req) => {
     const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
     const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
@@ -2696,12 +2404,6 @@ async function main(options = {}) {
     }
     let lanHost = null;
     if (isNetworkExposedBindHost(effectiveBindHost)) {
-      // Prefer the address the client is ALREADY talking to us on — it is the
-      // one interface guaranteed to be routable from that client's network.
-      // Interface scanning is only a fallback: on servers with virtual bridges
-      // (docker0 etc.) the first non-internal IPv4 can be an address no other
-      // machine can reach, which produced pairing links whose LAN candidate
-      // silently failed and forced devices onto the relay.
       lanHost = requestReachedLanAddress(req);
       try {
         if (!lanHost) {
@@ -2722,12 +2424,6 @@ async function main(options = {}) {
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
     return { local, lan, relayAvailable: !relayBlockedByEnterprise() };
   };
-  // ALL direct LAN URLs this server is currently reachable on, for the
-  // candidates-refresh endpoint: the address the requesting client already
-  // reached us on first (guaranteed routable from its network — over the relay
-  // tunnel this is loopback and yields nothing), then every non-internal IPv4
-  // interface. A client that paired while the machine had a different DHCP
-  // lease uses this to replace its stale LAN candidate.
   const resolveDirectLanUrls = (req) => {
     if (advertisedLanUrl) return [advertisedLanUrl];
     const activePort = tunnelRuntimeContext.getActivePort() || port;
@@ -2764,9 +2460,6 @@ async function main(options = {}) {
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
   }
-  // Enterprise mode keeps the server on this machine unless the administrator
-  // allowed network access. The server is a package anyone can install, so
-  // this holds for the CLI and --host as much as for the desktop toggle.
   if (isNetworkExposedBindHost(effectiveBindHost) && isNetworkAccessBlocked()) {
     throw new Error(NETWORK_ACCESS_BLOCKED_ERROR);
   }
@@ -2818,13 +2511,8 @@ async function main(options = {}) {
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
-  // Voice enumeration is independent from route registration. Start it now,
-  // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
   const sayTTSCapability = detectSayTtsCapability(process);
 
-  // The chats of deleted spaces, imported into the host's OpenCode and kept read-only there
-  // (decision 9). It reads a folder of the data directory and runs nothing else, so it
-  // exists with the switch on or off: an archived chat must stay read-only either way.
   const hostOpenCodeClient = () => createOpenCodeClient({
     baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
     headers: getOpenCodeAuthHeaders(),
@@ -2837,21 +2525,14 @@ async function main(options = {}) {
     },
   });
 
-  // The isolated-spaces switch, read here at start and changed live through its route below.
-  // While it is off the feature has no place, no manager, no route and runs no `docker`.
   const buildSpacesHost = async () => createSpacesHost({
     dataDir: OPENCHAMBER_DATA_DIR,
     dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
-    // The machine of the Docker over SSH place, when the settings name one.
     sshDockerHost: dockerHostOf((await readSettingsFromDiskMigrated().catch(() => null))?.isolatedSpacesSshHost),
-    // Only for a clean-up of the spaces' disk on Colima, to give the freed space back; null without it.
     colimaPath: searchPathFor('colima', buildAugmentedPath()),
-    // For getting Docker ready on this computer: brew, colima, asked again at every look.
     findProgram: (name) => searchPathFor(name, buildAugmentedPath()) ?? null,
     gitPath: searchPathFor('git', buildAugmentedPath()) ?? 'git',
-    // git starts `docker exec` itself when code moves in or out, so its PATH must find docker.
     hostEnvironment: { ...process.env, PATH: buildAugmentedPath() },
-    // So the session list can say which registered project each space was made for.
     listProjectDirectories: async () => {
       const settings = await readSettingsFromDiskMigrated();
       return sanitizeProjects(settings?.projects || []).map((project) => project.path);
@@ -2860,7 +2541,6 @@ async function main(options = {}) {
     saveIdleStop: (setting) => persistSettings({ isolatedSpacesIdleStop: setting }),
     readPermissionDefault: async () => permissionDefaultOf((await readSettingsFromDiskMigrated())?.permissionDefaultMode),
     archive: spaceArchive,
-    // What the host says to the login issuer when it renews a browser login for a space.
     userAgent: `OpenChamber/${OPENCHAMBER_VERSION}`,
   });
   const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -2868,7 +2548,6 @@ async function main(options = {}) {
     try {
       spacesHost = await buildSpacesHost();
     } catch (error) {
-      // The feature is absent then, and the rest of the server starts as with the switch off.
       console.error(`[spaces] isolated spaces are unavailable this start: ${error?.code ?? ''} ${error?.message ?? error}`.trim());
       spacesHost = null;
     }
@@ -2883,28 +2562,13 @@ async function main(options = {}) {
     'https://localhost',
   ]);
   const allowLocalDevOrigins = allowsLocalDevOrigins(process.env);
-  // Keeps other sites from framing the app (clickjacking). Routes that serve
-  // untrusted documents set a Content-Security-Policy of their own, which
-  // replaces this one.
   const frameAncestorsPolicy = buildFrameAncestorsPolicy({
     allowLocalDevOrigins,
     extra: process.env.OPENCHAMBER_FRAME_ANCESTORS,
   });
-  // Forwarded headers are believed only from a proxy on this machine or a
-  // private network (cloudflared, Docker, a LAN reverse proxy). From anyone
-  // else they are the client's own words, and the login rate limit keys on
-  // req.ip, so a client must not be able to name its own address.
   app.set('trust proxy', 'loopback, linklocal, uniquelocal');
-  // Keep self-hosted instances out of search engines. The app shell is served
-  // publicly (it loads before prompting for the UI password), so without this
-  // even a password-protected instance gets crawled and indexed. Applies to
-  // every response; the robots.txt route makes the intent explicit for crawlers.
   app.use((req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-    // The preview proxy relays a dev server's own pages, whose types and
-    // referrer behaviour are that app's business. Everything else is ours:
-    // served with real types, and its address (a tunnel host, short-lived
-    // auth tokens, session ids) never follows a link out as a Referer.
     if (!req.path.startsWith('/api/preview/proxy/')) {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'same-origin');
@@ -2921,14 +2585,9 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      // The packaged desktop UI (openchamber-ui://) and the dev UI sit on a
-      // different origin, so every custom request header must be listed here or
-      // the browser refuses the request at preflight, before it reaches a route.
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
-      // Without it the browser sends a preflight before every request: in the
-      // packaged app that was 45% of all requests while idle. Chromium caps
-      // the cache at two hours.
+      // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
       res.setHeader('Access-Control-Max-Age', '7200');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -2947,22 +2606,14 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
-  // A reverse proxy keeps idle upstream sockets pooled for 60-120 s (nginx,
-  // load balancers, cloudflared, Caddy). The runtime default closes them after
-  // 5 s, so a proxy that reuses one just as it closes answers 502. Outlive the
-  // proxy's pool instead; headersTimeout must stay above keepAliveTimeout.
   server.keepAliveTimeout = 125_000;
   server.headersTimeout = 126_000;
   gracefulShutdownRuntime.trackServerConnections(server);
-  // A policy placed while the server runs cannot rebind it, so connections
-  // from other machines are dropped until the next start binds loopback.
   if (isNetworkExposedBindHost(effectiveBindHost)) {
     server.on('connection', (socket) => {
       if (!isLoopbackBindHost(socket.remoteAddress ?? '') && isNetworkAccessBlocked()) socket.destroy();
     });
   }
-  // Same pattern for the tunnel runtime: created after the base routes so
-  // /api/system/info resolves port + tunnel URL lazily at request time.
   let tunnelRuntimeContextHolder = null;
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
@@ -3004,9 +2655,6 @@ async function main(options = {}) {
         apiOnly,
       };
     },
-    // Port this instance serves on and the active tunnel's public URL (if
-    // any), for /api/system/info. Resolved lazily because the tunnel runtime
-    // is created after these base routes are registered.
     getServerPort: () => {
       const activePort = tunnelRuntimeContextHolder?.getActivePort?.();
       if (Number.isFinite(activePort) && activePort > 0) return activePort;
@@ -3020,24 +2668,15 @@ async function main(options = {}) {
     clientPairingRuntime,
     getRelayPairingCandidate: (options) => {
       if (!relayServiceInstance) return null;
-      // A relay pairing link enables the relay on demand; a plain link only
-      // advertises relay when it is already on.
       return options?.ensureEnabled
         ? relayServiceInstance.ensureEnabledForPairing()
         : relayServiceInstance.getPairingCandidate();
     },
-    // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
-    // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
     removeClientPushDevices: clientPushAccess.removeDevicesOfClients,
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
-    // Stable server identity for client-side verification of learned addresses.
-    // Lazily resolved: the relay service is constructed after these routes.
     getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
-    // The display name a paired device shows for THIS server. Devices name the
-    // connection by the issuing machine's hostname, not the per-device pairing
-    // label typed by the operator.
     getServerLabel: () => {
       try {
         const name = os.hostname();
@@ -3085,19 +2724,11 @@ async function main(options = {}) {
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
-  // After the API auth gate, before every route that reads a directory, before the OpenCode proxy.
-  // The slot is mounted once and reads the host at call time, so the switch can turn the feature
-  // on and off live: with no host it passes every request on and no upgrade is taken.
-  // An archived chat of a deleted space is read and deleted, never run or changed.
   app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
-  // First of all upgrade handlers: a socket addressed to a space by its directory carries a path
-  // a host handler would take too, and the space's handler marks it as the space's before they run.
   server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
   const startSpacesHost = (host) => {
     host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
-    // Every space's events join the host's hub, and the host asks each space for its live status;
-    // each space's queue changes and permission modes reach the browsers on the streams the host's own use.
     void host.startEvents(globalMessageStreamHub, { broadcastUiEvent: broadcastOpenChamberUiEvent, broadcastGlobalUiEvent: broadcastPermissionUiEvent }).catch((error) => {
       console.warn(`[spaces] could not follow the spaces: ${error?.message ?? error}`);
     });
@@ -3136,9 +2767,6 @@ async function main(options = {}) {
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
   tunnelRuntimeContextHolder = tunnelRuntimeContext;
 
-  // Private relay host service: config + management routes + host client
-  // lifecycle. Loopback port comes from the same source the tunnel uses so
-  // relay-tunneled requests hit the local Express app on 127.0.0.1.
   const relayService = createRelayService({
     crypto,
     os,
@@ -3147,33 +2775,17 @@ async function main(options = {}) {
     relayKeyStore,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
-    // One relay host per machine: every instance sharing this data dir shares
-    // the relay identity (serverId), so concurrent hosts evict each other at
-    // the relay worker and devices land on a random local instance.
     hostLock: createRelayHostLock({
       lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
       fs,
       process,
     }),
-    // Dev/debug instances share the data dir (and thus the relay identity) with
-    // the production instance, so they must not host the relay on their own —
-    // paired devices would land on them. OPENCHAMBER_RELAY_HOST=off disables
-    // passive hosting explicitly (dev scripts set it); the Electron dev shell is
-    // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
-    // both. Explicit enable/pairing on the instance still hosts regardless.
-    // The relay nudges this host when one of its shared pages changed.
     onShareState: (shareId) => {
       void sharePagesRuntime.handleShareState(shareId).catch(() => undefined);
     },
     allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
       || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
-    // Relay demand = any paired device or pending pairing session that uses the
-    // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {
-      // A store read failure must NOT masquerade as "no demand": reconcile
-      // persists enabled=false and severs paired devices. Any affirmative
-      // answer wins; otherwise a failed check aborts reconcile (throw) so the
-      // relay keeps its current state until a trustworthy read succeeds.
       const [pendingRelay, deviceRelay] = await Promise.allSettled([
         clientPairingRuntime.hasActiveRelaySession(),
         remoteClientAuthRuntime.hasActiveRelayClients(),
@@ -3193,8 +2805,6 @@ async function main(options = {}) {
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
   registerUploadRoute(app, { store: browserUploadStore });
 
-  // One scanner backs both discovery and the tunnel allowlist, so a port the
-  // user can see is exactly a port the tunnel will dial.
   const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
   const listDevServers = () => devServerScanner.discover({
     ownPorts: [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
@@ -3258,7 +2868,6 @@ async function main(options = {}) {
       ]);
     },
     onExtensionWaitsChanged: () => extensionWaitsRuntime.reconcile(),
-    // Lifecycle state that exists before OpenCode is up: the mode is the server's environment, not a probe.
     getOpenCodePluginDelivery: () => openCodePluginDelivery({
       external: isExternalOpenCode || ENV_SKIP_OPENCODE_START,
       origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null,
@@ -3295,9 +2904,7 @@ async function main(options = {}) {
         env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
         cwd: os.homedir(),
       });
-      // Windows cannot replace an executable that is running. npm then leaves
-      // the package without opencode.exe, and the next start fails. The server
-      // stops for the install and comes back on the new version.
+      // external: https://learn.microsoft.com/en-us/windows/win32/fileio/creating-and-opening-files Windows cannot replace the running executable; the managed process stops during installation.
       if (process.platform !== 'win32') return upgrade();
       return restartOpenCode('opencode-upgrade', { whileStopped: upgrade });
     },
@@ -3312,14 +2919,11 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
-    // Dev-server discovery must not offer OpenChamber's own listeners back to
-    // the user as something to preview.
     getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
     getActivePort: () => {
       const address = server?.address?.();
       return address && Number.isInteger(address.port) ? address.port : null;
     },
-    // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
     devServerScanner,
     buildAugmentedPath,
@@ -3348,10 +2952,8 @@ async function main(options = {}) {
     mergeFollowRuntime,
     workflowRuntime,
   });
-  // Keeps and schedules the services the catalog asks for, after the routes their calls land on.
   void extensionServiceLifetime.reconcile();
 
-  // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = createGuestSurfaceRuntime({
     server,
     uiAuthController,
@@ -3388,9 +2990,6 @@ async function main(options = {}) {
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
-    // Git's credential helper reaches the server through a file that names
-    // the port, so it is written once the port is known and before OpenCode,
-    // whose shells will use it, starts.
     onListenerReady: async () => {
       try { await featureRoutesRuntime.publishRepositoryCredentialEndpoint(); }
       catch (error) { console.warn('Git credential helper endpoint was not published:', error instanceof Error ? error.message : String(error)); }
@@ -3432,23 +3031,13 @@ async function main(options = {}) {
   }
   memoryDreaming.start();
 
-  // Only opens a relay control socket when the user opted in (config enabled).
-  // Reconcile the relay lifecycle from demand on startup: run it if any relay
-  // device/session exists, stop it (and clear a stale enabled flag) otherwise.
   void relayService.reconcile();
 
-  // Relay demand can change outside our routes: `openchamber connect-url
-  // --relay` writes a pending relay session straight to the on-disk store, and
-  // pending sessions expire without any request hitting us. Poll reconcile so a
-  // headless instance picks the relay up (or drops it) within a minute.
   relayReconcileTimer = setInterval(() => {
     void relayService.reconcile();
   }, 60_000);
   relayReconcileTimer.unref?.();
 
-  // The server inside an isolated space stops itself after the user's idle hours, and the space's
-  // container with it (decision 11). Only a space's environment names the setting's
-  // file, so this never runs anywhere else. The exit code tells the host why it stopped.
   const spaceIdleStopFile = process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE;
   if (spaceIdleStopFile) {
     startIdleStop({
@@ -3479,12 +3068,6 @@ async function main(options = {}) {
     restartOpenCode: () => restartOpenCode(),
     getOpenCodeProcessInfo: () => {
       const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
-      // Only ever expose pid/port for a server WE manage. The Electron-side
-      // killer kills by port (lsof + kill -KILL), so returning a port we don't
-      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
-      // let a single miscomputed `managed` flag take down the user's separate
-      // server. Structurally withhold what isn't ours so the killer has no
-      // target, instead of relying on the flag check alone.
       return {
         managed,
         pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,

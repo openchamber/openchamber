@@ -95,11 +95,6 @@ const parseDefinitionDestination = (value) => {
   return match ? unescapeMarkdownDestination(match[0]) : '';
 };
 
-/**
- * v2 messages are flat records: an assistant one carries `content[]` and a user
- * one a single `text`. Both are read here, because an image link can come from
- * either side of the conversation.
- */
 const messageContent = (message) => {
   if (Array.isArray(message?.content)) return message.content;
   if (typeof message?.text === 'string') return [{ type: 'text', text: message.text }];
@@ -169,14 +164,6 @@ const markdownImageSources = (message) => {
   return sources;
 };
 
-/**
- * The HTML of a call a harness spilled into `action` as JSON text. The plugin
- * revives such a call and draws its page (`singleActionSchema` in
- * `../agent-tool/runtime.js`), and OpenCode stores the input as the model sent
- * it, so the page is read back the same way: the spilled object's own
- * `parameters` over its siblings, and a `parameters` that is not an object
- * ignored. The call's own fields win, so this is read last.
- */
 const spilledPageHtml = (input) => {
   if (!isString(input?.action) || !input.action.trim().startsWith('{')) return undefined;
   let revived;
@@ -191,20 +178,12 @@ const spilledPageHtml = (input) => {
     : revived.html;
 };
 
-/**
- * The message's openchamber_render pages, by tool call id. The page's HTML is
- * the call's input, which OpenCode stores with the message, so it authorizes
- * its paths the way assistant text does. The input is either the page itself
- * or, for a call made through the action form, its `parameters`.
- */
 const renderPages = (message) => {
   const pages = new Map();
   for (const part of messageContent(message)) {
     if (part?.type !== 'tool' || part.name !== 'openchamber_render') continue;
     const input = part.state?.input;
     const html = [input?.parameters?.html, input?.html, spilledPageHtml(input)].find(isString);
-    // A stored tool item's `id` is its call id: the chat's `callID` is this
-    // field (projectToolPart in packages/ui/src/lib/opencode/projection.ts).
     if (isString(html)) pages.set(part.id, html);
   }
   return pages;
@@ -218,12 +197,6 @@ const renderPageSources = (message) => {
   return sources;
 };
 
-/**
- * A file path the way two spellings of it compare: the chat sends the
- * destination Markdown made of it, percent-encoded and, for a Windows path, a
- * `file:` URL. Only the generated images compare this way; text and pages
- * keep their exact references.
- */
 const comparablePath = (value) => {
   let text = value;
   if (/^file:\/\//i.test(text)) {
@@ -242,20 +215,12 @@ const comparablePath = (value) => {
   return /^\/[A-Za-z]:\//.test(text) ? text.slice(1) : text;
 };
 
-// The tools whose stored result names image files the chat draws in their row,
-// with the reader of those names. `browser.capture` runs behind Code Mode, so
-// its result is usually an `execute` call's.
 const TOOL_RESULT_IMAGE_PATHS = new Map([
   ['openchamber_image', generatedImagePaths],
   ['openchamber_web', capturedScreenshotPaths],
   ['execute', capturedScreenshotPaths],
 ]);
 
-/**
- * The files the message's openchamber_image calls saved and its page
- * screenshots, named by the result each call stored, as `comparablePath`
- * spells them. The chat draws them in the call's row.
- */
 const toolResultImageSources = (message) => {
   const sources = new Set();
   for (const part of messageContent(message)) {
@@ -278,8 +243,6 @@ const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl,
   const response = await fetch(url, {
     headers: {
       accept: 'application/json',
-      // Percent-encoded to match the SDK wire format; raw non-ASCII values
-      // are rejected by OpenCode.
       'x-opencode-directory': encodeURIComponent(directory),
       ...getOpenCodeAuthHeaders(),
     },
@@ -303,8 +266,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
 
   app.post(
     '/api/openchamber/sessions/:sessionId/markdown-image-grants',
-    // A drawn page may name hundreds of local images (the page itself takes up
-    // to 200 000 characters), and the chat asks for all of them in one body.
     express.json({ limit: '256kb' }),
     async (req, res) => {
       const sessionId = asString(req.params.sessionId);
@@ -312,7 +273,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
       const sources = Array.isArray(req.body?.sources)
         ? [...new Set(req.body.sources.map(asString).filter(Boolean))]
         : [];
-      // The page the sources belong to, when the chat draws an openchamber_render page.
       const callId = asString(req.body?.callId);
       if (!sessionId || !messageId || sources.length === 0) {
         return res.status(400).json({ error: 'sessionId, messageId, and sources are required' });
@@ -330,7 +290,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           buildOpenCodeUrl,
           getOpenCodeAuthHeaders,
         });
-        // v2 messages are flat records with a `type` discriminator.
         if (!message || message.id !== messageId || message.type !== 'assistant') {
           return res.status(404).json({ error: 'Assistant message not found' });
         }
@@ -340,8 +299,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           fsPromises,
           path,
         }).catch(() => ({ status: 'error' }));
-        // The assistant's text and pages are authoritative: a remote client cannot mint grants for unreferenced paths.
-        // A page's images are checked together, so the page shows them in its own order up to its weight budget.
         let check;
         if (callId) {
           const html = renderPages(message).get(callId);
@@ -362,7 +319,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
               results.push({ source, status: inspected.status });
               continue;
             }
-            // Reuse the existing path-bound raw-file grant instead of creating another asset lifecycle.
             const grant = inspected.outsideWorkspace
               ? await mintOutsideFileGrant(inspected.path, {
                 scopes: ['raw'],

@@ -6,6 +6,8 @@ This module removes generated managed chat folders after confirmed host session 
 
 ## Invariants
 
+- A continuously updated session can keep moving past pagination cursors. The
+  bounded inventory walk gives up without authorizing deletion in that case.
 - Only the locally managed OpenCode process authorizes cleanup. An external OpenCode and isolated-space events cannot remove host files. A process change retires the previous process's session directory evidence and pending cleanup.
 - Session creation and directory updates supply the directory that a deletion event omits. Fork events read the new fork's record through the SDK. A later update or complete snapshot supersedes that read, and a deletion during the read waits for its directory evidence. Each stream connection also seeds the directory index from a complete host session list. A startup list alone supplies no cleanup candidates, and unknown deleted sessions leave their files untouched.
 - A fresh list includes every active and archived root, fork and subagent. It is read oldest first, so a session written during the read moves ahead of the cursor and is read again; the later copy wins. Every session the host stream names during the read (any wire event with a session id, including archives and message writes the translation drops) and the list lacks is read on its own; only a not-found answer drops it. Every continuation cursor must complete; a terminal cursor object can omit `next` or set it to null. A missing cursor object is a failure. Failed, malformed, repeated, unsettled or incomplete pages authorize no removal.
