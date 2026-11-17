@@ -125,15 +125,15 @@ Server routes (authenticated UI session):
 
 The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port itself. Opaque iframe origin stays. Only the host proxy talks to loopback.
 
-VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
+VS Code stays `unsupported` for the guest catalog. Hosted mobile and Capacitor mobile load the catalog from the connected OpenChamber server. None of them spawn services.
 
 | Runtime | Extension services |
 |---|---|
 | Web | Supported on the connected OpenChamber server |
 | Electron desktop | Supported through the connected OpenChamber server |
 | VS Code | Unsupported; the extension catalog is unavailable |
-| Hosted mobile | Unsupported; the extension catalog is unavailable |
-| Capacitor mobile | Unsupported; the extension catalog is unavailable |
+| Hosted mobile | Supported through the connected OpenChamber server; the phone spawns no services |
+| Capacitor mobile | Supported through the connected OpenChamber server; the phone spawns no services |
 
 Services approved on a web or desktop instance continue on that server regardless of which clients are connected. Mobile clients do not expose extension setup.
 
