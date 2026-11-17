@@ -624,4 +624,76 @@ describe('session goal runtime', () => {
     runtime.stop();
     warning.mockRestore();
   });
+
+  it('re-arms after a failed continuation and retries the prepaid turn without charging again (#2314)', async () => {
+    quiet();
+    const state = { goal: activeGoal() };
+    const seam = {
+      readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: state.goal } })),
+      persistSessionGoal: vi.fn(async (sessionId, directory, goal) => { state.goal = { ...state.goal, ...goal }; }),
+    };
+    v2OpenCode({ messages: [assistantRecord({ finish: 'length' })] });
+    const upstream = globalThis.fetch;
+    let promptAttempts = 0;
+    const fetchMock = vi.fn(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/prompt')) {
+        promptAttempts += 1;
+        if (promptAttempts === 1) {
+          return new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html' } });
+        }
+      }
+      return upstream(input, init);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime(seam);
+    await runTick(runtime);
+    // The failed tick charged its turn and warned. No new idle event will
+    // arrive — the session was already idle — so the re-armed timer must
+    // retry the continuation on its own.
+    for (let i = 0; i < 60 && promptAttempts < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(promptAttempts).toBe(2);
+    const charges = seam.persistSessionGoal.mock.calls.map((call) => call[2]?.turnsUsed).filter((value) => value !== undefined);
+    expect(Math.max(...charges)).toBe(1);
+    expect(state.goal.turnsUsed).toBe(1);
+    expect(state.goal.status).toBe('active');
+    runtime.stop();
+  });
+
+  it('preserves a wakeup that lands while a tick is inflight (#2314)', async () => {
+    quiet();
+    const state = { goal: activeGoal() };
+    const seam = {
+      readSessionMetadata: vi.fn(async () => ({ openchamber: { goal: state.goal } })),
+      persistSessionGoal: vi.fn(async (sessionId, directory, goal) => { state.goal = { ...state.goal, ...goal }; }),
+    };
+    const { calls } = v2OpenCode({ messages: [assistantRecord({ finish: 'length' })] });
+    const upstream = globalThis.fetch;
+    let releaseFirstRead;
+    const firstReadGate = new Promise((resolve) => { releaseFirstRead = resolve; });
+    let messageReads = 0;
+    const fetchMock = vi.fn(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/message')) {
+        messageReads += 1;
+        if (messageReads === 1) await firstReadGate;
+      }
+      return upstream(input, init);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime(seam);
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    for (let i = 0; i < 40 && messageReads < 1; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(messageReads).toBe(1);
+    // The session goes idle while the first tick is still inflight: this
+    // is the wakeup the fire handler used to drop.
+    runtime.processPayload(idle(), '/repo');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    releaseFirstRead();
+    for (let i = 0; i < 60; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    // Exactly one follow-up tick runs from the preserved wakeup: a second
+    // continuation, not zero and not a storm.
+    const prompts = calls.filter((call) => call.method === 'POST' && call.path.endsWith('/prompt'));
+    expect(prompts).toHaveLength(2);
+    expect(state.goal.turnsUsed).toBe(2);
+    runtime.stop();
+  });
 });
