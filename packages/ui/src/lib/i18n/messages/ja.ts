@@ -1632,7 +1632,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'ブラウザ',
   'contextPanel.browser.loadFailed': 'このページを読み込めませんでした',
   'contextPanel.browser.waitingForServer': '開発サーバーを待っています',
-  'contextPanel.browser.waitingForServerHint': 'まだ接続を受け付けていません。受け付け次第このページを読み込みます。',
+  'contextPanel.browser.waitingForServerHint': 'まだ準備ができていません。準備ができ次第このページを読み込みます。',
   'contextPanel.browser.tunnelFailed': 'この開発サーバーに接続できませんでした',
   'contextPanel.browser.remoteLoopback.title': '{url} は OpenChamber のマシン上にあります',
   'contextPanel.browser.remoteLoopback.hint': 'ブラウザーのタブからは、そこで動いているページを開けません。OpenChamber のデスクトップアプリかモバイルアプリで開いてください。',

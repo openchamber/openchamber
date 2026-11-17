@@ -1989,7 +1989,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.frameTitle': 'Przeglądarka',
   'contextPanel.browser.loadFailed': 'Nie udało się wczytać tej strony',
   'contextPanel.browser.waitingForServer': 'Czekanie na serwer deweloperski',
-  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie przyjmuje połączeń. Strona wczyta się, gdy tylko zacznie.',
+  'contextPanel.browser.waitingForServerHint': 'Jeszcze nie jest gotowy. Strona wczyta się, gdy tylko będzie.',
   'contextPanel.browser.tunnelFailed': 'Nie udało się połączyć z tym serwerem deweloperskim',
   'contextPanel.browser.remoteLoopback.title': '{url} działa na komputerze z OpenChamber',
   'contextPanel.browser.remoteLoopback.hint': 'Karta przeglądarki nie otworzy stron, które tam działają. Otwórz ją w aplikacji OpenChamber na komputer lub telefon.',

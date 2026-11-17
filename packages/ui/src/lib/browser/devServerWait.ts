@@ -1,10 +1,11 @@
 import type { BrowserNavStatus } from './contract';
-import { isStartingServerFailure } from './url';
+import { isStartingServerAnswer, isStartingServerFailure } from './url';
 
 export const DEV_SERVER_WAIT_MS = 40_000;
 export const DEV_SERVER_FIRST_RETRY_MS = 500;
 export const DEV_SERVER_MAX_RETRY_MS = 4_000;
 export const DEV_SERVER_AFTER_ACTION_MS = 3_000;
+export const DEV_SERVER_ANSWER_WAIT_MS = 120_000;
 
 const tabKey = (directory: string, tabID: string): string => `${directory}\n${tabID}`;
 
@@ -33,7 +34,9 @@ export const requestBrowserTabLoad = (directory: string, tabID: string, url: str
 };
 
 export const acceptsBrowserTabLoadRequest = (status: BrowserNavStatus, hasShownPage: boolean): boolean => (
-  status.kind === 'failed' || !hasShownPage
+  status.kind === 'failed'
+  || (status.kind === 'ready' && status.httpStatus !== undefined && status.httpStatus >= 400)
+  || !hasShownPage
 );
 
 export const subscribeBrowserTabLoadRequests = (
@@ -59,31 +62,60 @@ export type DevServerWaitRun = {
 
 type FailedLoad = { readonly code: number; readonly url: string };
 
-type FailedLoadPlan =
+type ErrorAnswer = { readonly url: string; readonly httpStatus?: number };
+
+type RetryPlan =
   | { readonly next: 'stop' | 'pause'; readonly run: DevServerWaitRun | null }
   | { readonly next: 'retry'; readonly delayMs: number; readonly run: DevServerWaitRun };
 
-export const planFailedLoadRetry = (
-  failure: FailedLoad,
-  { run, restored, watched, now, actionRunning = false, actionStoppedAt = null }: {
-    run: DevServerWaitRun | null;
-    restored: boolean;
-    watched: boolean;
-    now: number;
-    actionRunning?: boolean;
-    actionStoppedAt?: number | null;
-  },
-): FailedLoadPlan => {
-  if (restored || !isStartingServerFailure(failure.code, failure.url)) {
-    return { next: 'stop', run };
-  }
-  const current = run?.url === failure.url ? run : { url: failure.url, startedAt: now, paused: false };
+type WaitContext = {
+  run: DevServerWaitRun | null;
+  restored: boolean;
+  watched: boolean;
+  now: number;
+  actionRunning?: boolean;
+  actionStoppedAt?: number | null;
+};
+
+const isJustAfterAction = ({ now, actionRunning = false, actionStoppedAt = null }: WaitContext): boolean => (
+  !actionRunning && actionStoppedAt !== null && now - actionStoppedAt <= DEV_SERVER_AFTER_ACTION_MS
+);
+
+const planWait = (
+  url: string,
+  context: WaitContext,
+  limitMs: number,
+  limitWithActionMs: number,
+): RetryPlan => {
+  const { run, watched, now, actionRunning = false } = context;
+  const current = run?.url === url ? run : { url, startedAt: now, paused: false };
   const waited = now - current.startedAt;
-  const afterAction = !actionRunning && actionStoppedAt !== null && now - actionStoppedAt <= DEV_SERVER_AFTER_ACTION_MS;
-  if (!current.paused && waited > DEV_SERVER_WAIT_MS && !actionRunning && !afterAction) return { next: 'stop', run: current };
+  const afterAction = isJustAfterAction(context);
+  const limit = actionRunning || afterAction ? limitWithActionMs : limitMs;
+  if (!current.paused && waited > limit) return { next: 'stop', run: current };
   if (!watched) return { next: 'pause', run: { ...current, paused: true } };
   if (current.paused) return { next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run: { ...current, paused: false } };
   if (afterAction) return { next: 'retry', delayMs: DEV_SERVER_FIRST_RETRY_MS, run: current };
   const delayMs = Math.min(DEV_SERVER_MAX_RETRY_MS, Math.max(DEV_SERVER_FIRST_RETRY_MS, waited / 2));
   return { next: 'retry', delayMs, run: current };
+};
+
+export const planFailedLoadRetry = (failure: FailedLoad, context: WaitContext): RetryPlan => {
+  if (context.restored || !isStartingServerFailure(failure.code, failure.url)) {
+    return { next: 'stop', run: context.run };
+  }
+  return planWait(failure.url, context, DEV_SERVER_WAIT_MS, Number.POSITIVE_INFINITY);
+};
+
+export const planErrorAnswerRetry = (answer: ErrorAnswer, context: WaitContext): RetryPlan => {
+  const withAction = context.actionRunning === true || isJustAfterAction(context);
+  if (
+    context.restored
+    || !withAction
+    || answer.httpStatus === undefined
+    || !isStartingServerAnswer(answer.httpStatus, answer.url)
+  ) {
+    return { next: 'stop', run: context.run };
+  }
+  return planWait(answer.url, context, DEV_SERVER_ANSWER_WAIT_MS, DEV_SERVER_ANSWER_WAIT_MS);
 };
