@@ -6,20 +6,26 @@ import { createAutomationAdmission, pullRequestKey, sessionKey } from '../sessio
 import { readPullFeedback, readFeedbackAuthorPermission, readFailedChecks } from '../github/pr-feedback.js';
 import { createProductionBotPullRequests } from './production-pull-requests.js';
 import { productionFixture } from './production-test-support.js';
+import { createBotDriver } from './runtime-test-support.js';
 
 let fixture;
 let runtimes = [];
 afterEach(async () => { for (const runtime of runtimes) await runtime.stop(); runtimes = []; await fixture?.close(); fixture = null; });
 
-async function setup({ automation, notify, onFeedback } = {}) {
+async function setup({ automation, notify, onFeedback, publicationBranch } = {}) {
   const f = fixture = await productionFixture();
   const checkout = await f.makeWorktrees().create(f.request);
-  Object.assign(f.item, { worktree: checkout.directory, branch: checkout.branch,
-    pr: { number: 7, url: 'https://github.com/acme/app/pull/7', headSha: f.base } });
+  Object.assign(f.item, { worktree: checkout.directory, branch: checkout.branch });
+  if (publicationBranch) {
+    Object.assign(f.item, await f.makeWorktrees().bindPublication({ ...f.request, branch: publicationBranch }));
+    f.state.publicationBranch = publicationBranch;
+  }
+  f.item.pr = { number: 7, url: 'https://github.com/acme/app/pull/7', headSha: f.base };
   const timers = [];
   const deliveries = [];
   let runtime;
   const adapters = createProductionBotPullRequests({ context: f.context, services: f.services, getFixLoopRuntime: () => runtime,
+    resolvePublication: (request) => f.makeWorktrees().readPublication(request),
     receiveFeedback: async (projectId, itemId, event) => { deliveries.push({ projectId, itemId, ...event }); await onFeedback?.(adapters); },
     reviewApps: [{ slug: 'ai-review', appId: 77 }] });
   const makeRuntime = () => {
@@ -45,6 +51,22 @@ async function setup({ automation, notify, onFeedback } = {}) {
 }
 
 describe('production PR watch uses the existing loop and GitHub feedback owner', () => {
+  test('watches a privately reserved project branch and rejects forged publication authority', async () => {
+    const f = await setup({ publicationBranch: 'task/BUG-1' });
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    f.state.feedback = [f.thread(1, 'maintainer')];
+
+    await f.runNext();
+
+    expect(f.deliveries).toHaveLength(1);
+    expect(f.item.branch).toBe('bot/item-1');
+    const stored = JSON.parse(await fs.readFile(path.join(f.dataDir, 'pr-fix-loops.json'), 'utf8'));
+    expect(stored.loops[0].branch).toBe('task/BUG-1');
+    const authority = stored.loops[0].botAuthority;
+    expect(authority.publicationBranch).toBe('task/BUG-1');
+    await expect(f.adapters.botWatch.getOctokit({ ...authority, publicationBranch: 'task/BUG-2' }))
+      .rejects.toMatchObject({ code: 'BOT_GITHUB_PULL_CHANGED' });
+  });
   test('more than 10 feedback turns use the exact bot identity and survive restart', async () => {
     const f = await setup();
     await f.adapters.pullRequests.ensureLoop(f.request);
@@ -206,6 +228,92 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
     await expect(f.adapters.pullRequests.read(f.request)).rejects.toMatchObject({ code: 'BOT_SERVICE_REJECTED' });
   });
 
+  test('PR admission uses the live target branch when the PR base is stale', async () => {
+    const f = await setup();
+    f.state.base = '5'.repeat(40);
+    expect(f.state.prBase).toBe(f.base);
+
+    expect(await f.adapters.pullRequests.read(f.request)).toMatchObject({ headSha: f.base, baseSha: f.state.base });
+
+    f.state.base = '6'.repeat(40);
+    expect(await f.adapters.pullRequests.read(f.request)).toMatchObject({ headSha: f.base, baseSha: f.state.base });
+    expect(f.state.prBase).toBe(f.base);
+  });
+
+  test('a failed live target branch read rejects admission without attaching a watch', async () => {
+    const f = await setup();
+    f.state.failRules = true;
+
+    await expect(f.adapters.pullRequests.read(f.request)).rejects.toMatchObject({ code: 'BOT_SERVICE_REJECTED' });
+
+    expect(await f.runtime.list()).toEqual([]);
+    expect(f.timers).toEqual([]);
+    expect(f.state.admissions).toEqual([]);
+  });
+
+  test.each([
+    { headRefOid: 'd'.repeat(40) },
+    { headRefName: 'another-branch' },
+    { baseRefName: 'another-base' },
+    { headRepository: { nameWithOwner: 'other/app' } },
+    { baseRepository: { nameWithOwner: 'other/app' } },
+    { number: 8 },
+  ])('PR admission rejects a changed head or target %j', async (status) => {
+    const f = await setup();
+    f.state.pullAdmission = status;
+
+    await expect(f.adapters.pullRequests.read(f.request)).rejects.toMatchObject({ code: 'BOT_GITHUB_PULL_CHANGED' });
+
+    expect(await f.runtime.list()).toEqual([]);
+    expect(f.state.admissions).toEqual([]);
+  });
+
+  test('an unchanged judged head and live base survive repeated production PR reads and coordinator restart', async () => {
+    const f = await setup();
+    const driver = await createBotDriver(f.directory, { bot: { identity: f.bot.identity } });
+    driver.controls.baseSha = f.state.base = '5'.repeat(40);
+    driver.controls.headSha = f.state.head;
+    const item = await driver.admit();
+    await driver.runtime.pump(driver.project.id);
+    const current = (await driver.runtime.detail(driver.project.id, item.id)).item;
+    expect(current.state).toBe('merging');
+    expect(current.judgment).toMatchObject({ headSha: f.state.head, baseSha: f.state.base });
+    // The coordinator driver owns deterministic publication and service writes.
+    // Replace its PR reader with the actual production adapter and HTTP owners;
+    // the watch boundary accepts the driver's synthetic session IDs.
+    f.state.pullNumber = current.pr.number;
+    f.state.publicationBranch = current.publicationBranch ?? current.branch;
+    const { binding } = await f.context.github({ project: driver.project, bot: f.bot });
+    const adapters = createProductionBotPullRequests({ context: f.context, services: f.services,
+      getFixLoopRuntime: () => ({ async createBotWatch() {}, async stopBotWatch() {} }), receiveFeedback: async () => {}, reviewApps: [],
+      resolvePublication: async () => ({ publicationBranch: current.publicationBranch, localBranch: current.branch,
+        identityId: binding.identityId, identityRevision: binding.identityRevision }) });
+    driver.dependencies.pullRequests = adapters.pullRequests;
+    // A regression must stop at an unexpected new judge instead of hot-looping.
+    driver.held.add('judge');
+    const prompts = driver.calls.prompts.length;
+    const effects = driver.calls.effects.length;
+    const pullReads = () => f.state.requests.filter((request) => request.path === `/repos/acme/app/pulls/${current.pr.number}`).length;
+    const reads = pullReads();
+
+    const withProductionReads = driver.restart();
+    await withProductionReads.pump(driver.project.id);
+    await withProductionReads.pump(driver.project.id);
+    const restarted = driver.restart();
+    await restarted.pump(driver.project.id);
+    await restarted.pump(driver.project.id);
+
+    const settled = (await restarted.detail(driver.project.id, item.id)).item;
+    expect(settled.state).toBe('merging');
+    expect(settled.judgment).toEqual(current.judgment);
+    expect(driver.calls.prompts).toHaveLength(prompts);
+    expect(driver.calls.effects).toHaveLength(effects);
+    expect(driver.calls.effects.filter((entry) => entry.operation === 'pr.auto-merge')).toHaveLength(1);
+    expect(f.state.admissions).toEqual([]);
+    expect(f.state.prBase).not.toBe(f.state.base);
+    expect(pullReads() - reads).toBeGreaterThanOrEqual(4);
+  });
+
   test('credential rotation blocks reads but cannot strand stopping the owned feedback loop', async () => {
     const f = await setup();
     await f.adapters.pullRequests.ensureLoop(f.request);
@@ -219,6 +327,7 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
   test('admission uses the existing service mutation journal and only GitHub queue admission', async () => {
     const f = await setup();
     f.state.mergeQueue = true;
+    f.state.base = '5'.repeat(40);
     const status = await f.adapters.pullRequests.read(f.request);
     const binding = (await f.context.serviceContext({ ...f.request, service: 'github', operation: 'pr.auto-merge' })).github;
     const input = { number: 7, headSha: status.headSha, baseSha: status.baseSha, branch: f.item.branch, mode: status.mergeMode, mergeMethod: 'SQUASH' };

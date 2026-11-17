@@ -29,6 +29,7 @@ export const createMergeAuthorizationDriver = async (root) => {
     mergeQueueEntry: remote.queued ? { id: 'QUEUE_not_the_pull_id' } : null });
   const upstream = await controlledUpstream(async (request) => {
     if (request.path === '/user') return { body: { id: 42, login: 'user-42' } };
+    if (request.path.includes('/rules/branches/')) return { body: [] };
     if (request.path.includes('/git/ref/heads/')) return { body: { ref: `refs/heads/${decodeURIComponent(request.path.split('/heads/')[1])}`, object: { sha: driver.controls.headSha } } };
     if (request.path.includes('/pulls?')) return { body: [pull()] };
     if (request.path.includes('/pulls/42')) {
@@ -83,7 +84,17 @@ export const createMergeAuthorizationDriver = async (root) => {
   let runtime = driver.restart();
   return { ...driver, runtime, remote, upstream,
     journal: createBotExecutionStore({ store: driver.store }),
-    async admit() { const created = await runtime.admit('project', 'bugs', { source: { kind: 'manual', id: 'merge' }, title: 'Fix' }); item = { ...created, branch: `bot/${created.id}` }; return created; },
+    async admit() {
+      const created = await runtime.admit('project', 'bugs', { source: { kind: 'manual', id: 'merge' }, title: 'Fix' });
+      item = { ...created, branch: `bot/${created.id}` };
+      // This driver starts with an already published legacy PR, not a new branch reservation.
+      await driver.store.update('project', (snapshot) => ({ snapshot: { ...snapshot,
+        items: snapshot.items.map((entry) => entry.id === created.id ? { ...entry, pr: {
+          number: 42, url: 'https://github.com/acme/example/pull/42', headSha: driver.controls.headSha, baseSha: driver.controls.baseSha,
+        } } : entry),
+      } }));
+      return created;
+    },
     restart() { driver.dependencies.services = makeServices(); runtime = driver.restart(); return runtime; },
     writes: () => upstream.requests.filter((entry) => entry.body?.query?.startsWith('mutation')),
     close: () => upstream.close(),
