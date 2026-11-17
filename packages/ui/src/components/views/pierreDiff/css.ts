@@ -5,19 +5,11 @@ export const HUNK_ACTION_OVERLAY_CSS = `
   [data-code] { min-height: 2.5rem; align-content: start; }
 `;
 
-// The inline layout draws the columns' horizontal scrollbar outside the
-// shadow root, sticky to the panel (DiffStickyScrollbar).
 export const HIDE_COLUMN_SCROLLBAR_CSS = `
   [data-code] { scrollbar-width: none; }
   [data-code]::-webkit-scrollbar { display: none; }
 `;
 
-/**
- * Base CSS injected into Pierre's Shadow DOM. Pins font-family/size to the
- * app tokens (so Files view and Diff view render at the same scale on mobile)
- * and enables touch-friendly line interactions. Re-exported so plain
- * <PierreFile> consumers (e.g. `MobileFilesSurface`) can inject the same.
- */
 const PIERRE_RUNTIME_BASE_CSS = `
   :host {
     font-family: var(--font-mono);
@@ -42,9 +34,6 @@ const PIERRE_RUNTIME_BASE_CSS = `
   }
 `;
 
-// CSS injected into Pierre's Shadow DOM for WebKit scroll optimization +
-// diff-specific separator height. Note: avoid will-change and contain:paint
-// as they break resize behavior.
 export const WEBKIT_SCROLL_FIX_CSS = `
   ${PIERRE_RUNTIME_BASE_CSS}
   ${PIERRE_DIFF_TINT_CSS}

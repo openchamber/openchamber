@@ -7,7 +7,6 @@ const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
 
 export const useHunkActionTargets = (hunkActions: DiffHunkActions | undefined) => {
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
-  // The hunk under the pointer: its actions show while the user points at it.
   const [hoveredHunk, setHoveredHunk] = React.useState<number | null>(null);
   const handleHunkLineEnter = useCallback((props: OnDiffLineEnterLeaveProps) => {
     const hunk = hunkAnchors.find(({ span }) => {
@@ -29,8 +28,6 @@ export const useHunkActionTargets = (hunkActions: DiffHunkActions | undefined) =
       const capsuleHeight = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
       const columns = new Map<HTMLElement, DOMRect>();
       const placements: Array<{ target: HTMLElement; offset: number }> = [];
-      // Only mounted virtual rows have slots. Avoid creating React controls
-      // for off-screen hunks or measuring every line on a scroll event.
       for (const slot of node.shadowRoot?.querySelectorAll('slot') ?? []) {
         for (const wrapper of slot.assignedElements()) {
           const target = wrapper.querySelector<HTMLElement>('[data-hunk-action-target]');
@@ -42,22 +39,17 @@ export const useHunkActionTargets = (hunkActions: DiffHunkActions | undefined) =
           let bounds = columns.get(column);
           if (!bounds) {
             bounds = column.getBoundingClientRect();
-            // Wrapped split view lays the column out as `display: contents`,
-            // which has no box. Its content grid spans the same rows.
+            // external: https://github.com/pierrecomputer/pierre Wrapped split columns use display: contents and have no box; their content grid supplies bounds.
             if (bounds.height === 0) bounds = slot.closest('[data-content]')?.getBoundingClientRect() ?? bounds;
             columns.set(column, bounds);
           }
           const markerTop = target.getBoundingClientRect().top;
-          // Centred on the hunk's last changed line, the row the annotation
-          // follows; kept inside the code column, whose clipping would hide it.
           const lastLine = slot.closest('[data-line-annotation]')?.previousElementSibling?.getBoundingClientRect();
           const centre = lastLine && lastLine.height > 0 ? lastLine.top + lastLine.height / 2 : markerTop - capsuleHeight / 2;
           const top = Math.max(bounds.top + 2, Math.min(centre - capsuleHeight / 2, bounds.bottom - capsuleHeight - 2));
           placements.push({ target, offset: top - markerTop });
         }
       }
-      // Finish all geometry reads before writing offsets to avoid layout
-      // recalculation between neighboring hunks.
       for (const { target, offset } of placements) {
         const value = `${offset}px`;
         if (target.style.getPropertyValue('--oc-hunk-action-offset') !== value) {

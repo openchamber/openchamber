@@ -8,18 +8,12 @@ export const useFindHighlights = (diffContainerRef: RefObject<HTMLDivElement | n
   const findMatchesRef = useRef<ReadonlyArray<{ lineNumber: number; side: DiffFindSide; spanStart: number; spanLength: number }>>([]);
   const findCurrentIndexRef = useRef(-1);
 
-  // The shadow-root observer below, and its pass, shared so highlight surgery
-  // can keep its own mutations out of the observer.
   const shadowObserverRef = useRef<MutationObserver | null>(null);
   const scheduleShadowPassRef = useRef<(() => void) | null>(null);
   const applyFindHighlights = useCallback(() => {
     const observer = shadowObserverRef.current;
-    // Records queued before the surgery are the library's and keep their pass.
     const pending = observer?.takeRecords() ?? [];
     applyFindHighlightsToContainer(diffContainerRef.current, findMatchesRef.current, findCurrentIndexRef.current);
-    // The surgery's own records are dropped: its text splits and merges look
-    // like the library's, and a pass for them would re-apply the highlights
-    // and re-render the viewer for nothing.
     observer?.takeRecords();
     if (pending.length > 0) scheduleShadowPassRef.current?.();
   }, [diffContainerRef]);
@@ -57,7 +51,6 @@ export const useShadowRootPass = ({
   diffThemeKey,
   fileName,
 }: ShadowRootPassInput): void => {
-  // MutationObserver to trigger re-renders when annotation DOM nodes are added/removed
   useEffect(() => {
     const container = diffContainerRef.current;
     if (!container) return;
@@ -71,9 +64,6 @@ export const useShadowRootPass = ({
 
       const shadowRoot = diffsContainer.shadowRoot;
 
-      // A rebuild of the rows drops their find marks, so the pass paints them
-      // again. The surgery takes its own records (applyFindHighlights), so this
-      // never fires for it.
       const schedulePass = () => {
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {

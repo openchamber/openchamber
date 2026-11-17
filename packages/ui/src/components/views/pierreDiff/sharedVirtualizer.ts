@@ -24,8 +24,6 @@ type VirtualizerEntry = {
 
 const virtualizerCache = new WeakMap<Document | HTMLElement, VirtualizerEntry>();
 
-// Rows are 24px unless the code follows the Editor font size
-// (`useEditorCodeMetrics`); the CSS row height in index.css must match.
 export const DEFAULT_DIFF_LINE_HEIGHT = 24;
 
 export function diffVirtualMetrics(lineHeight: number): Partial<VirtualFileMetrics> {

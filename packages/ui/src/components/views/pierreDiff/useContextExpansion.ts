@@ -60,9 +60,6 @@ export const useContextExpansion = ({
     return () => container.removeEventListener('click', onClick);
   }, [diffContainerRef, expandLoading, expandOnDemand, fileDiff, onExpandContextRequest]);
 
-  // Replay the expansion the user asked for on the partial diff once the full
-  // diff is rendered. Hunks may merge differently after the reload, so the
-  // gap is located through the hunk that now contains the requested line.
   const appliedContextExpansionRef = useRef<ContextExpansionRequest | null>(null);
   useEffect(() => {
     if (!pendingContextExpansion || !fileDiff || fileDiff.isPartial) return;
@@ -76,8 +73,7 @@ export const useContextExpansion = ({
       if (appliedContextExpansionRef.current === pendingContextExpansion) return;
       appliedContextExpansionRef.current = pendingContextExpansion;
       if (pendingContextExpansion.gap === 'after-last-hunk') {
-        // Pierre keys the region after the last hunk by the hunk count and
-        // grows it from its start, which is the 'up' direction.
+        // external: https://github.com/pierrecomputer/pierre The trailing region uses the hunk count and expands from its start with direction 'up'.
         instance.expandHunk(fileDiff.hunks.length, 'up');
         return;
       }
