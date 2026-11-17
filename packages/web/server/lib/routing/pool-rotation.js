@@ -119,7 +119,7 @@ const failingNow = (reliability) => reliability !== undefined && reliability.fai
  * request failed is never chosen, and one with a recent success ranks before
  * one with no recent traffic; then the most plan headroom wins.
  */
-export const rankDestinations = (poolHealth, rawTargets, source, reliabilityByRef = new Map(), now = Date.now()) => {
+const rankDestinations = (poolHealth, rawTargets, source, reliabilityByRef = new Map(), now = Date.now()) => {
   const sourcePlanID = source.plan?.id ?? null;
   const candidates = rawTargets
     .map(concreteModel)
