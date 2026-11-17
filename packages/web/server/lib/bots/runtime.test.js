@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fileLocks from '../source-control/file-lock.js';
 import { createBotsRuntime } from './runtime.js';
 import { registerBotRoutes } from './routes.js';
 import { createBotExecutionStore } from './execution-store.js';
@@ -157,6 +158,47 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     expect((await driver.runtime.detail('project', item.id)).item.state).toBe('needs-you');
     expect(driver.calls.sessions).toEqual([]);
     expect(driver.calls.proofs).toEqual([]);
+  });
+
+  it.each(['investigation', 'fixing', 'judge'])('retries a failed %s session after explicit Resume with the repaired model', async (stage) => {
+    const driver = await fixture({ held: [stage] });
+    const item = await driver.admit();
+    await driver.runtime.pump('project');
+    const failedSession = (await driver.runtime.detail('project', item.id)).item.sessions[stage];
+    driver.records.set(failedSession, [
+      { id: `idle_${failedSession}`, type: 'idle', outcome: 'failed', time: { created: 10 } },
+      { id: `reply_${failedSession}`, type: 'assistant', content: [], error: { message: 'Provider limit reached' }, time: { created: 9 } },
+    ]);
+    // A provider can refuse before generating tokens. That must remain a failed run.
+    driver.controls.stageTokens = undefined;
+    await driver.runtime.pump('project');
+    const failed = (await driver.runtime.detail('project', item.id)).item;
+    expect(failed).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_STAGE_FAILED' } });
+    const originalEffects = failed.effects.filter((effect) => effect.kind.startsWith('session.'));
+    const journal = createBotExecutionStore({ store: driver.store });
+    const before = await journal.read('project', item.id);
+    driver.controls.stageTokens = 7;
+    driver.held.delete(stage);
+    driver.controls.availableModels.push({ providerID: 'test', modelID: 'repaired-model' });
+    const config = await driver.config.read('project');
+    await driver.config.update('project', { ...config, definitions: config.definitions.map((bot) => ({
+      ...bot, models: { ...bot.models, [stage]: { useDefaults: false, providerID: 'test', modelID: 'repaired-model' } },
+    })) });
+
+    await driver.restart().resume('project', item.id);
+
+    const recovered = (await driver.runtime.detail('project', item.id)).item;
+    expect(recovered.state).toBe('merging');
+    expect(recovered.sessions[stage]).not.toBe(failedSession);
+    expect(driver.calls.prompts.find((entry) => entry.sessionID === recovered.sessions[stage]).model).toMatchObject({ providerID: 'test', id: 'repaired-model' });
+    for (const effect of originalEffects) expect(recovered.effects.find((entry) => entry.key === effect.key)).toEqual(effect);
+    const after = await journal.read('project', item.id);
+    expect(after.data.runs[`${stage}:0`]).toEqual(before.data.runs[`${stage}:0`]);
+    expect(after.data.round).toBe(1);
+    const sessions = driver.calls.sessions.length;
+    await driver.restart().pump('project');
+    expect(driver.calls.sessions).toHaveLength(sessions);
+    expect(driver.calls.effects.filter((entry) => entry.operation === 'git.push')).toHaveLength(1);
   });
 
   it('returns a pending merge to judgment when its policy changes', async () => {
@@ -315,6 +357,82 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     await driver.runtime.pump('project');
     await expect(driver.runtime.stopItem('project', item.id)).rejects.toMatchObject({ code: 'BOT_STOP_HAS_UNSETTLED_EFFECTS' });
     expect(driver.calls.removed).toEqual([]);
+  });
+
+  it('queues a fixing tool behind the active owner pass and ahead of its dirty continuation', async () => {
+    const driver = await fixture({ held: ['fixing'] });
+    const item = await driver.admit();
+    await driver.runtime.pump('project');
+    const before = (await driver.runtime.detail('project', item.id)).item;
+    const first = Promise.withResolvers();
+    const second = Promise.withResolvers();
+    const releaseFirst = Promise.withResolvers();
+    const releaseSecond = Promise.withResolvers();
+    let reads = 0;
+    const original = driver.stages.outcome;
+    driver.stages.outcome = async (...args) => {
+      reads += 1;
+      if (reads === 1) { first.resolve(); await releaseFirst.promise; }
+      if (reads === 2) { second.resolve(); await releaseSecond.promise; }
+      return original(...args);
+    };
+    const lock = vi.spyOn(fileLocks, 'withSourceControlFileLock');
+    const ownerPath = `${driver.store.filePathFor('project')}.owner.lock`;
+    const ownerCalls = () => lock.mock.calls.filter(([target]) => target === ownerPath).length;
+    const pump = driver.runtime.pump('project');
+    let tool;
+    try {
+      await first.promise;
+      expect(ownerCalls()).toBe(1);
+      const evidence = [{ source: 'owned tool', summary: 'The report remains valid while another owner pass runs.' }];
+      tool = driver.runtime.handleTool({ sessionId: before.sessions.fixing, action: 'item.report', input: { evidence } });
+      void tool.catch(() => {});
+      driver.runtime.pump('project');
+      expect(ownerCalls()).toBe(1);
+      releaseFirst.resolve();
+      await second.promise;
+      const after = (await driver.runtime.detail('project', item.id)).item;
+      expect(after.state).toBe('fixing');
+      expect(after.evidence).toContainEqual(evidence[0]);
+      expect(after.effects).toEqual(before.effects);
+      expect(ownerCalls()).toBe(3);
+    } finally {
+      releaseFirst.resolve(); releaseSecond.resolve();
+      await Promise.allSettled([pump, tool]);
+      lock.mockRestore();
+    }
+    await expect(tool).resolves.toMatchObject({ item: { state: 'fixing' } });
+  });
+
+  it('releases the local owner queue after a failed coordinator read without cancelling the queued tool', async () => {
+    const driver = await fixture({ held: ['fixing'] });
+    const item = await driver.admit();
+    await driver.runtime.pump('project');
+    const current = (await driver.runtime.detail('project', item.id)).item;
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const read = driver.config.read;
+    const failure = new Error('Configuration read failed');
+    let first = true;
+    driver.config.read = async (...args) => {
+      if (first) { first = false; entered.resolve(); await release.promise; throw failure; }
+      return read(...args);
+    };
+    const pump = driver.runtime.pump('project');
+    void pump.catch(() => {});
+    let tool;
+    try {
+      await entered.promise;
+      tool = driver.runtime.handleTool({ sessionId: current.sessions.fixing, action: 'item.report', input: { evidence: [] } });
+      void tool.catch(() => {});
+      release.resolve();
+      await expect(pump).rejects.toBe(failure);
+      await expect(tool).resolves.toMatchObject({ item: { state: 'fixing' } });
+    } finally {
+      release.resolve();
+      await Promise.allSettled([pump, tool]);
+      driver.config.read = read;
+    }
   });
 
   it('does not trust tool-supplied targets, commands or another session identity', async () => {

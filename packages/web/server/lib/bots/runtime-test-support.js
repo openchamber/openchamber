@@ -26,12 +26,15 @@ export const createBotDriver = async (root, options = {}) => {
   } });
   const clock = () => options.now ?? 1_792_700_000_000;
   const store = createBotStore({ projectsDirPath: path.join(root, 'personal'), now: clock });
-  const calls = { sessions: [], prompts: [], permissions: [], modes: [], knowledge: [], effects: [], worktrees: [], removed: [], proofs: [], notices: [], attention: [], schedules: [], loops: [], published: [] };
+  const calls = { sessions: [], prompts: [], permissions: [], modes: [], knowledge: [], effects: [], worktrees: [], removed: [], proofs: [], notices: [], attention: [], schedules: [], loops: [], published: [], publications: [] };
   const records = new Map();
   const sessions = new Map();
   const held = new Set(options.held ?? []);
   const controls = { merged: false, approved: false, autoMerge: false, queued: false, headSha: TEST_HEAD, baseSha: TEST_BASE, remoteSha: null, changes: [{ newPath: 'src/fix.js' }], decision: options.decision ?? 'auto', questions: options.questions ?? [], reviewers: options.reviewers ?? [], failOperation: null, loseOperation: null, reconciliation: null, failStage: null, stageTokens: options.stageTokens ?? 7, providerCalls: 0 };
-  const outputs = (stage) => stage === 'investigation' ? { summary: 'Verified bug', plan: 'Add test, then fix', evidence: [{ source: 'test', summary: 'Observed wrong result' }], questions: controls.questions, requestedRole: options.requestedRole }
+  controls.repositoryRules = options.repositoryRules ?? [];
+  controls.publicationBranch = options.publicationBranch;
+  controls.availableModels = [{ providerID: 'test', modelID: 'model' }];
+  const outputs = (stage) => stage === 'investigation' ? { summary: 'Verified bug', plan: 'Add test, then fix', evidence: [{ source: 'test', summary: 'Observed wrong result' }], questions: controls.questions, requestedRole: options.requestedRole, publicationBranch: controls.publicationBranch }
     : stage === 'fixing' ? { summary: 'Fixed the cause', evidence: [{ source: 'test', summary: 'Regression now passes' }] }
       : { decision: controls.decision, reason: 'Reviewed the exact diff and evidence', reviewers: controls.reviewers, questions: controls.decision === 'ask' ? ['Confirm behavior?'] : [], requestedRole: options.requestedRole };
   const complete = (sessionId) => {
@@ -64,7 +67,7 @@ export const createBotDriver = async (root, options = {}) => {
       async synthetic() { return { id: 'msg_goal' }; },
     },
     message: { async list({ sessionID }) { return { data: records.get(sessionID) ?? [] }; } },
-    model: { async list() { return { data: [{ providerID: 'test', modelID: 'model' }] }; } },
+    model: { async list() { return { data: controls.availableModels }; } },
     agent: { async list() { return { data: [{ id: 'build', mode: 'primary' }] }; } },
     config: { async get() { return []; } },
     command: { async list() { return { data: [] }; } },
@@ -119,6 +122,8 @@ export const createBotDriver = async (root, options = {}) => {
     },
     async reconcile() { return controls.reconciliation ?? { state: 'outcome-unknown' }; },
     async read({ operation, input }) {
+      if (operation === 'github.branch-rules') return controls.repositoryRules;
+      if (operation === 'jira.issue') return { key: 'BUG-1', issueType: { id: '1', name: 'Task' } };
       if (operation !== 'github.authorization') throw new Error('Unsupported fixture read');
       return { number: input.number, headSha: controls.headSha, baseSha: controls.baseSha,
         merged: controls.merged, autoMerge: controls.autoMerge, queued: controls.queued };
@@ -126,6 +131,7 @@ export const createBotDriver = async (root, options = {}) => {
   };
   const dependencies = { config, store, resolveProject: async (id) => { if (id !== project.id) throw Object.assign(new Error('Missing project'), { status: 404 }); return project; }, listProjects: async () => [project], stages, services, serviceContext,
     worktrees: {
+      async bindPublication({ item, branch }) { calls.publications.push({ itemId: item.id, branch }); return { publicationBranch: branch }; },
       async create(request) { const directory = path.join(root, 'worktrees', request.item.id); await fs.mkdir(directory, { recursive: true }); calls.worktrees.push(request.item.id); return { directory, branch: `bot/${request.item.id}`, baseBranch: 'main', baseSha: TEST_BASE }; },
       async reconcile() { return { state: 'outcome-unknown' }; },
       async remove(request) { if (!request.checkout.directory.startsWith(path.join(root, 'worktrees'))) throw new Error('Unowned worktree'); calls.removed.push(request.item.id); await fs.rm(request.checkout.directory, { recursive: true }); },
