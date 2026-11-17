@@ -6,6 +6,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { botMigrationPathSchema } from '../spaces/transfer-bundle.js';
 
 // A project of the agent's settings, which come from its file: only one with an absolute path is trusted.
 const projectSchema = z.object({ path: z.string().refine((folder) => path.isAbsolute(folder)) });
@@ -41,4 +42,28 @@ export async function trustProjectRepositories({ projects, runGit }) {
     }
   }
   return added;
+}
+
+/** Trust a retained checkout only after the owner mapping matches its physical identities. */
+export async function trustMigratedBotCheckout({ mapping: raw, runGit, allowMissingCheckout = false }) {
+  const mapping = botMigrationPathSchema.parse(raw);
+  for (const [directory, expected] of [[mapping.directory, mapping.directoryIdentity], [mapping.gitDirectory, mapping.gitIdentity]]) {
+    let stat;
+    try { stat = await fs.lstat(directory, { bigint: true }); }
+    catch (error) {
+      // Only removal receipts/publication history may proceed to their durable
+      // owner journal without a checkout. No missing directory gains Git trust.
+      if (allowMissingCheckout && directory === mapping.directory && error.code === 'ENOENT') return;
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink() || `${stat.dev}:${stat.ino}` !== expected || await fs.realpath(directory) !== directory) {
+      throw Object.assign(new Error('Retained Bot checkout identity changed'), { code: 'BOT_MIGRATION_PATH_AUTHORITY_MISMATCH' });
+    }
+  }
+  const listed = await runGit(['config', '--global', '--get-all', 'safe.directory']);
+  if (![0, 1].includes(listed.code)) throw Object.assign(new Error('Retained Bot Git trust is unreadable'), { code: 'BOT_MIGRATION_GIT_TRUST_FAILED' });
+  const entries = listed.code === 0 ? listed.stdout.split(/\r?\n/).filter(Boolean) : [];
+  if (entries.includes(mapping.directory) || entries.includes('*')) return;
+  const added = await runGit(['config', '--global', '--add', 'safe.directory', mapping.directory]);
+  if (added.code !== 0) throw Object.assign(new Error('Retained Bot Git trust is unavailable'), { code: 'BOT_MIGRATION_GIT_TRUST_FAILED' });
 }
