@@ -407,6 +407,22 @@ const ACTIONS = {
     writeFileSync(join(ctx.dir, name), JSON.stringify({ selector: step.selector, found }, null, 2))
     ctx.artifacts.push(name)
   },
+  async style(step, ctx) {
+    if (!step.property || step.equals === undefined) fail("style needs a CSS property and an equals value")
+    const target = resolveTarget(step, ctx)
+    const deadline = Date.now() + timeoutOf(step)
+    let actual = null
+    do {
+      actual = await ctx.page.evaluate(`(() => {
+        const element = ${ctx.page.query(target)}[${target.index}]
+        return element ? getComputedStyle(element).getPropertyValue(${JSON.stringify(step.property)}).trim() : null
+      })()`)
+      if (actual === step.equals) return
+      if (Date.now() >= deadline) break
+      await wait(150)
+    } while (Date.now() < deadline)
+    fail(`${describe(step)} ${step.property} is ${JSON.stringify(actual)}, expected ${JSON.stringify(step.equals)}`)
+  },
   async pause(step) {
     await wait(step.ms)
   },

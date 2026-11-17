@@ -124,6 +124,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `network.block` `urls`; `network.allow` | Refuses matching browser requests using Chrome's URL patterns, then clears the block. Variable placeholders such as `{s}` resolve to scenario variables. A fresh browser context clears the block between scenarios. |
 | `screenshot` `name` | Saves a screenshot next to the result |
 | `inspect` `selector`, `props`, `full` | Writes the matching elements' attributes, text and properties to a JSON file; for writing scenarios, not for keeping |
+| `style` `on`, `property`, `equals` | Waits for a visible element's computed CSS property to equal the given string, such as `background-color` and `rgb(21, 23, 32)` |
 | `pause` `ms` | Waits; only where the time itself is the behavior (a debounced save, a cache window) |
 
 "Shows" means rendered, not `display: none` or `visibility: hidden`, with opacity above zero, searched through open shadow roots (the diff viewer renders its lines in one).
