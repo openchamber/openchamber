@@ -122,14 +122,16 @@ describe('agent server streams', () => {
     expect(JSON.stringify(broadcastUiEvent.mock.calls)).not.toMatch(/open-as-host|settings|claim/);
   });
 
-  it('forwards a Bots change with its project only, so the Bots page refreshes behind the front door', async () => {
-    const { send, broadcastUiEvent } = setup();
+  it('refuses agent Bot control and attention now that the coordinator belongs to the owner', async () => {
+    const { send, broadcastUiEvent, broadcastGlobalUiEvent } = setup();
 
     await send('openchamber:bots-changed', { projectId: 'project-one', item: { id: 'item-one' }, spaceId: 'claim' });
+    await send('openchamber:bot-attention', { change: 'snapshot', entries: [] }, 'notifications');
+    await send('openchamber:notification', { kind: 'bot', title: 'Ask', body: 'Agent has no Bot coordinator', tag: 'bot-item',
+      botTarget: { projectId: 'project-one', itemId: 'item-one' }, critical: false, sessionId: null }, 'notifications');
 
-    expect(broadcastUiEvent.mock.calls.map(([event]) => event)).toEqual([
-      { type: 'openchamber:bots-changed', origin: 'agent', spaceId: null, properties: { projectId: 'project-one', origin: 'agent', spaceId: null } },
-    ]);
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
   });
 
   it('takes duplicated notification and permission types from their owning stream only', async () => {
