@@ -47,7 +47,7 @@ export const resolveSessionPlaceholder = ({
         return <DraftWelcome exiting={draftPresentationExiting} />;
     }
 
-    const showHydrationSkeleton = isSessionHydrating && messageCount === 0 && !sessionIsWorking;
+    const showHydrationSkeleton = isSessionHydrating && !sessionIsWorking && (messageCount === 0 || loadStatus === 'error');
     if (showHydrationSkeleton) {
         if (spaceStopped && effectiveSessionDirectory) {
             return <SpaceChatPlaceholder directory={effectiveSessionDirectory} />;
