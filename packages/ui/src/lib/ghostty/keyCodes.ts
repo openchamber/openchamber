@@ -1,9 +1,3 @@
-// Adapted from T3 Code's libghostty-vt browser adapter (MIT, T3 Tools Inc.).
-// See LICENSE-T3CODE in this directory.
-
-// This order mirrors GhosttyKey in ghostty/vt/key/event.h. The values are
-// intentionally derived from the official W3C-aligned enum instead of
-// maintaining a second keyboard protocol.
 const ghosttyKeyboardCodes = [
   'Unidentified',
   'Backquote',
@@ -235,11 +229,6 @@ export function loadGhosttyKeyboardLayoutMap(): Promise<GhosttyKeyboardLayoutMap
   return promise;
 }
 
-// Browsers do not expose consumed modifiers; treat Shift as consumed for
-// unchorded character input. On macOS the Option key is consumed too when it
-// composed an ASCII symbol the key does not type on its own: Swedish and
-// German layouts type $ | \ { } [ ] @ only with Option. Option letters, digits
-// and non-ASCII characters stay Meta chords, so Option+B still sends ESC b.
 export function ghosttyConsumedMods(
   event: Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
   layoutMap?: GhosttyKeyboardLayoutMap,
@@ -255,10 +244,7 @@ function isOptionComposedSymbol(
   event: Pick<KeyboardEvent, 'code' | 'key'>,
   layoutMap?: GhosttyKeyboardLayoutMap,
 ): boolean {
-  // ASCII punctuation and symbols only.
   if (!/^[!-/:-@[-`{-~]$/u.test(event.key)) return false;
-  // Without layout data, letter and digit keys fall back to their US
-  // characters; any other key is assumed to have composed the symbol.
   const base = layoutMap?.get(event.code) ?? /^(?:Key|Digit)(.)$/u.exec(event.code)?.[1]?.toLowerCase();
   return event.key !== base;
 }
@@ -280,8 +266,6 @@ export function ghosttyUnshiftedCodepoint(
     if (lowercase !== event.key && [...lowercase].length === 1) {
       return lowercase.codePointAt(0) ?? 0;
     }
-    // Without layout data the unshifted form of a shifted key is unknowable;
-    // reporting the shifted character as unshifted corrupts Kitty alternate keys.
     return 0;
   }
   return event.key.codePointAt(0) ?? 0;

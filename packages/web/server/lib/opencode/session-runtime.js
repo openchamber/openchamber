@@ -5,7 +5,6 @@ const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-// Give the user time to continue by hand before the automatic attempt.
 export const RESTART_RESUME_GRACE_MS = 60 * 1000;
 const RESTART_RESUME_RETRY_MS = 15 * 1000;
 const RESTART_RESUME_ATTEMPTS = 3;
@@ -22,7 +21,6 @@ const extractSessionStatusUpdate = (payload) => {
   const status = properties.status && typeof properties.status === 'object' ? properties.status : {};
   const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
   const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  // Canonical OpenCode schema uses properties.status.type. Keep legacy info.type fallback for compatibility.
   const type = typeof status.type === 'string'
     ? status.type.trim()
     : (typeof info.type === 'string' ? info.type.trim() : '');
@@ -50,16 +48,10 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
-/** Sessions whose latest context reading the host keeps; the oldest goes first. */
 const CONTEXT_READINGS_MAX = 2000;
 
 const finiteCount = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
 
-/**
- * Tokens the context window held after a step: the step's reported total of
- * its final round-trip, else the sum of its breakdown. Mirrors
- * `contextTokensFromBreakdown` in the shared UI.
- */
 const contextTokensOf = (tokens) => {
   if (!tokens || typeof tokens !== 'object') return 0;
   const total = finiteCount(tokens.total);
@@ -81,24 +73,11 @@ export const createSessionRuntime = ({
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
-  // When each session's latest turn began (OpenCode's clock), so every client
-  // counts "Active for" from the same moment instead of from when it first
-  // looked. Set from `session.execution.started`; a turn this server joined
-  // already running is read back from the session's history (`readTurnStart`).
-  // The start outlives its turn with `running: false`: a parent idling while a
-  // background subagent works is still in that turn for display, and clients
-  // ask for it then. A start that is not running is never reported as the
-  // start of a busy session.
   const turnStarts = new Map();
-  // One history read per session per turn; the token tells a read that
-  // outlived its turn from the current one.
   const turnStartReads = new Map();
   const restartResumeTimers = new Map();
-  // Survives managed OpenCode restarts. Only a new user message renews the budget.
   const restartResumes = new Map();
   const latestUserMessages = new Map();
-  // What each session's context window held after its latest step, or that
-  // it was compacted since, for clients that start after it.
   const contextReadings = new Map();
   const recordContext = (sessionId, reading) => {
     contextReadings.delete(sessionId);
@@ -106,16 +85,6 @@ export const createSessionRuntime = ({
     if (contextReadings.size > CONTEXT_READINGS_MAX) contextReadings.delete(contextReadings.keys().next().value);
   };
   const isolatedSessionIds = new Set();
-  // Pending permission requests and forms per session, kept from the same
-  // upstream stream. Clients that do not initialize a directory cannot read
-  // its pending list from OpenCode (that read creates a location), so this map
-  // is their seed. Entries live until the matching reply, the session's
-  // deletion, or an OpenCode restart, which drops every pending request. A
-  // permission also ends with its turn: OpenCode drops the request of a stopped
-  // turn without announcing it.
-  // Pages an agent shows that wait for the user's answer sit beside them; they
-  // come from this server's own render.page calls, not from OpenCode, and
-  // leave when the call stops waiting or the turn ends (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
 
@@ -131,14 +100,11 @@ export const createSessionRuntime = ({
   const settlePendingRequest = (kind, sessionId, requestId) => {
     const entry = pendingRequestsBySession.get(sessionId);
     if (!entry) return;
-    // OpenCode may omit the request ID on a reply; the session then has no
-    // pending request of that kind we can still vouch for.
     if (requestId) entry[kind].delete(requestId);
     else entry[kind].clear();
     if (entry.permissions.size === 0 && entry.forms.size === 0 && entry.pages.size === 0) pendingRequestsBySession.delete(sessionId);
   };
 
-  /** A page that started (`waiting`) or stopped (`settled`) waiting for the user's answer. */
   const trackWaitingPage = (change) => {
     const sessionId = readRequestId(change?.sessionId);
     const callId = readRequestId(change?.callId);
@@ -161,8 +127,6 @@ export const createSessionRuntime = ({
       getOrCreatePendingRequests(sessionId).permissions.set(requestId, properties);
       return;
     }
-    // v2 replaced the question tool with forms; the request itself rides in
-    // `properties.form`, so that object is what clients receive.
     if (payload.type === 'form.created') {
       const form = properties.form && typeof properties.form === 'object' ? properties.form : null;
       if (!form) return;
@@ -254,17 +218,11 @@ export const createSessionRuntime = ({
     return true;
   };
 
-  /** The start of the session's running turn, or null while none is known. */
   const getRunningTurnStart = (sessionId) => {
     const entry = turnStarts.get(sessionId);
     return entry?.running ? entry.startedAt : null;
   };
 
-  /**
-   * The start clients get beside a status: a running session's own start, an
-   * idle one's last start (for a parent its subagents keep in the turn), and
-   * nothing for a running session whose start is not known yet.
-   */
   const reportedTurnStart = (sessionId, status) => {
     if (status === 'busy' || status === 'retry') return getRunningTurnStart(sessionId) ?? undefined;
     return turnStarts.get(sessionId)?.startedAt;
@@ -290,11 +248,6 @@ export const createSessionRuntime = ({
     }
   };
 
-  /**
-   * A busy session this server did not see start: read its start back from
-   * the history once per turn, and announce it when it arrives while the same
-   * turn still runs.
-   */
   const readBackTurnStart = (sessionId) => {
     if (!readTurnStart || turnStartReads.has(sessionId)) return;
     const token = {};
@@ -325,7 +278,6 @@ export const createSessionRuntime = ({
     const existing = sessionStates.get(sessionId);
     const isRestartInterruption = metadata.reason === 'opencode-restart';
     if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
-      // A repeat the dedupe swallows still proves the status is current now.
       existing.lastEventAt = now;
       return;
     }
@@ -415,8 +367,6 @@ export const createSessionRuntime = ({
         ...getOpenCodeAuthHeaders(),
       },
       body: JSON.stringify({
-        // Stable for every attempt of one restart: a retry after a lost
-        // response lands as a 409, not a second continuation.
         id,
         text: RESTART_RESUME_TEXT,
         resume: true,
@@ -434,16 +384,13 @@ export const createSessionRuntime = ({
   };
 
   const checkRestartResume = (sessionId, check) => {
-    if (restartResumeTimers.get(sessionId) !== check) return; // A newer interrupt superseded it.
+    if (restartResumeTimers.get(sessionId) !== check) return;
     const state = sessionStates.get(sessionId);
-    // The user already continued the turn.
     if (!state || state.status === 'busy' || state.status === 'retry') {
       restartResumeTimers.delete(sessionId);
       return;
     }
     void (async () => {
-      // A lost response may mean the message landed. A later restart must
-      // not mint another continuation for the same user turn.
       check.resume.attempted = true;
       try {
         await postRestartContinuation(sessionId, check.resume.id);
@@ -495,7 +442,6 @@ export const createSessionRuntime = ({
       }
     }
 
-    // A restarted OpenCode forgot every pending request with the turns.
     pendingRequestsBySession.clear();
     turnStarts.clear();
     turnStartReads.clear();
@@ -532,7 +478,6 @@ export const createSessionRuntime = ({
         if (!restartResumes.has(sessionId)) latestUserMessages.delete(sessionId);
       }
     }
-    // A start lives as long as its session's status does.
     for (const sessionId of turnStarts.keys()) {
       if (!sessionStates.has(sessionId)) turnStarts.delete(sessionId);
     }
@@ -574,7 +519,6 @@ export const createSessionRuntime = ({
     if (spaceId) isolatedSessionIds.add(update.sessionId);
 
     if (update.type === 'busy' || update.type === 'retry') {
-      // Recorded before the status update, so its broadcast carries the start.
       if (update.turnStartedAt !== null) {
         turnStarts.set(update.sessionId, { startedAt: update.turnStartedAt, running: true });
         turnStartReads.delete(update.sessionId);
@@ -592,24 +536,11 @@ export const createSessionRuntime = ({
       next: update.next,
     });
 
-    // A later step of a turn that started before this server was listening.
     if ((update.type === 'busy' || update.type === 'retry') && !turnStarts.get(update.sessionId)?.running) {
       readBackTurnStart(update.sessionId);
     }
   };
 
-  /**
-   * Sessions OpenCode reports running when this server connects to its event
-   * stream, as read from `readAt` on. Turns that started before then sent no
-   * event this server saw, so they are marked busy here and their starts are
-   * read back from history. A host session this map holds busy that the list
-   * leaves out ended its turn while the stream was down, and settles idle:
-   * clients seed rows from this map, so a missed idle would show the session
-   * running on every client that starts within the seed's age limit. A
-   * session that reported a status while the list was read is left to that
-   * newer status, and sessions of isolated spaces, which the host's list
-   * never names, are left alone.
-   */
   const adoptRunningSessions = (sessionIds, readAt) => {
     const running = new Set();
     for (const sessionId of sessionIds) {

@@ -14,13 +14,6 @@ const normalizeMessageParts = (message: ChatMessageEntry): ChatMessageEntry => {
 
 const normalizedMessageBySource = new WeakMap<ChatMessageEntry, ChatMessageEntry>();
 
-/**
- * The message a timeline row renders, with malformed parts dropped.
- *
- * Cached by source reference: streaming re-renders resolve an unchanged
- * message without rebuilding it, which also keeps its identity stable for the
- * turn projection.
- */
 export const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageEntry => {
     const cached = normalizedMessageBySource.get(message);
     if (cached) {

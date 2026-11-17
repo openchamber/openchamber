@@ -12,7 +12,6 @@ const MAX_EXTRACTED_TEXT_CHARS = 500_000
 const MAX_ODF_SPACES_PER_ELEMENT = 100
 const MAX_ODS_REPEAT = 1_000
 const MAX_ODS_COLUMNS = 1_024
-// Excel's own limit. A longer code is a crafted file, and the scan below is quadratic on it.
 const MAX_NUMBER_FORMAT_CHARS = 255
 const TEXT_TRUNCATION_NOTICE = "\n\n[Document text truncated by OpenChamber]\n"
 
@@ -97,9 +96,6 @@ export const tagBlocks = (xml: string, tag: string): string[] => {
   return Array.from(xml.matchAll(new RegExp(`<${escaped}\\b[^>]*>[\\s\\S]*?<\\/${escaped}>`, "gi")), (match) => match[0])
 }
 
-// Unlike tagBlocks, keeps self-closing elements on their own: an empty styled
-// cell must not swallow the next cell, and `table:table-row` stops matching
-// `table:table-row-group`.
 export const elements = (source: string, tag: string): string[] => {
   const pattern = new RegExp(`<${tag}(?=[\\s/>])[^>]*?\\/>|<${tag}(?=[\\s/>])[^>]*>[\\s\\S]*?<\\/${tag}>`, "gi")
   return Array.from(source.matchAll(pattern), (match) => match[0])
@@ -333,7 +329,6 @@ const tsvValue = (value: string): string => {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-/** Shows a stored number; `isDate` marks a format whose numbers are days. */
 export type NumberFormat = ((value: number) => string) & { isDate?: boolean }
 
 const BUILT_IN_NUMBER_FORMATS = new Map<number, string>([
@@ -344,8 +339,6 @@ const BUILT_IN_NUMBER_FORMATS = new Map<number, string>([
   [45, "mm:ss"], [46, "[h]:mm:ss"], [47, "mm:ss"], [49, "@"],
 ])
 
-// Serial day 25569 is 1970-01-01. Serials below 60 sit before the leap day
-// Excel invented in 1900, so they are one day off from the rest.
 const formatDateSerial = (serial: number, date1904: boolean, hasDate: boolean, hasTime: boolean, hasSeconds: boolean): string | undefined => {
   const days = date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial
   const date = new Date(Math.round((days - 25569) * 86_400_000))
@@ -360,12 +353,6 @@ const formatElapsedHours = (value: number): string => {
   return `${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`
 }
 
-/**
- * What a cell's format code changes in the shown value. A number only follows
- * a plain digit pattern with optional decimals; anything richer, such as
- * scientific or fraction notation, keeps the stored value, because rounding it
- * through the wrong pattern would show a different number.
- */
 const numberFormatter = (code: string, date1904: boolean): NumberFormat | undefined => {
   if (code.length > MAX_NUMBER_FORMAT_CHARS) return
   if (/\[h+\]/i.test(code)) return formatElapsedHours
@@ -387,7 +374,6 @@ const numberFormatter = (code: string, date1904: boolean): NumberFormat | undefi
   return (value) => value.toFixed(decimals)
 }
 
-/** One format per entry of `cellXfs`, which a cell's `s` attribute indexes. */
 export const spreadsheetNumberFormats = (archive: Unzipped, workbookXml: string): Array<NumberFormat | undefined> => {
   const stylesXml = xml(archive, "xl/styles.xml")
   const date1904 = /<workbookPr\b[^>]*\bdate1904\s*=\s*["'](?:1|true)["']/i.test(workbookXml)
@@ -403,7 +389,6 @@ export const spreadsheetNumberFormats = (archive: Unzipped, workbookXml: string)
   })
 }
 
-// Decimals in the file carry binary noise: 0.1 + 0.2 is stored as 0.30000000000000004.
 export const numericCellValue = (raw: string, format: NumberFormat | undefined): string => {
   const value = Number(raw)
   if (raw === "" || !Number.isFinite(value)) return raw
@@ -638,11 +623,6 @@ export const repeatCount = (tag: string, name: string): number => {
   return Number.isSafeInteger(count) && count > 0 ? count : 1
 }
 
-/**
- * ODF stores runs of equal cells and rows once with a repeat count, and pads
- * every sheet to the format's full size with such runs, so a repeat is expanded
- * only when it holds a value and only up to a bound.
- */
 const odsRows = (table: string, cellText: (cell: string) => string) => {
   const rows: SpreadsheetRow[] = []
   let omittedRows = 0
@@ -695,7 +675,6 @@ const extractOds = (archive: Unzipped, images: EmbeddedImages): string | undefin
   return `${sections.join("\n\n")}\n`
 }
 
-/** What an archive may hold. A chat attachment keeps the tight default; the viewer reads whole workbooks. */
 type ArchiveLimits = { archive: number; uncompressed: number; entry: number; xmlEntry: number }
 const ATTACHMENT_LIMITS: ArchiveLimits = {
   archive: MAX_ARCHIVE_BYTES,
@@ -776,8 +755,6 @@ const unzipBytes = async (
 ): Promise<Unzipped> => {
   await validateArchiveMetadata(data, limits)
 
-  // Bun's browser-style Blob workers do not reliably execute fflate's async decoder.
-  // Production browser runtimes use the worker-backed path below.
   const archive = "Bun" in globalThis
     ? unzipSync(data, { filter })
     : await new Promise<Unzipped>((resolve, reject) => {
@@ -795,7 +772,6 @@ const unzipDocument = async (file: File): Promise<Unzipped> => {
   return unzipBytes(new Uint8Array(await file.arrayBuffer()), ATTACHMENT_LIMITS, shouldExtractArchiveEntry)
 }
 
-/** Every entry of a workbook, for a reader that writes the file back. */
 export const unzipWorkbook = (data: Uint8Array): Promise<Unzipped> => unzipBytes(data, {
   archive: 64 * 1024 * 1024,
   uncompressed: 512 * 1024 * 1024,

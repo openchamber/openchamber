@@ -12,9 +12,6 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
-// Desktop dev renders from Vite on its own origin while the local server keeps
-// another. Both main.mjs (isLocalSender) and this preload treat only the exact
-// HMR origin as local, and only in development.
 const devUiOrigin = readArgValue('--openchamber-dev-ui-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
@@ -23,21 +20,8 @@ const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber-tray-enabled') !== '0';
-// The window has the desktop environment's own title bar, so the page draws no window controls.
 const nativeFrame = readArgValue('--openchamber-native-frame') === '1';
 
-// Preload re-executes on every cross-origin navigation (we run with
-// sandbox:false, per-document). Two separate concerns to balance:
-//  - __OPENCHAMBER_ELECTRON__ is a shell-identity flag (no capability).
-//    Remote UIs still need it so isDesktopShell() returns true and the
-//    window renders with desktop affordances (DesktopHostSwitcher,
-//    title bar offsets, etc.). Expose unconditionally.
-//  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
-//    exposed broadly, but privileged commands are gated in main.mjs.
-//    Local-only globals below stay limited to packaged UI, the exact localOrigin,
-//    or the exact HMR UI origin in development (main.mjs trusts it too).
-// Everything driven by localOrigin (home dir, macOS hints) also stays
-// local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
   try {
     return typeof location !== 'undefined' ? location.origin : '';
@@ -50,11 +34,6 @@ const isLocalPage = currentOrigin !== 'null'
   || (localOrigin && currentOrigin === localOrigin)
   || (devUiOrigin && currentOrigin === devUiOrigin));
 
-// Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
-// the URL of the Local entry (isDesktopLocalOriginActive() falls back to
-// window.location.origin otherwise — wrong on remote). Low risk: the value
-// is just "http://127.0.0.1:<port>" which is not exploitable without the
-// IPC channel, and CORS on the local server prevents remote-origin fetches.
 if (localOrigin) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
 }
@@ -67,24 +46,15 @@ if (clientToken && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
 }
 
-// A window created before startup resolved has none of the values above in its
-// arguments, so the packaged document asks main for them (packaged-runtime-config.mjs).
 if (currentOrigin === 'openchamber-ui://app') {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_READ_RUNTIME_CONFIG__', () => ipcRenderer.sendSync('openchamber:read-runtime-config'));
 }
 
-// Which saved host this window should connect to over the relay-capable path
-// (direct probe first, E2EE tunnel fallback). Local pages only — the id is
-// only useful together with the desktop IPC channel anyway.
 const relayHostId = readArgValue('--openchamber-relay-host-id');
 if (relayHostId && isLocalPage) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_RELAY_HOST_ID__', relayHostId);
 }
 
-// A window opened for a specific instance carries an explicit runtime, so the
-// renderer keeps that endpoint instead of running the default-host relaunch
-// restore. Exposed on any page (dev direct-host windows are remote-origin);
-// the value is a hint that carries no secret.
 if (readArgValue('--openchamber-explicit-runtime') === '1') {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_EXPLICIT_RUNTIME__', true);
 }
@@ -92,9 +62,6 @@ if (readArgValue('--openchamber-explicit-runtime') === '1') {
 if (runtimeHeadersRaw && isLocalPage) {
   try {
     const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
-    // An exposed global is read-only. A window created before startup resolved
-    // carries no headers, and exposing that empty set would keep the packaged
-    // document from receiving the startup host's headers.
     if (runtimeHeaders && typeof runtimeHeaders === 'object' && Object.keys(runtimeHeaders).length > 0) {
       contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
     }
@@ -102,15 +69,10 @@ if (runtimeHeadersRaw && isLocalPage) {
   }
 }
 
-// Home directory leaks the OS username — keep local-only. Remote pages
-// operate on the REMOTE server's filesystem, local home is irrelevant
-// (and would be misleading if consumed as a workspace hint).
 if (isLocalPage && homeDirectory) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_HOME__', homeDirectory);
 }
 
-// macOS major version drives window chrome offsets (traffic lights) — UI
-// presentation only, safe to expose.
 if (Number.isFinite(macosMajor) && macosMajor > 0) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_MACOS_MAJOR__', macosMajor);
 }
@@ -124,11 +86,6 @@ contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);
 
-// Main reloads a window that crashed several times in a row once without its
-// saved layout (expanded folders, open panels), so a layout that crashes the
-// window on load cannot loop forever. The startup splash (a data: page in
-// development, /__splash in packaged UI) loads before main.mjs listens and is
-// never the page that crashed, so it does not ask.
 const isStartupSplash = (() => {
   try {
     return location.protocol === 'data:' || location.pathname === '/__splash';
@@ -140,10 +97,6 @@ if (!isStartupSplash && ipcRenderer.sendSync('openchamber:take-safe-start') === 
   contextBridge.exposeInMainWorld('__OPENCHAMBER_SAFE_START__', true);
 }
 
-// Note: bootOutcome must stay writable from the main world's initScript so
-// re-navigations (host switch via deep link) can refresh it. contextBridge-
-// exposed globals are read-only, which blocks that update — rely solely on
-// the main-process initScript injection (dispatched on did-finish-load).
 
 const addListener = (event, handler) => {
   const listeners = eventListeners.get(event) || new Set();
@@ -184,9 +137,6 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
-// Main-process events are read-only notifications (update progress,
-// window focus, etc.) — safe to deliver to any page rendered in this
-// webContents. The events themselves don't grant capability.
 ipcRenderer.on('openchamber:emit', (_evt, payload) => {
   if (!payload || typeof payload !== 'object') {
     return;
@@ -206,7 +156,6 @@ ipcRenderer.on('openchamber:relay-dev-tunnel-connect', (event, payload) => {
   if (!isLocalPage || !payload || typeof payload.connectionId !== 'string' || !event.ports?.[0]) return;
   const port = event.ports[0];
   relayDevTunnelPorts.set(payload.connectionId, port);
-  // Main's own payload: the id it opened the tunnel for, or null for the host.
   const spaceId = payload.spaceId ?? null;
   port.onmessage = (messageEvent) => relayDevTunnelHandler?.({
     connectionId: payload.connectionId,
@@ -218,25 +167,17 @@ ipcRenderer.on('openchamber:relay-dev-tunnel-connect', (event, payload) => {
   relayDevTunnelHandler?.({ connectionId: payload.connectionId, remotePort: payload.remotePort, spaceId, message: { type: 'connect' } });
 });
 
-// The desktop bridge is exposed on all pages; the main-process gate in
-// ipcMain.handle('openchamber:invoke') decides per-command what is safe
-// for non-local callers (window/host-switcher ops yes, file/shell ops
-// no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
 const desktopBridge = {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
-  // Resolves the on-disk path of a File dropped from Finder/Explorer. Only
-  // the path string crosses the bridge; shared UI gates use on the local page.
   pathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 if (isLocalPage) {
   desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
-  // PRIMARY is not reachable from the web Clipboard API; expose it only to the
-  // local Linux page. Remote pages never receive this bridge.
   if (process.platform === 'linux') {
     desktopBridge.clipboard = {
       readSelection: () => ipcRenderer.invoke('openchamber:invoke', 'desktop_clipboard_read_selection', {}),

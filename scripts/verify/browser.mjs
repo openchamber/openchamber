@@ -4,6 +4,8 @@ import process from "node:process"
 import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
 
 const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
+// A phone the size of an iPhone 15; the app serves its phone layout at /mobile.html.
+const PHONE_VIEWPORT = { width: 390, height: 844, deviceScaleFactor: 2 }
 const MODIFIERS = { alt: 1, ctrl: 2, meta: 4, shift: 8 }
 const KEYS = {
   Escape: { code: "Escape", keyCode: 27 },
@@ -13,8 +15,10 @@ const KEYS = {
   ArrowDown: { code: "ArrowDown", keyCode: 40 },
   ArrowUp: { code: "ArrowUp", keyCode: 38 },
   End: { code: "End", keyCode: 35 },
+  F10: { code: "F10", keyCode: 121 },
 }
 export const MOD = process.platform === "darwin" ? "meta" : "ctrl"
+const modifierMask = (modifiers) => modifiers.map((name) => (name === "mod" ? MOD : name)).reduce((sum, name) => sum | MODIFIERS[name], 0)
 
 export const DEEP_QUERY = `((selector) => {
   const roots = [document]
@@ -155,22 +159,103 @@ export class Page {
   }
 
   async mouse(type, point, extra = {}) {
-    await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra })
+    await this.client.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, ...extra }, { timeoutMs: 30_000 })
   }
 
-  async hover(target, timeoutMs) {
+  // A point another element still covers when the wait ends comes back
+  // unused: pressing there would act on whatever lies on top.
+  async hover(target, timeoutMs, modifiers = []) {
     const point = await this.point(target, timeoutMs)
-    if (!point) return null
-    await this.mouse("mouseMoved", point)
+    if (!point?.hits) return point
+    await this.mouse("mouseMoved", point, { modifiers: modifierMask(modifiers) })
     return point
   }
 
-  async click(target, timeoutMs) {
-    const point = await this.hover(target, timeoutMs)
-    if (!point) return null
-    await this.mouse("mousePressed", point, { button: "left", buttons: 1, clickCount: 1 })
-    await this.mouse("mouseReleased", point, { button: "left", buttons: 0, clickCount: 1 })
+  // Touch from here on, at a phone's size: clicks become taps.
+  async usePhone() {
+    this.phone = true
+    await this.client.send("Emulation.setDeviceMetricsOverride", { ...PHONE_VIEWPORT, mobile: true })
+    await this.client.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })
+  }
+
+  async touch(point, holdMs) {
+    await this.client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: point.x, y: point.y }] })
+    await wait(holdMs)
+    await this.client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+  }
+
+  // `count` 2 is a double-click: two press-release pairs, the second counted
+  // as the second click, which is what fires dblclick.
+  // `modifiers` (as on `press`) are held during the move and the click.
+  async click(target, timeoutMs, { button = "left", count = 1, modifiers = [] } = {}) {
+    if (this.phone || button === "long") {
+      const point = await this.point(target, timeoutMs)
+      if (point?.hits) await this.touch(point, button === "long" ? 800 : 40)
+      return point
+    }
+    const point = await this.hover(target, timeoutMs, modifiers)
+    if (!point?.hits) return point
+    const buttons = button === "right" ? 2 : 1
+    const mask = modifierMask(modifiers)
+    for (let clickCount = 1; clickCount <= count; clickCount += 1) {
+      await this.mouse("mousePressed", point, { button, buttons, clickCount, modifiers: mask })
+      await this.mouse("mouseReleased", point, { button, buttons: 0, clickCount, modifiers: mask })
+    }
     return point
+  }
+
+  // A native HTML drag: Chrome hands the drag data to the client instead of
+  // running its own drag loop, which a headless browser cannot finish. The
+  // source still gets dragstart; dragOver and drop then deliver the data to
+  // the page as the browser would.
+  async startHtmlDrag(from) {
+    await this.client.send("Input.setInterceptDrags", { enabled: true })
+    const intercepted = this.client.once("Input.dragIntercepted", 15_000).then(({ data }) => data, () => null)
+    try {
+      await this.mouse("mouseMoved", from)
+      await this.mouse("mousePressed", from, { button: "left", buttons: 1, clickCount: 1 })
+      for (let move = 1; move <= 6; move += 1) {
+        await this.client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + move * 4, y: from.y + move * 3, button: "left", buttons: 1 }, { timeoutMs: 10_000 })
+      }
+    } catch {
+      return null
+    }
+    return intercepted
+  }
+
+  async dragEvent(type, point, data, modifiers = 0) {
+    await this.client.send("Input.dispatchDragEvent", { type, x: point.x, y: point.y, data, modifiers }, { timeoutMs: 10_000 })
+  }
+
+  async endHtmlDrag(point) {
+    await this.mouse("mouseReleased", point, { button: "left", buttons: 0, clickCount: 1 })
+    await this.client.send("Input.setInterceptDrags", { enabled: false })
+  }
+
+  // The next file picker the page opens gets `paths` as if the user chose them.
+  async armFileChooser(paths) {
+    this.fileChooserError = null
+    await this.client.send("Page.setInterceptFileChooserDialog", { enabled: true })
+    const off = this.client.on("Page.fileChooserOpened", ({ backendNodeId }) => {
+      off()
+      this.client.send("DOM.setFileInputFiles", { files: paths, backendNodeId })
+        .catch((error) => { this.fileChooserError = error.message })
+        .finally(() => this.client.send("Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => undefined))
+    })
+  }
+
+  // Downloads land in `dir`; `downloads` lists them by the name the page gave
+  // them, with their state.
+  async allowDownloads(dir) {
+    this.downloads = new Map()
+    this.client.on("Page.downloadWillBegin", ({ guid, suggestedFilename }) => {
+      this.downloads.set(guid, { name: suggestedFilename, state: "inProgress" })
+    })
+    this.client.on("Page.downloadProgress", ({ guid, state }) => {
+      const download = this.downloads.get(guid)
+      if (download) download.state = state
+    })
+    await this.client.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: dir })
   }
 
   // Presses at `from`, moves to `to` in small steps with the button held, and
@@ -191,7 +276,7 @@ export class Page {
   }
 
   async press(key, modifiers = []) {
-    const mask = modifiers.map((name) => (name === "mod" ? MOD : name)).reduce((sum, name) => sum | MODIFIERS[name], 0)
+    const mask = modifierMask(modifiers)
     const known = KEYS[key]
     const isChar = !known && key.length === 1
     const code = known?.code ?? (isChar ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : `Digit${key}`) : key)

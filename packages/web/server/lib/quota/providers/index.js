@@ -1,9 +1,3 @@
-/**
- * Quota Providers Registry
- *
- * Implements quota fetching for various AI providers using a registry pattern.
- * @module quota/providers
- */
 
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { extensionQuotaProvider, extensionQuotaProviderEntries } from '../extension-registry.js';
@@ -193,7 +187,6 @@ const registry = {
   zenmux: {
     providerId: zenmux.providerId,
     providerName: zenmux.providerName,
-    // ZenMux reads its own managed credential; the list's OpenCode auth is not for it.
     isConfigured: () => zenmux.isConfigured(),
     fetchQuota: zenmux.fetchQuota
   },
@@ -213,32 +206,18 @@ const registry = {
 
 export { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from '../extension-registry.js';
 
-// `hasOwn`, so an id such as `constructor` never resolves to the object's own prototype members.
 const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : extensionQuotaProvider(providerId));
 const providerEntries = () => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
 
 const pendingFetches = new Map();
 
-// The registry entries Settings > Usage never reads. Its built-in list
-// (`QUOTA_PROVIDERS` in packages/ui/src/lib/quota/providers/index.ts) shows
-// GitHub Copilot once; the add-on entry asks GitHub a second time.
 const NOT_ON_USAGE_PAGE = new Set([copilot.providerIdAddon]);
 
-/**
- * The providers Settings > Usage reads, built-ins first, then the attached
- * extensions: what an agent reading usage may ask, so it never makes a
- * request the page does not make.
- */
 export const listUsagePageProviders = () => providerEntries()
   .filter(([id]) => !NOT_ON_USAGE_PAGE.has(id))
   .map(([providerId, provider]) => ({ providerId, providerName: provider.providerName }));
 
 
-/**
- * Providers with a usable credential. OpenCode's stored credentials are read
- * once and handed to every provider; when OpenCode cannot be asked this
- * throws, so a transient failure does not look like "nothing configured".
- */
 export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = [];
@@ -272,7 +251,6 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   try {
     return await provider.fetchQuota();
   } catch (error) {
-    // The extension layer's own answer for a service reply OpenChamber cannot use: the route answers its status and code.
     if (error instanceof QuotaRouteError) throw error;
     return buildResult({
       providerId: provider.providerId,

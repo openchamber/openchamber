@@ -37,7 +37,6 @@ export const surfaceInputEventSchema = z.discriminatedUnion('type', [
 
 const dimension = z.number().int().min(1).max(SURFACE_DIMENSION_MAX);
 
-/** What a viewer (the host panel) sends the host over the surface socket. */
 export const surfaceViewerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ack'), seq: z.number().int().min(0) }),
   z.object({ type: z.literal('input'), events: z.array(surfaceInputEventSchema).min(1).max(SURFACE_INPUT_BATCH_MAX) }),
@@ -49,10 +48,6 @@ export type SurfaceViewerMessage = z.infer<typeof surfaceViewerMessageSchema>;
 
 export const surfaceControllerSchema = z.enum(SURFACE_CONTROLLERS);
 
-/**
- * What the host sends a viewer. A `frame` text message is followed by one
- * binary message carrying exactly `bytes` bytes of the image.
- */
 export const surfaceHostMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hello'), viewerId: z.string().min(1) }),
   z.object({
@@ -73,6 +68,5 @@ export const surfaceHostMessageSchema = z.discriminatedUnion('type', [
 ]);
 export type SurfaceHostMessage = z.infer<typeof surfaceHostMessageSchema>;
 
-/** Service answers the host parses. */
 export const surfaceResizeAnswerSchema = z.object({ width: dimension, height: dimension });
 export const surfaceClipboardAnswerSchema = z.object({ text: z.string().max(SURFACE_TEXT_MAX) });

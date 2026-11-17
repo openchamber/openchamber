@@ -53,7 +53,6 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
       return {};
     }
 
-    // OpenCode 2 accepts only this username; OPENCODE_SERVER_USERNAME is ignored.
     const credentials = Buffer.from(`opencode:${password}`).toString('base64');
     return { Authorization: `Basic ${credentials}` };
   };

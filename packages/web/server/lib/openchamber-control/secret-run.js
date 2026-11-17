@@ -8,10 +8,8 @@ export const SECRET_RUN_MAX_LABEL_LENGTH = 120;
 export const SECRET_RUN_MAX_PLACEHOLDER_LENGTH = 80;
 export const SECRET_RUN_DEFAULT_TIMEOUT_MS = 120_000;
 export const SECRET_RUN_MAX_TIMEOUT_MS = 600_000;
-// A remembered value is reused for this long after the user submitted it; use does not extend it.
 export const SECRET_LEASE_MS = 10 * 60_000;
 const SECRET_MAX_VALUE_LENGTH = 16_000;
-// The child prints into a 1 MB window; the agent gets the last 32,000 characters of it.
 const CAPTURE_BYTES = 1024 * 1024;
 const OUTPUT_LIMIT = 32_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
@@ -20,18 +18,7 @@ const RAN_NOTE = "The command ran once, with the secrets in its environment. In 
 const DECLINED_NOTE = "The user declined to give the secrets, so the command did not run. Continue without it or say what it blocks; ask again only if they want to.";
 const CHAT_SENT_EARLIER_NOTE = "The card did not wait and the command did not run: the user had already written in the chat before it appeared, and that message follows this result. Continue from that message; call again only if it still fits.";
 
-/**
- * The command line the user approves and reads on the card: each argument
- * bare when it is plain, else in single quotes. Characters that draw nothing
- * or reorder text (controls, bidirectional marks) show as `\u{XXXX}`, so an
- * argument cannot make the line read differently from what runs.
- *
- * Self-contained: the agent tool's plugin embeds it with `toString()` to show
- * the same line in OpenCode's permission request.
- */
 export function secretRunCommandLine(program, args) {
-  // C0 and C1 controls, the Arabic letter mark, zero-width and direction marks,
-  // line and paragraph separators, embeddings and overrides, isolates, BOM.
   const hidden = (code) => code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x61c
     || (code >= 0x200b && code <= 0x200f) || (code >= 0x2028 && code <= 0x202e)
     || (code >= 0x2060 && code <= 0x2069) || code === 0xfeff;
@@ -43,15 +30,6 @@ export function secretRunCommandLine(program, args) {
   return [program, ...args].map(word).join(' ');
 }
 
-/**
- * The program and arguments of a `secret.run` call, or the reason they are
- * refused. The plugin checks the call with it before it asks for permission,
- * so a malformed call never shows a permission request. It embeds this
- * function with `toString()`, so it uses nothing from outside itself: a
- * transformed import (vitest rewrites them) would not resolve in the plugin.
- * A script passed to `sh -c` is one argument, so the length bound is on the
- * whole line.
- */
 export function secretRunCommand(input) {
   const isText = (value) => Object.prototype.toString.call(value) === '[object String]';
   const program = isText(input?.program) ? input.program.trim() : '';
@@ -68,7 +46,6 @@ const readText = (value) => (isString(value) ? value.trim() : '');
 
 const refuse = (message) => new OpenChamberControlError(message, 400);
 
-/** A `secret.run` input checked and normalized, or a 400 that names what to fix. */
 const normalizeSecretRun = (input = {}) => {
   const command = secretRunCommand(input);
   if (command.error) throw refuse(command.error);
@@ -102,11 +79,6 @@ const normalizeSecretRun = (input = {}) => {
   return { ...command, reason, inputs, timeoutMs };
 };
 
-/**
- * Values the user let a chat keep, by session and environment name, each for
- * `SECRET_LEASE_MS` from when they submitted it. Only memory holds them, so a
- * restart forgets them all.
- */
 export const createSecretLeases = ({ now = Date.now, leaseMs = SECRET_LEASE_MS } = {}) => {
   const leases = new Map();
   const key = (sessionId, env) => `${sessionId}\u0000${env}`;
@@ -151,7 +123,6 @@ export const createSecretLeases = ({ now = Date.now, leaseMs = SECRET_LEASE_MS }
 
 const NUL = String.fromCharCode(0);
 
-/** The prefix function of `text`: at each position, the longest proper prefix that also ends there. */
 const prefixFunction = (text) => {
   const prefix = new Array(text.length).fill(0);
   for (let index = 1; index < text.length; index += 1) {
@@ -163,7 +134,6 @@ const prefixFunction = (text) => {
   return prefix;
 };
 
-/** Every place `value` occurs in `text`, overlapping ones included, as [start, end) ranges, in linear time. */
 const occurrencesOf = (value, text) => {
   const prefix = prefixFunction(value);
   const ranges = [];
@@ -179,27 +149,17 @@ const occurrencesOf = (value, text) => {
   return ranges;
 };
 
-/** How many characters at the start of `text` are the end of `value`. Values never hold NUL, so no match runs across it. */
 const leadingTailOf = (value, text) => {
   const prefix = prefixFunction(`${text.slice(0, value.length)}${NUL}${value}`);
   return prefix[prefix.length - 1];
 };
 
-/**
- * `text` with every character that belongs to a secret value hidden: each run
- * of them becomes `[secret:NAME]`, the longest value naming a character two
- * values cover. All ranges are found on the original text and hidden together
- * (a value inside another, overlapping occurrences, and with `cutAtStart` the
- * end of a value the text starts with), so hiding one can never shift the text
- * into a new partial match.
- */
 export const redactSecrets = (text, values, { cutAtStart = false } = {}) => {
   const owner = new Array(text.length).fill(null);
   const entries = Object.entries(values).filter(([, value]) => value.length > 0).sort(([, a], [, b]) => b.length - a.length);
   for (const [env, value] of entries) {
     const ranges = occurrencesOf(value, text);
     if (cutAtStart) ranges.push([0, leadingTailOf(value, text)]);
-    // Covered positions through a difference array, so overlapping ranges cost nothing extra.
     const depth = new Int32Array(text.length + 1);
     for (const [start, end] of ranges) {
       depth[start] += 1;
@@ -225,14 +185,8 @@ export const redactSecrets = (text, values, { cutAtStart = false } = {}) => {
   return pieces.join('');
 };
 
-/**
- * The output a run returns. A window the runner cut at its byte limit can
- * start inside a secret, where that piece no longer matches the value, so its
- * start is hidden as the end of a value too.
- */
 const shownOutput = (raw, values) => {
   if (Buffer.byteLength(raw, 'utf8') < CAPTURE_BYTES - 3) return lastChars(redactSecrets(raw, values));
-  // A cut inside a multi-byte character decodes as replacement characters first.
   let start = 0;
   while (raw.charCodeAt(start) === 0xfffd) start += 1;
   return { ...lastChars(redactSecrets(raw.slice(start), values, { cutAtStart: true })), truncated: true };
@@ -240,7 +194,6 @@ const shownOutput = (raw, values) => {
 
 const lastChars = (text) => (text.length > OUTPUT_LIMIT ? { text: text.slice(-OUTPUT_LIMIT), truncated: true } : { text, truncated: false });
 
-/** What one run of the command came to: its exit, or why it did not finish. */
 const runOnce = async ({ program, args, timeoutMs }, { values, directory, signal, run }) => {
   try {
     const { code, stdout, stderr } = await run(program, args, {
@@ -262,21 +215,7 @@ const runOnce = async ({ program, args, timeoutMs }, { values, directory, signal
   }
 };
 
-/**
- * `secret.run`: the card asks the user for the secrets a command needs, and
- * the server runs that command once with them in its environment, in the
- * session's directory. The values never enter the call, its result, a file,
- * or the agent's context; the output the agent gets has them replaced.
- *
- * `waits` is the secret card's `createPageAnswers`, shared with
- * `secret.request`, so the answer route reaches both. While a card waits,
- * `fieldsFor` names the fields it asks for, the ones the chat still remembers
- * left out; the card reads them once the wait is announced.
- * `authorized` is true only for a call from the agent tool, whose plugin asked
- * OpenCode's shell permission for this command line first.
- */
 export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLeases(), run = runCommand }) => {
-  // The calls whose card waits, by session and call id, and the fields each asks for.
   const pending = new Map();
   const key = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
@@ -295,8 +234,6 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
     }
     const reused = Object.keys(values);
 
-    // A message the user wrote while OpenCode asked to approve the command
-    // comes first, also when the chat remembers every value and no card shows.
     if (await hasUnreadChat(sessionId)) {
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
@@ -318,7 +255,6 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       Object.assign(values, submitted.values);
       remember = submitted.remember;
     }
-    // Kept before the run, so a command that fails can be fixed and run again without asking.
     for (const env of remember) leases.keep(sessionId, env, values[env]);
 
     const result = await runOnce(request, { values, directory, signal, run });
@@ -332,23 +268,16 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       remembered,
       note: RAN_NOTE,
     };
-    // Each only when it says something, so a plain run reads short.
     if (stdout.truncated || stderr.truncated) data.truncated = { stdout: stdout.truncated, stderr: stderr.truncated };
     if (result.error) data.error = redactSecrets(result.error, values);
     return data;
   };
 
-  /** What this call's card asks for (`fields`) and reuses (`reused`), or null when it is not waiting for a run. */
   const fieldsFor = (sessionId, callId) => {
     const slot = pending.get(key(sessionId, callId));
     return slot ? { fields: slot.fields, reused: slot.reused } : null;
   };
 
-  /**
-   * The card's answer: exactly the asked fields, each non-empty, and the ones
-   * the user let the chat remember. Settles the wait as `submitted`; the
-   * values travel past it in memory and never through the wait's data.
-   */
   const submit = (sessionId, callId, input, settle) => {
     const slot = pending.get(key(sessionId, callId));
     const raw = input.values;
@@ -358,7 +287,6 @@ export const createSecretRuns = ({ waits, hasUnreadChat, leases = createSecretLe
       const value = raw[env];
       if (!isString(value) || !value.trim()) throw new OpenChamberControlError(`A value for ${env} is required`, 400);
       if (value.length > SECRET_MAX_VALUE_LENGTH) throw new OpenChamberControlError(`The value for ${env} is ${value.length} characters; the limit is ${SECRET_MAX_VALUE_LENGTH}`, 413);
-      // No program can receive it, and the runtime would quote it in its error.
       if (value.includes(NUL)) throw new OpenChamberControlError(`The value for ${env} contains a NUL character`, 400);
       values[env] = value;
     }

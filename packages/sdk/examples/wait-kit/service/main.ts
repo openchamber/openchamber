@@ -1,8 +1,3 @@
-// A service that offers agents two waits: a timer, and a URL that starts
-// answering. OpenChamber keeps every wait and its state and asks this service
-// on each type's interval whether it fired, so the service keeps nothing and
-// may be stopped between checks. Runs under the app's Node runtime on
-// 127.0.0.1, reachable only through the host.
 import http from 'node:http';
 
 import {
@@ -47,7 +42,6 @@ const dueOf = (state: JsonValue): number | null => {
   return typeof state.due === 'number' ? state.due : null;
 };
 
-/** Takes a new wait, or says what the agent should change. */
 const start = (type: string, args: GuestWaitArgs): GuestWaitStartResult => {
   if (type === 'timer') {
     const seconds = Number(args.seconds);
@@ -67,7 +61,6 @@ const start = (type: string, args: GuestWaitArgs): GuestWaitStartResult => {
   return { ok: false, error: `this service has no wait "${type}"` };
 };
 
-/** Whether one wait fired. A URL that cannot be reached yet keeps waiting. */
 const check = async (wait: { id: string; type: string; args: GuestWaitArgs; state: JsonValue }): Promise<GuestWaitCheckOutcome> => {
   if (wait.type === 'timer') {
     const due = dueOf(wait.state);
@@ -92,7 +85,6 @@ const server = http.createServer((req, res) => {
     return;
   }
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-  // OpenChamber waits for this before it sends anything.
   if (url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end('{"ok":true}');

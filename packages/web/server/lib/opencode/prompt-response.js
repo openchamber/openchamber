@@ -9,7 +9,6 @@ export const assertPromptResponse = async (response, operation = 'prompt') => {
   assertOpenCodeApiResponse(response, operation);
 };
 
-/** Keep SDK status/body decoding intact while refusing a successful app shell. */
 export const assertOpenCodeApiResponse = (response, operation = 'OpenCode request') => {
   if (response.ok && isHtmlResponse(response)) {
     void response.body?.cancel().catch(() => undefined);

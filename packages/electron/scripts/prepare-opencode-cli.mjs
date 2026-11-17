@@ -27,13 +27,7 @@ const run = (command, args, options = {}) => {
   return result;
 };
 
-/**
- * OpenCode 2.x ships on npm, not as GitHub release assets: `@opencode/cli`
- * resolves a platform package (`@opencode/cli-<os>-<arch>`) whose tarball
- * holds the compiled binary under `package/bin/`. OpenCode's own installer
- * (`https://opencode.ai/v2/install`) downloads exactly these tarballs, so the
- * bundled desktop binary comes from the same place.
- */
+// external: https://opencode.ai/v2/install OpenCode 2 ships the platform CLI tarballs on npm; stage the same binaries as the upstream installer.
 const artifactForPlatform = (platform, targetArchitecture) => {
   const arch = targetArchitecture.opencode;
   if (platform === 'darwin') {
@@ -87,10 +81,6 @@ const download = async (url, destination) => {
 const extractArchive = (archivePath, destination) => {
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
-  // npm tarballs are gzipped tar on every platform; Windows 10+ ships bsdtar.
-  // The archive is addressed relative to the destination: under Git Bash on
-  // Windows, `tar` is GNU tar, which reads an absolute `D:\...` path as a
-  // remote host ("Cannot connect to D:").
   run('tar', ['-xzf', path.relative(destination, archivePath)], { cwd: destination });
 };
 
@@ -118,11 +108,8 @@ const main = async () => {
   const targetArchitecture = resolveTargetArchitecture();
   const artifact = artifactForPlatform(process.platform, targetArchitecture);
   const outputBinary = outputBinaryPath(artifact.binary);
-  // A Windows build for another architecture is not run here: an x64 runner
-  // cannot start an arm64 executable, so the package manifest vouches for the version.
   const runsOnHost = !(process.platform === 'win32' && targetArchitecture.node !== process.arch);
   const existingVersion = runsOnHost ? readBinaryVersion(outputBinary) : null;
-  // Windows on arm64 also runs an x64 binary left from an earlier build.
   const existingMatchesTarget = process.platform !== 'win32'
     || (existingVersion !== null && readPeArchitecture(outputBinary) === targetArchitecture.node);
   if (existingVersion === version && existingMatchesTarget) {

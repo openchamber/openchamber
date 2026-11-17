@@ -1,17 +1,9 @@
-/**
- * One session notice (`@/lib/opencode/session-notices`): a folded line with an
- * info icon and what happened, opening to the text the model received. A pull
- * request wake is one line that opens the pull request; an extension wait's
- * wake names the wait and opens to the extension's report; the answer to a
- * page shown with `answerLater` names the page and the choice and opens to
- * what the page sent. All draw the same inside a turn's Activity and between
- * turns.
- */
 
 import React from 'react';
 
 import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ExtensionWaitNotice, PageAnswerNotice, PullRequestNotice, SessionNotice } from '@/lib/opencode/session-notices';
@@ -20,7 +12,6 @@ import { changeRequestTermOfUrl, useRepositoryUrlMatcher } from '@/lib/source-co
 import { cn } from '@/lib/utils';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 
-// A worktree reads by its folder name; the full path is in the expanded text.
 const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
 type FoldedSessionNotice = Exclude<SessionNotice, PullRequestNotice | ExtensionWaitNotice | PageAnswerNotice>;
@@ -84,8 +75,6 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
                 />
             </span>
             <span
-                // The row's name, muted as every activity row's; the change
-                // list after it is prose, muted too.
                 className={cn(ROW_TEXT_CLASS, 'flex-shrink-0 font-normal group-hover/notice:underline group-focus-visible/notice:underline')}
                 style={{ color: 'var(--tools-description)' }}
             >
@@ -98,10 +87,22 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
     );
 };
 
-// The wait's name, with the extension's report as the preview; it opens to the
-// whole report, which the agent read inside an envelope of OpenChamber's own text.
+const PlainNoticeLine: React.FC<{ icon: IconName; title: string }> = ({ icon, title }) => (
+    <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 ps-px pe-2">
+        <span className="flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+            <Icon name={icon} className="h-3.5 w-3.5" />
+        </span>
+        <span className={cn(ROW_TEXT_CLASS, 'min-w-0 truncate')} style={{ color: 'var(--tools-description)' }} title={title} dir="auto">
+            {title}
+        </span>
+    </div>
+);
+
 const ExtensionWaitNoticeRow: React.FC<{ notice: ExtensionWaitNotice; blockId: string }> = ({ notice, blockId }) => {
     const { t } = useI18n();
+    if (notice.timerMinutes !== undefined && notice.outcome === 'fired') {
+        return <PlainNoticeLine icon="timer" title={t('chat.waits.timerFired', { minutes: notice.timerMinutes })} />;
+    }
     return (
         <ReasoningTimelineBlock
             text={notice.summary}
@@ -119,9 +120,6 @@ const ExtensionWaitNoticeRow: React.FC<{ notice: ExtensionWaitNotice; blockId: s
     );
 };
 
-// The page's title and the user's choice in one line, opening to the data the
-// page sent; the agent read it inside an envelope of instructions. A declined
-// page has nothing to open to, so its row is a plain line.
 const PageAnswerNoticeRow: React.FC<{ notice: PageAnswerNotice; blockId: string }> = ({ notice, blockId }) => {
     const { t } = useI18n();
     const title = notice.outcome === 'answered'
@@ -130,18 +128,7 @@ const PageAnswerNoticeRow: React.FC<{ notice: PageAnswerNotice; blockId: string 
             ? t('chat.sessionNotice.pageAnswer.declined', { title: notice.title })
             : t('chat.sessionNotice.pageAnswer.notDrawn', { title: notice.title });
     const failed = notice.outcome === 'ui-not-drawn';
-    if (!notice.details) {
-        return (
-            <div className="flex w-full min-w-0 items-center gap-1.5 py-1.5 ps-px pe-2">
-                <span className="flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
-                    <Icon name="survey" className="h-3.5 w-3.5" />
-                </span>
-                <span className={cn(ROW_TEXT_CLASS, 'min-w-0 truncate')} style={{ color: 'var(--tools-description)' }} title={title} dir="auto">
-                    {title}
-                </span>
-            </div>
-        );
-    }
+    if (!notice.details) return <PlainNoticeLine icon="survey" title={title} />;
     return (
         <ReasoningTimelineBlock
             text={notice.details}

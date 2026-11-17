@@ -1,7 +1,6 @@
 import { ReceivedPagesList } from './ReceivedPagesList';
 import { useOpenReceivedPage } from './openReceivedPage';
 
-/** The `pages` surface with no page open: the list, each row opening its page's tab beside it. */
 export function ReceivedPagesTab() {
   const openPage = useOpenReceivedPage();
   return (

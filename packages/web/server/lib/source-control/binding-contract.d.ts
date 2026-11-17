@@ -9,7 +9,6 @@ export type BindingStorageSnapshot = {
   version: 2;
   repositories: { [repositoryId: string]: { revision: number; binding: StoredBinding | null } };
 };
-// These parsers are the persisted and process-boundary entrypoints.
 export function parseBinding(value: StoredBinding): StoredBinding;
 export function parseBindingResponse(value: SourceControlRepositoryBinding): SourceControlRepositoryBinding;
 export function parseBindingStore(value: BindingStorageSnapshot): BindingStorageSnapshot;

@@ -1,13 +1,3 @@
-// APNs (Apple Push Notification service) runtime for the native iOS mobile app.
-//
-// Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
-// modes, chosen at send time:
-//   - Relay (default): POST tokens + generic text to the central Cloudflare relay, which
-//     holds the single project APNs key and signs+sends — so users configure nothing.
-//   - Direct (fallback): sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves,
-//     for self-hosters who set OPENCHAMBER_APNS_* and OPENCHAMBER_PUSH_RELAY_DISABLED=true.
-// Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
-// generic, model-based text (no session content) — see APNS.md.
 
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
 import { parsePushKey, sealPushContent } from './push-seal.js';
@@ -19,24 +9,16 @@ import {
 const APNS_TOKENS_VERSION = 1;
 const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
-// APNs rejects auth tokens older than 1h; refresh well inside that window.
+// external: https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns APNs rejects authentication tokens older than 1 hour.
 const JWT_TTL_MS = 50 * 60 * 1000;
 const DEFAULT_BUNDLE_ID = 'com.openchamber.app';
 const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
-// What one clearing push carries (`tag@nid` entries); the relay accepts as much.
 const MAX_CLEAR_TAGS = 20;
 const MAX_CLEAR_ENTRY_LENGTH = 100;
-// APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
-// The relay answers a send in 0.1-0.4 s, its FCM/APNs call included. Without a limit a stalled
-// path held the send for undici's 300 s and then lost it. The limit sits above Node's 10 s
-// connect timeout, so a path that never connects fails first with a code that is retried.
 const RELAY_TIMEOUT_MS = 15_000;
 const RELAY_RETRY_DELAY_MS = 5_000;
-// Failures before the request left this machine (Node puts the code on `cause`, Bun on the
-// error). Only these are retried: the relay does not deduplicate sends, so repeating a request
-// it may have received, after a timeout or a reset, could alert the phone twice.
 const RELAY_NOT_SENT_CODES = new Set([
   'ECONNREFUSED',
   'ENOTFOUND',
@@ -79,7 +61,6 @@ const trimmedEnv = (name) => {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 };
 
-// Env vars commonly store the .p8 with literal "\n" sequences; restore real newlines.
 const normalizePem = (value) => (typeof value === 'string' ? value.replace(/\\n/g, '\n').trim() : '');
 
 export const createApnsRuntime = (deps) => {
@@ -90,28 +71,17 @@ export const createApnsRuntime = (deps) => {
     http2,
     APNS_TOKENS_FILE_PATH,
     readSettingsFromDiskMigrated,
-    // Host relay identity keys, shared with the private relay (relay/key-store.js).
     relayKeyStore,
-    // Session keys of revoked or expired clients (client-push-access.js).
     getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
   let persistLock = Promise.resolve();
   let legacyKeysScrubQueued = false;
-  let cachedJwt = null; // { token, issuedAtMs, keyId }
-  let cachedRelayKey = null; // { generation, keypair: { privateKey, publicJwk } }
+  let cachedJwt = null;
+  let cachedRelayKey = null;
   let warnedUnconfigured = false;
 
-  // ---------------------------------------------------------------------------
-  // Per-server relay signing identity (ECDSA P-256). Auto-generated + persisted by
-  // relay/key-store.js. The relay derives serverId = SHA-256(publicKey), verifies
-  // each request's signature, and only delivers to tokens this server registered — so a leaked
-  // device token alone can't be used to push. Zero-config: the keypair generates on first use.
-  // ---------------------------------------------------------------------------
 
-  // Key access lives in lib/relay/signing-key.js now (shared with the private
-  // relay identity — same keypair, same storage, same serverId derivation).
-  // Keyed by the store generation: resetting the relay identity mints a new key.
   const getOrCreateRelayKeypair = async () => {
     const generation = relayKeyStore.generation();
     if (cachedRelayKey?.generation === generation) return cachedRelayKey.keypair;
@@ -122,7 +92,6 @@ export const createApnsRuntime = (deps) => {
 
   const signRelayMessage = (privateKey, message) => signRelayMessageShared({ crypto }, privateKey, message);
 
-  // Trim to the 4 fields the relay's schema accepts (and that feed the serverId hash).
   const relayPublicJwk = (publicJwk) => ({
     kty: publicJwk.kty,
     crv: publicJwk.crv,
@@ -132,11 +101,10 @@ export const createApnsRuntime = (deps) => {
 
   const registerTokenWithRelay = async (token, platform = 'ios') => {
     const relay = resolveRelayConfig();
-    if (!relay) return; // direct mode — no relay binding needed
+    if (!relay) return;
     try {
       const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
       const ts = Date.now();
-      // platform is part of the signed message so it can't be tampered en route.
       const sig = signRelayMessage(privateKey, `${ts}.${token}.${platform}`);
       const res = await postToRelay(
         relay.registerUrl,
@@ -149,9 +117,6 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // Token persistence (same shape + write-lock pattern as push-runtime.js)
-  // ---------------------------------------------------------------------------
 
   const emptyStore = () => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
 
@@ -166,8 +131,6 @@ export const createApnsRuntime = (deps) => {
         parsed.tokensBySession && typeof parsed.tokensBySession === 'object' ? parsed.tokensBySession : {};
       const { bySession: tokensBySession, changed } = withHashedSessionKeys(stored);
       if (changed && !legacyKeysScrubQueued) {
-        // Rewrite once so raw session tokens leave the disk now, not at the
-        // next registration.
         legacyKeysScrubQueued = true;
         void persistTokenUpdate((current) => current).catch((error) => {
           console.warn('Failed to rewrite APNs tokens with hashed session keys:', error);
@@ -195,7 +158,6 @@ export const createApnsRuntime = (deps) => {
       await writeTokensToDisk(next);
       return next;
     });
-    // Only this caller sees a failed write; the next registration still writes.
     persistLock = result.catch(() => {});
     return result;
   };
@@ -212,23 +174,14 @@ export const createApnsRuntime = (deps) => {
           createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
           lastSeenAt: typeof entry.lastSeenAt === 'number' ? entry.lastSeenAt : null,
           userAgent: typeof entry.userAgent === 'string' ? entry.userAgent : undefined,
-          // 'ios' (APNs) or 'android' (FCM). Older entries without one are APNs by default.
           platform: entry.platform === 'android' ? 'android' : 'ios',
-          // APNs delivery environment for this token. Xcode/dev-signed installs produce
-          // sandbox tokens, TestFlight/App Store produce production ones; the client reports
-          // which at registration. Older entries without one default to production (matches
-          // released builds).
           environment: entry.environment === 'sandbox' ? 'sandbox' : 'production',
-          // The device's key for end-to-end sealed text (push-seal.js); absent for
-          // apps from before it, which keep getting plain text.
           pushKey: parsePushKey(entry.pushKey) ?? undefined,
         };
       })
       .filter(Boolean);
   };
 
-  // Normalize an incoming platform hint to the two we support; default to APNs/iOS since that
-  // was the only registrant before Android/FCM existed.
   const normalizePlatform = (platform) => (platform === 'android' ? 'android' : 'ios');
 
   const normalizeEnvironment = (environment) => (environment === 'sandbox' ? 'sandbox' : 'production');
@@ -258,11 +211,6 @@ export const createApnsRuntime = (deps) => {
       return { version: APNS_TOKENS_VERSION, tokensBySession };
     });
 
-    // (Re)bind this token to our server on the relay so only we can push to it. The device
-    // re-sends its token on each launch; this is an idempotent upsert relay-side, and binding
-    // every time (not just for new tokens) keeps existing tokens bound after a relay/server
-    // upgrade rather than silently going unbound. Platform is bound too so the relay routes
-    // it to APNs vs FCM.
     await registerTokenWithRelay(token, tokenPlatform);
   };
 
@@ -293,8 +241,6 @@ export const createApnsRuntime = (deps) => {
     });
   };
 
-  // A device can sit under several keys (an older cookie session, an earlier pairing) and a
-  // send reaches it through any of them, so it leaves every key except those in `keep`.
   const removeApnsDevicesOfSessions = async (sessionKeys, keep) => {
     await persistTokenUpdate((current) => {
       const tokensBySession = { ...(current.tokensBySession || {}) };
@@ -311,9 +257,6 @@ export const createApnsRuntime = (deps) => {
     });
   };
 
-  // ---------------------------------------------------------------------------
-  // Config (env first, then settings.apnsConfig) — mirrors resolveVapidSubject
-  // ---------------------------------------------------------------------------
 
   const resolveApnsConfig = async () => {
     let keyId = trimmedEnv('OPENCHAMBER_APNS_KEY_ID');
@@ -354,15 +297,10 @@ export const createApnsRuntime = (deps) => {
       teamId,
       p8,
       bundleId: bundleId || DEFAULT_BUNDLE_ID,
-      // Explicit env/settings value forces every send to that environment; when unset (null),
-      // each token is delivered to the environment it registered with.
       environment: environment === 'sandbox' ? 'sandbox' : environment === 'production' ? 'production' : null,
     };
   };
 
-  // ---------------------------------------------------------------------------
-  // JWT (ES256, JOSE/raw signature) + HTTP/2 send
-  // ---------------------------------------------------------------------------
 
   const signApnsJwt = (config) => {
     const header = Buffer.from(JSON.stringify({ alg: 'ES256', kid: config.keyId })).toString('base64url');
@@ -397,19 +335,13 @@ export const createApnsRuntime = (deps) => {
         badge: Number.isFinite(payload?.badge) && payload.badge >= 0 ? Math.trunc(payload.badge) : undefined,
         sound: 'default',
         'thread-id': typeof payload?.tag === 'string' ? payload.tag : undefined,
-        // Wakes the Notification Service Extension so it can refresh the home/lock-screen
-        // widgets (attention count + unread dot) from the push, even when the app is closed.
-        // No extra network call — just an extra key on the push we already send.
         'mutable-content': 1,
       },
       ...data,
     });
   };
 
-  // A clearing push wakes the app in the background, shows nothing and carries
-  // the tags to remove; the app also sets the icon badge from `badge`. APNs
-  // wants a background push to hold only `content-available` in `aps`, at
-  // priority 5.
+  // external: https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app Background pushes use content-available without alert keys and priority 5.
   const buildClearBody = ({ tags, badge }) => JSON.stringify({
     aps: { 'content-available': 1 },
     clear: tags.join(','),
@@ -427,7 +359,7 @@ export const createApnsRuntime = (deps) => {
         'apns-push-type': background ? 'background' : 'alert',
         'apns-priority': background ? '5' : '10',
       };
-      // collapse-id dedups like web-push tags; APNs caps it at 64 bytes.
+      // external: https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CommunicatingwithAPNs.html APNs limits apns-collapse-id to 64 bytes.
       const collapseId = typeof config.tag === 'string' ? config.tag.slice(0, 64) : undefined;
       if (collapseId) headers['apns-collapse-id'] = collapseId;
 
@@ -474,10 +406,6 @@ export const createApnsRuntime = (deps) => {
       req.end(body);
     });
 
-  // Relay mode (default): the single APNs key lives in the central Cloudflare relay, not on
-  // each user's server — so users configure nothing. The server just POSTs device tokens +
-  // generic text; the relay signs + sends and reports which tokens to drop. Direct mode (below)
-  // is the fallback for self-hosters who set OPENCHAMBER_APNS_* and disable the relay.
   const resolveRelayConfig = () => {
     if (trimmedEnv('OPENCHAMBER_PUSH_RELAY_DISABLED') === 'true') return null;
     const url = trimmedEnv('OPENCHAMBER_PUSH_RELAY_URL') || DEFAULT_RELAY_URL;
@@ -486,8 +414,6 @@ export const createApnsRuntime = (deps) => {
       url,
       registerUrl: url.replace(/\/send$/, '/register-token'),
       clearUrl: url.replace(/\/send$/, '/clear'),
-      // Explicit OPENCHAMBER_APNS_ENVIRONMENT forces every send to that environment; when
-      // unset (null), each token is delivered to the environment it registered with.
       environment: override === 'sandbox' ? 'sandbox' : override === 'production' ? 'production' : null,
     };
   };
@@ -497,7 +423,6 @@ export const createApnsRuntime = (deps) => {
     const title = typeof payload?.title === 'string' && payload.title.length > 0 ? payload.title : 'OpenChamber';
     const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
     const ts = Date.now();
-    // Sign over the same canonical form the relay verifies: ts.sortedTokens.title.
     const sig = signRelayMessage(privateKey, `${ts}.${[...tokens].sort().join(',')}.${title}`);
     const requestBody = JSON.stringify({
       tokens,
@@ -529,7 +454,6 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  // `request`: the push body and how APNs takes it (`tag`, `pushType`).
   const sendViaDirectApns = async (tokenGroups, { body, tag, pushType }) => {
     const config = await resolveApnsConfig();
     if (!config) {
@@ -545,8 +469,6 @@ export const createApnsRuntime = (deps) => {
     const jwt = getJwt(config);
     const sendConfig = { ...config, tag, pushType };
 
-    // One HTTP/2 session per APNs environment; a sandbox token sent to the production host
-    // (or vice versa) gets BadDeviceToken and would be wrongly dropped as dead.
     for (const [environment, deviceTokens] of tokenGroups) {
       const effectiveEnvironment = config.environment ?? environment;
       const host = effectiveEnvironment === 'sandbox' ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
@@ -582,16 +504,6 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  // NOT gated on UI visibility (unlike web push). A backgrounded WKWebView can't reliably
-  // report "hidden" before iOS suspends it, so a visibility gate wrongly suppressed
-  // background push for short responses. Instead we always send, and rely on iOS to NOT
-  // display the alert while the app is foreground (presentationOptions: [] in
-  // capacitor.config) — so there is no notification when the app is active, with no race.
-  // `sealed` is the `{ title, body }` a phone with a key shows; without it the
-  // phone opens the same text an app without a key gets in the clear.
-  // Every registered device a send may reach, once each. Rejects when the client list cannot
-  // be read: that send is lost with a log line in the fanout, since sending would reach a
-  // revoked device.
   const readDeliverableDevices = async () => {
     const store = await readTokensFromDisk();
     const invalidSessionKeys = await getInvalidSessionKeys();
@@ -608,9 +520,6 @@ export const createApnsRuntime = (deps) => {
     return devices;
   };
 
-  // Tokens are grouped by their registered APNs environment so each batch goes to the
-  // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
-  // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
   const groupByEnvironment = (devices) => {
     const tokensByEnvironment = new Map();
     for (const entry of devices) {
@@ -627,25 +536,15 @@ export const createApnsRuntime = (deps) => {
     pushType: 'alert',
   });
 
-  // NOT gated on UI visibility (unlike web push). A backgrounded WKWebView can't reliably
-  // report "hidden" before iOS suspends it, so a visibility gate wrongly suppressed
-  // background push for short responses. Instead we always send, and rely on iOS to NOT
-  // display the alert while the app is foreground (presentationOptions: [] in
-  // capacitor.config) — so there is no notification when the app is active, with no race.
-  // `sealed` is the `{ title, body }` a phone with a key shows; without it the
-  // phone opens the same text an app without a key gets in the clear.
   const sendApnsToAllUiSessions = async ({ sealed, ...payload } = {}, _options = {}) => {
     const sealedContent = sealed ?? { title: payload.title, body: payload.body };
     const devices = await readDeliverableDevices();
     if (devices.length === 0) return;
-    // Devices that gave a push key get their text sealed for them alone, so
-    // each is its own send; the rest share one batch per environment.
     const sealedDevices = devices.filter((entry) => entry.pushKey);
     const tokensByEnvironment = groupByEnvironment(devices.filter((entry) => !entry.pushKey));
 
     const relay = resolveRelayConfig();
     if (relay) {
-      // In parallel, so one send waiting out a timeout or a retry does not hold the others.
       await Promise.all([
         ...[...tokensByEnvironment].map(([environment, deviceTokens]) =>
           sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment)),
@@ -663,14 +562,12 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  // A relay from before clearing answers 404; said once, since every clear would repeat it.
   let warnedRelayCannotClear = false;
 
   const clearViaRelay = async (deviceTokens, { tags, badge }, relay, environment) => {
     const tokens = deviceTokens.slice(0, 100);
     const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
     const ts = Date.now();
-    // Signed like a send, with the tags in place of the title.
     const sig = signRelayMessage(privateKey, `${ts}.${[...tokens].sort().join(',')}.clear.${tags.join(',')}`);
     const requestBody = JSON.stringify({
       tokens,
@@ -705,12 +602,6 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  /**
-   * Removes the notifications with these tags from every phone, with a push that shows
-   * nothing: a background push on iOS, a data message on Android. Each entry is `tag@nid`,
-   * so a newer push under the tag stays. `badge` is the icon count that remains. Tags are
-   * opaque ids (`ready-<sessionId>`), so nothing here is sealed.
-   */
   const clearApnsNotifications = async ({ tags, badge } = {}) => {
     const clearTags = (Array.isArray(tags) ? tags : [])
       .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH)
@@ -730,9 +621,6 @@ export const createApnsRuntime = (deps) => {
     await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
   };
 
-  // What the relay and the push service see for a device with a key: the
-  // generic scenario title and an empty body, with the real title and body
-  // sealed in `data.enc` for the phone to open.
   const sealedPayloadFor = (payload, content, pushKey) => ({
     ...payload,
     body: '',
@@ -750,7 +638,6 @@ export const createApnsRuntime = (deps) => {
     sendApnsToAllUiSessions,
     clearApnsNotifications,
     resolveApnsConfig,
-    // exposed for tests
     signApnsJwt,
   };
 };

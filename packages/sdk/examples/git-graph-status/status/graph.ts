@@ -1,16 +1,3 @@
-/**
- * Lane layout for the commit graph, ported from OpenChamber's own Git view
- * (`packages/ui/src/components/views/git/gitGraph.ts`) so the section draws
- * the same picture. Commits come newest first (git's topo order).
- *
- * Each connector covers one row's full height:
- *  - `passing`     another lane runs straight through this row
- *  - `commit-lane` this commit's lane, with a child above and a parent below
- *  - `top-stub`    from the top to the dot (no parent: a root commit)
- *  - `bottom-stub` from the dot to the bottom (no child above: a branch tip)
- *  - `branch-out`  curve from the dot down to a merge parent's lane
- *  - `merge-in`    curve from another lane above into the dot
- */
 export type GraphCommit = {
   hash: string;
   parents: string[];
@@ -31,11 +18,9 @@ export type GraphRow = {
 
 export type GraphLayout = {
   rows: GraphRow[];
-  /** Lanes the widest row needs. */
   width: number;
 };
 
-/** Lanes that continue below a row's dot: what an expanded row keeps drawing under itself. */
 export const lanesBelow = (row: GraphRow): number[] => {
   const lanes = new Set<number>();
   for (const connector of row.connectors) {
@@ -83,7 +68,6 @@ export const layoutGraph = (commits: readonly GraphCommit[]): GraphLayout => {
       active[converging] = null;
     }
     for (const extra of extraLanes) connectors.push({ fromLane: lane, toLane: extra, type: 'branch-out' });
-    // A reused merge parent already had a lane above, so it keeps its straight segment.
     active.forEach((expected, index) => {
       if (expected === null || index === lane || newExtraLanes.has(index)) return;
       connectors.push({ fromLane: index, toLane: index, type: 'passing' });

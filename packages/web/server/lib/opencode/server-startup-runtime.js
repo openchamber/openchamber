@@ -1,4 +1,3 @@
-/** One stray uncaught exception is survivable; a storm means the process is broken. */
 const UNCAUGHT_STORM_LIMIT = 10;
 const UNCAUGHT_STORM_WINDOW_MS = 60_000;
 
@@ -135,10 +134,6 @@ export const createServerStartupRuntime = (dependencies) => {
       const handleSignal = async () => {
         await gracefulShutdown();
       };
-      // Cover every signal a shell or dev harness may use to stop/restart us, so
-      // the managed OpenCode child is always torn down gracefully instead of
-      // orphaned: SIGINT/SIGQUIT (Ctrl+C/Ctrl+\), SIGTERM (kill/default), SIGHUP
-      // (terminal close), SIGUSR2 (nodemon restart outside Windows).
       process.on('SIGTERM', handleSignal);
       process.on('SIGINT', handleSignal);
       process.on('SIGQUIT', handleSignal);
@@ -152,14 +147,6 @@ export const createServerStartupRuntime = (dependencies) => {
       console.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
 
-    // A single stray exception — a socket teardown race, a Node-internal bug
-    // like `setTypeOfService EINVAL` — must not take the server down. Nothing
-    // restarts this process (it is embedded in the desktop app or run by hand
-    // in a terminal), so shutting down turns every such stray into "the
-    // instance is unreachable until I restart it". Mirror the
-    // unhandledRejection policy above: log and keep serving. A sustained storm
-    // of exceptions is a different situation — the process is genuinely
-    // broken — so that still shuts down rather than limping along half-alive.
     const exceptionTimes = [];
     process.on('uncaughtException', (error) => {
       console.error('Uncaught Exception:', error);

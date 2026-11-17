@@ -1,15 +1,3 @@
-// Server-owned live state of the pull requests, merge requests, issues and
-// tracker work items the connected clients show (sidebar badges, a session's
-// Context sources), and of the ones a server module follows on its own (an
-// agent waiting on its pull request, `../pr-watch`).
-//
-// Clients say what they show and whether their window is visible; they never
-// poll. This service asks the providers on a cadence that follows each item's
-// state, only while some interested client is visible, batched per provider,
-// and pushes a change to the clients that show the item only when its state
-// actually moved. The last known state survives failures, rate limits and
-// restarts (persisted), so a client starts from it instead of an unknown.
-
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { isWorkItem, threadInstance, trackedItemKey } from './items.js';
 import { joinProjectPath } from '../source-control/project-path.js';
@@ -17,35 +5,24 @@ import { joinProjectPath } from '../source-control/project-path.js';
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
-// How often an item is asked again, by what it is now.
 const OPEN_CHANGE_INTERVAL_MS = MINUTE;
 const PENDING_CHECKS_INTERVAL_MS = 30 * SECOND;
 const SETTLED_INTERVAL_MS = 5 * MINUTE;
 const WORK_ITEM_OPEN_INTERVAL_MS = 2 * MINUTE;
 const UNKNOWN_INTERVAL_MS = MINUTE;
-// Coming back to the window refreshes what is older than this.
 const RETURN_FLOOR_MS = 15 * SECOND;
-// A finished agent turn may have opened, merged or closed something; the
-// burst of idle events around a turn boundary is coalesced first.
 const TURN_SETTLE_MS = 3 * SECOND;
-// A provider that failed is left alone for a while, doubling up to the cap.
 const BACKOFF_BASE_MS = 30 * SECOND;
 const BACKOFF_MAX_MS = 15 * MINUTE;
-// No account on that host: nothing will answer until one is connected.
 const DISCONNECTED_RETRY_MS = 2 * MINUTE;
 
 const PERSIST_DEBOUNCE_MS = 2 * SECOND;
 const RETENTION_MS = 12 * 60 * MINUTE;
 const MAX_ENTRIES = 500;
 
-// A source-control provider's batch size is its descriptor's; a tracker's is this.
 const WORK_ITEM_BATCH_LIMIT = 50;
-// Work item state categories (the tracker contract's) that no longer move.
 const SETTLED_WORK_ITEM_CATEGORIES = new Set(['done', 'canceled']);
 
-// One batch per provider, instance and reading account. A host-form instance
-// missing on the item is its provider's default (github.com), so one
-// enterprise host's cooldown and failures never touch another host's items.
 const groupOf = (item) => {
   if (isWorkItem(item)) return item.provider;
   const account = item.accountId ? `@${item.accountId}` : '';
@@ -70,7 +47,6 @@ const refreshIntervalMs = (entry) => {
   return SETTLED_INTERVAL_MS;
 };
 
-// Whether a finished agent turn could have changed the item.
 const isLive = (entry) => {
   const { item, state } = entry;
   if (!state) return true;
@@ -80,18 +56,6 @@ const isLive = (entry) => {
 
 const publicState = (key, entry) => ({ key, item: entry.item, state: entry.state, fetchedAt: entry.fetchedAt });
 
-/**
- * `readers` answer one provider batch each and never see other providers:
- * - `sourceControl({ provider, instance, accountId, pulls, issues, discussions })`
- *   with `{ owner, repo, number }` refs, answering `{ status: 'ok', pulls,
- *   issues, discussions }` in the live summary shape;
- * - `workItems({ provider, identifiers })` answering `{ status: 'ok', items }`
- *   (tracker live summaries, whose `state.category` sets the cadence);
- * - or `{ status: 'disconnected' }` (no account there) /
- *   `{ status: 'unavailable', retryAfterMs? }` (rate limit, outage). A throw
- *   counts as unavailable.
- * `send(connectionId, event)` returns false when the connection is gone.
- */
 export function createTrackedItemsService({
   readers,
   send,
@@ -104,8 +68,6 @@ export function createTrackedItemsService({
 }) {
   const entries = new Map();
   const connections = new Map();
-  // Items a server module follows on its own (an agent waiting on a pull
-  // request), refreshed whether or not any window is open: owner → key → item.
   const serverInterests = new Map();
   const serverListeners = new Set();
   const forced = new Set();
@@ -144,12 +106,8 @@ export function createTrackedItemsService({
     return addServerKeys(keys);
   };
 
-  // A listener that throws must not stop the others or the tick.
   const notifyServerListeners = (changedKeys) => {
     if (changedKeys.size === 0 || serverListeners.size === 0) return;
-    // `requestedAt` says when the read that produced the state began, so a
-    // listener with a fresher read of its own can drop an answer that was
-    // already on its way.
     const states = [...changedKeys].map((key) => ({ ...publicState(key, entries.get(key)), requestedAt: entries.get(key).requestedAt ?? 0 }));
     for (const listener of serverListeners) {
       try {
@@ -198,7 +156,6 @@ export function createTrackedItemsService({
     }, PERSIST_DEBOUNCE_MS);
   };
 
-  // Keeps the map bounded without dropping what anyone shows.
   const trim = () => {
     if (entries.size <= MAX_ENTRIES) return;
     const interested = interestedKeys();
@@ -229,8 +186,6 @@ export function createTrackedItemsService({
     backoff.set(group, { failures, until: now() + delay });
   };
 
-  // Applies one answered batch. An item the provider did not answer is
-  // unknown, not closed: its state is cleared, never invented.
   const applyAnswers = (batch, answers, changed, requestedAt) => {
     const checkedAt = now();
     for (const [key, entry] of batch) {
@@ -245,7 +200,6 @@ export function createTrackedItemsService({
     }
   };
 
-  // Matches answers back to the batch: a batch is always one provider.
   const answersFor = (batch, result) => {
     const answers = new Map();
     if (isWorkItem(batch[0][1].item)) {
@@ -299,7 +253,6 @@ export function createTrackedItemsService({
         applyAnswers(batch, answersFor(batch, result), changed, requestedAt);
         continue;
       }
-      // The last known state stays; the items wait for the provider.
       for (const [key] of batch) forced.delete(key);
       if (result?.status === 'disconnected') backoff.set(group, { failures: 0, until: now() + DISCONNECTED_RETRY_MS });
       else noteFailure(group, Number.isFinite(result?.retryAfterMs) ? result.retryAfterMs : undefined);
@@ -353,7 +306,6 @@ export function createTrackedItemsService({
       for (const record of saved ?? []) {
         if (!record?.item || !(record.fetchedAt > cutoff)) continue;
         const key = trackedItemKey(record.item);
-        // An item a client already asked about in the meantime is newer.
         if (entries.has(key)) continue;
         entries.set(key, { item: record.item, state: record.state ?? null, fetchedAt: record.fetchedAt, checkedAt: 0 });
       }
@@ -363,14 +315,8 @@ export function createTrackedItemsService({
   })();
 
   return {
-    /** Resolves once the persisted state has been read (or failed to). */
     ready: () => restored,
 
-    /**
-     * Replaces what one connection shows and answers with what is known of it
-     * already. Unknown items are asked about right away when the client is
-     * visible. Throws `unknown-connection` for a connection that is not open.
-     */
     setInterest(connectionId, items, { visible = true } = {}) {
       if (!isConnectionOpen(connectionId)) {
         throw Object.assign(new Error('The event stream connection is not open'), { code: 'unknown-connection' });
@@ -391,12 +337,6 @@ export function createTrackedItemsService({
       return known;
     },
 
-    /**
-     * Replaces what one server module follows (`owner` names it) with
-     * `items`, a key → item map; an empty map ends its interest. These items
-     * are refreshed on their cadence whether or not any window is open, and a
-     * new one is asked about right away.
-     */
     setServerInterest(owner, items) {
       if (items.size === 0) {
         serverInterests.delete(owner);
@@ -410,16 +350,11 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    /**
-     * `listener(states)` hears every state that moved, in the clients' shape
-     * plus `requestedAt`, when the read behind it began. Returns the unsubscribe.
-     */
     subscribe(listener) {
       serverListeners.add(listener);
       return () => serverListeners.delete(listener);
     },
 
-    /** A connection's window became visible or hidden. Visible again refreshes what aged past the floor. */
     setPresence(connectionId, visible) {
       const connection = connections.get(connectionId);
       if (!connection || connection.visible === visible) return;
@@ -433,7 +368,6 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    /** Asks about these items now, whatever their age: a user's refresh, our own mutation. */
     refresh(items) {
       for (const item of items) {
         const key = trackedItemKey(item);
@@ -442,11 +376,6 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    /**
-     * One item a user asked to read again: a work item by identifier, else a
-     * change request or issue by project and number, whichever account or
-     * kind follows it. Its state is asked now.
-     */
     refreshItem(provider, { owner, repo, number, identifier }) {
       const same = (left, right) => !left || String(left).toLowerCase() === String(right ?? '').toLowerCase();
       const wanted = String(identifier ?? '').toUpperCase();
@@ -461,11 +390,6 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    /**
-     * Something changed on a provider through this server (a merge, a comment,
-     * a state change) or the user asked to read it again: its open items on
-     * screen are asked now.
-     */
     refreshProvider(provider) {
       for (const key of watchedKeys()) {
         const entry = entries.get(key);
@@ -474,7 +398,6 @@ export function createTrackedItemsService({
       scheduleNext();
     },
 
-    /** An agent turn finished somewhere: anything still open may have moved. */
     noteTurnFinished() {
       if (turnTimer || disposed) return;
       turnTimer = setTimer(() => {

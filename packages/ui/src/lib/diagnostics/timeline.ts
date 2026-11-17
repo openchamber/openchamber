@@ -50,7 +50,6 @@ export function rendererRejectionDetail(reason: Error | null): string {
   return [`type=${name ?? 'unavailable'}`, message && `message="${message}"`].filter(Boolean).join(' ');
 }
 
-/** Only local built asset names and numeric positions may leave the renderer. */
 export function rendererErrorDetail(event: Pick<ErrorEvent, 'filename' | 'lineno' | 'colno' | 'error'> & Partial<Pick<ErrorEvent, 'message'>>, pageUrl: string): string | undefined {
   const fields = [];
   const name = rendererErrorName(event.error);
@@ -72,7 +71,6 @@ export function rendererErrorDetail(event: Pick<ErrorEvent, 'filename' | 'lineno
   return fields.join(' ');
 }
 
-/** Free-form console arguments can contain secrets. Inspect only a short prefix. */
 export function recordRendererConsole(level: 'debug' | 'info' | 'log' | 'warn' | 'error', first: string, error?: Error | null): void {
   const tag = /^\[([a-z-]+)\]/i.exec(first.slice(0, 64))?.[1]?.toLowerCase();
   const knownTag = tag && CONSOLE_TAGS.has(tag) ? tag : null;
@@ -87,7 +85,6 @@ export function recordRendererConsole(level: 'debug' | 'info' | 'log' | 'warn' |
   });
 }
 
-/** Correlate local events without putting the original identifier in the log. */
 export function diagnosticIdentity(kind: 'session' | 'directory' | 'message', value: string): string {
   if (!value || value.length > 1_024) return 'unavailable';
   const key = `${kind}\0${value}`;
@@ -102,7 +99,6 @@ export function diagnosticIdentity(kind: 'session' | 'directory' | 'message', va
   return label;
 }
 
-/** Only call this with fields chosen for the export. Never pass raw API bodies or console arguments. */
 export function recordDiagnosticEvent(event: DiagnosticEvent): void {
   if (!Number.isFinite(event.at)) return;
   events.push(event);

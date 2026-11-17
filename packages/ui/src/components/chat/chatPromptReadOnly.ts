@@ -5,7 +5,9 @@ export const resolveChatPromptReadOnly = (
     session: Session | null | undefined,
     allowPromptingSubagentSessions: boolean,
     readOnly: boolean,
+    ownFolderAdmitted = true,
 ): boolean => {
+    if (!ownFolderAdmitted) return true;
     // Review sessions are independent conversations even if an older server or
     // cached record still carries parentID. Their explicit metadata is the
     // authority; only the surface itself may make them read-only.

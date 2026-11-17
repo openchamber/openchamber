@@ -7,10 +7,10 @@ const composerEditorSource = readFileSync(
 );
 
 const writebackEffect = (): string => {
-    const start = composerEditorSource.indexOf('// Controlled value:');
+    const end = composerEditorSource.indexOf('}, [value, valueRevision]);');
+    expect(end).toBeGreaterThan(-1);
+    const start = composerEditorSource.lastIndexOf('React.useEffect(() => {', end);
     expect(start).toBeGreaterThan(-1);
-    const end = composerEditorSource.indexOf('}, [value, valueRevision]);', start);
-    expect(end).toBeGreaterThan(start);
     return composerEditorSource.slice(start, end);
 };
 

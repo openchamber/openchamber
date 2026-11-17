@@ -20,7 +20,6 @@ export type IntegrateInProgress = {
   tempWorktreePath: string;
   sourceBranch: string;
   targetBranch: string;
-  /** Worktrees on target branch that were clean pre-integration; safe to fast-sync after ref update. */
   cleanTargetWorktrees: string[];
   remainingCommits: string[];
   currentCommit: string;

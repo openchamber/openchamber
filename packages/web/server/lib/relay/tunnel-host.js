@@ -1,10 +1,3 @@
-// Host side of the tunnel mux (Layer 3): consumes decrypted tunnel frames for
-// ONE relay connection and dispatches them to the local loopback origin.
-// HTTP streams -> fetch http://127.0.0.1:<port> with streamed duplex bodies;
-// WS streams -> `ws` client to the loopback WebSocket endpoints.
-// The dispatcher NEVER injects credentials: tunneled requests authenticate
-// exactly like any remote client (bearer oc_client_* header, oc_url_token query).
-// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
 import { Readable, pipeline } from 'node:stream';
 import { createGzip } from 'node:zlib';
@@ -21,7 +14,6 @@ import {
   encodeTunnelFrame,
 } from './tunnel-codec.js';
 
-// Path allowlists (defense in depth; same families realtime-proxy.js allows).
 const isAllowedHttpPath = (pathname) =>
   pathname === '/health'
   || pathname === '/api'
@@ -36,17 +28,10 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/dictation/ws',
   '/api/dev-tunnel',
 ]);
-// Extension surfaces carry the extension id in the path, so they are matched
-// by shape rather than listed.
 const GUEST_SURFACE_WS_PATH = /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/;
-// The sockets of an isolated space carry the space id in the path: the same four sockets,
-// under `/api/spaces/<id>/`, matched by shape.
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
 export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname) || SPACE_WS_PATH.test(pathname);
 
-// Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
-// to the loopback origin. content-length is dropped too because the body is
-// re-chunked through the tunnel and undici computes framing itself.
 const STRIPPED_REQUEST_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -57,18 +42,9 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'accept-encoding',
 ]);
 
-// A client that can gunzip asks for compressed bodies with this request
-// header, and a compressed body is marked with the response header. Names
-// mirror `TUNNEL_ACCEPT_ENCODING_HEADER` / `TUNNEL_CONTENT_ENCODING_HEADER` in
-// packages/ui/src/lib/relay/protocol.ts. Clients and hosts without them keep
-// sending plain bodies, so mixed versions interoperate.
 const TUNNEL_ACCEPT_ENCODING_HEADER = 'x-openchamber-tunnel-accept-encoding';
 const TUNNEL_CONTENT_ENCODING_HEADER = 'x-openchamber-tunnel-content-encoding';
-// Below this the gzip framing costs more than it saves (the server's own
-// compression middleware uses the same threshold).
 const COMPRESSION_MIN_BYTES = 1024;
-// Whole-body text formats only. Event streams are excluded: gzip holds bytes
-// back until its window fills, which would delay live events.
 const COMPRESSIBLE_CONTENT_TYPE = /^(?:application\/(?:json|[\w.+-]+\+json|javascript|xml|[\w.+-]+\+xml)|text\/(?!event-stream)[\w.+-]+|image\/svg\+xml)\s*(?:;|$)/i;
 
 const shouldCompressResponse = (request, method, response) => {
@@ -81,9 +57,6 @@ const shouldCompressResponse = (request, method, response) => {
   return !(Number.isFinite(length) && length > 0 && length < COMPRESSION_MIN_BYTES);
 };
 
-// Response framing headers that no longer apply once the body crosses the
-// tunnel as HttpBody chunks. Loopback asks for identity, and fetch decodes
-// anything encoded regardless; tunnel compression is marked separately.
 const STRIPPED_RESPONSE_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -92,27 +65,14 @@ const STRIPPED_RESPONSE_HEADERS = new Set([
   'content-encoding',
 ]);
 
-// v1 backpressure rule: pause reading the loopback source while the outbound
-// relay socket has more than this buffered.
 const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BACKPRESSURE_POLL_MS = 20;
 
-// Bodies smaller than this are fully buffered before the loopback request is
-// sent, so a tunneled body that lost all its frames or its StreamEnd (relay
-// reconnect) never reaches the loopback server as an empty/unfinished chunked
-// body — the server rejects those with a bare 400, surfacing as the mobile
-// app's "Failed to send message (400)". Buffering cannot see a body that lost
-// only some of its frames: the consecutive frame counter in e2ee.js catches
-// that by failing the channel. Larger bodies stream live as before.
 const BODY_BUFFER_MAX_BYTES = 512 * 1024;
-// While the body is still being buffered, abort the stream if it never
-// completes, so a stalled tunnel converts into an ambiguous transport failure
-// (which the client already retries) instead of a hung loopback request.
 const BODY_DELIVERY_TIMEOUT_MS = 15_000;
 const MAX_PENDING_WS_BYTES = 16 * 1024 * 1024;
 const MAX_PENDING_WS_MESSAGES = 1024;
-// Node ws supports read backpressure. Bun's ws shim does not implement pause;
-// there the bounded queue fails the affected substream explicitly on overflow.
+// external: https://github.com/oven-sh/bun/blob/bun-v1.3.0/src/js/thirdparty/ws.js Bun's ws shim cannot pause reads, so its downstream WS queue aborts the substream on overflow.
 const CAN_PAUSE_WS_READS = !process.versions.bun;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,9 +156,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  // -------------------------------------------------------------------------
-  // HTTP
-  // -------------------------------------------------------------------------
 
   const buildRequestHeaders = (rawHeaders, loopbackOrigin) => {
     const headers = {};
@@ -210,18 +167,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       headers[lower] = value;
     }
     headers['x-openchamber-relay-connection'] = connectionId;
-    // Loopback fetch would decode a gzipped body anyway; asking for identity
-    // spares the server compressing what this host decompresses. Bodies are
-    // compressed once, for the tunnel, when the client accepts it.
     headers['accept-encoding'] = 'identity';
-    // Browser-generated Origin is not visible to the tunnel client. Present the
-    // loopback origin being dialed and overwrite any client-supplied value.
     headers.origin = loopbackOrigin;
     return headers;
   };
 
-  // Synthetic responses never ship an empty body: `reason` states explicitly
-  // that the relay host (not the upstream server) produced this response.
   const syntheticResponse = async (streamId, status, message) => {
     await sendJson(TunnelFrameType.HttpResponse, streamId, {
       status,
@@ -260,11 +210,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const compress = shouldCompressResponse(request, method, response);
     if (compress) responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
-    // A Node stream pipeline, not CompressionStream: Node's web-stream adapter
-    // behind CompressionStream throws an uncaught "Controller is already
-    // closed" when the reader cancels while gzip still emits, which every
-    // aborted compressed request did. Leaving the loop below destroys this
-    // pipeline and the loopback body with it.
+    // external: https://github.com/nodejs/node/blob/main/lib/internal/webstreams/adapters.js CompressionStream cancellation during gzip output raises "Controller is already closed"; a Node pipeline handles teardown.
     const responseBody = compress
       ? pipeline(Readable.fromWeb(response.body), createGzip(), () => {})
       : response.body;
@@ -276,9 +222,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
           if (closed || stream.abort.signal.aborted) return;
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
           const pieces = chunkPayload(bytes, responseChunkBytes);
-          // Offer at most one plaintext-frame budget at a time. The scheduler
-          // can batch small slices and interleave streams without buffering the
-          // entire source or encrypting hundreds of tiny messages separately.
           const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
           for (let offset = 0; offset < pieces.length; offset += groupSize) {
             await waitForBackpressure(stream.abort.signal);
@@ -321,14 +264,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       return;
     }
 
-    // Body-carrying request. Buffer the tunneled body frames and forward the
-    // COMPLETE body only once StreamEnd arrives. Forwarding a body whose frames
-    // or StreamEnd never arrived (relay reconnect) reaches the loopback server
-    // as an empty/unfinished chunked body, which it rejects with a bare 400
-    // (empty response body) — the "Failed to send message (400)" seen from the
-    // mobile APK. Frames lost from the middle of a body are caught by the
-    // consecutive frame counter (e2ee.js), not here. Bodies above
-    // BODY_BUFFER_MAX_BYTES stream live so large uploads are not fully buffered.
     const buffered = [];
     let bufferedBytes = 0;
     let bodyFrameCount = 0;
@@ -366,9 +301,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         try { liveController.enqueue(chunk); } catch { break; }
       }
       buffered.length = 0;
-      // The loopback request is now streaming live; runHttpStream has nothing
-      // left to do — clear the deadline and let the async body forwarding own
-      // this stream from here (abort/StreamEnd close the controller).
       if (deliveryDeadline) clearTimeout(deliveryDeadline);
       resolveBodyEnd();
       void forwardRequest(streamId, stream, url, method, request, liveStream, loopbackOrigin);
@@ -402,9 +334,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (streams.get(streamId) === stream && !completed && !liveStream) {
         dropStream(streamId);
         void sendAbort(streamId, 'tunnel request body was not delivered in time');
-        // Settle the buffered-body wait below so the stream's buffered chunks
-        // and this call frame are released (the post-wait guard sees the
-        // dropped stream and returns without a second abort).
         finishBody(new Error('tunnel request body was not delivered in time'));
       }
     }, bodyDeliveryTimeoutMs);
@@ -412,28 +341,20 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
 
     await bodyEnded;
     if (deliveryDeadline) clearTimeout(deliveryDeadline);
-    if (streams.get(streamId) !== stream) return; // aborted or dropped meanwhile
+    if (streams.get(streamId) !== stream) return;
     if (bodyFailure) {
       dropStream(streamId);
       await sendAbort(streamId, bodyFailure.message ?? 'tunnel request body failed');
       return;
     }
-    if (liveStream) return; // already forwarded via the streaming path
+    if (liveStream) return;
 
-    // The client signaled it had a body but no HttpBody frame arrived before
-    // StreamEnd — the body frames were lost through the tunnel. Forwarding an
-    // empty body would make the loopback server reject the request with a bare
-    // 400. Abort instead so the client treats it as an ambiguous transport
-    // failure (dispatched, outcome unknown) and can safely retry.
     if (request.hasBody === true && bodyFrameCount === 0) {
       dropStream(streamId);
       await sendAbort(streamId, 'tunnel request body frames were lost');
       return;
     }
 
-    // Buffered path: forward the complete body as a single buffer so Bun
-    // frames it with content-length — never as a chunked body that could be
-    // truncated. Reset the buffered handler so late frames cannot enqueue.
     stream.body = null;
     await forwardRequest(streamId, stream, url, method, request, Buffer.concat(buffered), loopbackOrigin);
   };
@@ -459,9 +380,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   const handleHttpBody = (streamId, payload) => {
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'http' || stream.noBody) return;
-    // runHttpStream installs a body sink (buffering handler, or the live stream
-    // controller once the buffer cap is crossed) before any HttpBody frame can
-    // arrive; drop stray bytes for request bodies already completed/aborted.
     try {
       stream.body?.enqueue(payload);
     } catch {
@@ -477,12 +395,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     } catch {
       // stream already errored/closed
     }
-    // Response side keeps running; only the request body is half-closed.
   };
 
-  // -------------------------------------------------------------------------
-  // WebSocket
-  // -------------------------------------------------------------------------
 
   const handleWsOpen = (streamId, payload) => {
     if (streams.has(streamId)) {
@@ -503,13 +417,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
 
     const url = `ws://127.0.0.1:${getLocalPort()}${open.path}${open.query ? `?${open.query}` : ''}`;
-    // Present the loopback origin we're actually dialing. The server derives this
-    // as a trusted same-origin candidate from the Host header (127.0.0.1:<port>),
-    // so the WS origin check passes reliably for every client platform. We do NOT
-    // use the client's window.location.origin: it's unreliable in WKWebView (empty
-    // or "null" for custom schemes), and the `ws` client sends no Origin at all
-    // otherwise — a no-origin upgrade is rejected 403. The request itself is still
-    // authenticated by the tunneled oc_url_token, not by this origin.
     const dialHeaders = {
       'x-openchamber-relay-connection': connectionId,
       origin: `http://127.0.0.1:${getLocalPort()}`,
@@ -548,8 +455,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       socketPendingMessages += 1;
       if (CAN_PAUSE_WS_READS) socket.pause();
       outputChain = outputChain.then(async () => {
-        // Serialize entire messages, including their fragments. A later close
-        // must also wait here or it can overtake the final output.
         const chunks = chunkPayload(bytes, responseChunkBytes);
         const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
         for (let offset = 0; offset < chunks.length; offset += groupSize) {
@@ -591,7 +496,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         }
         void sendAbort(streamId, error?.message ?? 'upstream ws error');
       }
-      // Post-open errors are followed by 'close', handled above.
     });
   };
 
@@ -618,7 +522,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const code = Number.isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
     try {
-      // A paused receiver still needs to read the peer's close handshake.
       if (CAN_PAUSE_WS_READS) stream.socket.resume();
       stream.socket.close(code, typeof close.reason === 'string' ? close.reason : '');
     } catch {
@@ -626,16 +529,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
   };
 
-  // -------------------------------------------------------------------------
-  // Frame entrypoint
-  // -------------------------------------------------------------------------
 
   /** @param {Uint8Array} plaintextFrame one decrypted tunnel frame */
   const handleFrame = async (plaintextFrame) => {
     if (closed) return;
     const frame = decodeTunnelFrame(plaintextFrame);
 
-    // WS message frames can be fragmented; everything else arrives whole.
     if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
       const message = assembler.push(frame);
       if (message === null) return;
@@ -668,7 +567,6 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       case TunnelFrameType.Pong:
         return;
       default:
-        // Host never receives HttpResponse/WsOpened; ignore rather than tear down.
         return;
     }
   };

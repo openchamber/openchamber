@@ -1,8 +1,3 @@
-// Per-server relay signing identity (ECDSA P-256), extracted from
-// lib/notifications/apns-runtime.js so both the push relay and the private
-// relay share the SAME keypair and thus the SAME serverId
-// (base64url(SHA-256(canonical public JWK))). Stored by key-store.js; existing
-// installs' serverId must stay stable because push token binding depends on it.
 
 /**
  * @param {{
@@ -13,8 +8,6 @@
  */
 export const getOrCreateRelaySigningKeypair = async ({ crypto, relayKeyStore }) => {
   const stored = await relayKeyStore.getOrCreate('signing', async () => {
-    // Loud on purpose: a new signing key means a new serverId — every previously
-    // paired device and push binding is orphaned. Expected exactly once, on first run.
     console.warn('[relay-identity] Generating NEW relay signing keypair (serverId changes; previously paired devices must re-pair)');
     const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
     return { privateJwk: privateKey.export({ format: 'jwk' }), publicJwk: publicKey.export({ format: 'jwk' }) };
@@ -25,8 +18,6 @@ export const getOrCreateRelaySigningKeypair = async ({ crypto, relayKeyStore }) 
   };
 };
 
-// Fixed key order so the hash is stable regardless of stored JSON field order.
-// Byte-for-byte mirror of canonicalJwk in openchamber-website apps/api relay-auth.ts.
 /** @param {JsonWebKey} jwk */
 export const canonicalPublicJwkString = (jwk) =>
   JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });

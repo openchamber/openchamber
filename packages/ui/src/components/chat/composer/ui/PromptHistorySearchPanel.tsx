@@ -145,9 +145,6 @@ function PromptHistorySearchPanelView({ history, initialQuery, olderRequest, onP
         if (!event.currentTarget.contains(event.relatedTarget)) onClose('blur');
     };
 
-    // Pointer presses on non-interactive panel areas (padding, hint, scrollbar)
-    // would otherwise move focus to nothing and close the panel while the
-    // pointer stays inside it. Buttons and the input keep their native focus.
     const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
         if (event.target instanceof Element && event.target.closest('input, button')) return;
         event.preventDefault();

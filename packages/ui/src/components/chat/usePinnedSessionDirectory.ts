@@ -3,7 +3,8 @@ import { useSessionDirectory } from '@/sync/sync-context';
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { isSessionDirectoryAdmitted, resolveAdmittedLineageDirectory } from '@/sync/session-admission-rule';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getChatsRoot, subscribeChatsRoot } from '@/lib/chatDirectories';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 
@@ -32,5 +33,8 @@ export const usePinnedSessionDirectory = (selection: PinnedSelection | null): st
     // A column only hides an unknown destination. Pins persist across
     // launches, so admitting from here would register folders nobody opened;
     // a live move is admitted by `subscribeSessionAdmission`.
-    return isSessionDirectoryAdmitted(directory, projects, worktrees) ? directory : null;
+    const lineageDirectory = useGlobalSessionsStore((state) => (selection?.sessionId
+        ? resolveAdmittedLineageDirectory(selection.sessionId, state.entityById, (candidate) => isSessionDirectoryAdmitted(candidate, projects, worktrees))
+        : null));
+    return isSessionDirectoryAdmitted(directory, projects, worktrees) ? directory : lineageDirectory;
 };

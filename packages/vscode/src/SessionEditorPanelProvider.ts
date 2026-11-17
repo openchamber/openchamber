@@ -33,26 +33,11 @@ type LineCommentPayload = {
 
 type SessionPanelState = {
   kind: 'session';
-  /** This panel's id, which is also its surface identity for comment threads. */
   id: string;
-  /**
-   * The session this panel was opened for; null for a new-session panel. A
-   * comment delivered here names it, so the webview files the draft under that
-   * session's key rather than whatever it shows while still booting.
-   */
   sessionId: string | null;
   panel: vscode.WebviewPanel;
   sseStreams: Map<string, AbortController>;
-  /**
-   * Comments held until the webview proves it is listening. Posting into a
-   * panel whose script has not booted drops the message outright, and the user
-   * already saw the comment accepted.
-   *
-   * A list, because a second comment can be written while the panel is still
-   * starting; a single slot silently discarded the first.
-   */
   pendingLineComments: LineCommentPayload[];
-  /** Set by the panel's first inbound message, the only proof its script runs. */
   webviewReady?: boolean;
 };
 
@@ -100,10 +85,6 @@ export class SessionEditorPanelProvider {
   private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
   private readonly _webviewDevServerUrl: string | null;
 
-  /**
-   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
-   * before the webview bridge is ready, leaving the loading screen stuck.
-   */
   private _scheduleCachedStateRetries(entry: EditorPanelState): void {
     scheduleCachedStateRetries({
       target: entry.panel,
@@ -176,17 +157,11 @@ export class SessionEditorPanelProvider {
     void state.panel.webview.postMessage(response);
   }
 
-  /**
-   * A new-session tab whose draft opens in "Run on several models" mode: the
-   * wide place to set up a parallel run. Runs themselves open wherever the
-   * chat is, like any session.
-   */
   public createOrShowParallelDraft(directory?: string): void {
     this._openDraftPanel(t('Run on several models'), 'parallel', directory);
   }
 
   private _openDraftPanel(title: string, initialComposer: 'parallel' | undefined, directory?: string): void {
-    // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     this._createPanel(panelId, title, null, initialComposer, directory);
   }
@@ -255,8 +230,6 @@ export class SessionEditorPanelProvider {
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
-    // The webview bridge may not be ready yet; keep re-sending so a dropped
-    // `connectionStatus` can never leave the webview stuck on its loading screen.
     this._scheduleCachedStateRetries(state);
 
     panel.onDidDispose(() => {
@@ -298,8 +271,6 @@ export class SessionEditorPanelProvider {
         this._sendCachedStateToPanel(state);
       }
 
-      // Any inbound message proves the webview script is running, which is the
-      // only readiness signal this panel has. Flush whatever was held for it.
       if (state.kind === 'session') {
         state.webviewReady = true;
         for (const pending of drainPending(state.pendingLineComments)) {
@@ -313,11 +284,7 @@ export class SessionEditorPanelProvider {
 
       if (message.type === 'webview:ready') return;
 
-      // Editor comment threads mirror the composer's drafts, so the webview
-      // reports every change. One-way notification, no response expected.
       if (state.kind === 'session' && message.type === 'inlineComments:sync') {
-        // Tagged with this panel's identity: a snapshot only speaks for the
-        // store that produced it, and every panel has its own.
         void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
           snapshot: message.payload,
           surfaceId: state.id,
@@ -384,9 +351,6 @@ export class SessionEditorPanelProvider {
       this._sendCachedStateToPanel(entry);
     }
 
-    // When we become connected, keep re-sending at staggered delays so the
-    // webview cannot miss the transition (postMessage is dropped if the
-    // webview bridge is not ready yet).
     if (status === 'connected') {
       for (const entry of this._allPanels()) {
         this._scheduleCachedStateRetries(entry);
@@ -414,7 +378,6 @@ export class SessionEditorPanelProvider {
     }
   }
 
-  /** Tells each panel's webview whether the user can see it: VS Code focused and the panel shown. */
   public notifyViewerStateChanged(): void {
     for (const entry of this._allPanels()) {
       this._postViewerState(entry);
@@ -490,9 +453,6 @@ export class SessionEditorPanelProvider {
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
 
-    // An existing panel can still be booting (reopened from a restored window),
-    // and a post into a webview whose script has not run is dropped outright.
-    // Hold it on the same path a freshly opened panel uses.
     if (!entry.webviewReady) {
       entry.pendingLineComments.push(payload);
       return entry.id;
@@ -506,18 +466,6 @@ export class SessionEditorPanelProvider {
     return entry.id;
   }
 
-  /**
-   * Drops a draft the user removed from its editor thread.
-   *
-   * Sent to every panel, not just the active one: each webview owns its own
-   * draft store, and the draft may have landed in a tab the user has since
-   * moved away from. Targeting only the active panel made removal a silent
-   * no-op in that case, leaving the chip attached after its thread was gone.
-   *
-   * Unlike adding, this does not reveal a panel: the user is looking at the
-   * code, and stealing focus to show a chip disappearing would be worse than
-   * letting it disappear quietly.
-   */
   public removeLineComment(draftId: string): void {
     const targets = [...this._panels.values()].map((state) => ({
       pendingLineComments: state.pendingLineComments,
@@ -721,7 +669,6 @@ export class SessionEditorPanelProvider {
         headers: this._buildSseHeaders(headers),
         signal: controller.signal,
         onChunk: (chunk) => {
-          // Panel may be disposed before SSE callbacks fire.
           entry.panel?.webview?.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });

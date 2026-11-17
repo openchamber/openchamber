@@ -22,7 +22,6 @@ import {
 
 type Size = { width: number; height: number };
 
-/** An image point that must stay under a screen point once a zoom renders. */
 type ZoomAnchor = { imageX: number; imageY: number; clientX: number; clientY: number };
 
 type DragState = { pointerId: number; x: number; y: number; left: number; top: number };
@@ -31,18 +30,12 @@ type TouchPinch = { distance: number; scale: number };
 
 const touchDistance = (a: Touch, b: Touch): number => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 
-/** A neighbouring image of the same folder and how to show it. */
 export type ImageNeighbor = { name: string; open: () => void };
 
-// With the focus nowhere, the browser scrolls whatever was clicked last, so
-// the keys belong to the viewer only after a click in its panel. The panel
-// outlives the remount a step causes; a clicked arrow button does not.
 let lastPointerRegion: Element | null = null;
 
-// Controls that move with the arrow keys themselves keep them.
 const ARROW_KEY_OWNERS = '[role="tablist"], [role="menu"], [role="menubar"], [role="listbox"], [role="radiogroup"], [role="slider"], [role="combobox"], [role="tree"], [role="grid"], [role="toolbar"]';
 
-// The chat image viewer's arrows, so stepping through images looks the same everywhere.
 const NEIGHBOR_BUTTON_CLASS = 'absolute top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring';
 
 type ImageArtifactProps = {
@@ -54,36 +47,15 @@ type ImageArtifactProps = {
   download?: React.ReactNode;
 };
 
-/**
- * An image the way a designer looks at one: whole first, then closer. Fit never
- * upscales, so a small icon stays its real size instead of blurring across the
- * panel. Zoom follows the pointer: Ctrl/⌘ + wheel or a trackpad pinch
- * (Chromium, Firefox), WebKit gesture events (Safari), a two-finger touch pinch,
- * the − and + steps, or a double-click between fit and 1:1. A zoomed image
- * larger than the viewer pans by dragging.
- *
- * With `neighbors`, arrows at the viewer's edges and the arrow keys show the
- * previous and next image of the folder. The keys work while the focus is in
- * the panel that holds the viewer, or nowhere, and the image is at fit; zoomed,
- * they keep scrolling. A text field or a control that moves with the arrow
- * keys itself keeps them.
- *
- * An empty `src` is an image still being fetched; until it decodes the viewer
- * shows the loading state, and an image the browser cannot decode shows a
- * failure with retry and download in its place.
- */
 const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors, onRetry, download }) => {
   const { t, direction } = useI18n();
-  // null is fit: the scale then follows the viewer's size.
   const [scale, setScale] = React.useState<number | null>(null);
   const [natural, setNatural] = React.useState<Size | null>(null);
   const [failed, setFailed] = React.useState(false);
-  // A retry of the same URL remounts the element, so the browser requests it again.
   const [attempt, setAttempt] = React.useState(0);
   const [viewport, setViewport] = React.useState<Size | null>(null);
   const [dragging, setDragging] = React.useState(false);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
-  // Stays laid out when the image fails, unlike the viewport.
   const viewerRef = React.useRef<HTMLDivElement | null>(null);
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const anchorRef = React.useRef<ZoomAnchor | null>(null);
@@ -112,8 +84,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     || natural.height * scale + IMAGE_VIEWPORT_PADDING * 2 > viewport.height
   );
 
-  // Zooms so the image point under (clientX, clientY) stays there. The render
-  // is flushed at once so the next wheel or pinch event measures the new size.
   const zoomTo = (nextScale: number, clientX: number, clientY: number) => {
     const image = imageRef.current;
     if (!image || !natural) return;
@@ -148,8 +118,7 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     element.scrollTop += rect.top + image.clientTop + anchor.imageY * rendered - anchor.clientY;
   }, [scale]);
 
-  // Native listeners: React's wheel and touch listeners are passive and could
-  // not stop the page from zooming or scrolling instead of the image.
+  // external: https://github.com/facebook/react/issues/19651 React wheel and touch listeners are passive, so zoom uses native listeners.
   const gestureHandlersRef = React.useRef({ zoomTo, shownScale });
   gestureHandlersRef.current = { zoomTo, shownScale };
   React.useEffect(() => {
@@ -187,8 +156,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
       touchCount = event.touches.length;
       if (event.touches.length < 2) touchPinch = null;
     };
-    // iOS sends gesture events alongside the touch pinch above; only a
-    // trackpad pinch in Safari, with no finger on the screen, zooms here.
     const onGestureStart = (event: GestureEvent) => {
       event.preventDefault();
       gestureBase = touchCount > 0 ? null : gestureHandlersRef.current.shownScale;
@@ -226,7 +193,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!canPan || event.pointerType !== 'mouse' || event.button !== 0) return;
     const element = event.currentTarget;
-    // A press on the viewer's own scrollbar keeps scrolling the native way.
     const bounds = element.getBoundingClientRect();
     if (event.clientX - bounds.left >= element.clientWidth || event.clientY - bounds.top >= element.clientHeight) return;
     event.preventDefault();
@@ -254,7 +220,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     setDragging(false);
   };
 
-  // "Previous" sits at the start of the row: on the right in RTL.
   const handleKeyDown = (event: KeyboardEvent) => {
     if (!neighbors || scale !== null || event.defaultPrevented) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -274,8 +239,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     event.preventDefault();
     (event.key === previousKey ? neighbors.previous : neighbors.next).open();
   };
-  // On the document: a click on a file in the tree leaves the focus on its row
-  // or nowhere, and the keys should step from there too.
   const keyDownRef = React.useRef(handleKeyDown);
   keyDownRef.current = handleKeyDown;
   React.useEffect(() => {
@@ -357,7 +320,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
       <div ref={viewerRef} className="relative flex min-h-0 flex-1 flex-col">
         {failed ? (
           <ContentState
-            // Clears the round previous/next arrows at the viewer's edges.
             className={neighbors ? 'px-16' : undefined}
             icon={<Icon name="image" className="size-10 text-muted-foreground" />}
             title={t('filesView.artifact.image.loadFailed')}
@@ -419,7 +381,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
                 className={cn(
                   'select-none rounded-md border border-edge-muted bg-primary/10',
                   scale === null ? 'max-h-full max-w-full object-contain' : 'max-w-none shrink-0',
-                  // Kept in the document while it decodes, so it can load and report its size.
                   !natural && 'invisible',
                 )}
               />
@@ -461,12 +422,6 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
   );
 };
 
-/**
- * A new source gets a new viewer, so the measured size and the zoom cannot
- * outlive their image. Resetting them in an effect instead loses the size of an
- * SVG shown from a data URL: that image fires `load` before React flushes the
- * effect, so the reset erases the size the image just reported.
- */
 export const ImageArtifact: React.FC<ImageArtifactProps> = (props) => (
   <ImageArtifactView {...props} key={props.src} />
 );

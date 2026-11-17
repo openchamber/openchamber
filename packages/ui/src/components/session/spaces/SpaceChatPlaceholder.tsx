@@ -1,10 +1,3 @@
-/**
- * What the chat shows for a session of a space that cannot answer now: stopped, its container
- * gone, or its machine out of reach. Its messages live inside the space, so a load would only wait
- * for a timeout and end in a load error. A stopped space offers Start here; the chat loads by
- * itself once the journey list says the space runs, because `ChatContainer` holds the load while
- * this shows. The other states say why, with the repair their status line offers.
- */
 
 import React from 'react';
 
@@ -23,8 +16,6 @@ export const SpaceChatPlaceholder: React.FC<{ directory: string }> = ({ director
   const action = useSpacesStore((state) => (spaceId ? state.actions.get(spaceId) : undefined));
   if (!spaceId || !entry) return null;
   const stopped = entry.state === 'exited';
-  // Start stands as the one button while nothing runs or failed; once it runs, or failed, the
-  // status line says so, a failure with the way to try again.
   const offersStart = stopped && action === undefined && spaceMenuActionsOf(entry).includes('start');
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center px-6" data-space-chat-placeholder={spaceId}>

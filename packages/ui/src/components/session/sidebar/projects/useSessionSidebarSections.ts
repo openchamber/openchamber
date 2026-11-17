@@ -28,9 +28,7 @@ type ProjectSectionCacheEntry = {
   groupingSessions: Session[];
   availableWorktrees: WorktreeMetadata[];
   rootBranch: string | null;
-  /** Current branch of every worktree directory the section renders. */
   worktreeBranchesKey: string;
-  /** Lifecycle ranks of the sessions that order the section's worktrees. */
   worktreeRanksKey: string;
   isRepo: boolean;
   buildGroupedSessions: Args['buildGroupedSessions'];
@@ -47,8 +45,6 @@ const worktreeBranchesKeyFor = (
   })
   .join('\n');
 
-// Ranks only order worktree groups, so a project without worktrees has none
-// to compare.
 const worktreeRanksKeyFor = (
   sessions: Session[],
   worktrees: WorktreeMetadata[],
@@ -67,7 +63,6 @@ type Args = {
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
   gitBranches: ReadonlyMap<string, string | null>;
-  /** The ranks `buildGroupedSessions` orders worktrees by; it reads them at call time. */
   sessionOrderRanks: ReadonlyMap<string, number>;
   lastRepoStatus: boolean;
   buildGroupedSessions: (
@@ -138,8 +133,6 @@ export const useSessionSidebarSections = (args: Args) => {
 
       rebuiltSections += 1;
       if (cached) {
-        // Diagnostic: name what invalidated the cached section so a sidebar
-        // that rebuilds on every session switch can be traced to its input.
         const reason = cached.project !== project ? 'project'
           : !sameSessions(cached.activeSessions, activeSessions) ? 'sessions'
           : !sameSessions(cached.archivedSessions, archivedSessions) ? 'archived'
@@ -193,12 +186,6 @@ export const useSessionSidebarSections = (args: Args) => {
     sessionOrderRanks,
   ]);
 
-  // Flat display sections: one merged group per project containing every
-  // non-archived session from the project root and all of its worktrees.
-  // Worktree grouping stays available in `projectSections` for data consumers
-  // (bootstrap demand planning, ownership); rendering is flat.
-  // The per-section cache keeps merged group references stable so the
-  // memoized SessionGroupSection subtree skips unrelated update waves.
   const flatSectionCacheRef = React.useRef<WeakMap<ProjectSection, ProjectSection>>(new WeakMap());
   const flatSectionsForRender = React.useMemo<ProjectSection[]>(() => {
     const cache = flatSectionCacheRef.current;

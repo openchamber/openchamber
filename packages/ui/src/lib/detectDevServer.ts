@@ -25,9 +25,6 @@ const DEV_SCRIPT_COMMAND_PATTERN = /^(?:cd\s+(?:"[^"]+"|'[^']+'|[^\s;&|]+)\s*&&\
 
 const isDevScriptName = (name: string): boolean => DEV_COMMAND_PATTERNS.some(({ pattern }) => pattern.test(name));
 
-/**
- * Detect the dev server command from project actions or package.json scripts
- */
 export async function detectDevServerCommand(
   directory: string,
   projectActions: OpenChamberProjectAction[],
@@ -35,7 +32,6 @@ export async function detectDevServerCommand(
 ): Promise<DevServerInfo | null> {
   if (!directory) return null;
 
-  // First, check if there's a project action that looks like a dev server
   const devAction = findDevServerAction(projectActions);
   if (devAction) {
     return {
@@ -46,11 +42,9 @@ export async function detectDevServerCommand(
     };
   }
 
-  // Then, check package.json scripts
   if (packageJsonScripts) {
     const devScript = findDevScript(packageJsonScripts);
     if (devScript) {
-      // Determine the package manager command
       const pm = await detectPackageManager(directory);
       const pmCommand = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'pnpm' ? 'pnpm' : pm === 'bun' ? 'bun run --shell=bun' : 'npm run';
       return {
@@ -60,8 +54,6 @@ export async function detectDevServerCommand(
     }
   }
 
-  // Fallback: static sites (no package.json) can be previewed via a simple file server.
-  // This keeps Start Preview usable for non-Node projects.
   if (await hasStaticIndexHtml(directory)) {
     const port = await allocatePreviewPort();
     const resolvedPort = typeof port === 'number' && Number.isFinite(port) && port > 0 ? port : 8000;
@@ -93,9 +85,6 @@ async function allocatePreviewPort(): Promise<number | null> {
   }
 }
 
-/**
- * Find a project action that looks like a dev server
- */
 function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberProjectAction | null {
   for (const action of actions) {
     const scriptName = DEV_SCRIPT_COMMAND_PATTERN.exec(action.command.trim())?.[1];
@@ -108,9 +97,6 @@ function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberPr
   return null;
 }
 
-/**
- * Find a dev script in package.json scripts
- */
 function findDevScript(scripts: Record<string, string>): string | null {
   for (const { pattern } of DEV_COMMAND_PATTERNS) {
     for (const scriptName of Object.keys(scripts)) {
@@ -122,11 +108,6 @@ function findDevScript(scripts: Record<string, string>): string | null {
   return null;
 }
 
-/**
- * Simple package manager detection based on lock files
- * Note: This is intentionally a simple client-side check.
- * For server-side operations, the server's package-manager.js is used.
- */
 async function detectPackageManager(directory: string): Promise<PackageManager> {
   const packageJsonContent = await readOptionalTextFile(`${directory}/package.json`, directory);
   if (packageJsonContent) {
@@ -196,9 +177,6 @@ async function readOptionalTextFile(path: string, directory?: string): Promise<s
   }
 }
 
-/**
- * Read package.json scripts from a directory
- */
 export async function readPackageJsonScripts(directory: string): Promise<Record<string, string> | null> {
   try {
     const content = await readOptionalTextFile(`${directory}/package.json`, directory);

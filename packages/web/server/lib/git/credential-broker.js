@@ -10,13 +10,8 @@ const DEFAULT_CAPACITY = 64;
 const DEFAULT_TTL_MS = 2 * 60 * 1000;
 const MAX_BODY_BYTES = 64 * 1024;
 const HELPER_PATH = fileURLToPath(new URL('./credential-helper.js', import.meta.url));
-/** Where the helper finds its lease nonce; set on the Git process, inherited by the helper. */
 export const GIT_CREDENTIAL_NONCE_ENV = 'OPENCHAMBER_GIT_CREDENTIAL_NONCE';
 
-/**
- * Git's credential wire format: `key=value` lines, one per attribute. Exported
- * so everything that answers git parses the same shape.
- */
 export const parseGitCredentialQuery = (value) => {
   const result = {};
   for (const line of String(value).split(/\r?\n/)) {
@@ -164,9 +159,6 @@ export function createGitCredentialBroker({
         used: false,
       });
       operationOwners.set(operationId, nonce);
-      // The nonce travels in the environment Git hands its helper, never in a
-      // command line: argv is readable by every local user, and the nonce is
-      // what redeems the lease.
       const helperCommand = `!${helperShellCommand(path.resolve(helperPath), [brokerUrl])}`;
       return Object.freeze({
         env: Object.freeze({ [GIT_CREDENTIAL_NONCE_ENV]: nonce }),

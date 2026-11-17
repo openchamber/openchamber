@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react"
 import type { SessionPatch, SyncEvent } from "@/lib/opencode/events"
 import type { Session } from "@/lib/opencode/model"
 import { compact } from "@/lib/opencode/model"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import {
   isGlobalSessionDeferrableUpdate,
   mergeSessionDirectoryMetadata,
@@ -15,14 +16,6 @@ import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 import { publishGlobalSessionMoves, type GlobalSessionMove } from "./session-moves"
 
-/**
- * What a running turn changed in a session's global record and has not
- * published yet: the fields themselves, never a whole record, so a record
- * another owner publishes meanwhile (a view, a metadata write, a refresh)
- * keeps its own changes. `base` is the published record the spend was read
- * against: when the published spend differs from it, someone else wrote spend
- * since (a refresh), and the deferred spend is older than that.
- */
 type DeferredGlobalSessionUpdate = {
   runtimeKey: string
   base: Session
@@ -35,7 +28,6 @@ const sameSpend = (left: Pick<Session, "cost" | "tokens">, right: Pick<Session, 
   left.cost === right.cost && (left.tokens === right.tokens || JSON.stringify(left.tokens ?? null) === JSON.stringify(right.tokens ?? null))
 )
 
-/** `current` with a deferred update laid over it; `current` itself when nothing of it still applies. */
 export const withDeferredGlobalUpdate = (current: Session, deferred: DeferredGlobalSessionUpdate | undefined): Session => {
   if (!deferred) return current
   const spendStillOurs = current === deferred.base || sameSpend(current, deferred.base)
@@ -53,9 +45,6 @@ export const withDeferredGlobalUpdate = (current: Session, deferred: DeferredGlo
 
 const pendingGlobalSessionUpdates = new Map<string, DeferredGlobalSessionUpdate>()
 
-// The deferred updates, for the few readouts that show what a turn changes at
-// each step in a session no directory store holds (a run lane's cost).
-// Rebuilt on read after a change, so a step costs one small map at most.
 const deferredListeners = new Set<() => void>()
 let deferredSnapshot: ReadonlyMap<string, DeferredGlobalSessionUpdate> | null = new Map()
 
@@ -80,11 +69,6 @@ const subscribeDeferredGlobalUpdates = (listener: () => void): (() => void) => {
   return () => { deferredListeners.delete(listener) }
 }
 
-/**
- * The updates still waiting for their turn's end (spend and `time.updated`),
- * keyed by session id. Lay them over the global list with
- * `withDeferredGlobalUpdate` where a readout shows spend while a turn runs.
- */
 export const useDeferredGlobalUpdates = (): ReadonlyMap<string, DeferredGlobalSessionUpdate> => (
   useSyncExternalStore(subscribeDeferredGlobalUpdates, readDeferredGlobalUpdates, readDeferredGlobalUpdates)
 )
@@ -112,16 +96,8 @@ const scheduleGlobalSessionUpdate = (base: Session, session: Session): void => {
 
 subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
 
-/**
- * Applies a session patch to the global list's own record.
- *
- * The global list holds whole sessions (the sidebar renders them), while the
- * event stream only reports what changed. The record already in the store is
- * the authoritative base to patch — an event carrying a partial session would
- * otherwise erase the fields it does not mention.
- */
 const applyPatch = (session: Session, patch: SessionPatch): Session => {
-  const next: Session = { ...session }
+  const next: Session = patch.metadata === undefined ? { ...session } : withSessionMetadata(session, patch.metadata)
   if (patch.title !== undefined) next.title = patch.title
   if (patch.directory !== undefined) next.directory = patch.directory
   if (patch.projectID !== undefined) next.projectID = patch.projectID
@@ -130,9 +106,6 @@ const applyPatch = (session: Session, patch: SessionPatch): Session => {
   if (patch.cost !== undefined) next.cost = patch.cost
   if (patch.tokens !== undefined) next.tokens = patch.tokens
   if (patch.permissions !== undefined) next.permissions = patch.permissions
-  // OpenChamber's metadata broadcasts (in work, recap, goal) replace the whole
-  // object; without this the sidebar saw them only on its next full reload.
-  if (patch.metadata !== undefined) next.metadata = patch.metadata
   if (patch.outcome !== undefined) next.outcome = patch.outcome
   if (patch.subpath === null) delete next.subpath
   else if (patch.subpath !== undefined) next.subpath = patch.subpath
@@ -149,9 +122,6 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
   if (payloads.length === 0) return
   const runtimeKey = getRuntimeKey()
   const store = useGlobalSessionsStore.getState()
-  // What this batch changed so far, `null` for a removal; every other read
-  // falls through to the store. A copy of the whole map per batch cost more
-  // than the rest of the batch with thousands of sessions.
   const changed = new Map<string, Session | null>()
   const read = (sessionId: string): Session | undefined => (
     changed.has(sessionId) ? changed.get(sessionId) ?? undefined : store.entityById.get(sessionId)
@@ -175,7 +145,6 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
       if (!update || update.runtimeKey !== runtimeKey) continue
       const currentSession = read(sessionID) ?? null
       if (!currentSession) continue
-      // Laid over the record as it is now, which may have changed since.
       const session = withDeferredGlobalUpdate(currentSession, update)
       if (
         session === currentSession
@@ -197,12 +166,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
     if (payload.type === "session.patched") {
       const { sessionID, patch } = payload.properties
       const currentSession = read(sessionID) ?? null
-      // Nothing to patch: the global list has never seen this session, and a
-      // partial patch cannot stand in for the record it is missing.
       if (!currentSession) continue
-      // A deferred update holds what earlier patches of this turn carried: the
-      // next patch builds on the published record with it laid over, so it
-      // keeps both those and whatever another owner published since.
       const pending = pendingGlobalSessionUpdates.get(sessionID)
       const base = withDeferredGlobalUpdate(currentSession, pending?.runtimeKey === runtimeKey ? pending : undefined)
       const session = stripSessionDiffSnapshots(applyPatch(base, patch))

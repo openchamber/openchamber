@@ -10,20 +10,6 @@ import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
 import { isProviderUserId, isProviderUsername } from './provider-id.js';
 
-/**
- * The generic source-control route shell. For every registered provider it
- * owns the HTTP surface under `/api/source-control/<id>/`: request parsing,
- * instance normalization, read-context validation through the binding
- * service, account resolution, the change-request status cache, the durable
- * mutation executor, upload streaming and error mapping. The provider's
- * implementation (`<provider>/provider.js`) answers in plain JSON.
- *
- * Routes are literal per id, not `/:provider/`, so the shell's own
- * `/api/source-control/binding/*` routes never collide and an unknown id falls
- * through to the module's 404 catch-all instead of the OpenCode proxy. A
- * capability the descriptor turns off still gets a route: a stable 501, never
- * a fall-through.
- */
 
 const STATUS_CACHE_TTL_MS = 90_000;
 const STATUS_RESOLVE_TIMEOUT_MS = 12_000;
@@ -43,20 +29,14 @@ const withTimeout = async (promise, timeoutMs, label) => {
   }
 };
 
-/** The HTTP status a provider answered with, wherever its SDK put it. */
 const upstreamStatusOf = (error) => error?.cause?.response?.status ?? error?.response?.status ?? error?.status;
 
 function errorStatus(kind) {
   return kind === 'temporarily-unavailable' ? 503 : kind === 'unreachable' ? 502 : 500;
 }
 
-/**
- * Whether an error carries one of this module's string codes. A local Git
- * process failure carries its numeric exit status as `code`, which is none.
- */
 const hasCodePrefix = (error, prefix) => isString(error?.code) && error.code.startsWith(prefix);
 
-/** An answer the implementation chose itself, or a storage failure that is never an empty answer; else null. */
 function sendAuthStorageError(res, error) {
   const answered = sendProviderResponse(res, error);
   if (answered) return answered;
@@ -69,7 +49,6 @@ function sendAuthStorageError(res, error) {
   return null;
 }
 
-/** An answer the implementation chose itself (`sourceControlResponse`). */
 function sendProviderResponse(res, error) {
   const response = error?.sourceControlResponse;
   return response ? res.status(response.status).json(response.body) : null;
@@ -91,7 +70,6 @@ function requestIssueNumber(value) {
   return Number.isSafeInteger(number) ? number : null;
 }
 
-/** The labels a page is narrowed to: every one must be carried, in the order asked. */
 function readLabelFilter(value) {
   const raw = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const names = raw
@@ -100,11 +78,6 @@ function readLabelFilter(value) {
   return [...new Set(names)].slice(0, 20);
 }
 
-/**
- * A list's state, whose items and which labels, from the query; unknown values
- * read as open, anyone and no labels. `unanswered` narrows a list of
- * discussions to open questions without an answer; no other list has it.
- */
 function readListFilter(query) {
   const state = requestText(query?.state);
   const people = requestText(query?.people);
@@ -114,24 +87,17 @@ function readListFilter(query) {
     state: states.includes(state) ? state : 'open',
     people: ['any', 'assigned', 'created', 'reviewRequested'].includes(people) ? people : 'any',
   };
-  // An unfiltered page reads exactly as it did before labels existed.
   if (labels.length > 0) filter.labels = labels;
   return filter;
 }
 
-// A provider writes a file attached in Markdown as `/uploads/<32-hex secret>/<name>`.
 const UPLOAD_SECRET_RE = /^[0-9a-f]{32}$/;
-// Only what an `img` or a `video` draws is served; an uploaded page or SVG
-// opened from this server's origin could run script in it.
 const UPLOAD_MEDIA_TYPE_RE = /^(?:image\/(?:png|jpeg|gif|webp|avif)|video\/(?:mp4|webm|quicktime))$/;
-// GitLab's uploads API sends every file as `application/octet-stream`; then
-// the name says which of the types above it is, and anything else is refused.
 const UPLOAD_EXTENSION_TYPES = new Map([
   ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp'], ['avif', 'image/avif'],
   ['mp4', 'video/mp4'], ['m4v', 'video/mp4'], ['webm', 'video/webm'], ['mov', 'video/quicktime'],
 ]);
 
-/** The media type to serve an upload as; null when it is not a picture or a clip. */
 function uploadMediaType(upstreamType, filename) {
   const type = upstreamType.split(';')[0].trim().toLowerCase();
   if (UPLOAD_MEDIA_TYPE_RE.test(type)) return type;
@@ -140,7 +106,6 @@ function uploadMediaType(upstreamType, filename) {
 }
 const UPLOAD_PASSED_HEADERS = ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified'];
 
-/** Express has decoded the name already; a `/`, `.` or `..` would leave the upload's folder. */
 function readUploadParams(params) {
   const secret = requestText(params?.secret);
   const filename = isString(params?.filename) ? params.filename : '';
@@ -182,7 +147,6 @@ const requireReplayMatch = (record, kind, actor, context) => {
   }
 };
 
-/** A 4xx the provider answered after dispatch is a definite failure; anything else may have happened. */
 const classifyMutationError = (error) => {
   const status = upstreamStatusOf(error);
   const localSourceControlError = hasCodePrefix(error, 'SOURCE_CONTROL_')
@@ -194,10 +158,6 @@ const classifyMutationError = (error) => {
   return 'outcome-unknown';
 };
 
-/**
- * A create's claim target has no number yet; when the provider recorded the
- * number it made, the receipt names it in the target, where clients link it.
- */
 const changeRequestReceipt = (record, replayed, providerAccountId) => {
   const receipt = mutationReceipt(record, replayed, providerAccountId);
   if (receipt.target.number !== undefined || !Number.isSafeInteger(receipt.result?.number)) return receipt;
@@ -205,28 +165,21 @@ const changeRequestReceipt = (record, replayed, providerAccountId) => {
   return { ...receipt, target: { ...receipt.target, number }, result };
 };
 
-// A revision is named by its full commit SHA.
 const REVISION_RE = /^[0-9a-f]{40}$/;
 const invalidReadContext = (message) => Object.assign(new Error(message), {
   code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
 });
 const namesRevision = (value) => value !== undefined && value !== '';
-/**
- * Why a read's `revision` is refused, or null. A provider without the
- * capability refuses one rather than answer for the current revision.
- */
 const revisionProblem = (descriptor, value) => {
   if (!namesRevision(value)) return null;
   if (!descriptor?.capabilities.revisions) return 'This source control provider does not keep change request revisions';
   return isString(value) && REVISION_RE.test(value.trim().toLowerCase()) ? null : 'revision must be a full commit SHA';
 };
-/** The 40-hex revision a read names, or undefined when it names none. */
 const readRevision = (descriptor, value) => {
   const problem = revisionProblem(descriptor, value);
   if (problem) throw invalidReadContext(problem);
   return namesRevision(value) ? value.trim().toLowerCase() : undefined;
 };
-/** `input` with `revision` added only when one was named, so providers without revisions see the call they always did. */
 const withRevision = (input, revision) => (revision === undefined ? input : { ...input, revision });
 
 const unsupportedCapability = (res) => res.status(501).json({
@@ -236,10 +189,6 @@ const unsupportedCapability = (res) => res.status(501).json({
 
 const enabled = (capabilities, capability) => capability.split('.').reduce((value, key) => value?.[key], capabilities);
 
-/**
- * The mutation routes and the capability each one needs. A provider whose
- * descriptor turns the capability off answers 501 there.
- */
 const MUTATION_ROUTES = [
   ['/pr/create', 'changeRequests'],
   ['/pr/update', 'changeRequests'],
@@ -275,11 +224,6 @@ const MUTATION_ROUTES = [
   ['/discussions/update', 'discussions'],
 ];
 
-/**
- * Registers every shell-served provider's routes and returns the reads other
- * modules make with a context they have already validated, dispatched by the
- * context's provider.
- */
 export function registerProviderRoutes(app, {
   providers,
   validateReadContext,
@@ -294,7 +238,6 @@ export function registerProviderRoutes(app, {
     if (!statusCaches.has(id)) statusCaches.set(id, createChangeRequestStatusCache({ ttlMs: STATUS_CACHE_TTL_MS }));
     return statusCaches.get(id);
   };
-  // An account the provider wrote off has no last-known answers left.
   providers.events.subscribe({
     invalidated: ({ provider, instance, accountId }) => {
       statusCaches.get(provider)?.invalidate({ instance, accountId });
@@ -312,19 +255,10 @@ export function registerProviderRoutes(app, {
 
   for (const descriptor of providers.list()) registerProvider(descriptor);
 
-  /*
-   * Extension providers appear and go while the server runs, so their routes
-   * cannot be registered once like the built-ins'. Each gets its own router
-   * with the same literal paths, kept here by id; one dispatcher, mounted by
-   * the caller after the built-ins and before the module's catch-all, hands a
-   * request under `/api/source-control/ext-<id>/` to that router. Without a
-   * router the request falls through to the catch-all's 404.
-   */
   const extensionRouters = new Map();
   const EXTENSION_PATH = /^\/api\/source-control\/(ext-[a-z0-9-]+)(?:\/|$)/;
   const mountExtension = (descriptor) => {
     const router = express.Router();
-    // A remount (a newer version) starts without the old descriptor's answers.
     statusCaches.delete(descriptor.id);
     registerProvider(descriptor, router);
     extensionRouters.set(descriptor.id, router);
@@ -344,19 +278,13 @@ export function registerProviderRoutes(app, {
     const { id, label } = descriptor;
     const base = `/api/source-control/${id}`;
     const statusCache = statusCacheFor(id);
-    // A request without an instance names the provider's legacy instance
-    // (github.com for GitHub's own account flow), else none.
     const requestInstance = (req) => descriptor.instance.normalize(
       (isString(req.query?.instance) ? req.query.instance.trim() : '') || (descriptor.instances?.legacyFlow?.instance ?? ''),
     );
 
-    // Declarative aliases a provider keeps for older clients
-    // (`descriptor.routeAliases`): its account routes under another prefix,
-    // extra names for a route, and retired paths that answer 410.
     const aliases = descriptor.routeAliases ?? null;
     const extraNames = (suffix) => Object.entries(aliases?.extraAuthAliases ?? {})
       .filter(([, canonical]) => canonical === suffix).map(([alias]) => alias);
-    /** An account route's paths: the canonical one, its alias prefix, and its extra names under both. */
     const authPaths = (suffix) => {
       const paths = [suffix, ...extraNames(suffix)]
         .flatMap((name) => [...(aliases?.authAliasPrefix ? [`${aliases.authAliasPrefix}${name}`] : []), `${base}${name}`]);
@@ -371,7 +299,6 @@ export function registerProviderRoutes(app, {
       for (const suffix of aliases.retiredPost) target.post(`${aliases.authAliasPrefix}${suffix}`, retired);
     }
 
-    /** A capability-gated route; off in the descriptor, it answers 501 and never reaches the proxy. */
     const route = (method, suffix, capability, handler, path = `${base}${suffix}`) => {
       if (capability && !enabled(descriptor.capabilities, capability)) {
         target[method](path, (_req, res) => unsupportedCapability(res));
@@ -380,11 +307,6 @@ export function registerProviderRoutes(app, {
       target[method](path, handler);
     };
 
-    /**
-     * The project a request's `owner` and `repo` name: `{ owner, name }`,
-     * `none` when it names neither, `incomplete` otherwise. A path provider's
-     * top-level project (Gerrit's `demo`) names a repo and an empty owner.
-     */
     const topLevelProjects = allowsTopLevelProjects(descriptor);
     const requestedProject = (req) => {
       const owner = requestText(req.query?.owner);
@@ -401,7 +323,6 @@ export function registerProviderRoutes(app, {
       return impl.auth.invalidateAccount({ instance: identity.instance, accountId: identity.accountId, persisted });
     };
 
-    /** A 401 from the provider writes off only the acting account. Answers a lock failure itself; else null. */
     const invalidateRefusedAccount = async (res, impl, error) => {
       if (upstreamStatusOf(error) !== 401 || error?.sourceControlAccountUnavailable || !error?.sourceControlIdentity?.accountId) return null;
       try {
@@ -433,11 +354,6 @@ export function registerProviderRoutes(app, {
       return kind === 'unreachable' || kind === 'temporarily-unavailable';
     };
 
-    /**
-     * `linked=1` asks to read an item a link names wherever its repository
-     * is, with the bound account. Only these reads honour it: writes validate
-     * their own context, so the network still decides what can be changed.
-     */
     const readContextOf = async (req, instance, directory) => {
       const context = await validateReadContext?.({
         directory,
@@ -451,10 +367,6 @@ export function registerProviderRoutes(app, {
       return context && req.query?.linked === '1' ? { ...context, linked: true } : context;
     };
 
-    /**
-     * A bound read: validates the context before any credential lookup, then
-     * resolves the exact bound account and hands both to `read`.
-     */
     const boundRead = (capability, suffix, read, { validate, validateAfterInstance } = {}) => {
       route('get', suffix, capability, async (req, res) => {
         let impl;
@@ -486,8 +398,6 @@ export function registerProviderRoutes(app, {
       return impl.resources[method];
     };
 
-    // Capabilities: the static ones from the descriptor, the authentication
-    // methods probed on the instance.
     target.get(`${base}/capabilities`, async (req, res) => {
       let impl;
       try {
@@ -507,7 +417,6 @@ export function registerProviderRoutes(app, {
           mergeMethods: capabilities.merge ? [...capabilities.merge.methods] : [],
           ci: capabilities.ci,
         };
-        // Only a host that can turn an open change request into a draft says so.
         if (capabilities.draftConversion) published.draftConversion = true;
         return res.json(published);
       } catch (error) {
@@ -523,7 +432,6 @@ export function registerProviderRoutes(app, {
       } catch (error) {
         const lockResponse = sendAuthStorageError(res, error);
         if (lockResponse) return lockResponse;
-        // A service login that could not be read is not an empty account list.
         if (error?.sourceControlAuthUnknown) {
           return res.status(errorStatus(error.kind)).json({ error: error.message });
         }
@@ -594,7 +502,6 @@ export function registerProviderRoutes(app, {
           throw error;
         }
         const outcome = await impl.auth.completeDeviceFlow({ instance, deviceCode: flow.deviceCode, clientId: flow.clientId }, {
-          // A terminal answer spends the flow before the account is stored.
           consume: () => {
             oauthFlowRegistry.consume(flowId);
             acquired = false;
@@ -620,8 +527,6 @@ export function registerProviderRoutes(app, {
       try {
         impl = await loadImplementation(id);
         if (!descriptor.authMethods.pat) return unsupportedCapability(res);
-        // A token goes to the instance next, so one that is not a valid
-        // instance stops here, before any request.
         let instance;
         try {
           instance = requestInstance(req);
@@ -630,8 +535,6 @@ export function registerProviderRoutes(app, {
         }
         const token = isString(req.body?.token) ? req.body.token.trim() : '';
         if (!token) return res.status(400).json({ error: 'token is required' });
-        // A Basic-auth host (its settings declare a username field) needs the
-        // username before the first request; every other host never gets one.
         if (!takesUsername) return res.json(await impl.auth.connectToken({ instance, token }));
         const username = isString(req.body?.username) ? req.body.username.trim() : '';
         if (!isProviderUsername(username)) {
@@ -641,9 +544,6 @@ export function registerProviderRoutes(app, {
       } catch (error) {
         const lockResponse = sendAuthStorageError(res, error);
         if (lockResponse) return lockResponse;
-        // The reason a token was refused is the person's to act on, so it is
-        // named by a code the interface can translate rather than folded into a
-        // generic failure.
         if (error?.kind === 'invalid-token') {
           return res.status(401).json({ error: error?.message || `${label} token is invalid`, code: 'INVALID_TOKEN' });
         }
@@ -703,7 +603,6 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    // Removal names the exact account; it never falls back to the current one.
     target.delete(authPaths('/auth'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
@@ -719,28 +618,21 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    // A badge keeps its last-known state through an outage: a fresh repeat is
-    // answered from the cache, a transient failure with the last answer.
     boundRead('changeRequests', '/pr/status', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const branch = requestText(req.query?.branch);
       const force = req.query?.force === 'true' || req.query?.force === '1';
       const remote = trustedContext.primaryRemote;
-      // The account is resolved before the cache is consulted, so a removed or
-      // rotated credential never receives an answer it did not earn.
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       const cacheContext = {
         instance, accountId: session.accountId, credentialRevision: session.credentialRevision,
         repositoryId: trustedContext.repositoryId, bindingRevision: trustedContext.bindingRevision,
         directory, branch, remote,
-        // A push-to-create host finds the change by the tip's Change-Id, so
-        // its answer is only as current as the tip it was read for.
         localTip: descriptor.capabilities.createVia === 'push' ? await readBranchTip(directory, branch) : null,
       };
       if (!force) {
         const fresh = statusCache.fresh(cacheContext);
         if (fresh) return res.json(fresh);
       }
-      // A mutation that lands while this read runs keeps the read from storing.
       const started = statusCache.begin();
       try {
         const status = await withTimeout(
@@ -750,7 +642,6 @@ export function registerProviderRoutes(app, {
         );
         return res.json(statusCache.store(cacheContext, status, started));
       } catch (error) {
-        // The client treats a 503 as "keep what you have" when nothing was seen yet.
         if (isTransientFailure(impl, error)) {
           const last = statusCache.last(cacheContext);
           if (last) return res.json(last);
@@ -766,11 +657,6 @@ export function registerProviderRoutes(app, {
     const mutationAvailable = () => validateMutationContext instanceof Function
       && mutationExecutor?.read instanceof Function
       && mutationExecutor?.execute instanceof Function;
-    /**
-     * One durable mutation: validated binding context, the exact bound
-     * account, a provider-owned kind and digest, and the shared executor that
-     * claims the idempotency key before the provider is called once.
-     */
     const executeMutation = async (impl, route, body) => {
       if (!mutationAvailable()) {
         throw Object.assign(new Error('Canonical source control mutations are unavailable'), {
@@ -829,27 +715,17 @@ export function registerProviderRoutes(app, {
         statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
         try { await onMutationSucceeded({ context, kind, input, record: execution.record, replayed: execution.replayed }); }
         catch (error) {
-          // The provider write is already durable. Notification bookkeeping
-          // cannot turn an accepted merge into an apparent failed mutation.
           console.warn('[source-control] post-mutation follow failed:', error?.code ?? 'FOLLOW_FAILED');
         }
       } finally {
         settleStarted?.();
       }
-      // Cache invalidation after the write is durable and best effort: the write
-      // landed, and a stale cache must not turn that into an error.
       if (impl.mutations.afterSuccess instanceof Function) {
         try { await impl.mutations.afterSuccess({ session, target: execution.record.target }); }
-        catch { /* the next read refreshes what stayed cached */ }
+        catch {  }
       }
       return changeRequestReceipt(execution.record, execution.replayed, session.providerUserId);
     };
-    /**
-     * A provider that words its own failures (`mutations.presentError`) gets
-     * every error after the shell wrote off a refused account; otherwise the
-     * module's own errors answer as they are and the provider's as resource
-     * errors.
-     */
     const sendMutationError = async (res, impl, error) => {
       if (impl?.mutations?.presentError instanceof Function) {
         const lockFailure = await invalidateRefusedAccount(res, impl, error);
@@ -876,7 +752,6 @@ export function registerProviderRoutes(app, {
       });
     }
 
-    // The project's labels and who can review in it, for the board's pickers.
     for (const [suffix, capability, method] of [
       ['/references/labels', 'labels', 'listLabels'],
       ['/references/reviewers', 'reviewers', 'listReviewerCandidates'],
@@ -891,10 +766,6 @@ export function registerProviderRoutes(app, {
       });
     }
 
-    // The reference picker: a searched page of issues or change requests, the
-    // same search across several folders, an item's detail, and what colours
-    // the change requests a page shows.
-    // Discussions are one more kind where the host keeps them; elsewhere asking for them is unsupported.
     const discussions = descriptor.capabilities.discussions === true;
     boundRead('referencePicker', '/references', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const kind = requestText(req.query?.kind);
@@ -913,7 +784,6 @@ export function registerProviderRoutes(app, {
         ? 'directory and kind (issue, pull or discussion) are required' : null),
     });
 
-    // Every folder's context is validated, and read with its own account, by the provider.
     route('post', '/references/across', 'referencePicker', async (req, res) => {
       let impl;
       try {
@@ -929,7 +799,6 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    // `kind=discussion` reads a discussion; without it, the issue or change request the number names.
     boundRead('referencePicker', '/references/detail', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const kind = requestText(req.query?.kind) === 'discussion' ? 'discussion' : 'item';
       if (kind === 'discussion' && !discussions) return unsupportedCapability(res);
@@ -947,7 +816,6 @@ export function registerProviderRoutes(app, {
         || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
     });
 
-    // A change request's review as the diff draws it: the viewer's draft and the threads on its lines.
     boundRead('reviewDrafts', '/pr/review/state', async ({ req, res, impl, directory, instance, trustedContext }) => {
       const read = requireResource(impl, 'reviewState');
       const session = await sessionFor(impl, instance, trustedContext.accountId);
@@ -961,7 +829,6 @@ export function registerProviderRoutes(app, {
         || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
     });
 
-    // Statuses are read with each listed host's own account, so no bound session is resolved here.
     boundRead('referencePicker', '/references/status', async ({ req, res, impl, directory, trustedContext }) => {
       const read = requireResource(impl, 'referenceStatuses');
       return res.json(await read({
@@ -972,13 +839,6 @@ export function registerProviderRoutes(app, {
         ? 'directory and pulls (owner/repo#number, comma separated) are required' : null),
     });
 
-    // A picture or a clip attached to an issue, a change request or a note,
-    // for the board. The path keeps the provider's own shape, so the file name
-    // ends it. The route accepts the URL auth token, since `img` and `video`
-    // cannot send headers.
-    // TODO(provider-registry): `ui-auth/ui-auth.js` allows URL auth only for
-    // `/api/source-control/gitlab/uploads/`; a further provider with `uploads`
-    // needs its prefix there too.
     route('get', '/uploads/:secret/:filename', 'uploads', async (req, res) => {
       const abort = new AbortController();
       res.on('close', () => abort.abort());
@@ -1003,7 +863,6 @@ export function registerProviderRoutes(app, {
         const type = uploadMediaType(upstream.headers.get('content-type') || '', upload.filename);
         if (!upstream.ok || !upstream.body || !type) {
           await upstream.body?.cancel().catch(() => {});
-          // A refused read is the file's answer, never the account's: it does not invalidate it.
           return res.status(upstream.ok ? 415 : upstream.status === 416 ? 416 : 404).end();
         }
         res.status(upstream.status);
@@ -1056,7 +915,6 @@ export function registerProviderRoutes(app, {
     }, {
       validate: (req) => {
         if (projectSelectorProblem(req)) return 'complete project selector is required';
-        // Refused before any context or account work.
         const problem = revisionProblem(descriptor, req.query?.revision);
         return problem ? { error: problem, code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' } : null;
       },
@@ -1110,20 +968,12 @@ export function registerProviderRoutes(app, {
       validate: (req) => (!namesProject(req) ? 'owner and repo are required' : null),
     });
 
-    // The ambient account route is retired: account presentation comes from
-    // auth status and account inventory, never from an implicit current user.
     target.get(authPaths('/me'), (_req, res) => res.status(410).json({
       error: `${label} account user route is retired`,
       code: 'SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED',
     }));
   }
 
-  /**
-   * A read for another module (the comparison view, walkthroughs, worktrees)
-   * with the account of a context its caller has already validated. The
-   * provider refusing the token writes the account off the same way a route
-   * read does, and the upstream status travels with the error.
-   */
   const readWithBoundAccount = async (context, method, input) => {
     const impl = await loadImplementation(context?.provider);
     const read = impl.resources?.[method];
@@ -1166,19 +1016,11 @@ export function registerProviderRoutes(app, {
     mountExtension,
     unmountExtension,
     extensionDispatcher,
-    /** Forgets every provider's status of one local branch, after the server rewrote its tip. */
     invalidateBranchStatus: ({ directory, branch }) => {
       for (const cache of statusCaches.values()) cache.invalidate({ directory, branch });
     },
-    /**
-     * Live state of known change requests and issues, read with the
-     * instance's current or named account. A provider may answer with the
-     * instance's current account when the named one no longer resolves
-     * (`orCurrent`); GitHub does, GitLab does not.
-     */
     readLiveSummaries: async ({ provider, instance, accountId = null, refs, issueRefs, discussionRefs = [], details = false }) => {
       const impl = await loadImplementation(requireProvider(provider));
-      // A host without discussions is never asked about them; they stay unanswered (unknown).
       const askedDiscussions = providers.describe(provider).capabilities.discussions === true ? discussionRefs : [];
       if (!(impl.resources?.liveSummaries instanceof Function)) return { connected: false };
       let session;
@@ -1201,7 +1043,6 @@ export function registerProviderRoutes(app, {
         throw error;
       }
     },
-    /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
       context, 'readChangeRequestPatch', withRevision({ number, sourceRepo, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
@@ -1209,7 +1050,6 @@ export function registerProviderRoutes(app, {
       context, 'readChangeRequestFile',
       withRevision({ number, sourceRepo, path, previousPath, status, binary: binary || undefined, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
-    /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),
     resolveChangeRequestSource: (input) => trustedRead(input, 'resolveChangeRequestSource', () => ({
       project: input.project,

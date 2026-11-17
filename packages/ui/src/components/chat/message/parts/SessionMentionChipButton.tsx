@@ -6,10 +6,8 @@ import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { SessionLinkTarget } from '@/lib/sessionLinks';
 import type { SessionMentionChip } from '@/lib/messages/sessionMentionChip';
 
-// Inline minimums opt out of the mobile 36px button floor.
 const INLINE_BUTTON_STYLE = { minHeight: 0, minWidth: 0 };
 
-/** A mentioned session or message in sent text: opens it in the app. */
 export const SessionMentionChipButton: React.FC<{ chip: SessionMentionChip; target: SessionLinkTarget }> = ({ chip, target }) => (
     <button
         type="button"

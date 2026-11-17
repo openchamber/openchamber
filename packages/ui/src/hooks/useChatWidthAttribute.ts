@@ -1,11 +1,6 @@
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 
-/**
- * Puts the chat width setting on the document root as `data-chat-width`, where
- * the chat column rules in `styles/typography.css` read it. Default leaves the
- * attribute off.
- */
 export const useChatWidthAttribute = (): void => {
   const chatWidth = useUIStore((state) => state.chatWidth);
   React.useEffect(() => {
