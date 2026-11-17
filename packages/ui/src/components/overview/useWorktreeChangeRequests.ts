@@ -8,25 +8,13 @@ import { repositoryBindingOwner } from '@/lib/source-control/repository-binding'
 import { getSourceControlStatusKey, selectEntryVisualSummary, useGitHubPrStatusStore, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
-/** What a worktree branch's change request says, for Clean up. */
 export type WorktreeChangeRequest = { pr: OverviewWorktreeFacts['pr']; mergedHeadSha: string | null };
 
 const UNKNOWN: WorktreeChangeRequest = { pr: 'unknown', mergedHeadSha: null };
 
-/**
- * The change request of each worktree branch, read the way the sidebar reads
- * the branches it shows: the directory's repository binding names the account,
- * the status store asks the host once per branch, and the answer lands in the
- * shared store. The sidebar does this only for branches it shows, so the page
- * asks for every linked worktree itself while it is open. A branch whose
- * repository has no connected account stays unknown, and an unknown branch is
- * never offered for removal.
- */
 export type WorktreeChangeRequests = {
   changeRequestOf: (path: string) => WorktreeChangeRequest;
-  /** The branch's PR badge, by the sidebar's colour rule; null while unknown or without one. */
   summaryOf: (path: string) => PrVisualSummary | null;
-  /** The store keys of these branches, for following their open PRs live. */
   keys: readonly string[];
 };
 
@@ -90,7 +78,6 @@ export function useWorktreeChangeRequests(
   const changeRequestOf = React.useCallback((path: string): WorktreeChangeRequest => {
     const key = keyByPath.get(path);
     const entry = key ? entries[key] : undefined;
-    // A failed read says nothing about the branch; only an answer does.
     if (!entry?.isInitialStatusResolved || entry.error) return UNKNOWN;
     const changeRequest = entry.status?.changeRequest ?? entry.status?.pr ?? null;
     if (!changeRequest) return { pr: 'none', mergedHeadSha: null };

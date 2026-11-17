@@ -34,6 +34,9 @@ sidebar's one repository-thread path (`getLinkedSidebarChanges`,
 
 - Rows are top-level sessions. A subagent's running and its requests roll up
   to the session the user opens; `/btw` side questions have no row.
+- The empty state waits for the session list to load, so an unfinished read
+  cannot claim there is nothing to show.
+- Subagent ancestry traversal uses the status index's 8-level bound.
 - A permission or question shows from any session. The rest follows
   `isOverviewFollowed`: with In work on, the sessions in work; with it off,
   the sessions touched in the last two weeks, so years of sessions nobody
@@ -63,6 +66,15 @@ sidebar's one repository-thread path (`getLinkedSidebarChanges`,
   the branches the sidebar showed, and Clean up stayed empty in List view. A
   branch whose repository has no connected account, or whose read failed, is
   unknown and never offered.
+- A fresh project worktree list takes precedence over the sidebar's map. A
+  failed read or a non-repository project keeps the sidebar's known entries.
+  Fresh entries can lack status; an explicit status other than ready excludes
+  an entry because it is still being set up or is gone.
+- A failed git read leaves a worktree unknown and excludes it from Clean up.
+- A merged change request's head commit anchors the loss check: commits after
+  that head still count as work to lose.
+- A space's sessions belong to the project the space is created from once the
+  space list identifies it.
 - Clean up offers only linked worktrees of registered projects, never the
   primary checkout, never one in use (a
   running session, the open session, the directory on screen), never one
@@ -76,13 +88,21 @@ sidebar's one repository-thread path (`getLinkedSidebarChanges`,
   reports a session there running; a failed status read stops it too. It reads
   git and stops if git reports more to lose than the user agreed to: nothing
   for a clean worktree, the confirmed losses otherwise. It checks what runs
-  again after the git read, then takes the sessions there from the store,
+  again after the git read because an agent can start during that round trip,
+  then takes the sessions there from the store,
   marks the ones in work done, archives all of them, and removes the worktree
   with its local branch. A failed archive stops before removal.
+- A failed removal leaves sessions archived, where they remain recoverable.
+  Teardown is skipped only through the failure toast's "Delete without teardown"
+  action.
+- Marking sessions done isolates failures per session so the remaining sessions
+  still proceed; failed sessions are returned to the caller.
 - Bulk actions: Mark all done covers Looks done, including rows that rest on
   Jev alone, since Done comes back with the next message. Clean up all covers
   only worktrees where nothing is lost. Each confirmation lists what it touches
   and, folded, what it leaves out and why.
+- Bulk Clean up marks every selected row pending before the removal loop starts,
+  including rows waiting for their turn, so a second click cannot race the loop.
 - While open, the page follows the linked items and branch PRs of the sessions
   it judges (`useTrackedItems`) and reads git for the linked worktrees: once on
   open, when the set changes, when the window returns, and after an action.
@@ -131,6 +151,10 @@ were never found. The reason a row is listed sits beside its title in the
 colour of its state, so the state is readable without the 12px mark. A second
 line under the title carries only what helps decide: a recap on a done row,
 the question asked on a waiting one.
+
+Opening a row uses its own button over the text so adjacent action buttons
+remain separate buttons. An unread end uses the sidebar's unread component;
+its mark conveys the waiting reason without a repeated text label.
 
 The top is one line of counts, each a jump to its section, in place of a
 sentence: the same facts, scannable, and nothing counted is hidden below.
