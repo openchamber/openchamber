@@ -65,6 +65,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 
 ## Runtime behavior
 - Browser clients connect to the WS endpoints above.
+- A message-stream upgrade whose URL repeats `directory` or `lastEventId` is ambiguous and is refused with an error frame and a 1008 close instead of silently streaming under the first value (issue #2315); single-value and absent params are unchanged. This mirrors the directory-scoped HTTP surfaces, which reject a repeated `directory` with a 400.
 - OpenChamber still fetches OpenCode upstream event streams over SSE, now from `/api/event`.
 - OpenCode 2.x sends no `id:` SSE lines: the event id is `payload.id` and the directory is `payload.location.directory`. Replay and per-directory routing read both out of the payload.
 - Browser clients receive the RAW wire payload and translate it themselves. Server-side subscribers read `event.translated()` instead, so the translation happens once per event and only when something listens.
