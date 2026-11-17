@@ -8,6 +8,7 @@ import { startBrowser } from "./browser.mjs"
 import { createSelector, diffMap, keepingChangedFiles, listChangedFiles, readMapAt, workingTreeFiles } from "./changed.mjs"
 import { DEFAULT_MODEL, attachKeptStand, startStand } from "./stand.mjs"
 import { ACTION_NAMES, StepFailure, runStep } from "./steps.mjs"
+import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, "../..")
@@ -203,6 +204,7 @@ const runScenario = async ({ scenario, stand, browser, vocabulary, outDir, round
 }
 
 const main = async () => {
+  prioritizeWindowsProcess()
   const options = parseArgs(process.argv.slice(2))
   const { vocabulary, zones, scenarios } = loadMap()
   const chosen = options.changed ? selectChanged({ zones, vocabulary }, scenarios, options.base) : select(scenarios, options.selection)

@@ -367,6 +367,12 @@ timeline for the DevTools Performance panel.
 
 ### Deterministic stimulus
 
+`scripts/verify` starts the provider with `--verify-control`. In that mode,
+`GET /__verify/active?session=<id>&prompt=<text>` reports only whether a matching
+streaming request is active, using `x-opencode-session-id` and the latest user
+message. Closed requests are removed immediately. Normal profiling launches
+have no control endpoint.
+
 A hosted model returns a different length at a different speed on every run,
 and streaming cost follows the rate of deltas, not the amount of text. Two
 captures against a real model are therefore not comparable. `fixture-provider.mjs`

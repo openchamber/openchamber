@@ -165,6 +165,20 @@ const ACTIONS = {
     }
     fail(`session ${step.session} never became busy`)
   },
+  async "fixture.request"(step, ctx) {
+    if (!step.prompt) fail("fixture.request needs a prompt")
+    const query = new URLSearchParams({ session: sessionId(step, ctx), prompt: step.prompt })
+    const deadline = Date.now() + timeoutOf(step)
+    while (Date.now() < deadline) {
+      const response = await fetch(`http://127.0.0.1:${ctx.stand.fixturePort}/__verify/active?${query}`, { signal: AbortSignal.timeout(2000) })
+      if (!response.ok) fail(`the fixture request control answered ${response.status}; start a new verification stand`)
+      const body = await response.json()
+      if (body.active === true) return
+      if (body.active !== false) fail("the fixture returned invalid request activity")
+      await wait(100)
+    }
+    fail(`the fixture has no active request for session ${step.session} and prompt ${JSON.stringify(step.prompt)}`)
+  },
   async "file.write"(step, ctx) {
     const content = Array.isArray(step.content) ? step.content.join("\n") : step.content
     for (let n = 1; n <= (step.times ?? 1); n += 1) {

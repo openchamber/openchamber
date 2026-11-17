@@ -33,6 +33,17 @@ FAIL composer.send.shift-enter (21.8s)
 
 A fresh stand warms up for about 40 s (Vite's first compile of the chat, Changes and Files) before the first scenario; a full run of about 200 scenarios takes about 25 minutes. With `--keep` the stand runs until Ctrl-C, and `--attach` runs against it in seconds, which is the loop for writing scenarios. Vite serves the checkout's UI source, so a UI edit shows in the next scenario without restarting the stand. The server runs the code it started with: a change under `packages/web/server` needs a new stand.
 
+`OPENCODE_BINARY` overrides the installed app's bundled CLI. Use the exact version in `packages/electron/package.json` under `opencodeCli.version`; a separate official npm platform package can be extracted outside the checkout without changing the installed app or `PATH`. For example, in Windows Command Prompt:
+
+```bat
+cd /d C:\Users\openc\projects\openchamber
+set "OPENCODE_BINARY=C:\Users\openc\opencode-verify\package\bin\opencode.exe"
+start "" /b /wait /high bun run verify -- workspace > C:\Users\openc\verify-workspace.log 2>&1
+start "" /b /wait /high bun run verify -- composer > C:\Users\openc\verify-composer.log 2>&1
+```
+
+`node --test scripts/verify/platform.test.mjs` checks the fixture entrypoint, isolated Git configuration, the installed virtualizer patch and repeated Windows fixture shutdown without starting the app. A frozen install can report no changes while leaving a corrupted installed patch in place; this smoke test catches the broken virtualizer before a browser warm-up.
+
 ### Running only what a change touches
 
 `--changed` takes the files the change touches, counted as `bun run check:changed` counts them (from where the branch left `origin/main`, with uncommitted and new files; `--base <ref>` for another base, `--base A..B` for the commits between two refs only), and runs the scenarios of the features those files can break. Each changed file goes to one of these:
@@ -97,6 +108,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | `session.create` `as`, `title` | Creates a session in the project; `as` names the variable holding its id |
 | `session.send` `session`, `prompt`, `model`, `wait`, `goal` | Sends a prompt as another client would; waits for the answer unless `wait` is false; `goal` sends it as a goal the agent keeps working toward |
 | `session.idle`, `session.busy` `session` | Waits for the session's status |
+| `fixture.request` `session`, `prompt` | Waits until the fixture has an active model request for this session whose latest user message contains `prompt` |
 | `file.write` `path`, `content`, `times`; `file.delete` `path` | Changes the project on disk; `content` may be an array of lines; with `times` it writes that many files, `{n}` in the path numbered 01, 02, ... |
 | `file.expect` `path`, `contains`, `equals` or `exists` | Waits for the file's content, or for the path to exist (`true`) or be gone (`false`) |
 | `open` `session`, `phone` | Loads the app, at that session when given; `"phone": true` loads the phone layout (`/mobile.html`) at a phone's size with touch, and every later click is a tap |
@@ -131,7 +143,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 
 ## Invariants
 
-- Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell, so no provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
+- Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` on macOS or the OS temp directory elsewhere with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell. Windows also keeps `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`, and redirects `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the stand. No provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the run stops before deleting anything.
 - Every scenario starts from the same state: all sessions deleted, linked worktrees and scenario branches removed, the project reset to its first commit and cleaned, the server's settings put back as they were when the stand started and the user's profile settings (Settings > Chat and the like) dropped back to the stand's, the sidebar's folders removed, a fresh browser context. A scenario's result does not depend on which ran before it, so one that changes a setting needs no step to change it back. Worktree cleanup refuses any linked directory outside the stand before removing anything.
@@ -142,6 +154,30 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
 
 ## Decisions
+
+### Why queue cleanup waits for the follow-up's model request
+
+A session can stay busy while a steered follow-up moves from admission to execution. The fixture's opt-in request control identifies the new request by OpenCode's session header and its latest prompt, so Stop targets the follow-up's running turn. The control returns only a boolean and removes requests on completion or cancellation; normal profiling fixtures do not expose it.
+
+The queue scenario allows 60 s for that request to start because the first fixture response stays silent for 30 s before OpenCode can consume the steer. Stop still has to make the session idle within 10 s after the follow-up request starts.
+
+Ctrl+Enter cleanup uses the same request precondition before Stop.
+
+### Why Windows stops process trees
+
+Windows has no POSIX process groups or group signals. The stand and fixture use `taskkill /PID <owned pid> /T /F` there to stop the children they started; macOS keeps its existing group signals. Windows uses the installed OpenChamber app's bundled OpenCode when present, resolving its path before redirecting the stand's user directories.
+
+Shutdown drains process log pipes for at most 1 s, then detaches and closes them before flushing the log file. A descendant retaining an inherited pipe must not prevent the runner from finishing cleanup.
+
+The Windows API launch builds the built-in extensions and starts `server/index.js` with an explicit port. The `dev:server` script uses POSIX environment substitutions that Bun's Windows script shell passes literally. macOS continues to use that script.
+
+Windows Chrome starts with desktop mouse capabilities even when an SSH session has no attached input devices. Otherwise `(hover: hover)` and `(pointer: fine)` both report false and hover-only tab controls never show. Phone emulation still switches to coarse, touch-only input. `node --test scripts/verify/browser.test.mjs` checks both modes without a stand.
+
+Windows browser teardown asks Chrome to close over CDP before falling back to killing its owned process tree. Terminating only the main process leaves helpers holding profile files open and can fail profile removal with `EPERM`.
+
+The Windows runner explicitly gives itself, its API, Vite and Chrome High process priority. `start /high bun run verify` alone leaves these children at Normal, where windowless runs became slow enough to exceed control API timeouts. Vite runs through its Node entrypoint on Windows so the priority applies to the actual server. Other platforms retain the existing process launches and priorities.
+
+Windows reset reads the global session list directly, including archived and child sessions. The CLI's 4 s control-request budget was too short for cleanup after a server restart; housekeeping can wait up to 120 s for the same raw list the reset already uses for child sessions. Scenario actions retain the CLI and its existing request budgets. Reset follows continuation cursors through the terminal empty page: OpenCode can return a cursor even on a short page. A failed or malformed page, or a repeated cursor, stops the reset before anything is deleted.
 
 ### Why a dev instance and not the production build
 

@@ -498,6 +498,7 @@
             {"do": "click", "on": "composer.queueButton", "text": "send"},
             {"do": "see", "on": "chat.userBubble", "text": "queued follow up"},
             {"do": "gone", "on": "composer.queue"},
+            {"do": "fixture.request", "session": "s", "prompt": "queued follow up", "timeout": 60},
             {"do": "press", "key": "a", "mods": ["mod"]},
             {"do": "press", "key": "Backspace"},
             {"do": "click", "on": "composer.stop"},
@@ -551,6 +552,7 @@
             {"do": "press", "key": "Enter", "mods": ["mod"]},
             {"do": "see", "on": "chat.userBubble", "text": "not waiting in line"},
             {"do": "see", "on": "composer.queue", "count": 0, "timeout": 1},
+            {"do": "fixture.request", "session": "s", "prompt": "not waiting in line", "timeout": 60},
             {"do": "click", "on": "composer.stop"},
             {"do": "session.idle", "session": "s", "timeout": 10}
           ]
