@@ -1,6 +1,17 @@
 import { readEnterprisePolicy } from '../enterprise-mode.js';
+import type { EnterprisePolicyOptions } from '../enterprise-mode.js';
 
-const CURATED_SKILLS_SOURCES = [
+export interface CuratedSkillsSource {
+  id: string;
+  label: string;
+  description: string;
+  source: string;
+  defaultSubpath?: string;
+  sourceType: 'github';
+  excludedSkills?: string[];
+}
+
+const CURATED_SKILLS_SOURCES: CuratedSkillsSource[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
@@ -35,7 +46,7 @@ const CURATED_SKILLS_SOURCES = [
   },
 ];
 
-export function getCuratedSkillsSources(policyOptions) {
+export function getCuratedSkillsSources(policyOptions?: EnterprisePolicyOptions) {
   if (readEnterprisePolicy(policyOptions).hideBuiltinSkillCatalogs) return [];
   return CURATED_SKILLS_SOURCES.slice();
 }

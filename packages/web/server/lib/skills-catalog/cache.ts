@@ -1,14 +1,16 @@
-import { readDiskCache, writeDiskCache } from './disk-cache.js';
+import { isPersistedCacheEntry, readDiskCache, writeDiskCache } from './disk-cache.js';
+import type { PersistedCacheEntry } from './disk-cache.js';
+import type { SkillsScanResult } from './scan.js';
 
 const DEFAULT_TTL_MS = 3 * 60 * 60 * 1000;
 const DISK_CACHE_FILE = 'skills-catalog-cache.json';
 const MAX_CONCURRENT_SCANS = 2;
 
-const cache = new Map();
-const inFlight = new Map();
+const cache = new Map<string, PersistedCacheEntry>();
+const inFlight = new Map<string, Promise<object>>();
 
 let diskLoaded = false;
-let diskWriteTimer = null;
+let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
 const loadDiskEntries = () => {
   if (diskLoaded) {
@@ -22,12 +24,8 @@ const loadDiskEntries = () => {
   const now = Date.now();
   for (const [key, entry] of Object.entries(persisted)) {
     if (
-      entry
-      && typeof entry === 'object'
-      && typeof entry.expiresAt === 'number'
+      isPersistedCacheEntry(entry)
       && entry.expiresAt > now
-      && entry.value
-      && typeof entry.value === 'object'
     ) {
       cache.set(key, entry);
     }
@@ -41,7 +39,7 @@ const scheduleDiskWrite = () => {
   diskWriteTimer = setTimeout(() => {
     diskWriteTimer = null;
     const now = Date.now();
-    const persisted = {};
+    const persisted: Record<string, PersistedCacheEntry> = {};
     for (const [key, entry] of cache.entries()) {
       if (entry.expiresAt > now) {
         persisted[key] = entry;
@@ -49,19 +47,22 @@ const scheduleDiskWrite = () => {
     }
     writeDiskCache(DISK_CACHE_FILE, persisted);
   }, 1000);
-  if (typeof diskWriteTimer.unref === 'function') {
-    diskWriteTimer.unref();
-  }
+  diskWriteTimer.unref();
 };
 
-export function getCacheKey({ normalizedRepo, ref, subpath, identityId }) {
+export function getCacheKey({ normalizedRepo, ref, subpath, identityId }: {
+  normalizedRepo: string;
+  ref?: string | null;
+  subpath?: string | null;
+  identityId?: string | null;
+}) {
   const safeRepo = `${String(normalizedRepo || '').trim()}${ref ? `#${ref}` : ''}`;
   const safeSubpath = String(subpath || '').trim();
   const safeIdentity = String(identityId || '').trim();
   return `${safeRepo}::${safeSubpath}::${safeIdentity}`;
 }
 
-export function getCachedScan(key) {
+export function getCachedScan(key: string) {
   loadDiskEntries();
   const entry = cache.get(key);
   if (!entry) return null;
@@ -72,7 +73,7 @@ export function getCachedScan(key) {
   return entry.value;
 }
 
-export function setCachedScan(key, value, ttlMs = DEFAULT_TTL_MS) {
+export function setCachedScan(key: string, value: SkillsScanResult, ttlMs = DEFAULT_TTL_MS) {
   const ttl = Number.isFinite(ttlMs) ? ttlMs : DEFAULT_TTL_MS;
   cache.set(key, { expiresAt: Date.now() + ttl, value });
   scheduleDiskWrite();
@@ -84,9 +85,9 @@ export function clearCache() {
 }
 
 let activeScans = 0;
-const scanQueue = [];
+const scanQueue: Array<() => void> = [];
 
-const acquireScanSlot = () => new Promise((resolve) => {
+const acquireScanSlot = () => new Promise<void>((resolve) => {
   scanQueue.push(resolve);
   pumpScanQueue();
 });
@@ -99,12 +100,13 @@ const releaseScanSlot = () => {
 const pumpScanQueue = () => {
   while (activeScans < MAX_CONCURRENT_SCANS && scanQueue.length > 0) {
     const resolve = scanQueue.shift();
+    if (!resolve) break;
     activeScans += 1;
     resolve();
   }
 };
 
-export async function scanWithCache(key, loader, { refresh = false } = {}) {
+export async function scanWithCache(key: string, loader: () => Promise<SkillsScanResult>, { refresh = false } = {}) {
   if (!refresh) {
     const cached = getCachedScan(key);
     if (cached) {

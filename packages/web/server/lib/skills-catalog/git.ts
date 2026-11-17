@@ -4,13 +4,40 @@ import { promisify } from 'util';
 import { createGitCredentialBroker, GIT_CREDENTIAL_NONCE_ENV } from '../git/credential-broker.js';
 import { normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
 import { managedSshCommand } from '../git/network-operations.js';
+import type { createGitCredentialResolver } from '../git/credential-resolver.js';
+
+export interface CatalogGitIdentity {
+  credentialId?: string;
+  endpoint?: string;
+  anonymous?: boolean;
+  transport?: string;
+}
+
+export interface CatalogGitOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  maxBuffer?: number;
+  identity?: CatalogGitIdentity | null | undefined;
+  credentialResolver?: ReturnType<typeof createGitCredentialResolver> | undefined;
+}
+
+export interface GitResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  message?: string;
+  code?: number | null;
+  signal?: string | null;
+}
+
+const isExitCode = (value: unknown): value is number => Number.isInteger(value);
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
 
-const isolatedGitEnvironment = (allowedProtocol) => {
+const isolatedGitEnvironment = (allowedProtocol: 'https' | 'ssh') => {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
     if (/^GIT_CONFIG(?:_|$)/i.test(name)
@@ -36,7 +63,7 @@ const isolatedGitEnvironment = (allowedProtocol) => {
   return env;
 };
 
-export function looksLikeAuthError(message) {
+export function looksLikeAuthError(message: string) {
   const text = String(message || '');
   return (
     /permission denied/i.test(text) ||
@@ -48,18 +75,18 @@ export function looksLikeAuthError(message) {
   );
 }
 
-export async function runGit(args, options = {}) {
+export async function runGit(args: string[], options: CatalogGitOptions = {}): Promise<GitResult> {
   const cwd = options.cwd;
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
-  const maxBuffer = Number.isFinite(options.maxBuffer) ? options.maxBuffer : DEFAULT_MAX_BUFFER;
+  const timeoutMs = options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+  const maxBuffer = options.maxBuffer !== undefined && Number.isFinite(options.maxBuffer) ? options.maxBuffer : DEFAULT_MAX_BUFFER;
 
   const identity = options.identity || null;
   const normalizedArgs = Array.isArray(args) ? args.slice() : [];
 
-  let env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-  let credential;
-  let broker;
-  let lease;
+  let env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  let credential: Awaited<ReturnType<ReturnType<typeof createGitCredentialResolver>['resolve']>> | undefined;
+  let broker: ReturnType<typeof createGitCredentialBroker> | undefined;
+  let lease: ReturnType<ReturnType<typeof createGitCredentialBroker>['issue']> | undefined;
 
   try {
     if (identity?.credentialId) {
@@ -80,7 +107,7 @@ export async function runGit(args, options = {}) {
         return { ok: false, stdout: '', stderr: '', message: 'Authentication failed for the selected Git identity' };
       }
 
-      if (credential.transport === 'https') {
+      if ('transport' in credential && credential.transport === 'https') {
         broker = createGitCredentialBroker({ capacity: 1, ttlMs: timeoutMs });
         await broker.start();
         lease = broker.issue({ operationId, credential });
@@ -99,7 +126,7 @@ export async function runGit(args, options = {}) {
           '-c', 'fetch.recurseSubmodules=false',
           ...lease.gitConfigArgs,
         );
-      } else if (credential.transport === 'ssh') {
+      } else if ('transport' in credential && credential.transport === 'ssh') {
         env = isolatedGitEnvironment('ssh');
         normalizedArgs.unshift('-c', `core.sshCommand=${managedSshCommand(credential.key.privateKeyPath)}`);
       } else {
@@ -132,8 +159,8 @@ export async function runGit(args, options = {}) {
     return { ok: true, stdout: stdout || '', stderr: stderr || '' };
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    const stdout = String(err.stdout ?? '');
-    const stderr = String(err.stderr ?? '');
+    const stdout = String(('stdout' in err ? err.stdout : undefined) ?? '');
+    const stderr = String(('stderr' in err ? err.stderr : undefined) ?? '');
     const message = err.message;
 
     return {
@@ -141,17 +168,17 @@ export async function runGit(args, options = {}) {
       stdout,
       stderr,
       message,
-      code: Number.isInteger(err.code) ? err.code : null,
-      signal: err.signal == null ? null : String(err.signal),
+      code: 'code' in err && isExitCode(err.code) ? err.code : null,
+      signal: !('signal' in err) || err.signal == null ? null : String(err.signal),
     };
   } finally {
     lease?.revoke();
-    if (credential?.transport === 'ssh') await credential.key.cleanup();
+    if (credential && 'transport' in credential && credential.transport === 'ssh') await credential.key.cleanup();
     if (broker) await broker.close();
   }
 }
 
-export async function assertGitAvailable() {
+export async function assertGitAvailable(): Promise<{ ok: true } | { ok: false; error: { kind: 'gitUnavailable'; message: string } }> {
   const result = await runGit(['--version'], { timeoutMs: 5_000 });
   if (!result.ok) {
     return { ok: false, error: { kind: 'gitUnavailable', message: 'Git is not available in PATH' } };
