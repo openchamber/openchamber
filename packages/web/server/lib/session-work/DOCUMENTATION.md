@@ -12,11 +12,11 @@ Small Model is worth waking.
 
 ## Files
 
-- `questions.js` — the turn-end Jev questions (measured wording, see
+- `questions.ts` — the turn-end Jev questions (measured wording, see
   "Measurement"), the thresholds, and the decisions taken from the answers.
-- `state.js` — `metadata.openchamber.work` and the merge patches that change
+- `state.ts` — `metadata.openchamber.work` and the merge patches that change
   it. Every patch is decided against the record at write time.
-- `membership.js` — which sessions can be in work and which ones the block
+- `membership.ts` — which sessions can be in work and which ones the block
   shows.
 - `runtime.js` — `createSessionWorkRuntime`: `processPayload` (a sent message,
   a turn start), `evaluateTurnEnd` (called by session assist), `stop`.
@@ -45,9 +45,35 @@ also exists in VS Code. An agent does the same on the user's word with the
 `openchamber` tool's `session.markDone` / `session.track`, which write
 `userStatePatch` (`../openchamber-control/DOCUMENTATION.md`).
 
-`membership.js` holds which sessions this feature serves (`canBeInWork`) and
+`membership.ts` holds which sessions this feature serves (`canBeInWork`) and
 which ones the sidebar block shows (`isInWork`, `isDoneSuggested`), for this
 runtime and for the agent tool's `session.list`.
+
+## TypeScript boundaries
+
+`state.ts` owns the parsed work record and metadata merge-patch types. Metadata
+uses OpenCode's `SessionMetadata` contract; fields remain untrusted until Zod
+parses them. Missing or malformed work reads as `null`; patch fields set to `null`
+remove metadata keys, while omitted fields leave them alone.
+
+`membership.ts` imports path resolution, Zod, the state readers and
+`sessionParentId`. Its session contract includes the legacy `directory` fallback
+as well as `location.directory`, optional metadata and optional archive/idle
+times. Absent sessions fail membership; an absent directory matches no Chat
+root. Chat roots default to an empty list.
+
+`questions.ts` imports Zod and owns the turn-end request contract. The answer
+type comes from `createJevClient` in `../routing/jev.js`. Answer fields are
+external Jev values parsed individually as numeric scores.
+Missing or malformed scores keep assist allowed and prevent a done hint.
+Question wording and thresholds remain unchanged.
+
+`runtime.js` remains JavaScript until its dependencies expose accurate types.
+`../opencode/settings-files.js` infers `{}` from `readMergedSettingsSync`,
+omitting the two settings this runtime reads. `../session-assist/context.js`
+infers turn `changedFiles` and `assistant` as `null` even though collection fills
+them, and does not express that a returned context has a completed final turn.
+Typing this runtime requires those owners to describe their existing results.
 
 ## Invariants
 
