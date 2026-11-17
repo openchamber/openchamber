@@ -5,12 +5,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useLeaveWorkStatus } from './leaveWorkStatus';
 
-/**
- * Opens a child session of the panel's session, the way the transcript's Task
- * tool does: a read-only chat tab beside the chat, or, on surfaces that cannot
- * host a side panel (mobile, VS Code), the session itself. A child that lives
- * in another folder (a worktree) passes it, so its chat reads that folder.
- */
 export const useOpenChildSession = (directory: string | null): ((childId: string, label: string, childDirectory?: string) => void) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);

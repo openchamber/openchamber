@@ -21,27 +21,17 @@ type Props = {
 const SECTION_ID = 'workflows';
 
 const StateGlyph: React.FC<{ icon: React.ComponentProps<typeof Icon>['name']; color?: string }> = ({ icon, color }) => (
-  // Centred in the panel's 13px icon slot, like the Subagents rows.
   <span className="flex size-[13px] shrink-0 items-center justify-center">
     <Icon name={icon} className="size-3" style={color ? { color } : undefined} />
   </span>
 );
 
-/** Where a running run is, for its one-line row: the phase and how many of its agents finished. */
 const runProgress = (run: WorkflowRun): string | null => {
   const phase = groupWorkflowAgentsByPhase(run).find((group) => group.title === run.currentPhase && group.agents.length > 0);
   if (!phase) return null;
   return `${phase.title ?? ''} ${phase.done}/${phase.agents.length}`.trim();
 };
 
-/**
- * The workflow runs this session proposed, each with its state and the one
- * action that fits it. Where the context panel exists (desktop, web) a run is
- * one row that opens it in the Workflows panel, which shows its agents, log
- * and result. On the phone, which has no panel, a run unfolds into its phases
- * and agents here, and the agents open like subagents. A run's agents are left
- * out of the Subagents section, so each session shows in one place.
- */
 export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const runs = useSessionWorkflowRuns(sessionId);
@@ -49,7 +39,6 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
   const { pending, act } = useWorkflowRunAction();
   const isMobile = useUIStore((state) => state.isMobile);
   const panelAvailable = !isMobile && !isVSCodeRuntime();
-  // Open runs show their phases; a finished one folds to its row until asked.
   const [toggled, setToggled] = React.useState<ReadonlySet<string>>(() => new Set());
 
   useReportWorkStatusPresence('workflows', runs.length > 0);
@@ -89,7 +78,6 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
                 ) : run.state === 'failed' || run.state === 'stopped' ? (
                   <WorkStatusRowAction disabled={busy} onClick={() => act(run.id, 'resume')}>{t('chat.workflow.action.resume')}</WorkStatusRowAction>
                 ) : progress ? (
-                  // The icon carries the state, as in Subagents; a running run adds where it is.
                   <WorkStatusValue tone="muted">{progress}</WorkStatusValue>
                 ) : null}
               />
@@ -123,7 +111,6 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
     if (run.state === 'failed' || run.state === 'stopped') {
       return <WorkStatusRowAction disabled={busy} onClick={() => act(run.id, 'resume')}>{t('chat.workflow.action.resume')}</WorkStatusRowAction>;
     }
-    // A finished run's icon says how it ended, as a subagent's does.
     return null;
   };
 

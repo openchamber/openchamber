@@ -21,12 +21,8 @@ type Props = {
 
 const MCP_STATUS_MAX_AGE_MS = 60_000;
 
-/** A sign-in the user started from a row; `run` is unique per press. */
 type SignInRequest = { server: string; directory: string; run: number };
 
-/**
- * MCP servers with their on/off switches, reusing the store's own action.
- */
 export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: selectedDirectory }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   const { t } = useI18n();
@@ -42,14 +38,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
   const isConnected = useConfigStore((state) => state.isConnected);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
 
-  // The panel loads its own MCP status rather than depending on another
-  // surface having been opened. Silent and background-gated, so it cannot
-  // compete with chat bootstrap traffic for sockets. It asks again when its
-  // directory changes, and then only for a status that is missing or older
-  // than a minute; connect/disconnect/auth refresh on their own.
-  // `isConnected` is a dependency, not a gate: MCP status is cached by
-  // directory alone and dropped on an instance switch, and two instances can
-  // hold the same project path — so the switch itself has to trigger the ask.
   React.useEffect(() => {
     if (!directory) return;
     void runBackgroundNetworkTask(() => ensureMcpFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }));
@@ -64,10 +52,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     [mcpServers],
   );
 
-  // A server waiting on authorization cannot be reconnected into working
-  // order: `connect` just repeats the attempt that produced `needs_auth`.
-  // Signing in is the action, through the same OAuth flow Settings runs; its
-  // progress shows under the row. Each press starts a fresh attempt.
   const [signIn, setSignIn] = React.useState<SignInRequest | null>(null);
   const signInRunRef = React.useRef(0);
   const startSignIn = React.useCallback((name: string) => {
@@ -76,8 +60,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     setSignIn({ server: name, directory, run: signInRunRef.current });
   }, [directory]);
 
-  // The run whose attempt is under way (started and not yet finished or
-  // failed), as `ProviderOAuthMethods` reports it.
   const [activeSignInRun, setActiveSignInRun] = React.useState<number | null>(null);
   const signInRun = signIn?.run ?? null;
   const handleSignInActiveChange = React.useCallback((active: boolean) => {
@@ -85,15 +67,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     setActiveSignInRun((current) => (active ? signInRun : current === signInRun ? null : current));
   }, [signInRun]);
 
-  // A sign-in lives only while its section is open and in its own directory:
-  // folding or switching unmounts it, which cancels the attempt upstream.
-  // Before it starts, and after it fails, it also needs its server to still
-  // ask for one. Once started it stays whatever the status says until it
-  // ends: a sign-in from another machine writes the server's redirect first
-  // and OpenCode reports the server `pending` while it reconnects, so
-  // unmounting then would cancel the attempt the user is in the middle of.
-  // Dropping an idle request keeps a later `needs_auth` from starting a
-  // sign-in nobody pressed for.
   const liveSignIn = signIn
     && expanded
     && signIn.directory === directory
@@ -105,7 +78,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
   }, [liveSignIn, signIn]);
 
   const handleSignedIn = React.useCallback(async (request: SignInRequest) => {
-    // An older attempt that finishes late must not end a newer one.
     setSignIn((current) => (current?.run === request.run ? null : current));
     setBusyServer(request.server);
     try {
@@ -117,8 +89,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     }
   }, [connect, t]);
 
-  // The lookup gave up (the integration list kept failing, or the server has
-  // no OAuth method): say where to go instead of leaving the press unanswered.
   const handleSignInUnavailable = React.useCallback((request: SignInRequest) => {
     setSignIn((current) => (current?.run === request.run ? null : current));
     toast.message(t('chat.workStatus.mcp.needsAuthHint'));
@@ -126,9 +96,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
 
   const handleToggle = React.useCallback(async (name: string, next: boolean) => {
     if (!directory) return;
-    // Switching on a server that is waiting for sign-in cannot connect: it only
-    // repeats the attempt that produced `needs_auth`, so the switch signs in,
-    // as the row's own Sign in does.
     const status = (mcpStatus ?? {})[name]?.status.status;
     if (next && status === 'needs_auth') {
       startSignIn(name);
@@ -171,8 +138,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
             onCheckedChange={(checked) => { void handleToggle(name, checked); }}
           />
         );
-        // A server asking for sign-in or reporting a failure is asking to be
-        // acted on; the state is the affordance, so it is the button.
         const stateAction = needsAuth ? (
           <WorkStatusRowAction
             tone="warning"
@@ -194,8 +159,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
         return (
           <React.Fragment key={name}>
             <WorkStatusRow
-              // On the phone a switch goes on the row's end, full size, as
-              // settings rows put it; the icon column is too narrow for one.
               leading={touch ? undefined : toggle}
               label={name}
               labelDir="auto"
@@ -203,7 +166,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
               value={touch ? <>{stateAction}{toggle}</> : stateAction ?? undefined}
             />
             {rowSignIn ? (
-              // Indented like a row's note: it belongs to the row above.
               <div className={touch ? 'mb-2 ms-[2.625rem] me-2.5' : 'mx-1 mb-1'}>
                 <McpOAuthSignIn
                   key={rowSignIn.run}

@@ -22,14 +22,12 @@ type CompletedStepStats = {
 
 export type CompletedTurnStats = {
   lastAssistantMessageId: string;
-  /** A newer prompt has already started the next turn; these numbers are from the turn before it. */
   previousTurn: boolean;
   stepsCount: number;
   elapsedDurationMs: number | null;
   totalLlmDurationMs: number | null;
   totalToolDurationMs: number | null;
   avgTtftMs: number | null;
-  /** Wait until the model's first output of any kind, as OpenCode records it (`time.firstToken`). */
   avgFirstOutputMs: number | null;
   tokensPerSecond: number | null;
   responseTokensPerSecond: number | null;
@@ -41,10 +39,6 @@ export type CompletedTurnStats = {
   cost: number | null;
 };
 
-/**
- * Merge an array of [start, end] time intervals into a disjoint union of intervals.
- * Correctly accounts for parallel / overlapping tool executions without double-counting.
- */
 export function mergeTimeIntervals(intervals: readonly (readonly [number, number])[]): Array<[number, number]> {
   if (intervals.length === 0) return [];
 
@@ -74,9 +68,6 @@ export function mergeTimeIntervals(intervals: readonly (readonly [number, number
   return merged;
 }
 
-/**
- * Sum the total duration spanned by an array of disjoint intervals.
- */
 export function sumIntervalsDuration(intervals: readonly (readonly [number, number])[]): number {
   return intervals.reduce((sum, [start, end]) => sum + (end - start), 0);
 }
@@ -85,7 +76,6 @@ export const formatTelemetryDuration = (ms: number): string => {
   if (!Number.isFinite(ms) || ms <= 0) {
     return '0.0s';
   }
-  // 1–49ms rounds to 0.0s at one decimal. That is a real wait, not zero.
   if (ms < 50) {
     return '<0.1s';
   }
@@ -121,30 +111,14 @@ const nonnegative = (value: number | undefined): number | null =>
 const add = (left: number | null, right: number | null): number | null =>
   left === null || right === null ? null : nonnegative(left + right);
 
-/**
- * No provider streams anywhere near this fast; the quickest inference
- * services top out around 3,000 tok/s. A rate above it means the measured
- * window is broken, not that the model was quick.
- */
 const MAX_PLAUSIBLE_TOKENS_PER_SECOND = 5_000;
 
-/**
- * Tokens per second over a measured window, or null when the window cannot
- * have produced them.
- *
- * The turn window is "step duration minus tool time". A step whose tool ran
- * for nearly the whole step leaves a residual of a millisecond or two; real
- * data shows such steps (a 560 ms step with a 559 ms tool). Divide a few
- * hundred tokens by that and the panel reads ~392,250 tok/s (#3500).
- * Showing nothing is more honest than showing that.
- */
 const tokenRate = (tokens: number, durationMs: number): number | null => {
   if (durationMs <= 0) return null;
   const rate = nonnegative(tokens / (durationMs / 1000));
   return rate !== null && rate <= MAX_PLAUSIBLE_TOKENS_PER_SECOND ? rate : null;
 };
 
-/** Text delivery rate for the final reply, not throughput of the agent loop. */
 function calculateResponseTokenRate(record: SessionMessageRecord): number | null {
   const { info, parts } = record;
   if (info.role !== 'assistant' || info.error || parts.some((part) => part.type === 'tool')) return null;
@@ -152,11 +126,7 @@ function calculateResponseTokenRate(record: SessionMessageRecord): number | null
   const { created, completed } = info.time;
   if (output === null || completed === undefined || nonnegative(created) === null || nonnegative(completed) === null) return null;
 
-  // Stored text carries no timing; a reload stamps it with the step's own
-  // `created` and `completed`. A start at `created` is that stamp, not a
-  // measured first token. Dividing by it counted the initial wait and
-  // reasoning, so the same turn read ~94 tok/s live and ~55 after a reload
-  // (#5465). Unknown hides the row, as for TTFT.
+  // external: #5465 Reloaded OpenCode text uses step creation stamps, so response speed requires observed text timing.
   const intervals: Array<[number, number]> = [];
   for (const part of parts) {
     if (part.type !== 'text') continue;
@@ -170,9 +140,6 @@ function calculateResponseTokenRate(record: SessionMessageRecord): number | null
   return tokenRate(output, sumIntervalsDuration(mergeTimeIntervals(intervals)));
 }
 
-/**
- * Calculate stats for a single completed assistant step.
- */
 function calculateCompletedStepStats(record: SessionMessageRecord): CompletedStepStats | null {
   const { info, parts } = record;
   if (info.role !== 'assistant') return null;
@@ -185,7 +152,6 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
   const validWindow = nonnegative(created) !== null && nonnegative(completed) !== null && completed >= created;
   const totalDurationMs = validWindow ? nonnegative(completed - created) : null;
 
-  // An unfinished or invalid tool makes duration-dependent metrics unknown.
   const rawToolIntervals: Array<[number, number]> = [];
   let validTools = validWindow;
   for (const part of parts) {
@@ -208,11 +174,6 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     ? nonnegative(totalDurationMs - toolDurationMs)
     : null;
 
-  // Wait until the first text or reasoning part that starts after the step
-  // was created. A start equal to `created` is the creation stamp copied onto
-  // the part, not a measured first token. Counting it made tool-heavy turns
-  // show Average TTFT 0.0s. Leaving it unset hides the row, same as a missing
-  // timestamp.
   let ttftMs: number | null = null;
   for (const part of parts) {
     if (part.type === 'text' || part.type === 'reasoning') {
@@ -224,9 +185,6 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     }
   }
 
-  // OpenCode's own record of the first output (text, reasoning or a tool
-  // call), stored with the step, so it reads the same live and after a
-  // reload. Steps written before OpenCode 2.3.0 have none.
   const firstToken = info.time.firstToken;
   const firstOutputMs = validWindow && firstToken !== undefined && Number.isFinite(firstToken)
     && firstToken >= created && firstToken <= completed
@@ -261,21 +219,13 @@ const lastConversationIndex = (records: readonly SessionMessageRecord[], end: nu
   return -1;
 };
 
-/**
- * Calculates telemetry metrics for the latest completed turn in the session.
- * A turn encompasses all assistant steps since the preceding user message up to the final completed assistant step.
- */
 export function getLatestCompletedTurnStats(
   records: readonly SessionMessageRecord[] | null | undefined,
 ): CompletedTurnStats | null {
   if (!records || records.length === 0) return null;
 
-  // v2 plumbing roles can trail the final assistant step, so the turn ends at
-  // the newest conversation record rather than the newest record.
   const newestIdx = lastConversationIndex(records, records.length);
   if (newestIdx < 0) return null;
-  // A prompt that has no reply yet lands before the session reports busy. The
-  // turn before it is the latest finished one, and is flagged as such.
   if (records[newestIdx].info.role === 'user') {
     const previousIdx = lastConversationIndex(records, newestIdx);
     return previousIdx < 0 ? null : calculateTurnStats(records, previousIdx, true);
@@ -283,7 +233,6 @@ export function getLatestCompletedTurnStats(
   return calculateTurnStats(records, newestIdx, false);
 }
 
-/** Excludes the entire newest user-bounded turn, including its completed tool steps. */
 export function getPreviousCompletedTurnStats(records: readonly SessionMessageRecord[]): CompletedTurnStats | null {
   for (let i = records.length - 1; i >= 0; i -= 1) {
     if (records[i].info.role !== 'user') continue;
@@ -293,11 +242,6 @@ export function getPreviousCompletedTurnStats(records: readonly SessionMessageRe
   return null;
 }
 
-/**
- * Stats for the turn whose final step is `lastCompletedAssistantIdx`. A partial
- * turn must not be published as complete or silently replaced with an older
- * turn's stats.
- */
 function calculateTurnStats(
   records: readonly SessionMessageRecord[],
   lastCompletedAssistantIdx: number,

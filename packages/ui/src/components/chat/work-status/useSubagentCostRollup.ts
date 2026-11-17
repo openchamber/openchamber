@@ -7,9 +7,7 @@ import { buildChildrenIndex, computeSubtreeCost } from './subagentCost';
 
 export type SubagentCostRollup = {
   totalCost: number | null;
-  /** The root session's own spend, excluding every subagent. */
   ownCost: number;
-  /** Everything the subagents cost between them: `totalCost - ownCost`. */
   subagentCost: number;
   subagentCount: number;
   perChildCost: Map<string, number>;
@@ -32,10 +30,6 @@ function countDescendants(id: string, childrenByParent: Map<string, Session[]>, 
   return count;
 }
 
-/**
- * Pure core of useSubagentCostRollup, kept separate so it can be unit-tested
- * directly against a plain session array instead of rendering the hook.
- */
 export function computeRollup(liveSessions: Session[], sessionId: string | null): SubagentCostRollup {
   if (!sessionId) return EMPTY_ROLLUP;
 
@@ -53,9 +47,6 @@ export function computeRollup(liveSessions: Session[], sessionId: string | null)
     subagentCost += childSubtree;
   }
 
-  // Derived by subtraction rather than read back off the session, so the split
-  // always adds up to the total the panel shows even if a cycle guard trimmed
-  // part of the walk.
   const ownCost = totalCost - subagentCost;
   const subagentCount = countDescendants(sessionId, childrenByParent, new Set());
 
@@ -87,10 +78,6 @@ export function useSessionsWithListedChildren(sessionId: string | null): Session
   }, [listedChildren, liveSessions]);
 }
 
-/**
- * Own cost plus every descendant subagent's cost, recursively summed, for a
- * given root session, over the same sessions the Subagents rows show.
- */
 export function useSubagentCostRollup(sessionId: string | null): SubagentCostRollup {
   const sessions = useSessionsWithListedChildren(sessionId);
   return React.useMemo(() => computeRollup(sessions, sessionId), [sessions, sessionId]);

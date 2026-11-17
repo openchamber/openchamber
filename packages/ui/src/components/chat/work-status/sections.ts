@@ -2,16 +2,6 @@ import { z } from 'zod';
 
 import type { I18nKey } from '@/lib/i18n/messages/en';
 
-/**
- * Every section the work-status panel can render, in default display order.
- *
- * One list drives both the panel and its settings dialog, so a section cannot
- * exist in the panel without being switchable, or appear in the dialog without
- * existing.
- *
- * The ids are persisted in user settings — renaming one silently resets that
- * user's choice for it.
- */
 export const WORK_STATUS_SECTION_IDS = [
   'session',
   'repository',
@@ -40,13 +30,8 @@ export const WORK_STATUS_SECTION_LABEL_KEYS = {
   contextSources: 'chat.workStatus.section.contextBreakdown',
 } as const satisfies Record<WorkStatusSectionId, I18nKey>;
 
-/**
- * A section contributed by an installed extension (`contributes.statusSection`),
- * keyed by its extension id. Persisted next to the built-in ids.
- */
 export type ExtensionSectionId = `ext:${string}`;
 
-/** Any id the panel can place: a built-in section or an extension's. */
 export type WorkStatusPanelSectionId = WorkStatusSectionId | ExtensionSectionId;
 
 const EXTENSION_SECTION_ID = /^ext:[a-z][a-z0-9-]*$/;
@@ -55,9 +40,6 @@ export const extensionSectionId = (guestId: string): ExtensionSectionId => `ext:
 
 export const isExtensionSectionId = (value: string): value is ExtensionSectionId => EXTENSION_SECTION_ID.test(value);
 
-// Extension ids are kept even when that extension is not installed right now:
-// the catalog loads after settings, and a paused or reinstalled extension
-// should come back where the user put it.
 const storedSectionIdSchema = z.union([
   z.enum(WORK_STATUS_SECTION_IDS),
   z.templateLiteral(['ext:', z.string().regex(/^[a-z][a-z0-9-]*$/)]),
@@ -68,9 +50,6 @@ const readStoredSectionId = (value: unknown): WorkStatusPanelSectionId | null =>
   return parsed.success ? parsed.data : null;
 };
 
-// The default before Context sources moved up. Clients saved the default as
-// their order without the user choosing it, and Turn stats, Workflows and Tasks
-// were appended to those saved lists wherever they stood, so those don't count.
 const DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST: readonly WorkStatusPanelSectionId[] = [
   'session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources',
 ];
@@ -81,20 +60,8 @@ const isDefaultOrderWithContextSourcesLast = (order: readonly WorkStatusPanelSec
     && placed.every((id, index) => id === DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST[index]);
 };
 
-/**
- * A built-in section added after users had saved orders goes beside the one
- * it follows by default, so it lands where the default puts it rather than
- * at the bottom of every saved list. Sections added before this rule were
- * appended and saved there, so they stay out of it.
- */
 const PLACED_AFTER = new Map<WorkStatusSectionId, WorkStatusSectionId>([['tasks', 'subagents']]);
 
-/**
- * Preserve chosen positions, discard obsolete ids, and add newly added
- * built-in sections: after their default neighbour (`PLACED_AFTER`), else at
- * the end. `arranged` is false for an order the user never set by hand, which
- * follows the default's move of Context sources.
- */
 export const sanitizeWorkStatusSectionOrder = (
   value: readonly string[] | null | undefined,
   arranged = true,
@@ -121,12 +88,6 @@ export const sanitizeWorkStatusSectionOrder = (
   return moved;
 };
 
-/**
- * What the panel and the sections dialog show: the saved order with sections
- * of extensions that are not available here left out, and available ones the
- * saved order does not know appended in the order given. Built-in sections
- * the build lacks (`unavailable`) are left out too.
- */
 export const resolveWorkStatusSectionOrder = (
   stored: readonly string[] | null | undefined,
   extensionIds: readonly ExtensionSectionId[],
@@ -143,20 +104,11 @@ export const resolveWorkStatusSectionOrder = (
   return order;
 };
 
-/**
- * Hidden sections are stored, not visible ones. Every section is on by default.
- */
 export const isWorkStatusSectionVisible = (
   hidden: readonly string[] | null | undefined,
   id: WorkStatusPanelSectionId,
 ): boolean => !hidden?.includes(id);
 
-/**
- * True when every section the panel could show appears in the hidden set.
- *
- * Uses `.every()` instead of a length comparison so that stale ids left over
- * from a removed section cannot inflate the count past the current list length.
- */
 export const areAllWorkStatusSectionsHidden = (
   hidden: readonly string[] | null | undefined,
   extensionIds: readonly ExtensionSectionId[] = [],
@@ -188,7 +140,6 @@ export const sanitizeWorkStatusHiddenSections = (value: unknown, explicit = true
     const id = readStoredSectionId(entry);
     if (id) seen.add(id);
   }
-  // Older clients hid telemetry automatically until the user chose a list.
   if (!explicit) seen.delete('telemetry');
   return [...seen];
 };
