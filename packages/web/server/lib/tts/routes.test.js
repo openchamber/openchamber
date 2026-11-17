@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
+import { buildSayArgs, isSafeSayVoice, parseSayRate, registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 const createApp = (sayTTSCapability = null) => {
@@ -115,6 +115,64 @@ describe('tts routes', () => {
       summarized: false,
       reason: 'Model summarization provider unavailable',
     });
+  });
+});
+
+describe('say speak input validation (#2293)', () => {
+  it('rejects a voice carrying shell syntax with a 400, on any platform', async () => {
+    const response = await request(createApp())
+      .post('/api/tts/say/speak')
+      .send({ text: 'hi', voice: 'Samantha" -o /tmp/x #', rate: 200 });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/voice/i);
+  });
+
+  it('rejects an injected rate with a 400, on any platform', async () => {
+    const response = await request(createApp())
+      .post('/api/tts/say/speak')
+      .send({ text: 'hi', voice: 'Samantha', rate: '200; echo injected' });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/rate/i);
+  });
+
+  it('rejects a non-integer rate with a 400', async () => {
+    const response = await request(createApp())
+      .post('/api/tts/say/speak')
+      .send({ text: 'hi', voice: 'Samantha', rate: 200.5 });
+    expect(response.status).toBe(400);
+  });
+
+  it('coerces only plain integer rates inside the accepted range', () => {
+    expect(parseSayRate(200)).toBe(200);
+    expect(parseSayRate('180')).toBe(180);
+    expect(parseSayRate('200; echo injected')).toBeNull();
+    expect(parseSayRate('abc')).toBeNull();
+    expect(parseSayRate(200.5)).toBeNull();
+    expect(parseSayRate(10)).toBeNull();
+    expect(parseSayRate(5000)).toBeNull();
+    expect(parseSayRate(undefined)).toBeNull();
+  });
+
+  it('accepts real localized voice names and rejects shell metacharacters', () => {
+    expect(isSafeSayVoice('Samantha')).toBe(true);
+    expect(isSafeSayVoice('Lesya (Enhanced)')).toBe(true);
+    expect(isSafeSayVoice('Milena (Русский (Россия))')).toBe(true);
+    expect(isSafeSayVoice('Samantha" -o /tmp/x #')).toBe(false);
+    expect(isSafeSayVoice('a; rm -rf /')).toBe(false);
+    expect(isSafeSayVoice('a`id`')).toBe(false);
+    expect(isSafeSayVoice('a$(id)')).toBe(false);
+    expect(isSafeSayVoice('-v')).toBe(false);
+    expect(isSafeSayVoice('')).toBe(false);
+  });
+
+  it('builds the say invocation as argv, never a shell string', () => {
+    const args = buildSayArgs({ voice: 'Samantha" -o /tmp/x #', rate: 200, tempFile: '/tmp/say-1.m4a', text: "it's; $(id)" });
+    expect(args).toEqual(['-v', 'Samantha" -o /tmp/x #', '-r', '200', '-o', '/tmp/say-1.m4a', '--data-format=aac', '--', "it's; $(id)"]);
+    // Dash-prefixed text stays speech content behind the `--` terminator,
+    // never a `say` option such as --input-file.
+    const injected = buildSayArgs({ voice: 'Samantha', rate: 200, tempFile: '/tmp/say-1.m4a', text: '--input-file=/etc/hosts' });
+    expect(injected.at(-2)).toBe('--');
+    expect(injected.at(-1)).toBe('--input-file=/etc/hosts');
   });
 });
 

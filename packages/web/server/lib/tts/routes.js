@@ -13,6 +13,44 @@ export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
 
+// The macOS `say` invocation receives request fields as data, never as
+// shell text (see buildSayArgs / the execFile call in the speak route).
+// Rate is coerced to a plain integer inside the words-per-minute range
+// `say` accepts from our clients (default 200, preview slider ~100-200);
+// anything else — non-numeric strings, fractions, injected shell syntax —
+// is rejected by the route with a 400 instead of reaching a command.
+export function parseSayRate(rate) {
+  let value = null;
+  if (typeof rate === 'number') {
+    value = rate;
+  } else if (typeof rate === 'string' && /^\d+$/.test(rate.trim())) {
+    value = Number(rate.trim());
+  }
+  if (value === null || !Number.isInteger(value) || value < 50 || value > 1000) {
+    return null;
+  }
+  return value;
+}
+
+// Voice names are localized and punctuated ("Milena (Русский (Россия))",
+// "Lesya (Enhanced)"), so the allow-pattern is letters/marks/numbers plus
+// the punctuation real voice names use. Shell metacharacters, quotes,
+// backslashes, and a leading dash (option injection against `say` itself)
+// are not voice-name characters and are rejected.
+const SAY_VOICE_PATTERN = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} .()'_-]*$/u;
+
+export function isSafeSayVoice(voice) {
+  return typeof voice === 'string' && voice.length <= 100 && SAY_VOICE_PATTERN.test(voice);
+}
+
+// Argv for `say`, in order. Passed to execFile, so every field stays a
+// single argument and no shell ever interprets it. The `--` terminator
+// keeps `say` itself from parsing dash-prefixed text as an option
+// (argument injection, e.g. text "--input-file=/etc/hosts").
+export function buildSayArgs({ voice, rate, tempFile, text }) {
+  return ['-v', voice, '-r', String(rate), '-o', tempFile, '--data-format=aac', '--', text];
+}
+
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
@@ -195,9 +233,19 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     try {
       const { text, rate = 200, language, languageSample } = req.body || {};
       let voice = typeof req.body?.voice === 'string' && req.body.voice.trim() ? req.body.voice.trim() : 'Samantha';
-      
+
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
+      }
+
+      // Validate before the platform check so malformed input is a 400
+      // everywhere, not a shell string on macOS and a 503 elsewhere.
+      const parsedRate = parseSayRate(rate);
+      if (parsedRate === null) {
+        return res.status(400).json({ error: 'Invalid rate: expected an integer between 50 and 1000' });
+      }
+      if (!isSafeSayVoice(voice)) {
+        return res.status(400).json({ error: 'Invalid voice name' });
       }
       
       // Check if we're on macOS
@@ -222,27 +270,25 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         }
       }
       
-      const { exec } = await import('child_process');
+      const { execFile } = await import('child_process');
       const { promisify } = await import('util');
       const fs = await import('fs');
       const os = await import('os');
       const path = await import('path');
-      const execAsync = promisify(exec);
-      
+      const execFileAsync = promisify(execFile);
+
       // Create temp file for audio output (use m4a for browser compatibility)
       const tempDir = os.tmpdir();
       const tempFile = path.join(tempDir, `say-${Date.now()}.m4a`);
-      
-      // Escape text for shell - escape both single quotes and double quotes
-      const escapedText = text.trim().replace(/'/g, "'\\''").replace(/"/g, '\\"');
-      
-      // Generate audio file using 'say' command
+
+      // Generate audio file using 'say' via execFile: voice, rate, file,
+      // and text are argv entries, never a shell command string, so no
+      // field can break out into shell syntax.
       // -o outputs to file, -r sets rate (words per minute)
       // --data-format=aac outputs as m4a which browsers can decode
-      const cmd = `say -v "${voice}" -r ${rate} -o "${tempFile}" --data-format=aac '${escapedText}'`;
-      console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate });
-      
-      await execAsync(cmd);
+      console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate: parsedRate });
+
+      await execFileAsync('say', buildSayArgs({ voice, rate: parsedRate, tempFile, text: text.trim() }));
       
       // Read the generated audio file
       const audioBuffer = await fs.promises.readFile(tempFile);
