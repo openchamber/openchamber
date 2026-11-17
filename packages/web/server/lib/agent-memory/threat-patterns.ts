@@ -1,3 +1,5 @@
+import { isMemoryText } from './contracts.js';
+
 const PATTERNS = [
   /\bignore\s+(?:all\s+|any\s+)?(?:previous|prior|earlier|above)\s+(?:instructions?|prompts?|rules?|context)\b/i,
   /\bdisregard\s+(?:all\s+|any\s+)?(?:previous|prior|earlier|above)\s+(?:instructions?|prompts?|rules?)\b/i,
@@ -19,14 +21,14 @@ const PATTERNS = [
   /\b(?:send|post|upload|exfiltrate)\s+(?:the\s+|your\s+)?(?:api\s+key|token|credentials?|secrets?|env)\b/i,
 ];
 
-export const findThreatPattern = (value) => {
-  if (typeof value !== 'string' || value.length === 0) {
+export const findThreatPattern = (value: string | null | undefined) => {
+  if (!isMemoryText(value) || value.length === 0) {
     return null;
   }
   const match = PATTERNS.find((pattern) => pattern.test(value));
   return match ? match.source.slice(0, 80) : null;
 };
 
-export const looksLikeInjection = (...values) => (
+export const looksLikeInjection = (...values: (string | null | undefined)[]) => (
   values.some((value) => findThreatPattern(value) !== null)
 );

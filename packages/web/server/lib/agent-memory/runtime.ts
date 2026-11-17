@@ -6,12 +6,26 @@ export const MEMORY_BODY_MAX_LENGTH = 2000;
 const GLOBAL_MEMORY_MAX_ITEMS = 60;
 const PROJECT_MEMORY_MAX_ITEMS = 200;
 
-const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
-
-import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
+import { asNonEmptyString } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { findThreatPattern } from './threat-patterns.js';
 import { z } from 'zod';
+import { isMemoryRecord, isMemoryText, isMemoryTimestamp, isMemoryType } from './contracts.js';
+import type { MemoryDocument, MemoryEntry, MemoryScope, MemoryTarget, MemoryWriteInput } from './contracts.js';
+
+interface MemoryRuntimeDependencies {
+  fsPromises: Pick<typeof import('node:fs/promises'), 'readFile' | 'mkdir' | 'writeFile' | 'rename' | 'rm'>;
+  path: Pick<typeof import('node:path'), 'join' | 'dirname'>;
+  projectsDirPath: string;
+  userConfigRoot: string;
+  createId?: () => string;
+}
+
+interface ResolvedMemoryTarget {
+  scope: MemoryScope;
+  key: string;
+  filePath: string;
+}
 
 const count = z.number().int().nonnegative().catch(0);
 
@@ -33,6 +47,23 @@ const dreamStateSchema = z.object({
   after: z.array(z.object({ id: z.string().min(1), updatedAt: z.number() })).nullable().catch(null),
 });
 
+export type DreamRecord = z.infer<typeof dreamRecordSchema>;
+export type DreamState = Omit<z.infer<typeof dreamStateSchema>, 'snapshot'> & { snapshot: MemoryEntry[] | null };
+
+interface DreamWriteInput {
+  lastRunAt: number | null;
+  record: unknown;
+  snapshot: unknown;
+  after?: unknown;
+}
+
+interface StoredDreamState {
+  lastRunAt: number | null;
+  record: DreamRecord | null;
+  snapshot: unknown[] | null;
+  after: unknown[] | null;
+}
+
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 
 const DUPLICATE_OVERLAP_THRESHOLD = 0.75;
@@ -48,8 +79,8 @@ const STOP_WORDS = new Set([
   'the', 'their', 'them', 'they', 'this', 'to', 'was', 'were', 'when', 'with',
 ]);
 
-const tokenize = (value) => {
-  const tokens = new Set();
+const tokenize = (value: string) => {
+  const tokens = new Set<string>();
   for (const raw of String(value).toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
     if (raw.length < 3 || STOP_WORDS.has(raw)) continue;
     tokens.add(raw);
@@ -57,7 +88,7 @@ const tokenize = (value) => {
   return tokens;
 };
 
-const overlapFraction = (incoming, existing) => {
+const overlapFraction = (incoming: Set<string>, existing: Set<string>) => {
   if (incoming.size === 0) return 0;
   let shared = 0;
   for (const token of incoming) {
@@ -66,7 +97,7 @@ const overlapFraction = (incoming, existing) => {
   return shared / incoming.size;
 };
 
-const findSupersededEntry = (entries, title, body) => {
+const findSupersededEntry = (entries: MemoryEntry[], title: string, body: string) => {
   const lowerTitle = title.toLowerCase();
   const exact = entries.find((entry) => entry.title.toLowerCase() === lowerTitle);
   if (exact) return exact;
@@ -74,7 +105,7 @@ const findSupersededEntry = (entries, title, body) => {
   const incoming = tokenize(`${title} ${body}`);
   if (incoming.size < DUPLICATE_MIN_TOKENS) return null;
 
-  let best = null;
+  let best: MemoryEntry | null = null;
   let bestScore = 0;
   for (const entry of entries) {
     const score = overlapFraction(incoming, tokenize(`${entry.title} ${entry.body}`));
@@ -86,7 +117,7 @@ const findSupersededEntry = (entries, title, body) => {
   return best;
 };
 
-const findRelatedEntries = (entries, title, body) => {
+const findRelatedEntries = (entries: MemoryEntry[], title: string, body: string) => {
   const incoming = tokenize(`${title} ${body}`);
   if (incoming.size < DUPLICATE_MIN_TOKENS) return [];
   return entries
@@ -97,61 +128,61 @@ const findRelatedEntries = (entries, title, body) => {
     .map(({ entry }) => entry);
 };
 
-const clampLength = (value, maxLength) => {
-  if (typeof value !== 'string') return '';
+const clampLength = (value: string, maxLength: number) => {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-const bodyFitsLimit = (value) => (asNonEmptyString(value)?.length ?? 0) <= MEMORY_BODY_MAX_LENGTH;
+const limitForScope = (scope: MemoryScope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
 
-const limitForScope = (scope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
-
-const sanitizeEntries = (value, now, scope) => {
-  if (!Array.isArray(value)) return [];
-
-  const result = [];
-  const seen = new Set();
+const sanitizeEntries = (value: unknown[], now: number, scope: MemoryScope) => {
+  const result: MemoryEntry[] = [];
+  const seen = new Set<string>();
   for (const entry of value) {
     if (result.length >= limitForScope(scope)) break;
-    if (!isObjectRecord(entry)) continue;
+    if (!isMemoryRecord(entry)) continue;
 
     const id = asNonEmptyString(entry.id);
     const title = clampLength(asNonEmptyString(entry.title) || '', MEMORY_TITLE_MAX_LENGTH);
-    const body = clampLength(typeof entry.body === 'string' ? entry.body : '', MEMORY_BODY_MAX_LENGTH).trim();
+    const body = clampLength(isMemoryText(entry.body) ? entry.body : '', MEMORY_BODY_MAX_LENGTH).trim();
     if (!id || !title || !body || seen.has(id)) continue;
     seen.add(id);
 
-    const createdAt = Number.isFinite(entry.createdAt) && entry.createdAt >= 0 ? entry.createdAt : now;
+    const createdAt = isMemoryTimestamp(entry.createdAt) && entry.createdAt >= 0 ? entry.createdAt : now;
     const sessionId = asNonEmptyString(entry.sessionId);
-    result.push({
+    const sanitized: MemoryEntry = {
       id,
       title,
       body,
-      type: MEMORY_TYPES.has(entry.type) ? entry.type : 'fact',
+      type: isMemoryType(entry.type) ? entry.type : 'fact',
       createdAt,
-      updatedAt: Number.isFinite(entry.updatedAt) && entry.updatedAt >= 0 ? entry.updatedAt : createdAt,
-      ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
+      updatedAt: isMemoryTimestamp(entry.updatedAt) && entry.updatedAt >= 0 ? entry.updatedAt : createdAt,
+    };
+    if (findThreatPattern(`${title}\n${body}`)) sanitized.flagged = true;
+    if (sessionId) sanitized.sessionId = sessionId;
+    result.push(sanitized);
   }
 
   return result.sort((a, b) => b.updatedAt - a.updatedAt);
 };
 
-const createEmptyMemory = () => ({ version: MEMORY_VERSION, entries: [] });
+const createEmptyMemory = (): MemoryDocument => ({ version: MEMORY_VERSION, entries: [] });
 
-export const createAgentMemoryRuntime = (deps) => {
+const hasRandomUuid = (value: Crypto | undefined): value is Crypto => (
+  value !== undefined && typeof value.randomUUID === 'function'
+);
+
+export const createAgentMemoryRuntime = (deps: MemoryRuntimeDependencies) => {
   const { fsPromises, path, projectsDirPath, userConfigRoot, createId } = deps;
 
-  const idFactory = typeof createId === 'function'
+  const idFactory = createId
     ? createId
-    : () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    : () => (hasRandomUuid(globalThis.crypto)
       ? crypto.randomUUID()
       : `mem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`);
 
-  const writeLocks = new Map();
+  const writeLocks = new Map<string, Promise<void>>();
 
-  const sanitizeProjectId = (projectId) => {
+  const sanitizeProjectId = (projectId: string | undefined) => {
     const value = asNonEmptyString(projectId);
     if (!value) {
       throw new Error('projectId is required');
@@ -162,7 +193,7 @@ export const createAgentMemoryRuntime = (deps) => {
     return value;
   };
 
-  const resolveTarget = (target) => {
+  const resolveTarget = (target: MemoryTarget): ResolvedMemoryTarget => {
     if (target?.scope === 'global') {
       return { scope: 'global', key: 'global', filePath: path.join(userConfigRoot, 'memory.json') };
     }
@@ -177,23 +208,23 @@ export const createAgentMemoryRuntime = (deps) => {
     throw new Error('scope is required');
   };
 
-  const readJson = async (filePath) => {
+  const readJson = async (filePath: string) => {
     let raw;
     try {
       raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error && error.code === 'ENOENT') return { missing: true, value: null };
+      if (isMemoryRecord(error) && error.code === 'ENOENT') return { missing: true, value: null };
       throw error;
     }
     try {
-      const parsed = JSON.parse(raw);
-      return { missing: false, value: isObjectRecord(parsed) ? parsed : null };
+      const parsed: unknown = JSON.parse(raw);
+      return { missing: false, value: isMemoryRecord(parsed) ? parsed : null };
     } catch {
       return { missing: false, value: null };
     }
   };
 
-  const writeJsonAtomic = async (filePath, value) => {
+  const writeJsonAtomic = async (filePath: string, value: MemoryDocument | (StoredDreamState & { version: number })) => {
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     try {
@@ -205,10 +236,10 @@ export const createAgentMemoryRuntime = (deps) => {
     }
   };
 
-  const withWriteLock = async (key, mutate) => {
+  const withWriteLock = async <T>(key: string, mutate: () => Promise<T>): Promise<T> => {
     const previous = writeLocks.get(key) || Promise.resolve();
-    let release;
-    const next = new Promise((resolve) => { release = resolve; });
+    let release = () => {};
+    const next = new Promise<void>((resolve) => { release = resolve; });
     const chained = previous.finally(() => next);
     writeLocks.set(key, chained);
 
@@ -223,34 +254,33 @@ export const createAgentMemoryRuntime = (deps) => {
     }
   };
 
-  const read = async (target) => {
+  const read = async (target: MemoryTarget) => {
     const resolved = resolveTarget(target);
     const stored = await readJson(resolved.filePath);
 
-    if (!stored.missing && (!stored.value || !Array.isArray(stored.value.entries))) {
-      throw new Error('Stored agent memory is malformed');
+    if (!stored.missing) {
+      if (!stored.value || !Array.isArray(stored.value.entries)) {
+        throw new Error('Stored agent memory is malformed');
+      }
+      return {
+        version: MEMORY_VERSION,
+        entries: sanitizeEntries(stored.value.entries, Date.now(), resolved.scope),
+      };
     }
-    if (stored.missing) {
-      return createEmptyMemory();
-    }
-
-    return {
-      version: MEMORY_VERSION,
-      entries: sanitizeEntries(stored.value.entries, Date.now(), resolved.scope),
-    };
+    return createEmptyMemory();
   };
 
-  const write = async (resolved, entries) => {
+  const write = async (resolved: ResolvedMemoryTarget, entries: MemoryEntry[]) => {
     await writeJsonAtomic(resolved.filePath, { version: MEMORY_VERSION, entries });
   };
 
-  const create = async (target, value) => {
+  const create = async (target: MemoryTarget, value: MemoryWriteInput) => {
     const resolved = resolveTarget(target);
     const title = clampLength(asNonEmptyString(value?.title) || '', MEMORY_TITLE_MAX_LENGTH);
-    if (!bodyFitsLimit(value?.body)) {
+    if ((asNonEmptyString(value?.body)?.length ?? 0) > MEMORY_BODY_MAX_LENGTH && isMemoryText(value.body)) {
       throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${value.body.trim().length}`);
     }
-    const body = clampLength(typeof value?.body === 'string' ? value.body : '', MEMORY_BODY_MAX_LENGTH).trim();
+    const body = clampLength(isMemoryText(value?.body) ? value.body : '', MEMORY_BODY_MAX_LENGTH).trim();
     if (!title) throw new Error('title is required');
     if (!body) throw new Error('body is required');
 
@@ -265,8 +295,8 @@ export const createAgentMemoryRuntime = (deps) => {
           title,
           body,
           updatedAt: now,
-          ...(MEMORY_TYPES.has(value?.type) ? { type: value.type } : {}),
         };
+        if (isMemoryType(value?.type)) updated.type = value.type;
         const entries = current.entries.map((entry) => (entry.id === existing.id ? updated : entry));
         await write(resolved, entries);
         return { entry: updated, entries, replaced: true };
@@ -284,16 +314,16 @@ export const createAgentMemoryRuntime = (deps) => {
       }
 
       const sessionId = asNonEmptyString(value?.sessionId);
-      const entry = {
+      const entry: MemoryEntry = {
         id: idFactory(),
         title,
         body,
-        type: MEMORY_TYPES.has(value?.type) ? value.type : 'fact',
+        type: isMemoryType(value?.type) ? value.type : 'fact',
         createdAt: now,
         updatedAt: now,
-        ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
-        ...(sessionId ? { sessionId } : {}),
       };
+      if (findThreatPattern(`${title}\n${body}`)) entry.flagged = true;
+      if (sessionId) entry.sessionId = sessionId;
       const related = findRelatedEntries(current.entries, title, body);
       const entries = [entry, ...current.entries];
       await write(resolved, entries);
@@ -301,22 +331,25 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  const update = async (target, memoryId, patch) => {
+  const update = async (target: MemoryTarget, memoryId: string | undefined, patch: MemoryWriteInput) => {
     const resolved = resolveTarget(target);
     const id = asNonEmptyString(memoryId);
     if (!id) throw new Error('memoryId is required');
 
-    const hasTitle = typeof patch?.title === 'string';
-    const hasBody = typeof patch?.body === 'string';
-    const hasType = MEMORY_TYPES.has(patch?.type);
+    const patchTitle = patch?.title;
+    const patchBody = patch?.body;
+    const patchType = patch?.type;
+    const hasTitle = isMemoryText(patchTitle);
+    const hasBody = isMemoryText(patchBody);
+    const hasType = isMemoryType(patchType);
     if (!hasTitle && !hasBody && !hasType) {
       throw new Error('title, body or type is required');
     }
-    const title = hasTitle ? clampLength(patch.title, MEMORY_TITLE_MAX_LENGTH).trim() : null;
-    if (hasBody && !bodyFitsLimit(patch.body)) {
-      throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${patch.body.trim().length}`);
+    const title = hasTitle ? clampLength(patchTitle, MEMORY_TITLE_MAX_LENGTH).trim() : null;
+    if (hasBody && (asNonEmptyString(patchBody)?.length ?? 0) > MEMORY_BODY_MAX_LENGTH) {
+      throw new Error(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${patchBody.trim().length}`);
     }
-    const body = hasBody ? clampLength(patch.body, MEMORY_BODY_MAX_LENGTH).trim() : null;
+    const body = hasBody ? clampLength(patchBody, MEMORY_BODY_MAX_LENGTH).trim() : null;
     if (hasTitle && !title) throw new Error('title is required');
     if (hasBody && !body) throw new Error('body is required');
 
@@ -329,11 +362,11 @@ export const createAgentMemoryRuntime = (deps) => {
 
       const updated = {
         ...existing,
-        ...(hasTitle ? { title } : {}),
-        ...(hasBody ? { body } : {}),
-        ...(hasType ? { type: patch.type } : {}),
         updatedAt: Date.now(),
       };
+      if (title !== null) updated.title = title;
+      if (body !== null) updated.body = body;
+      if (hasType) updated.type = patchType;
       delete updated.flagged;
       if (findThreatPattern(`${updated.title}\n${updated.body}`)) updated.flagged = true;
       const entries = current.entries.map((entry) => (entry.id === id ? updated : entry));
@@ -342,7 +375,7 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  const remove = async (target, memoryId) => {
+  const remove = async (target: MemoryTarget, memoryId: string | undefined) => {
     const resolved = resolveTarget(target);
     const id = asNonEmptyString(memoryId);
     if (!id) throw new Error('memoryId is required');
@@ -358,7 +391,7 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  const readAll = async (projectId) => {
+  const readAll = async (projectId: string | null) => {
     const settled = await Promise.allSettled([
       read({ scope: 'global' }),
       projectId ? read({ scope: 'project', projectId }) : Promise.resolve(createEmptyMemory()),
@@ -372,9 +405,9 @@ export const createAgentMemoryRuntime = (deps) => {
     };
   };
 
-  const dreamStatePath = (resolved) => path.join(path.dirname(resolved.filePath), 'memory-dream.json');
+  const dreamStatePath = (resolved: ResolvedMemoryTarget) => path.join(path.dirname(resolved.filePath), 'memory-dream.json');
 
-  const readDreamState = async (target) => {
+  const readDreamState = async (target: MemoryTarget): Promise<DreamState> => {
     const resolved = resolveTarget(target);
     const stored = await readJson(dreamStatePath(resolved)).catch(() => ({ missing: true, value: null }));
     const parsed = dreamStateSchema.safeParse(stored.value);
@@ -388,7 +421,7 @@ export const createAgentMemoryRuntime = (deps) => {
     };
   };
 
-  const writeDreamState = async (resolved, state) => {
+  const writeDreamState = async (resolved: ResolvedMemoryTarget, state: StoredDreamState) => {
     await writeJsonAtomic(dreamStatePath(resolved), {
       version: MEMORY_VERSION,
       lastRunAt: state.lastRunAt,
@@ -398,10 +431,10 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  const recordDream = async (target, { lastRunAt, record, snapshot, after = null }) => {
+  const recordDream = async (target: MemoryTarget, { lastRunAt, record, snapshot, after = null }: DreamWriteInput) => {
     const resolved = resolveTarget(target);
     return withWriteLock(resolved.key, async () => {
-      const state = {
+      const state: StoredDreamState = {
         lastRunAt,
         record: dreamRecordSchema.nullable().catch(null).parse(record ?? null),
         snapshot: Array.isArray(snapshot) ? snapshot : null,
@@ -412,7 +445,7 @@ export const createAgentMemoryRuntime = (deps) => {
     });
   };
 
-  const undoDream = async (target) => {
+  const undoDream = async (target: MemoryTarget) => {
     const resolved = resolveTarget(target);
     return withWriteLock(resolved.key, async () => {
       const state = await readDreamState(target);
@@ -440,3 +473,5 @@ export const createAgentMemoryRuntime = (deps) => {
 
   return { read, readAll, create, update, remove, resolveTarget, readDreamState, recordDream, undoDream };
 };
+
+export type AgentMemoryRuntime = ReturnType<typeof createAgentMemoryRuntime>;

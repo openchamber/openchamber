@@ -1,20 +1,51 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import { MEMORY_BODY_MAX_LENGTH, MEMORY_TITLE_MAX_LENGTH } from './runtime.js';
+import { isMemoryType } from './contracts.js';
+import type { AgentMemoryRuntime } from './runtime.js';
+import type { MemoryChangedEvent, MemoryEntry, MemoryScope, MemoryTarget, MemoryWriteInput } from './contracts.js';
 
-const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
+interface MemoryActionInput extends MemoryWriteInput {
+  scope?: unknown;
+  memoryId?: unknown;
+}
 
-const toSummary = (entry, scope) => ({
+interface MemoryActionDependencies {
+  agentMemoryRuntime: AgentMemoryRuntime;
+  createError: (message: string, status: number) => Error;
+  onMemoryChanged?: (event: MemoryChangedEvent) => void;
+  resolveProjectId: (directory: string) => Promise<string>;
+  isAgentMemoryEnabled?: () => boolean | Promise<boolean>;
+}
+
+const toSummary = (entry: MemoryEntry, scope: MemoryScope) => ({
   memoryId: entry.id,
   title: entry.title,
   type: entry.type,
   scope,
 });
 
+export type MemorySummary = ReturnType<typeof toSummary>;
+
+export interface MemoryListResult {
+  memories: MemorySummary[];
+  globalUnavailable?: true;
+  projectUnavailable?: true;
+}
+
+export interface MemorySaveResult {
+  saved: true;
+  memory: MemorySummary;
+  replaced: boolean;
+  related: MemorySummary[] | undefined;
+  relatedNote: string | undefined;
+  warning?: string;
+}
+
 const RELATED_NOTE = 'Stored as a new entry. These stored entries share much of its wording. If it replaces or reverses one of them, rewrite that one by memoryId to what holds now, with a line on what changed and why, then delete the entry just saved. If they are about different things, leave both.';
 
-const toFullEntry = (entry, scope) => ({ ...toSummary(entry, scope), body: entry.body });
+const toFullEntry = (entry: MemoryEntry, scope: MemoryScope) => ({ ...toSummary(entry, scope), body: entry.body });
 
-export const createAgentMemoryActions = (dependencies) => {
+export const createAgentMemoryActions = (dependencies: MemoryActionDependencies) => {
   const {
     agentMemoryRuntime,
     createError,
@@ -23,20 +54,22 @@ export const createAgentMemoryActions = (dependencies) => {
     isAgentMemoryEnabled,
   } = dependencies;
 
-  const announce = (scope, projectId) => {
-    if (typeof onMemoryChanged !== 'function') return;
+  const announce = (scope: MemoryScope, projectId: string | undefined) => {
+    if (!onMemoryChanged) return;
     try {
-      onMemoryChanged({ scope, ...(projectId ? { projectId } : {}) });
+      const event: MemoryChangedEvent = { scope };
+      if (projectId) event.projectId = projectId;
+      onMemoryChanged(event);
     } catch {
-      // A listener that throws must not take the write down with it.
+      return;
     }
   };
 
-  const fail = (message, status = 400) => {
+  const fail: (message: string, status?: number) => never = (message, status = 400) => {
     throw createError(message, status);
   };
 
-  const resolveProjectId = async (contextDirectory) => {
+  const resolveProjectId = async (contextDirectory: string | null | undefined) => {
     const directory = asNonEmptyString(contextDirectory);
     const projectId = directory ? await resolveProjectIdForDirectory(directory) : '';
     if (!projectId) {
@@ -45,7 +78,7 @@ export const createAgentMemoryActions = (dependencies) => {
     return projectId;
   };
 
-  const resolveTarget = async (input, contextDirectory) => {
+  const resolveTarget = async (input: MemoryActionInput, contextDirectory: string | null | undefined): Promise<MemoryTarget> => {
     const scope = asNonEmptyString(input.scope);
     if (scope === 'global') return { scope: 'global' };
     if (scope === 'project') {
@@ -54,22 +87,23 @@ export const createAgentMemoryActions = (dependencies) => {
     return fail('scope must be global or project', 400);
   };
 
-  const listBothScopes = async (contextDirectory) => {
+  const listBothScopes = async (contextDirectory: string | null | undefined) => {
     const directory = asNonEmptyString(contextDirectory);
     const projectId = directory ? await resolveProjectIdForDirectory(directory) : null;
     const result = await agentMemoryRuntime.readAll(projectId);
 
-    return {
+    const listed: MemoryListResult = {
       memories: [
         ...result.global.map((entry) => toSummary(entry, 'global')),
         ...result.project.map((entry) => toSummary(entry, 'project')),
       ],
-      ...(result.globalFailed ? { globalUnavailable: true } : {}),
-      ...(result.projectFailed ? { projectUnavailable: true } : {}),
     };
+    if (result.globalFailed) listed.globalUnavailable = true;
+    if (result.projectFailed) listed.projectUnavailable = true;
+    return listed;
   };
 
-  const list = async (input, contextDirectory) => {
+  const list = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
     const scope = asNonEmptyString(input.scope);
     if (!scope || scope === 'both') {
       return listBothScopes(contextDirectory);
@@ -79,16 +113,16 @@ export const createAgentMemoryActions = (dependencies) => {
     return { memories: entries.map((entry) => toSummary(entry, target.scope)) };
   };
 
-  const read = async (input, contextDirectory) => {
+  const read = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
     const memoryId = asNonEmptyString(input.memoryId);
     const title = asNonEmptyString(input.title);
     if (!memoryId && !title) {
       fail('memory.read requires memoryId or title', 400);
     }
 
-    const matches = (entry) => (memoryId
+    const matches = (entry: MemoryEntry) => (memoryId
       ? entry.id === memoryId
-      : entry.title.toLowerCase() === title.toLowerCase());
+      : entry.title.toLowerCase() === title?.toLowerCase());
 
     const requestedScope = asNonEmptyString(input.scope);
     if (requestedScope === 'global' || requestedScope === 'project') {
@@ -119,7 +153,7 @@ export const createAgentMemoryActions = (dependencies) => {
     fail('No memory matches that id or title', 404);
   };
 
-  const save = async (input, contextDirectory) => {
+  const save = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
     const target = await resolveTarget(input, contextDirectory);
     const title = asNonEmptyString(input.title);
     const body = asNonEmptyString(input.body);
@@ -131,12 +165,12 @@ export const createAgentMemoryActions = (dependencies) => {
     if (body.trim().length > MEMORY_BODY_MAX_LENGTH) {
       fail(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${body.trim().length}`, 400);
     }
-    if (input.type !== undefined && !MEMORY_TYPES.has(input.type)) {
+    if (input.type !== undefined && !isMemoryType(input.type)) {
       fail('type must be fact, preference, or reference', 400);
     }
 
     const memoryId = asNonEmptyString(input.memoryId);
-    let saved;
+    let saved: Pick<Awaited<ReturnType<AgentMemoryRuntime['create']>>, 'entry' | 'replaced' | 'related'>;
     if (memoryId) {
       const rewritten = await agentMemoryRuntime.update(target, memoryId, { title, body, type: input.type });
       if (!rewritten) {
@@ -152,20 +186,21 @@ export const createAgentMemoryActions = (dependencies) => {
       });
     }
     announce(target.scope, target.projectId);
-    const hasRelated = saved.related?.length > 0;
-    return {
+    const hasRelated = (saved.related?.length ?? 0) > 0;
+    const response: MemorySaveResult = {
       saved: true,
       memory: toSummary(saved.entry, target.scope),
       replaced: saved.replaced,
-      related: hasRelated ? saved.related.map((entry) => toSummary(entry, target.scope)) : undefined,
+      related: hasRelated ? saved.related?.map((entry) => toSummary(entry, target.scope)) : undefined,
       relatedNote: hasRelated ? RELATED_NOTE : undefined,
-      ...(saved.entry.flagged
-        ? { warning: 'Stored, but held back from future sessions: this text reads as an instruction to the model rather than a fact. The user can see it in the Memory panel.' }
-        : {}),
     };
+    if (saved.entry.flagged) {
+      response.warning = 'Stored, but held back from future sessions: this text reads as an instruction to the model rather than a fact. The user can see it in the Memory panel.';
+    }
+    return response;
   };
 
-  const remove = async (input, contextDirectory) => {
+  const remove = async (input: MemoryActionInput, contextDirectory: string | null | undefined) => {
     const target = await resolveTarget(input, contextDirectory);
     const memoryId = asNonEmptyString(input.memoryId);
     if (!memoryId) fail('memoryId is required for memory.delete', 400);
@@ -178,8 +213,8 @@ export const createAgentMemoryActions = (dependencies) => {
     return { deleted: true, memoryId };
   };
 
-  const execute = async (action, input = {}, contextDirectory) => {
-    if (typeof isAgentMemoryEnabled === 'function') {
+  const execute = async (action: string, input: MemoryActionInput = {}, contextDirectory?: string | null) => {
+    if (isAgentMemoryEnabled) {
       let enabled = false;
       try {
         enabled = await isAgentMemoryEnabled();
