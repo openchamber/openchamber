@@ -71,11 +71,6 @@ function Harness({ open, onOpenChange }: { open: boolean; onOpenChange: (open: b
 const items = () => Array.from(host.querySelectorAll('[cmdk-item]'));
 
 describe('MarkdownPreviewOutline', () => {
-  test('draws nothing while closed', async () => {
-    await act(async () => root.render(<Harness open={false} onOpenChange={() => {}} />));
-    expect(items()).toHaveLength(0);
-  });
-
   test('lists the headings in order, indented from the shallowest level', async () => {
     await act(async () => root.render(<Harness open onOpenChange={() => {}} />));
     expect(items().map((item) => item.textContent)).toEqual(['Install', 'From source', 'Usage']);

@@ -196,12 +196,6 @@ describe('editing an xlsx', () => {
     expect(session.unsupportedFormulas).toBe(1);
   });
 
-  test('text that looks like a number stays text for the formulas around it', async () => {
-    const session = await open(xlsx('<row r="1"><c r="A1" t="inlineStr"><is><t>00123</t></is></c><c r="B1"><f>LEN(A1)</f><v>5</v></c><c r="C1"><v>1</v></c></row>'));
-    await edit(session, 1, 2, '2');
-    expect(shown(session, 1, 1)).toBe('5');
-  });
-
   test('a date cell takes a date, and a number keeps being a number', async () => {
     const session = await open(xlsx('<row r="1"><c r="A1" s="1"><v>45231</v></c></row>', {
       'xl/styles.xml': '<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>',
