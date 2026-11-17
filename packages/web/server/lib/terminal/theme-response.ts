@@ -1,3 +1,18 @@
+export type TerminalThemeMode = 'light' | 'dark';
+
+export interface TerminalThemeAppearance {
+  themeMode: TerminalThemeMode;
+  foreground?: string | undefined;
+  background?: string | undefined;
+  modeEnabled?: boolean;
+}
+
+export interface TerminalThemeResponses {
+  pending: string;
+  responses: string[];
+  modeEnabled: boolean;
+}
+
 const MODE_SET = '\u001b[?2031h';
 const MODE_RESET = '\u001b[?2031l';
 const CAPABILITY_QUERY = '\u001b[?2031$p';
@@ -17,8 +32,10 @@ const CONTROL_SEQUENCES = [
   ...OSC_QUERIES.map(({ sequence }) => sequence),
 ];
 
-const parseColor = (value) => {
-  if (typeof value !== 'string') return null;
+const isColorText = (value: unknown): value is string => typeof value === 'string';
+
+const parseColor = (value: string | undefined) => {
+  if (!isColorText(value)) return null;
   const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)?.[1];
   if (hex) {
     const expanded = hex.length === 3 ? [...hex].map((part) => part + part).join('') : hex;
@@ -28,16 +45,16 @@ const parseColor = (value) => {
   return rgb ? rgb.slice(1, 4).map((part) => Math.min(255, Number(part))) : null;
 };
 
-const colorReport = (code, color) => {
+const colorReport = (code: number, color: string | undefined) => {
   const rgb = parseColor(color);
   if (!rgb) return null;
   const channels = rgb.map((channel) => channel.toString(16).padStart(2, '0').repeat(2));
   return `\u001b]${code};rgb:${channels.join('/')}\u001b\\`;
 };
 
-export const terminalThemeModeReport = (themeMode) => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
+export const terminalThemeModeReport = (themeMode: TerminalThemeMode) => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
 
-const findEscape = (input, start) => {
+const findEscape = (input: string, start: number) => {
   for (let cursor = start; cursor < input.length; cursor += 1) {
     if (input.charCodeAt(cursor) === 0x1b) return cursor;
   }
@@ -45,11 +62,11 @@ const findEscape = (input, start) => {
 };
 
 export const consumeTerminalThemeQueries = (
-  pending,
-  data,
-  appearance,
+  pending: string,
+  data: string,
+  appearance: TerminalThemeAppearance,
   { respondToPrimaryDeviceAttributes = false } = {},
-) => {
+): TerminalThemeResponses => {
   if (!pending && !data.includes('\u001b')) return { pending: '', responses: [], modeEnabled: appearance.modeEnabled === true };
   const input = `${pending}${data}`;
   const responses = [];

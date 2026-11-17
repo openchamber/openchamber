@@ -6,14 +6,43 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const SHUTDOWN_GRACE_MS = 20_000;
 
+export interface TerminalShutdownProcess {
+  pid: number;
+  kill: (signal?: NodeJS.Signals) => void;
+}
+
+export interface TerminalShutdownTarget {
+  process: TerminalShutdownProcess;
+  shellExecutable: string;
+}
+
+export interface TerminalShutdownOptions {
+  graceMs?: number;
+}
+
+interface ProcessEntry {
+  pid: number;
+  parent: number;
+  group: number;
+  zombie: boolean;
+  started: string | undefined;
+  command: string;
+}
+
+interface OwnedProcess extends ProcessEntry {
+  terminal: number;
+}
+
+const hasProcessErrorCode = (value: unknown): value is Error & { code: string } => value instanceof Error && 'code' in value && typeof value.code === 'string';
+
 const readProcesses = async () => {
   if (process.platform === 'linux') {
-    const processes = new Map();
+    const processes = new Map<number, ProcessEntry>();
     for (const entry of await fs.readdir('/proc')) {
       if (!/^\d+$/.test(entry)) continue;
       let stat;
       try { stat = await fs.readFile(`/proc/${entry}/stat`, 'utf8'); }
-      catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') continue; throw error; }
+      catch (error) { if (hasProcessErrorCode(error) && (error.code === 'ENOENT' || error.code === 'ESRCH')) continue; throw error; }
       const end = stat.lastIndexOf(')');
       const fields = stat.slice(end + 2).trim().split(/\s+/);
       const pid = Number(entry);
@@ -22,28 +51,30 @@ const readProcesses = async () => {
     return processes;
   }
   const { stdout } = await execFileAsync('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,stat=,lstart=,comm='], { timeout: 1000, maxBuffer: 4 * 1024 * 1024 });
-  return new Map(stdout.trim().split('\n').map(line => {
+  return new Map<number, ProcessEntry>(stdout.trim().split('\n').map(line => {
     const fields = line.trim().split(/\s+/);
-    return [Number(fields[0]), { pid: Number(fields[0]), parent: Number(fields[1]), group: Number(fields[2]), zombie: fields[3].startsWith('Z'), started: fields.slice(4, 9).join(' '), command: fields.slice(9).join(' ') }];
+    const status = fields[3];
+    if (status === undefined) throw new TypeError("Cannot read properties of undefined (reading 'startsWith')");
+    return [Number(fields[0]), { pid: Number(fields[0]), parent: Number(fields[1]), group: Number(fields[2]), zombie: status.startsWith('Z'), started: fields.slice(4, 9).join(' '), command: fields.slice(9).join(' ') }];
   }));
 };
 
-const signal = (pid, name) => {
-  try { process.kill(pid, name); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+const signal = (pid: number, name: NodeJS.Signals) => {
+  try { process.kill(pid, name); } catch (error) { if (!hasProcessErrorCode(error) || error.code !== 'ESRCH') throw error; }
 };
 
-export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_GRACE_MS } = {}) {
+export async function shutdownTerminalProcesses(terminals: TerminalShutdownTarget[], { graceMs = SHUTDOWN_GRACE_MS }: TerminalShutdownOptions = {}) {
   if (!terminals.length) return;
   if (process.platform === 'win32') {
     for (const { process: pty } of terminals) {
-      try { pty.kill(); } catch { /* already gone; other terminals still need cleanup */ }
+      try { pty.kill(); } catch { continue; }
     }
     return;
   }
 
   const deadline = Date.now() + graceMs;
-  const owned = new Map();
-  const shells = new Map();
+  const owned = new Map<number, OwnedProcess>();
+  const shells = new Map<number, TerminalShutdownProcess>();
   try {
     let snapshot = await readProcesses();
     for (const terminal of terminals) {
@@ -52,7 +83,7 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
       owned.set(current.pid, { ...current, terminal: current.pid });
       if (path.basename(current.command) === path.basename(terminal.shellExecutable)) shells.set(current.pid, terminal.process);
     }
-    const signalled = new Set();
+    const signalled = new Set<number>();
     while (owned.size) {
       for (const [pid, previous] of owned) {
         const current = snapshot.get(pid);
@@ -63,8 +94,9 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
       do {
         added = false;
         for (const current of snapshot.values()) {
-          if (!current.zombie && !owned.has(current.pid) && owned.has(current.parent)) {
-            owned.set(current.pid, { ...current, terminal: owned.get(current.parent).terminal });
+          const parent = owned.get(current.parent);
+          if (!current.zombie && !owned.has(current.pid) && parent) {
+            owned.set(current.pid, { ...current, terminal: parent.terminal });
             added = true;
           }
         }
@@ -88,10 +120,10 @@ export async function shutdownTerminalProcesses(terminals, { graceMs = SHUTDOWN_
       snapshot = await readProcesses();
     }
   } catch (error) {
-    console.warn('Terminal graceful shutdown failed; forcing owned PTYs closed:', error.message);
-    for (const pid of owned.keys()) { try { signal(pid, 'SIGKILL'); } catch { /* best effort */ } }
+    console.warn('Terminal graceful shutdown failed; forcing owned PTYs closed:', error instanceof Error ? error.message : undefined);
+    for (const pid of owned.keys()) { try { signal(pid, 'SIGKILL'); } catch { continue; } }
     for (const { process: pty } of terminals) {
-      try { pty.kill('SIGKILL'); } catch { /* continue with the remaining PTYs */ }
+      try { pty.kill('SIGKILL'); } catch { continue; }
     }
   }
 }

@@ -545,6 +545,8 @@ describe('terminal runtime', () => {
   });
 
   it('lists available shells and uses the selected shell for create and restart', async () => {
+    const previousShell = process.env.OPENCHAMBER_TERMINAL_SHELL;
+    process.env.OPENCHAMBER_TERMINAL_SHELL = '/bin/zsh';
     const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
     const harness = createHarness({
       fs: {
@@ -587,7 +589,11 @@ describe('terminal runtime', () => {
         expect(harness.processes[1].shell).toBe('/bin/bash');
         expect(harness.processes[1].args).toEqual(['-l']);
       }
-    } finally { await harness.runtime.shutdown(); }
+    } finally {
+      if (previousShell === undefined) delete process.env.OPENCHAMBER_TERMINAL_SHELL;
+      else process.env.OPENCHAMBER_TERMINAL_SHELL = previousShell;
+      await harness.runtime.shutdown();
+    }
   });
 
   it('rejects invalid and unavailable explicit shells', async () => {
