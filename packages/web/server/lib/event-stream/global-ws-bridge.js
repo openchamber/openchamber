@@ -50,6 +50,8 @@ export function createGlobalMessageStreamWsBridge({
     const replay = globalHub.replayAfter(requestedLastEventId);
     const ready = { type: 'ready', scope: 'global' };
     if (replay === null) ready.replayReset = true;
+    else if (requestedLastEventId) ready.replayed = true;
+    if (!ready.replayed) ready.cursor = globalHub.cursor();
     const sent = sendMessageStreamWsFrame(socket, ready);
     if (!sent) {
       removeClient(socket);
@@ -86,8 +88,6 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
-  // Browser clients take the events of isolated spaces too: each frame carries its directory,
-  // and a space's directory is one more project directory to the UI.
   const unsubscribeEvent = globalHub.subscribeEvent((event) => {
     const { payload } = event;
     for (const socket of Array.from(clients)) {
@@ -127,6 +127,7 @@ export function createGlobalMessageStreamWsBridge({
           const sent = sendMessageStreamWsFrame(socket, {
             type: 'ready',
             scope: 'global',
+            cursor: globalHub.cursor(),
           });
           if (!sent) {
             removeClient(socket);

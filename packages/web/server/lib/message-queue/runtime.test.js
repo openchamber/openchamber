@@ -604,68 +604,19 @@ describe('message queue runtime', () => {
     await runtime.flush();
   });
 
-  it('waits for a background subagent before sending the queued message', async () => {
+  it('sends the queued message to an idle parent while its background subagents run', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
-    // The parent paused: it is idle while its background subagent works.
-    openCode.state.children = { [SESSION]: ['ses_child'] };
-    openCode.state.active = { ses_child: { type: 'running' } };
+    // The parent is idle while its subagent and that one's own subagent work.
+    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
+    openCode.state.active = { ses_child: { type: 'running' }, ses_grandchild: { type: 'running' } };
 
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'next', text: 'next' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-
-    // The subagent finished and OpenCode ran the parent again with its result.
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await vi.waitFor(() => {
       expect(openCode.state.sent).toHaveLength(1);
       expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
     });
-  });
-
-  it('keeps queued messages until a nested background subagent finishes', async () => {
-    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
-    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => {
-      expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
-      expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']));
-    await replayAfterSend();
-    expect(sendPosts(openCode).map((entry) => entry.body.text)).toEqual(['first', 'second']);
-    runtime.stop();
-  });
-
-  it('keeps the queue intact when a nested lineage read fails', async () => {
-    const { runtime, openCode, emit } = createRuntime();
-    runtime.start();
-    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
-    openCode.state.active = { ses_grandchild: { type: 'running' } };
-    openCode.state.failNext = /\/api\/session\/ses_child$/;
-    await runtime.enqueue(SESSION, DIRECTORY, item());
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(0);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
     runtime.stop();
   });
 
@@ -856,11 +807,10 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     let release;
-    // active map, message tail, the subagent check (empty active map),
-    // model switch, then the prompt itself (held open until released)
+    // active map, message tail, model switch, then the prompt itself (held
+    // open until released)
     openCode.fetchImpl.mockImplementationOnce(async () => Response.json({ location: {}, data: {} }))
       .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
-      .mockImplementationOnce(async () => Response.json({ data: {} }))
       .mockImplementationOnce(async () => new Response(null, { status: 204 }))
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());

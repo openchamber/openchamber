@@ -50,10 +50,7 @@ const parse = (content) => {
   return { version: parsedVersion, releaseDate, files };
 };
 
-// electron-updater compares a manifest's minimumSystemVersion with
-// os.release(), the Darwin kernel version. Darwin 22 is macOS 13, the oldest
-// macOS Electron 45 runs on, so an older Mac keeps the version it has instead
-// of updating into an app macOS refuses to open.
+// external: https://www.electron.build/auto-update.html#updateinfo minimumSystemVersion uses the Darwin kernel release, so Darwin 22 keeps unsupported Macs from updating to Electron 45.
 const MAC_MINIMUM_DARWIN_VERSION = '22.0.0';
 
 const serialize = (data) => {
@@ -83,8 +80,6 @@ const read = async (subdir, filename) => {
   }
 };
 
-// Hashes an installer already on the release, the way electron-builder
-// writes it into latest.yml: base64 sha512 and size of the whole file.
 const manifestFromReleaseAsset = async (assets, name, token) => {
   const asset = assets.find((entry) => entry.name === name);
   if (!asset) throw new Error(`Release asset ${name} is missing, so its update manifest cannot be built`);
@@ -104,16 +99,12 @@ const manifestFromReleaseAsset = async (assets, name, token) => {
 
 const output = {};
 
-// A run that finishes a release rebuilds macOS only. Its Windows installers
-// are on the release from the first run, whose manifest artifacts may be
-// gone, so the manifests are built from the installers themselves.
 const windowsFromRelease = process.env.WINDOWS_FROM_RELEASE === '1';
 
 if (windowsFromRelease) {
   const releaseId = process.env.RELEASE_ID;
   const token = process.env.GITHUB_TOKEN;
   if (!releaseId || !token) throw new Error('RELEASE_ID and GITHUB_TOKEN are required to read the Windows installers');
-  // The release can be a draft, which only the id reaches.
   const response = await fetch(`https://api.github.com/repos/${repo}/releases/${releaseId}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
   });
@@ -131,9 +122,6 @@ if (windowsFromRelease) {
   output['latest-arm64.yml'] = serialize(winArm64);
 }
 
-// One manifest serves both Mac architectures. The updater falls back to x64
-// files when it lists no arm64 ones, so a manifest missing an architecture
-// moves Apple Silicon users onto the Intel build under Rosetta.
 const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
 const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');
 if (!macX64 || !macArm64) {

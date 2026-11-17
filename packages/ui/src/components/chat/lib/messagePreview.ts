@@ -24,12 +24,6 @@ const basename = (path: string): string => {
     return segments[segments.length - 1] ?? path;
 };
 
-/**
- * The caption a context attachment shows in the bubble, reused as a preview
- * prefix. `descriptorOf` names a change request's provider; a part without one
- * was written before providers other than GitHub existed and reads as a pull
- * request with `#`.
- */
 const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf: SourceControlDescriptorOf): string => {
     const changeRequestTermOf = (provider: string | undefined) => descriptorOf(provider).terminology.changeRequest;
     switch (payload.kind) {
@@ -81,7 +75,6 @@ const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf:
     }
 };
 
-/** The quoted material behind a context attachment. */
 const contextBody = (payload: ContextPartPayload): string => {
     switch (payload.kind) {
         case 'code-comment':
@@ -110,10 +103,6 @@ const contextBody = (payload: ContextPartPayload): string => {
     }
 };
 
-/**
- * One preview line for a context attachment, mirroring the collapsed bubble:
- * the caption, then the user's comment when there is one, otherwise the quote.
- */
 const contextPreview = (payload: ContextPartPayload, t: Translate, descriptorOf: SourceControlDescriptorOf): string => {
     const summary = contextSummary(payload, t, descriptorOf);
     const comment = 'text' in payload ? payload.text.trim() : '';
@@ -121,16 +110,6 @@ const contextPreview = (payload: ContextPartPayload, t: Translate, descriptorOf:
     return detail.length > 0 ? `${summary}: ${detail}` : summary;
 };
 
-/**
- * The text a user prompt shows in navigators: what the user typed, and — for
- * messages that are only attached context (a quoted message, a terminal
- * selection) — a label derived from that context, so such turns are never
- * label-less. Without a translator it falls back to the raw part text.
- *
- * React callers pass `useSourceControlDescriptorOf()` and keep it in their memo
- * inputs, so change-request wording drawn before the provider list arrived is
- * redrawn when it does; the default reads the registry as it is now.
- */
 export function getPromptPreviewText(parts: Part[], t?: Translate, descriptorOf: SourceControlDescriptorOf = readSourceControlProvider): string {
     const typed = parts
         .filter(isTextPart)

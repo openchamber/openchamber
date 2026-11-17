@@ -38,7 +38,6 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [dictionary, direction, locale, setLocale]);
 
-  // Base UI menus, popovers and sliders read the direction from this provider, not from the document.
   return (
     <I18nContext.Provider value={value}>
       <DirectionProvider direction={direction}>{children}</DirectionProvider>

@@ -54,6 +54,24 @@ click-outside handler skips it (`isDragReleaseClick`) and the range stays.
 
 Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
 
+### Why the open comment field gets its focus back after a render
+
+A render that rebuilds the rows or the annotations takes the open comment field out of the rendered tree for a moment, and the browser drops its focus. It happens under a person who is typing: an agent's write refreshes the diff, and the virtualized diff is reset for the new content. `PierreDiffViewer` records the focused field before each render it starts and focuses it again in Pierre's post-render callback, only while nothing else has taken the focus since. `CodeMirrorEditor` does the same for a field in a block widget when an update redraws the lines around it, such as a reload from disk in `FilesView`. Keeping the node attached through the render was not available: Pierre resets its container when the content changes, and CodeMirror redraws a widget's node with the lines next to it.
+
+### Why a line comment follows its code and not its line number
+
+A pending comment in `FilesView` and `PierreDiffViewer`, the open field and a saved unsent one, is stored with its line numbers, and an agent's write shifts the lines under it. `useInlineCommentController` finds the lines again each time the content changes (`lib/commentAnchor.ts`): by the text of the commented lines, with the line before and after them telling repeated code apart. It writes the new numbers to the draft store, so the card, the composer row and the prompt all show where the comment is now. When the code is gone the comment stays by a neighbour that survived, the draft carries `changedCode`, the card says so, and the prompt quotes both the code the comment was written on and the code there now.
+
+The search needs only what the draft already stores, so it works after a restart and for a file that changed while it was closed. Mapping old line numbers to new ones through a diff of the two versions was rejected for that reason: it needs the old text at the moment of the change, which a closed file or a patch-only diff does not have.
+
+Each view says which lines it knows. `FilesView` gives none until the file is loaded and non-empty, and a patch says it is partial, so a comment outside its hunks is left alone. An empty or missing side never reads as "the code is gone". A viewer with comments off (a commit in History) gives no lines at all: it shows other content under the same path. A comment the patch does not hold moves into a hunk only when a stored neighbour stands beside the match, since the text alone may be any closing brace. A comment is re-anchored only while its file is shown in one of these views; sent before that, it carries the numbers it had, with its code.
+
+### Why the comment field stays in view when the editor scrolls sideways
+
+With wrapping off a CodeMirror block widget is as wide as the longest line. `CodeMirrorEditor` publishes the visible width as `--oc-editor-width` beside the gutter width, the comment field and cards size to it, and `.oc-block-widget > *` is sticky past the fixed gutter. Sizing from the context panel's width overflowed by the width of the file tree.
+
+`PierreDiffViewer.tsx` is the viewer's shell: the whitespace-only gate, the options Pierre gets and the markup. The mechanics sit in `pierreDiff/`, one hook or helper module per concern (comments and selection, line gestures, annotations, the Pierre instance lifecycle, find marks, context expansion, theme variables, the shared virtualizer), and the shell calls those hooks in one fixed order. Effects run in call order, and the instance hook's effects depend on the annotation and selection refs the earlier hooks set, so a hook moves only together with its position in that sequence.
+
 ### Why Pierre owns diff line-number selection
 
 `PierreDiffViewer` receives number-column selections through Pierre's
@@ -75,6 +93,8 @@ hand drifted into the code, never scrolled, and the click after a release that
 was not over the pressed line number often cleared the range (#5556).
 
 File tree ownership and request rules are in `files/DOCUMENTATION.md`.
+`DiffView.tsx` composes the modules in `diffView/`; their ownership and
+hook-order invariants are in `diffView/DOCUMENTATION.md`.
 `DiffView` gates repository discovery, comparisons, per-file reads, viewport
 measurement and keyboard navigation on visibility. Hidden refresh hints retain
 only dirty paths scoped to runtime and directory; reopening invalidates those
@@ -111,6 +131,10 @@ sidebar worktree row) showed no chip, until some other surface happened to ask. 
 their scope: the work-status Changes row counts working-tree changes and opens
 `working`, and a file opened from the Git panel or a tool card opens its own
 working or staged diff.
+
+The comparison picker puts the bound remote's default branch first, without
+changing automatic base detection. Other remotes' defaults keep their place:
+a base on a remote other than the bound one is rejected.
 
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
@@ -180,6 +204,7 @@ one at a time while the bar is open, but on the local scopes the first one asks
 (`diffFind/findDiffBatch.ts`) and the reads after it are answered from that
 answer while their revision holds; a failed batch, a path it leaves out, or a
 runtime without `getGitDiffs` (VS Code) falls back to the file's own read. The
+batch reader forgets a rejected request so the next read can retry it. The
 range and turn scopes already hold their diffs and read nothing new. While
 files are still being read the total reads `12+`. The active match is followed by what it
 points at, so a file landing or re-read ahead of it does not move the view. A read that fails is counted in the bar
@@ -207,6 +232,56 @@ Most files of a changeset are collapsed and have never been read, so their
 matches have to come from somewhere other than a mounted viewer. Each source's
 `revision` names what its data depends on, so the bar re-reads a file exactly
 when the viewer would show something different.
+
+### Invariants
+
+- Source loads run serially so opening find on a large changeset does not start
+  every host read at once. Closing stops new reads and retains resolved diffs
+  for reopening.
+- A layout change re-runs matching without invalidating the loaded diff.
+  Source revisions describe the data, independently of layout.
+- Callers memoize `sources` so its identity changes only with the file list,
+  layout or data revision.
+- Search uses the viewer's whitespace-filtered diff so every counted match
+  has a line navigation can reach. "No matches" waits for reads to settle.
+- An anchor jump waits for its file to load, then selects the following match.
+  A settled search without the anchor falls back to the first match. Closing,
+  opening normally or editing the query clears the intent to prevent stale jumps.
+- Shortcut ownership follows current DOM focus and the event's find surface.
+  Pointer history cannot change which surface owns Cmd/Ctrl+F.
+- Escape leaves IME composition, other fields and focused controls outside the
+  surface alone. Claimed Escape events are default-prevented so another
+  surface's window listener cannot close a second bar.
+- The bar stays above sticky file headers and below panel resize handles so
+  each control receives its own pointer events.
+- The failed-read note wraps within the controls' width so its text cannot
+  widen the floating bar.
+- A jump uses the match's location and index as its key because arriving files
+  rebuild match objects. Its job survives the retry deadline so a viewer that
+  mounts later can restart the wait and finish navigation.
+
+### Why a shared empty match list and not a fresh array
+
+The index synchronizes against match-list identity during render. A closed bar
+or empty query uses `NO_MATCHES` because allocating a new array on every render
+would keep that synchronization rendering forever.
+
+### Why resolved reads use state and refs
+
+State publishes each completed read to consumers. The serial loader also reads
+the same resolved and failed maps through refs so it can continue from its
+latest progress without waiting for React to render.
+
+### Why Escape uses capture and not a bubble listener
+
+The zone frame handles Escape in React capture and stops native propagation.
+The find surface listens on window capture so it can close the bar before that
+handler closes the panel; a bubble listener cannot receive the event.
+
+### Why a plus sign and not a loading spinner
+
+The growing total carries a `+` while files load. A spinner appearing and
+disappearing beside the count moves the navigation arrows.
 
 `WalkthroughView` gates discovery and source loading while retaining generated
 results and any explicitly started generation job.
@@ -395,26 +470,28 @@ step of every turn while the panel is open on another scope.
 
 ## Where a review comment reopens
 
-A review comment's chip (in the composer's preview and on a sent message) asks
-for the place the comment was written. `useOpenCommentSource`
+A review comment's row (in the composer's preview) and a sent message's
+context card ask for the place the comment was written. `useOpenCommentSource`
 (`components/comments/`) opens the comparison the comment belongs to — the base
 override for a branch, the change request for a PR, the commit by hash — and
 leaves the line in `useUIStore.pendingCommentLocation`. Comments on
 uncommitted changes and file quotes name a file on disk, so they open the file
 at the line.
 
-This view answers the request when it is on that scope and the comparison it
-names is the one on screen: it reveals the file as a changed-file chip does and
-scrolls its viewer to the line, waiting for the diff to load and render. That
-file is shown whole, because a comment's line can sit outside the hunks a patch
-carries, in a collapsed gap that never renders on its own; a comparison that
-answers without the file drops the request, and one that replaces the named
-comparison leaves it waiting. In the commit scope the requested hash outlives
-the branch's newest page, and is dropped once the history selects that commit
-or the person picks another. Mobile Changes answers the same request by
-switching mode, opening the file's own diff screen and loading its whole
-contents the same way. A comparison comment is never sent to the file on disk:
-the checkout has another version and may not have those lines.
+This view answers the request through `useDiffViewCommentLocation` (`hooks/`)
+when it is on that scope and the comparison it names is the one on screen: it
+reveals the file as a changed-file chip does and scrolls its viewer to the line,
+waiting for the diff to load and render. That file is shown whole, because a
+comment's line can sit outside the hunks a patch carries, in a collapsed gap
+that never renders on its own; a comparison that answers without the file drops
+the request, and one that replaces the named comparison leaves it waiting. In
+the commit scope `useRequestedCommitComparison` (`hooks/`) keeps the requested
+hash past the branch's newest page, and drops it once the history selects that
+commit or the person picks another. Mobile Changes answers the same request
+through `useMobileChangesCommentNavigation` (`hooks/`) by switching mode,
+opening the file's own diff screen and loading its whole contents the same way.
+A comparison comment is never sent to the file on disk: the checkout has another
+version and may not have those lines.
 
 ## Pull request comparisons
 
@@ -701,3 +778,52 @@ reads them from `GET /api/git/range-file-versions` or from the change request
 route with `binary=true`. A provider that ignores the flag, as an extension
 provider may, answers text that is no data URL, and the diff keeps the binary
 placeholder.
+
+## What a surface does while its zone animates
+
+A context zone opens, closes, expands and is dragged over an animation
+(`lib/layoutAnimation.ts`). Work a surface does inside it shows as dropped
+frames, so the heavy part waits for the end or is spread over frames.
+
+### Why the stacked diff list mounts a batch of entries per frame
+
+`DiffView` mounts the first `STACKED_ENTRIES_FIRST` file entries and then
+`STACKED_ENTRIES_PER_FRAME` more on each frame until the list is complete. All
+at once, the first open of an 88-file change was one 100 to 120 ms frame. A
+request to scroll to a file mounts every entry in that commit, because its
+entry may be past the limit and the alignment waits only 20 frames for it.
+Virtualizing the list was the alternative; it changes the scroller, the
+sticky headers and find, for a cost paid once per list.
+
+### Why a file that arrives mid-animation renders after it
+
+`FilesView` waits for the layout to settle (`whenLayoutSettled`) before it
+applies a file it has just read, and checks again that the load is still the
+current one. A long Markdown file's first render takes 50 to 60 ms; applied
+when the read returned, about 70 ms into the opening animation, it stopped the
+panel halfway. The cost is the same after the animation, where nothing moves.
+
+### Why a file surface leaves `inert` on open only with an editor showing
+
+Taking a zone's card out of `inert` restyles everything in it. A CodeMirror
+editor is re-attached as the zone opens, so its exit from `inert` is cheap in
+that commit and expensive later (`zoneInteractiveContext.ts`). A file shown
+rendered re-attaches nothing: leaving `inert` at once restyled the whole card
+in the frame of the click (25 ms for a long Markdown file), so it follows the
+other surfaces and leaves `inert` when the animation ends. `FilesView` says
+which case it is by rendering `DetachableEditorMarker` beside its editor.
+
+### Why the browser page keeps its width while its stage moves
+
+A `<webview>` page is drawn by another process, and the app's frame waits for
+it at every new size. `useSteadyStage` pins the page's width for as long as a
+side column animates or is dragged and lets the stage clip it: unchanged while
+the stage shrinks, one step (`GROW_STEP`) wider when the stage outgrows it,
+and the stage's width again once the layout settles. Following the stage on
+every frame, an expand with a site open drew 3 to 5 of the animation's 15
+frames in the desktop app. A zone that grows to a size it already knows (an
+expand) publishes it as `data-zone-size`, and the page takes its final width
+before the animation starts, so nothing snaps at the end. A drag has no final
+size: there the page takes the stage's width whenever the stage rests for
+`DRAG_REST_MS`, since a page held wider than its panel until the release read
+as broken.

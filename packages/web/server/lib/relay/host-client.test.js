@@ -22,16 +22,20 @@ import {
 } from './e2ee.js';
 import {
   TunnelFrameType,
+  chunkPayload,
+  createOutboundFrameBatcher,
   decodeTunnelFrame,
   encodeJsonPayload,
   encodeTunnelFrame,
+  MAX_TUNNEL_PAYLOAD_BYTES,
 } from './tunnel-codec.js';
 
 // ---------------------------------------------------------------------------
 // Fake relay: routes host-control <-> host-data <-> client by (serverId, connectionId).
-// Forwards frames verbatim, never inspects them.
+// Forwards frames verbatim, never inspects them, except that it drops the
+// client's binary message number `dropClientBinaryAt` (0-based) when given.
 // ---------------------------------------------------------------------------
-const startFakeRelay = () => {
+const startFakeRelay = ({ dropClientBinaryAt } = {}) => {
   const server = http.createServer();
   const wss = new WebSocketServer({ server });
   const state = {
@@ -41,6 +45,7 @@ const startFakeRelay = () => {
     buffered: new Map(), // connectionId -> [[data, isBinary]] awaiting host-data
     relayFrames: [], // observed forwarded frames (for plaintext assertions)
     apps: new Map(),
+    clientBinarySeen: 0,
   };
 
   wss.on('connection', (ws, req) => {
@@ -82,6 +87,7 @@ const startFakeRelay = () => {
       state.clients.set(connectionId, ws);
       ws.on('message', (data, isBinary) => {
         state.relayFrames.push({ from: 'client', isBinary });
+        if (isBinary && state.clientBinarySeen++ === dropClientBinaryAt) return;
         const host = state.hostData.get(connectionId);
         if (host && host.readyState === WebSocket.OPEN) {
           host.send(data, { binary: isBinary });
@@ -117,10 +123,12 @@ const startFakeRelay = () => {
   });
 };
 
-// A stub loopback origin serving /health.
+// A stub loopback origin serving /health; `requests` lists every request it saw.
 const startLoopbackOrigin = () =>
   new Promise((resolve) => {
+    const requests = [];
     const server = http.createServer((req, res) => {
+      requests.push(`${req.method} ${req.url}`);
       if (req.url === '/health') {
         const expectedOrigin = `http://127.0.0.1:${server.address().port}`;
         if (req.headers.origin !== expectedOrigin) {
@@ -140,7 +148,7 @@ const startLoopbackOrigin = () =>
       res.writeHead(404);
       res.end();
     });
-    server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, stop: () => new Promise((r) => server.close(() => r())) }));
+    server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, requests, stop: () => new Promise((r) => server.close(() => r())) }));
   });
 
 // Build the host identity around a fresh keypair (ECDH enc key + ECDSA sign key).
@@ -165,8 +173,9 @@ const buildIdentity = async () => {
   };
 };
 
-// Scripted client using the JS initiator: connects, handshakes, does a GET.
-const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
+// Scripted client using the JS initiator: connects, handshakes, does a GET, or
+// sends `requestPlaintexts` (one encrypted message each) instead.
+const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk, helloExtras = {}, requestPlaintexts }) => {
   const connectionId = 'conn-test-1';
   const url = new URL(`${relayUrl}/`);
   url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
@@ -204,6 +213,7 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
       v: RELAY_PROTOCOL_VERSION,
       clientPubJwk: await exportPublicKeyJwk(ephemeral.publicKey),
       nonce: bytesToBase64Url(nonce),
+      ...helloExtras,
     }));
   });
 
@@ -220,6 +230,10 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
           encryptor: createFrameEncryptor(keys.clientToHost),
           decryptor: createFrameDecryptor(keys.hostToClient),
         };
+        if (requestPlaintexts) {
+          for (const plaintext of requestPlaintexts) ws.send(await channel.encryptor.encrypt(plaintext), { binary: true });
+          return;
+        }
         // Send an HTTP GET /health over stream 1.
         const req = encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
           method: 'GET',
@@ -232,7 +246,8 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
       }
       return;
     }
-    if (!channel) return;
+    // Only the GET reads its response.
+    if (!channel || requestPlaintexts) return;
     const plaintext = await channel.decryptor.decrypt(new Uint8Array(data));
     const frame = decodeTunnelFrame(plaintext);
     if (frame.frameType === TunnelFrameType.HttpResponse) {
@@ -314,6 +329,80 @@ describe('relay host-client integration', () => {
     const plaintextForwarded = forwarded.filter((f) => !f.isBinary);
     expect(plaintextForwarded.length).toBe(2); // hello + ready only
     expect(forwarded.filter((f) => f.isBinary).length).toBeGreaterThan(0);
+  });
+});
+
+describe('relay host-client dropped message', () => {
+  it('closes the data channel when the relay drops part of a batched request body', async () => {
+    // Default batcher: a full-size body chunk travels alone, so the client
+    // sends [head] [A] [B] [CCCC + StreamEnd] as four encrypted messages.
+    const plaintexts = [];
+    const batcher = createOutboundFrameBatcher({ sendBatch: (p) => plaintexts.push(p) });
+    batcher.enqueue(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'POST',
+      path: '/api/submit',
+      query: '',
+      headers: { 'content-type': 'application/json' },
+      hasBody: true,
+    })));
+    const body = Buffer.concat([
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'A'),
+      Buffer.alloc(MAX_TUNNEL_PAYLOAD_BYTES, 'B'),
+      Buffer.from('CCCC'),
+    ]);
+    for (const piece of chunkPayload(new Uint8Array(body))) {
+      batcher.enqueue(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, piece));
+    }
+    batcher.enqueue(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
+    batcher.dispose();
+    expect(plaintexts.length).toBe(4);
+
+    // The relay drops the "B" message.
+    const relay = await startFakeRelay({ dropClientBinaryAt: 2 });
+    const origin = await startLoopbackOrigin();
+    const identity = await buildIdentity();
+    const warnings = [];
+    let markConnected;
+    const connected = new Promise((resolve) => { markConnected = resolve; });
+    let markFailed;
+    const channelFailed = new Promise((resolve) => { markFailed = resolve; });
+    const host = startRelayHost({
+      relayUrl: `${relay.wsUrl}/`,
+      identity,
+      getLocalPort: () => origin.port,
+      onStatus: (status) => {
+        if (status.state === 'connected') markConnected();
+      },
+      logger: {
+        warn: (line) => {
+          warnings.push(line);
+          if (line.includes('data channel failed')) markFailed();
+        },
+        info: () => {},
+      },
+    });
+    try {
+      await connected;
+      void runScriptedClient({
+        relayUrl: relay.wsUrl,
+        serverId: identity.serverId,
+        hostEncPubJwk: identity.hostEncPubJwk,
+        helloExtras: { batch: true },
+        requestPlaintexts: plaintexts,
+      });
+      await Promise.race([channelFailed, new Promise((r) => setTimeout(r, 3000))]);
+      // Let a wrongly forwarded body reach the origin, and the close the relay.
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(relay.state.clientBinarySeen).toBe(4);
+      expect(origin.requests).toEqual([]);
+      expect(warnings).toContain('[Relay] data channel failed connectionId=conn-test-1 reason=frame decryption failed');
+      expect(relay.state.hostData.has('conn-test-1')).toBe(false);
+    } finally {
+      host.stop();
+      await relay.stop();
+      await origin.stop();
+    }
   });
 });
 

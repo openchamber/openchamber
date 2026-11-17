@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { formatBrowserAnnotationPrompt } from './annotationPrompt';
+import { formatBrowserAnnotationPrompt, readBrowserAnnotationPrompt, withoutBrowserAnnotationComment } from './annotationPrompt';
 import type { BrowserAnnotationPayload, BrowserElementTarget } from './contract';
 
 const element = (overrides: Partial<BrowserElementTarget> = {}): BrowserElementTarget => ({
@@ -123,5 +123,41 @@ describe('annotation prompt', () => {
     });
     expect(output).toContain('Page: Settings');
     expect(output).toContain('URL: http://localhost:5173/settings');
+  });
+});
+
+describe('reading an annotation prompt', () => {
+  const prompt = formatBrowserAnnotationPrompt({
+    payload: basePayload({ comment: 'too tight', elements: [{ id: 'e1', element: element() }, { id: 'e2', element: element({ text: '' }) }] }),
+    screenshotAttached: true,
+    intro: 'Selected',
+  });
+
+  test('finds the page, the comment and the elements\' text', () => {
+    expect(readBrowserAnnotationPrompt(prompt)).toEqual({ page: 'Settings', comment: 'too tight', texts: ['Save   changes'] });
+  });
+
+  test('drops the comment line and nothing else', () => {
+    const stripped = withoutBrowserAnnotationComment(prompt);
+    expect(readBrowserAnnotationPrompt(stripped).comment).toBeNull();
+    expect(stripped.split('\n')).toHaveLength(prompt.split('\n').length - 1);
+  });
+});
+
+describe('an older prompt with a comment over several lines', () => {
+  const prompt = formatBrowserAnnotationPrompt({
+    payload: basePayload({ comment: 'first line\nsecond line', elements: [{ id: 'e1', element: element() }] }),
+    screenshotAttached: false,
+    intro: 'Selected',
+  });
+
+  test('reads the whole comment', () => {
+    expect(readBrowserAnnotationPrompt(prompt).comment).toBe('first line\nsecond line');
+  });
+
+  test('drops the whole comment and keeps the elements', () => {
+    const stripped = withoutBrowserAnnotationComment(prompt);
+    expect(stripped).not.toContain('second line');
+    expect(readBrowserAnnotationPrompt(stripped)).toEqual({ page: 'Settings', comment: null, texts: ['Save   changes'] });
   });
 });

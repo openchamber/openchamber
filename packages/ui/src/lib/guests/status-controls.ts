@@ -15,7 +15,6 @@ type StatusControlHost = {
 
 const PUBLICATIONS_PER_SECOND = 20;
 
-/** Owns one status frame's header. Retained UI callbacks cannot outlive its definitions. */
 export const createGuestStatusControls = ({ isActive, onChange, post, now = () => performance.now(), getContext = () => null }: StatusControlHost) => {
   let disposed = false;
   let generation = 0;

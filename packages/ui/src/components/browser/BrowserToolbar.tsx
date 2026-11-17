@@ -10,11 +10,6 @@ import type { BrowserHistoryEntry } from '@/lib/browser/history';
 import { cn } from '@/lib/utils';
 import type { IconName } from '@/components/icon/icons';
 
-/**
- * The address as the bar shows it at rest: the host in full colour, the rest
- * muted, so the site reads first. Anything that is not a plain web address
- * shows as typed.
- */
 const splitAddress = (address: string): { host: string; rest: string } | null => {
   const match = /^(https?:\/\/)?([^/?#\s]+)(.*)$/i.exec(address.trim());
   if (!match) return null;
@@ -23,13 +18,12 @@ const splitAddress = (address: string): { host: string; rest: string } | null =>
 
 type BrowserToolbarProps = {
   address: string;
-  /** A mark before the address, with its meaning: the page is inside an isolated space. */
   addressMark?: { icon: IconName; label: string };
-  /** Addresses already visited in this project, offered while typing. */
   suggestions?: readonly BrowserHistoryEntry[];
   onForgetSuggestion?: (url: string) => void;
   onAddressChange: (value: string) => void;
   onSubmit: (value: string) => void;
+  onHome?: () => void;
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
@@ -38,7 +32,6 @@ type BrowserToolbarProps = {
   canGoBack: boolean;
   canGoForward: boolean;
   isLoading: boolean;
-  /** These need a real Chromium host; hidden without one. */
   onAnnotate?: () => void;
   onOpenDevTools?: () => void;
   isAnnotating?: boolean;
@@ -46,7 +39,6 @@ type BrowserToolbarProps = {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomReset?: () => void;
-  /** Whole percent, e.g. 110. Controls hide at 100 to keep the bar quiet. */
   zoomPercent?: number;
   onClearCookies?: () => void;
   onClearCache?: () => void;
@@ -61,6 +53,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   onForgetSuggestion,
   onAddressChange,
   onSubmit,
+  onHome,
   onBack,
   onForward,
   onReload,
@@ -87,8 +80,6 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
 
-  // A new list is a new choice; keeping an old index would highlight whatever
-  // happens to sit in that position now.
   React.useEffect(() => {
     setActiveSuggestion(-1);
   }, [address, isAddressFocused]);
@@ -105,7 +96,6 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
       const count = visibleSuggestions.length;
-      // Wraps through "nothing selected", so the typed address stays reachable.
       setActiveSuggestion((current) => {
         const next = current + step;
         if (next < -1) return count - 1;
@@ -130,7 +120,6 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   const shortcut = (id: string) => formatShortcutForDisplay(getEffectiveShortcutCombo(id, shortcutOverrides), '') || undefined;
   const shownAddress = isAddressFocused ? null : splitAddress(address);
 
-  // Used all the time, on the row; the rest waits in "More actions".
   const rowActions: ToolbarGroup = [
     onToggleDeviceBar ? { id: 'device', icon: 'smartphone', label: t('contextPanel.browser.deviceToolbar'), onSelect: onToggleDeviceBar, pressed: isDeviceBarOpen } : null,
     onAnnotate ? { id: 'annotate', icon: 'markup', label: t('contextPanel.browser.annotate.toggle'), onSelect: onAnnotate, pressed: isAnnotating } : null,
@@ -142,13 +131,13 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
     onZoomOut ? { id: 'zoom-out', icon: 'zoom-out', label: t('contextPanel.browser.zoomOut'), onSelect: onZoomOut, shortcut: shortcut('zoom_out') } : null,
     onOpenDevTools ? { id: 'devtools', icon: 'terminal-box', label: t('contextPanel.browser.devTools'), onSelect: onOpenDevTools } : null,
     onClearCache ? { id: 'clear-cache', icon: 'database-2', label: t('contextPanel.browser.clearCache'), onSelect: onClearCache } : null,
-    // Signs the page out of everything, so it reads as the destructive one.
     onClearCookies ? { id: 'clear-cookies', icon: 'delete-bin', label: t('contextPanel.browser.clearCookies'), onSelect: onClearCookies, destructive: true } : null,
   ];
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 px-2 py-1.5">
       <div className="flex shrink-0 items-center gap-0.5">
+        {onHome ? <ToolbarTooltipButton icon="home" label={t('contextPanel.browser.devServers.title')} onClick={onHome} /> : null}
         <ToolbarTooltipButton icon="arrow-left" label={t('contextPanel.browser.back')} onClick={onBack} disabled={!canGoBack} />
         <ToolbarTooltipButton icon="arrow-right" label={t('contextPanel.browser.forward')} onClick={onForward} disabled={!canGoForward} />
         <ToolbarTooltipButton
@@ -185,6 +174,9 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           onKeyDown={onAddressKeyDown}
           spellCheck={false}
           autoComplete="off"
+          autoCapitalize="none"
+          autoCorrect="off"
+          inputMode="url"
           role="combobox"
           aria-expanded={visibleSuggestions.length > 0}
           aria-controls="openchamber-browser-address-suggestions"
@@ -193,7 +185,6 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
             addressMark && 'ps-8',
             zoomPercent !== 100 && 'pe-14',
             'typography-meta text-foreground outline-none',
-            // At rest the styled copy below shows; the field keeps the caret and selection.
             shownAddress && 'text-transparent',
           )}
           aria-label={t('contextPanel.browser.addressAria')}

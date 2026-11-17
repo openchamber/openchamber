@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDiffFromFile, parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
 
-import { getDiffLinesText } from './selectedDiffLines';
+import { diffLineSource, getDiffLinesText } from './selectedDiffLines';
 
 const PATCH = [
   'diff --git a/a.ts b/a.ts',
@@ -48,5 +48,23 @@ describe('getDiffLinesText', () => {
 
     expect(getDiffLinesText(fileDiff, 'additions', 1, 2)).toBe('a\nB');
     expect(getDiffLinesText(fileDiff, 'deletions', 2, 3)).toBe('b\nc');
+  });
+});
+
+describe('diffLineSource', () => {
+  test('a patch holds its hunk lines only and says so', () => {
+    const source = diffLineSource(patchDiff(), 'additions');
+    expect(source.partial).toBe(true);
+    expect([source.first, source.last]).toEqual([2, 22]);
+    expect(source.lineAt(4)).toBe('new 4');
+    expect(source.lineAt(10)).toBeUndefined();
+    expect(diffLineSource(patchDiff(), 'deletions').lineAt(21)).toBe('old 21');
+  });
+
+  test('a diff built from full contents holds the whole file', () => {
+    const fileDiff = parseDiffFromFile({ name: 'a.ts', contents: 'a\nb\nc' }, { name: 'a.ts', contents: 'a\nB\nc' });
+    const source = diffLineSource(fileDiff, 'additions');
+    expect(source.partial).toBeFalsy();
+    expect([source.first, source.last, source.lineAt(2)]).toEqual([1, 3, 'B']);
   });
 });

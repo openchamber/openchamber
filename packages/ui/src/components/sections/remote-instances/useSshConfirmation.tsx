@@ -8,8 +8,6 @@ type Confirmation = {
   actionKey: I18nKey;
 };
 
-// Native window.confirm can leave Electron's Windows renderer unable to accept
-// text input. Keep SSH confirmations in the page's existing dialog focus tree.
 export function useSshConfirmation(instanceId: string | null) {
   const { t } = useI18n();
   const [request, setRequest] = React.useState<Confirmation | null>(null);
@@ -23,8 +21,6 @@ export function useSshConfirmation(instanceId: string | null) {
       activeInstance.current = null;
       const resolve = pending.current;
       pending.current = null;
-      // Leaving the form abandons the operation, rather than treating it as a
-      // decision to save a password without persistence.
       resolve?.(null);
     };
   }, [instanceId]);

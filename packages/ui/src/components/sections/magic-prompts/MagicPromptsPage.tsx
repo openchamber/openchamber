@@ -205,21 +205,10 @@ const isVisiblePromptId = (id: MagicPromptId): boolean => id.endsWith('.visible'
 type Scope = 'global' | 'project';
 type Overrides = ReadonlyMap<string, string>;
 
-/**
- * One place the page reads and writes: a scope on one runtime, and for the
- * project scope one registered project. Drafts, pending work and read results
- * are kept per context, so nothing typed or answered in one shows in another.
- */
 type EditorContext =
   | { key: string; runtimeKey: string; scope: 'global' }
   | { key: string; runtimeKey: string; scope: 'project'; projectId: string };
 
-/**
- * What a context last read. The global scope reads the global file alone, so
- * it works without a project and whatever state a project file is in. The
- * project scope reads both scopes in one answer, so its inherited text and its
- * overrides come from the same read.
- */
 type ContextData =
   | { scope: 'global'; global: Overrides }
   | { scope: 'project'; view: MagicPromptScopesView };
@@ -235,11 +224,6 @@ type Editable =
   | { kind: 'editable'; scopeOverrides: Overrides; layers: { project: Overrides | null; global: Overrides } }
   | { kind: 'blocked'; error: 'projectInvalid' | 'globalInvalid'; reason: string; path: string };
 
-/**
- * The one write a context may have in flight. Each answer is a whole view of
- * the scope, so two overlapping writes could land in the wrong order and show
- * the older view; a context therefore runs its writes one at a time.
- */
 type ContextWrite =
   | { kind: 'save' | 'reset'; id: MagicPromptId }
   | { kind: 'resetAll' };
@@ -254,7 +238,6 @@ const withEntry = <V,>(map: ReadonlyMap<string, V>, key: string, value: V): Read
   return next;
 };
 
-/** Sets one prompt's value in one context; `undefined` removes it. */
 const withPromptValue = <V,>(map: PerPrompt<V>, contextKey: string, id: MagicPromptId, value: V | undefined): PerPrompt<V> => {
   const inner = new Map(map.get(contextKey));
   if (value === undefined) inner.delete(id);
@@ -274,8 +257,6 @@ const editableOf = (data: ContextData): Editable => {
   if (project.status === 'invalid') {
     return { kind: 'blocked', error: 'projectInvalid', reason: project.reason, path };
   }
-  // Without the global layer the inherited text is unknown, and showing the
-  // built-in text in its place would be wrong.
   if (global.status === 'invalid') {
     return { kind: 'blocked', error: 'globalInvalid', reason: global.reason, path };
   }
@@ -290,7 +271,6 @@ const readContext = async (context: EditorContext): Promise<ContextData> => (
 
 const saveInContext = async (context: EditorContext, id: MagicPromptId, text: string): Promise<ContextData> => {
   if (context.scope === 'project') {
-    // Kept even when it equals the built-in text: it still wins over a global override.
     return { scope: 'project', view: await saveScopedMagicPromptOverride({ scope: 'project', projectId: context.projectId }, id, text, context.runtimeKey) };
   }
   const payload = text === getDefaultMagicPromptTemplate(id)
@@ -313,7 +293,6 @@ const resetAllInContext = async (context: EditorContext): Promise<ContextData> =
 
 const useRuntimeKey = (): string => React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
 
-// Only the waiting indicator follows the shared clock; the editor state stays still.
 const MagicPromptsLoading: React.FC = () => {
   const { t } = useI18n();
   const blink = useWaitingBlink(true);
@@ -331,8 +310,6 @@ export const MagicPromptsPage: React.FC = () => {
   const { currentTheme } = useThemeSystem();
   const selectedPromptId = useMagicPromptsStore((state) => state.selectedPromptId);
   const runtimeKey = useRuntimeKey();
-  // The Settings project selector decides the project; the chat's active
-  // project only stands in until the user picks one there.
   const settingsDirectory = useSettingsDirectory();
   const projects = useProjectsStore((state) => state.projects);
   const project = React.useMemo(
@@ -344,13 +321,8 @@ export const MagicPromptsPage: React.FC = () => {
   const [loads, setLoads] = React.useState<ReadonlyMap<string, ContextLoad>>(() => new Map());
   const [drafts, setDrafts] = React.useState<PerPrompt<string>>(() => new Map());
   const [writes, setWrites] = React.useState<ReadonlyMap<string, ContextWrite>>(() => new Map());
-  // The same writes, readable synchronously: a second click before the next
-  // render must still find the context busy.
   const writesRef = React.useRef(new Map<string, ContextWrite>());
 
-  // Per context: the latest read, and how many mutations have started. A read
-  // that is not the latest, or that started before a mutation, would replace
-  // newer data, so its answer is dropped.
   const countersRef = React.useRef(new Map<string, { read: number; mutations: number }>());
   const mountedRef = React.useRef(true);
   React.useEffect(() => {
@@ -384,7 +356,6 @@ export const MagicPromptsPage: React.FC = () => {
     const counters = countersOf(target.key);
     const read = ++counters.read;
     const mutationsAtStart = counters.mutations;
-    // A context read before keeps showing while it is read again.
     setLoads((current) => (current.get(target.key)?.status === 'ready' ? current : withEntry(current, target.key, { status: 'loading' })));
     const superseded = () => !isLive(target) || counters.read !== read || counters.mutations !== mutationsAtStart;
     try {
@@ -397,7 +368,6 @@ export const MagicPromptsPage: React.FC = () => {
     }
   }, [countersOf, isLive]);
 
-  // Every time a context opens it is read again, so edits made elsewhere show.
   React.useEffect(() => {
     if (context) void load(context);
   }, [context, load]);
@@ -411,17 +381,10 @@ export const MagicPromptsPage: React.FC = () => {
     setDrafts((current) => (current.get(target.key)?.get(id) === value ? current : withPromptValue(current, target.key, id, value)));
   }, []);
 
-  /** Drops a draft only while it still holds `expected`, so typing during a request survives it. */
   const clearDraftIf = React.useCallback((target: EditorContext, id: MagicPromptId, expected: string | undefined) => {
     setDrafts((current) => (current.get(target.key)?.get(id) === expected ? withPromptValue(current, target.key, id, undefined) : current));
   }, []);
 
-  /**
-   * Runs one write of a context, or nothing when that context already has one
-   * in flight. Its answer replaces the context's view; a read that started
-   * before it is dropped. After a failure the server state is unknown and a
-   * dropped read may be gone, so the context is read again.
-   */
   const runWrite = React.useCallback(async (
     target: EditorContext,
     write: ContextWrite,
@@ -489,8 +452,6 @@ export const MagicPromptsPage: React.FC = () => {
     ? `${contextLoad.data.view.project.path}/${contextLoad.data.view.project.file}`
     : project?.path ?? '';
 
-  // One line under the scope choice: what the scope covers, which file a
-  // project override lives in, or why there is no project scope.
   const scopeHint = !project
     ? t('settings.magicPrompts.page.scope.noProject')
     : scope === 'global'
@@ -500,7 +461,6 @@ export const MagicPromptsPage: React.FC = () => {
           <span className="min-w-0 shrink-0 text-foreground"><ProjectLabel project={project} theme={currentTheme} /></span>
           <span aria-hidden="true">·</span>
           <span className="shrink-0">{t('settings.magicPrompts.page.scope.savedInLabel')}</span>
-          {/* A path reads left to right in every language, so it is its own isolated run. */}
           <span dir="ltr" className="min-w-0 truncate" data-magic-prompt-path>{projectFilePath}</span>
         </span>
       );
@@ -549,7 +509,6 @@ export const MagicPromptsPage: React.FC = () => {
       const ownWrite = contextWrite && contextWrite.kind !== 'resetAll' && contextWrite.id === block.id ? contextWrite.kind : null;
       const saving = ownWrite === 'save';
       const resetting = ownWrite === 'reset';
-      // Every write of this context waits for the one in flight.
       const busy = contextWrite !== undefined;
       const status = isDirty
         ? t('settings.magicPrompts.page.status.unsavedChanges')

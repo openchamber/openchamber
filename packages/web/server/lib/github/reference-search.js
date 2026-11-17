@@ -1,26 +1,3 @@
-// Issues, pull requests and discussions for the reference picker. Discussions
-// are a search type of their own and are read by `discussion(number:)`;
-// issues and PRs share the issue search and `issueOrPullRequest`.
-//
-// A page carries what the rows and most of the preview need: state, author,
-// labels, comment count, body, and for a PR its draft flag and branches. One
-// GraphQL search document answers a whole page, where the REST list plus
-// per-PR enrichment it replaces cost up to 51 calls per search. A pasted link
-// or number skips search and reads that item directly, whatever its kind.
-//
-// Comments, and a PR's size and review decision, are read for one item at a
-// time, when the preview shows it. Measured on openchamber/openchamber (30
-// open PRs): the cheap fields answer a page in about 2.5 s, size adds about
-// 2 s, the review decision about 4 s and checks about 3 s, which together run
-// into GitHub's 10 s search timeout. One item's detail answers in about a
-// second.
-//
-// A PR's checks and mergeability come from a status request for the PRs a
-// page shows, after the page: the sidebar's own summaries, so both colour a PR
-// the same way, and the preview's checks line reads the same answer as its
-// colour. Measured on the same repo: 30 PRs answer in about 4 to 7 s, almost
-// all of it GitHub working out mergeability, which is why it is not part of
-// the page.
 
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
@@ -45,14 +22,13 @@ const acrossRequestSchema = z.strictObject({
   kind: z.enum(['issue', 'pull', 'discussion']),
   state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).optional(),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']).optional(),
+  labels: z.array(z.string()).optional(),
   query: z.string().optional(),
-  // The first page sends no cursor as null, like the single-repository list.
   cursor: z.string().max(100_000).nullable().optional(),
 });
 
 const invalidAcrossCursor = () => Object.assign(new Error('Invalid references cursor'), { status: 400, code: 'INVALID_REFERENCES_CURSOR' });
 
-/** Validate the JSON read request before any folder or credential access. */
 export function readReferencesAcrossRequest(body) {
   const parsed = acrossRequestSchema.safeParse(body);
   if (!parsed.success) return null;
@@ -60,10 +36,10 @@ export function readReferencesAcrossRequest(body) {
   for (const context of parsed.data.contexts) {
     if (!folders.has(context.directory)) folders.set(context.directory, context);
   }
-  return folders.size > 100 ? null : { ...parsed.data, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
+  const labels = [...new Set((parsed.data.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0 && label.length <= 256))].slice(0, 20);
+  return folders.size > 100 ? null : { ...parsed.data, labels, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
 }
 
-/** Bounded fan-out for folder resolution and provider search. */
 export async function mapReferencesAcross(entries, operation) {
   const results = new Array(entries.length);
   let next = 0;
@@ -75,16 +51,12 @@ export async function mapReferencesAcross(entries, operation) {
   }));
   return results;
 }
-// The preview shows the description; the attach path reads the full one.
 const BODY_PREVIEW_MAX = 20_000;
-// Keys match the filter schema below.
-// The list's state and whose items it shows combine, one qualifier each.
 const SEARCH_STATES = {
   open: 'is:open',
   closed: 'is:closed',
   merged: 'is:merged',
   all: '',
-  // GitHub counts only discussions in a category that takes answers.
   unanswered: 'is:open is:unanswered',
 };
 const SEARCH_PEOPLE = {
@@ -124,8 +96,6 @@ fragment PullReference on PullRequest {
 }
 `;
 
-// A discussion's category carries its emoji as a short HTML snippet around
-// the character; `isAnswered` is null outside a category that takes answers.
 const DISCUSSION_FRAGMENT = `
 fragment DiscussionReference on Discussion {
   ${COMMON_FIELDS}
@@ -138,11 +108,8 @@ fragment DiscussionReference on Discussion {
 }
 `;
 
-// The newest comments and reviews; `totalCount` says how many there are.
 const DETAIL_COMMENT_LIMIT = 50;
-// The newest commits, so the preview can show what each review answered.
 const DETAIL_COMMIT_LIMIT = 50;
-// The newest review threads, and the comments that open and answer each.
 const DETAIL_THREAD_LIMIT = 50;
 const DETAIL_THREAD_COMMENT_LIMIT = 50;
 
@@ -153,10 +120,14 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
       __typename
       ... on Issue {
         number
+        body
+        viewerCanUpdate
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
       }
       ... on PullRequest {
         number
+        body
+        viewerCanUpdate
         state
         reviewDecision
         # The preview's checks, from the PR itself rather than the list's batch.
@@ -204,16 +175,15 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
     }
   }
 }
-fragment DetailComment on IssueComment { author { login avatarUrl } body createdAt url }
+fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
 `;
 
-// A discussion's comments each open a thread of replies; a comment in a
-// category that takes answers may be its answer.
 const DISCUSSION_DETAIL_QUERY = `
 query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     discussion(number: $number) {
       number
+      body
       locked
       viewerCanUpdate
       viewerCanClose
@@ -230,7 +200,11 @@ query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
           isAnswer
           viewerCanMarkAsAnswer
           viewerCanUnmarkAsAnswer
-          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) { nodes { author { login avatarUrl } body createdAt url } }
+          viewerCanUpdate
+          viewerCanDelete
+          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
+            nodes { id author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
+          }
         }
       }
     }
@@ -318,16 +292,20 @@ const discussionNodeSchema = z.object({
 });
 
 const detailCommentSchema = z.object({
+  databaseId: z.number().int().nullable().optional(),
   author: userSchema,
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+  viewerCanUpdate: z.boolean().optional(),
+  viewerCanDelete: z.boolean().optional(),
 });
 
 const discussionDetailSchema = z.object({
   repository: z.object({
     discussion: z.object({
       number: z.number().int(),
+      body: z.string().optional(),
       locked: z.boolean(),
       viewerCanUpdate: z.boolean(),
       viewerCanClose: z.boolean(),
@@ -340,7 +318,7 @@ const discussionDetailSchema = z.object({
           isAnswer: z.boolean(),
           viewerCanMarkAsAnswer: z.boolean(),
           viewerCanUnmarkAsAnswer: z.boolean(),
-          replies: z.object({ nodes: z.array(detailCommentSchema) }),
+          replies: z.object({ nodes: z.array(detailCommentSchema.extend({ id: z.string().min(1) })) }),
         })),
       }),
     }).nullable(),
@@ -353,11 +331,15 @@ const detailSchema = z.object({
       z.object({
         __typename: z.literal('Issue'),
         number: z.number().int(),
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
       }),
       z.object({
         __typename: z.literal('PullRequest'),
         number: z.number().int(),
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         headCommit: z.object({
@@ -413,7 +395,6 @@ const detailSchema = z.object({
                 path: z.string().nullable(),
                 line: z.number().int().nullable(),
                 originalLine: z.number().int().nullable(),
-                // Older hosts may not answer these; a comment without them shows no excerpt.
                 startLine: z.number().int().nullable().optional(),
                 originalStartLine: z.number().int().nullable().optional(),
                 diffHunk: z.string().nullable().optional(),
@@ -426,15 +407,8 @@ const detailSchema = z.object({
   }).nullable(),
 });
 
-// More lines than any suggestion a person reviews; a longer range shows no excerpt.
 const EXCERPT_LINE_LIMIT = 200;
 
-/**
- * The lines a review comment sits on, as the new side of its diff showed
- * them, so a suggestion in it can be drawn against them. GitHub's hunk ends
- * at the comment's last line; an outdated comment reads its original lines.
- * Undefined when the hunk does not cover the range.
- */
 export const reviewCommentExcerpt = (comment) => {
   const current = comment.line !== null && comment.line !== undefined;
   const end = current ? comment.line : comment.originalLine;
@@ -449,11 +423,8 @@ export const reviewCommentExcerpt = (comment) => {
   return { startLine: start, lines: newSide.slice(-count) };
 };
 
-// A stack is rarely taller than a handful of layers; GitHub pages the rest.
 const STACK_LAYER_LIMIT = 50;
 
-// Asked beside the detail rather than inside it: a host whose schema has no
-// stacks (an older GitHub Enterprise Server) fails this query alone.
 const STACK_QUERY = `
 query PullStack($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -498,10 +469,6 @@ const stackSchema = z.object({
   }).nullable(),
 });
 
-/**
- * The stack a PR is a layer of, bottom layer first, or null when it is in
- * none (an issue is in none either).
- */
 export async function fetchPullStack({ octokit, owner, repo, number }) {
   const parsed = stackSchema.parse(await octokit.graphql(STACK_QUERY, { owner, repo, number }));
   const stack = parsed.repository?.issueOrPullRequest?.stack;
@@ -527,7 +494,6 @@ const PULL_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
 const repoKey = (owner, repo) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
 
-/** The emoji a category's HTML snippet draws (`<div>💡</div>`), or null when it holds none that fits a label. */
 const categoryEmoji = (html) => {
   const text = String(html ?? '').replace(/<[^>]*>/g, '').trim();
   return text && text.length <= 16 && !/[<>&]/.test(text) ? text : null;
@@ -540,11 +506,6 @@ const previewBody = (body) => {
     : { body: text, bodyTruncated: false };
 };
 
-/**
- * One GraphQL node as a picker item, or null when it is not an issue or PR
- * of a repository the project searches. `repos` is the searched network:
- * the item keeps which of them it came from.
- */
 export function toReference(value, repos) {
   const parsed = referenceNodeSchema.safeParse(value);
   if (!parsed.success) return null;
@@ -596,7 +557,6 @@ export function toReference(value, repos) {
           owner: node.headRepository.owner.login,
           repo: node.headRepository.name,
           url: node.headRepository.url,
-          // A worktree from a fork's PR fetches over HTTPS first.
           cloneUrl: `${node.headRepository.url}.git`,
           sshUrl: node.headRepository.sshUrl ?? undefined,
         }
@@ -608,19 +568,23 @@ const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_reques
 
 const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
+const commentPermissions = (comment) => {
+  const permissions = {};
+  if (comment.viewerCanUpdate !== undefined) permissions.canUpdate = comment.viewerCanUpdate;
+  if (comment.viewerCanDelete !== undefined) permissions.canDelete = comment.viewerCanDelete;
+  return permissions;
+};
+
 const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
 
-/**
- * Comments of one issue or PR, oldest first, and for a PR its size, review
- * decision and checks. A PR's reviews join the comments: a review's own text
- * (or its verdict when it has none), and each review thread as the comment
- * that opened it, with its replies, whether it is resolved, and what this
- * account may do with it.
- * Null when the repo has no such number.
- */
+const editableText = (item) => {
+  const text = {};
+  if (item.body !== undefined) text.body = item.body;
+  if (item.viewerCanUpdate !== undefined) text.viewerCanUpdate = item.viewerCanUpdate;
+  return text;
+};
+
 export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
-  // The stack is read beside the detail; a host that cannot answer it leaves
-  // the PR's stack unknown (absent), which is not the same as in none (null).
   const [response, stack] = await Promise.all([
     octokit.graphql(DETAIL_QUERY, { owner, repo, number }),
     fetchPullStack({ octokit, owner, repo, number }).catch(() => undefined),
@@ -628,22 +592,25 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
   if (!item) return null;
-  const comments = item.comments.nodes.map((comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
-  }));
+  const comments = item.comments.nodes.map((comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    if (Number.isSafeInteger(comment.databaseId)) entry.id = String(comment.databaseId);
+    return entry;
+  });
   if (item.__typename === 'Issue') {
-    return { number: item.number, comments, commentTotal: item.comments.totalCount, pull: null };
+    return { number: item.number, ...editableText(item), comments, commentTotal: item.comments.totalCount, pull: null };
   }
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
-    // A review with no text is only the container of its line comments,
-    // unless it carries a verdict.
     if (review.body.trim() || state === 'approved' || state === 'changes_requested') {
       comments.push({ author: toAuthor(review.author), body: review.body, createdAt: review.createdAt, url: review.url, path: null, line: null, review: state });
     }
@@ -662,7 +629,6 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
     if (excerpt) result.excerpt = excerpt;
     return result;
   };
-  // A thread reads as its first comment with the answers under it.
   for (const thread of item.reviewThreads.nodes) {
     const [first, ...replies] = thread.comments.nodes;
     if (!first) continue;
@@ -680,18 +646,16 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   comments.sort(byCreatedAt);
   const detail = {
     number: item.number,
+    ...editableText(item),
     comments,
     commentTotal: item.comments.totalCount,
     pull: {
       reviewDecision: item.reviewDecision ? REVIEW_DECISIONS[item.reviewDecision] : null,
-      // People asked to review and not done yet; a team request is left out
-      // since the board only picks people.
       reviewers: item.reviewRequests.nodes.flatMap(({ requestedReviewer: reviewer }) => (
         reviewer?.__typename === 'User' && reviewer.login
           ? [{ id: reviewer.login, ...toAuthor({ login: reviewer.login, avatarUrl: reviewer.avatarUrl }) }]
           : []
       )),
-      // Like the list's statuses: a closed or merged PR's checks are not actionable.
       checks: item.state === 'OPEN'
         ? summarizeCheckContexts(item.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
         : null,
@@ -713,29 +677,26 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   return detail;
 }
 
-/**
- * Comments of one discussion, oldest first. Each comment opens a thread of
- * its replies, answered through `/discussions/comment` with its id; in a
- * category that takes answers it also says whether it is the answer and
- * whether this account may choose or unchoose it. A locked discussion takes
- * comments only from those who may update it. Null when the repo has no such
- * discussion.
- */
 export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   const parsed = discussionDetailSchema.parse(await octokit.graphql(DISCUSSION_DETAIL_QUERY, { owner, repo, number }));
   const discussion = parsed.repository?.discussion;
   if (!discussion) return null;
   const answerable = discussion.category.isAnswerable;
   const canReply = !discussion.locked || discussion.viewerCanUpdate;
-  const plain = (comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
-  });
+  const plain = (comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    if (comment.id !== undefined) entry.id = comment.id;
+    return entry;
+  };
   const commentOf = (comment) => {
     const entry = {
       ...plain(comment),
@@ -748,6 +709,7 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   };
   return {
     number: discussion.number,
+    ...editableText(discussion),
     comments: discussion.comments.nodes.map(commentOf),
     commentTotal: discussion.comments.totalCount,
     pull: null,
@@ -755,15 +717,8 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   };
 }
 
-// One request per listed page of PRs.
 const PULL_STATUS_LIMIT = REFERENCE_PAGE_SIZE;
 
-/**
- * The PRs a status request names, `owner/repo#number` joined by commas, as
- * summary refs. A ref may carry `@host` when it lives on a GitHub Enterprise
- * instance; a missing (or `github.com`) host is the default. Null when the list
- * is empty, malformed or longer than a page.
- */
 export function readPullStatusRefs(value) {
   const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 0 || entries.length > PULL_STATUS_LIMIT) return null;
@@ -772,8 +727,6 @@ export function readPullStatusRefs(value) {
     const match = entry.match(/^([^/#\s]+)\/([^/#\s]+)#(\d+)(?:@([^#@\s]+))?$/);
     if (!match) return null;
     const ref = { owner: match[1], repo: match[2], number: Number(match[3]) };
-    // A host the ref names, normalized. github.com is the default either way, so
-    // it is left off; only a real enterprise host is carried.
     const host = match[4]?.trim().toLowerCase();
     if (host && host !== 'github.com') {
       ref.host = host;
@@ -786,12 +739,10 @@ export function readPullStatusRefs(value) {
 const stateSchema = z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).catch('open');
 const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
 
-/** A list's state; anything else reads as `open`. */
 export function readReferenceState(value) {
   return stateSchema.parse(value);
 }
 
-/** Whose items a list shows; anything else reads as `any`. */
 export function readReferencePeople(value) {
   return peopleSchema.parse(value);
 }
@@ -804,13 +755,6 @@ const searchPageSchema = z.object({
 const searchResultSchema = z.object({ search: searchPageSchema.extend({ issueCount: z.number().int() }) });
 const discussionSearchResultSchema = z.object({ search: searchPageSchema.extend({ discussionCount: z.number().int() }) });
 
-/**
- * The item a pasted link or number names: a number for every searched repo,
- * a URL only for its own repo. Discussions are looked up apart from issues
- * and PRs (`family`), though all three share one number space: a number reads
- * as the list's own family, and a link of the other family is searched as
- * text. Null when the text is a search.
- */
 export function parseReferenceLookup(text, repos, kind = 'issue') {
   const trimmed = text.trim();
   const family = kind === 'discussion' ? 'discussion' : 'item';
@@ -826,27 +770,31 @@ export function parseReferenceLookup(text, repos, kind = 'issue') {
   return null;
 }
 
-/**
- * The repository and number a link to an item on `host` names, wherever the
- * repository is; null for anything else.
- */
 export function parseReferenceLink(text, host) {
   const url = text.trim().match(/^https?:\/\/(?:www\.)?([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
   if (!url || url[1].toLowerCase() !== String(host).toLowerCase()) return null;
   return { owner: url[2], repo: url[3], number: Number(url[4]) };
 }
 
-/**
- * The GitHub search string for one picker page. The user's text may carry
- * its own qualifiers; state and sort are added only when it does not. A
- * discussion search is its own search type, so it names no kind.
- */
-export function buildReferenceSearchQuery({ repos, kind, state, people, text }) {
+const USER_LABEL_QUALIFIERS = /(?:^|\s)labels?:("(?:[^"\\]|\\.)*"|\S+)/gi;
+const USER_PEOPLE_QUALIFIERS = /(?:^|\s)(?:assignee|author|mentions|review-requested|reviewed-by):\S+/i;
+
+export function labelSearchQualifiers(labels = [], text = '') {
+  const named = new Set([...String(text).matchAll(USER_LABEL_QUALIFIERS)]
+    .map((match) => match[1].replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').toLowerCase()));
+  const names = [];
+  for (const label of labels) {
+    const name = String(label).trim();
+    if (name && !named.has(name.toLowerCase()) && !names.some((seen) => seen.toLowerCase() === name.toLowerCase())) names.push(name);
+  }
+  return names.map((name) => `label:"${name.replace(/["\\]/g, '\\$&')}"`);
+}
+
+export function buildReferenceSearchQuery({ repos, kind, state, people, text, labels = [] }) {
   const userText = text.trim();
   const parts = repos.map((entry) => `repo:${entry.owner}/${entry.repo}`);
   if (kind !== 'discussion') parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
   if (!/(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i.test(userText)) {
-    // Only a PR merges, and only a discussion is answered; elsewhere the nearest list stands in.
     const shown = kind !== 'pull' && state === 'merged' ? 'closed' : kind !== 'discussion' && state === 'unanswered' ? 'open' : state;
     const stateQualifier = SEARCH_STATES[shown];
     if (stateQualifier) parts.push(stateQualifier);
@@ -854,11 +802,13 @@ export function buildReferenceSearchQuery({ repos, kind, state, people, text }) 
   if (!/(^|\s)sort:\S+/i.test(userText)) {
     parts.push('sort:updated-desc');
   }
-  // Review requests exist for pull requests only, and a discussion has no assignee.
-  const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
-    ? ''
-    : SEARCH_PEOPLE[people];
-  if (peopleQualifier) parts.push(peopleQualifier);
+  if (!USER_PEOPLE_QUALIFIERS.test(userText)) {
+    const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
+      ? ''
+      : SEARCH_PEOPLE[people];
+    if (peopleQualifier) parts.push(peopleQualifier);
+  }
+  if (kind !== 'discussion') parts.push(...labelSearchQualifiers(labels, userText));
   if (userText) parts.push(userText);
   return parts.join(' ');
 }
@@ -882,8 +832,6 @@ function buildLookupQuery(number, repos, family) {
   };
 }
 
-// A number one repo does not have is a per-alias NOT_FOUND next to the other
-// aliases' data. Keep the data; rethrow only when there is none.
 async function runPartialQuery(octokit, query, variables) {
   try {
     return await octokit.graphql(query, variables);
@@ -895,13 +843,7 @@ async function runPartialQuery(octokit, query, variables) {
   }
 }
 
-/**
- * One page of the picker. `repos` is the project's repo network, origin
- * first. A lookup answers every repo that has the number: an issue or PR
- * from those lists, a discussion from the discussions list. A search answers
- * one kind, newest activity first.
- */
-export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, cursor }) {
+export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }) {
   const lookup = parseReferenceLookup(text, repos, kind);
   if (lookup) {
     if (lookup.repos.length === 0) {
@@ -917,7 +859,7 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
   }
 
   const variables = {
-    q: buildReferenceSearchQuery({ repos, kind, state, people, text }),
+    q: buildReferenceSearchQuery({ repos, kind, state, people, text, labels }),
     first: REFERENCE_PAGE_SIZE,
     after: cursor || null,
   };
@@ -939,7 +881,6 @@ const acrossCursorSchema = z.strictObject({
   version: z.literal(2),
   scope: z.string().regex(/^[a-f0-9]{64}$/),
   searches: z.array(z.strictObject({
-    // The GitHub page the search resumes on, and how many of its items were already shown.
     cursor: z.string().min(1).max(10_000).nullable(),
     offset: z.number().int().min(0).max(REFERENCE_PAGE_SIZE),
     done: z.boolean(),
@@ -964,19 +905,7 @@ function readAcrossCursor(cursor, scope, searchCount) {
   }
 }
 
-/**
- * Search each exact-account group in chunks, then merge them newest first.
- * A failed group is reported through onGroupError and contributes no items.
- *
- * Every page is newest first across all searches, later pages included: an
- * item is shown only once no unfinished search can still hold a newer one,
- * that is, when it is at least as new as the oldest item read from every
- * search with more pages. The rest wait for a later page, which reads the
- * same GitHub page again and skips what was shown (`offset`). The composite
- * cursor, even for one search, pins the query and the ordered
- * account/repository authority, so a page is never read against another set.
- */
-export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, cursor, onGroupError }) {
+export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, labels = [], cursor, onGroupError }) {
   const searches = groups.flatMap((group, groupIndex) => {
     const chunks = [];
     for (let offset = 0; offset < group.repos.length; offset += ACROSS_REPO_CHUNK_SIZE) {
@@ -987,7 +916,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
   const lookup = parseReferenceLookup(text, [], kind);
   if (lookup && cursor) throw invalidAcrossCursor();
   const scope = createHash('sha256').update(JSON.stringify({
-    kind, state, people, text,
+    kind, state, people, labels, text,
     searches: searches.map(({ group, repos }) => ({ accountId: group.accountId, authority: group.authority,
       repos: repos.map((repo) => ({ key: repoKey(repo.owner, repo.repo), directory: repo.directory })) })),
   })).digest('hex');
@@ -998,7 +927,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     const position = positions[index];
     if (position.done) return { done: true, items: [], total: position.total };
     try {
-      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, cursor: position.cursor });
+      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor });
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');
       const items = page.items.slice(position.offset).map((item) => ({ ...item,
         directory: repos.find((repo) => repoKey(repo.owner, repo.repo) === repoKey(item.sourceRepo.owner, item.sourceRepo.repo)).directory,
@@ -1015,7 +944,6 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     await onGroupError(searches[index].group, pages[index].error);
   }
   const live = pages.map((page, index) => (failedGroups.has(searches[index].groupIndex) || page.done ? null : page));
-  // Anything a search with more pages has not read yet is older than the last item it read.
   const bound = Math.max(-Infinity, ...live
     .filter((page) => page?.hasMore && page.items.length > 0)
     .map((page) => updatedAtOf(page.items[page.items.length - 1])));
@@ -1024,7 +952,6 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     const count = page.items.findIndex((item) => updatedAtOf(item) < bound);
     return count === -1 ? page.items.length : count;
   });
-  // A query with its own `sort:` is not newest first; show what was read rather than stall.
   if (shown.every((count) => count === 0)) shown = live.map((page) => page?.items.length ?? 0);
   const items = live.flatMap((page, index) => page?.items.slice(0, shown[index]) ?? []);
   if (searches.length > 1 || lookup) items.sort((left, right) => updatedAtOf(right) - updatedAtOf(left));

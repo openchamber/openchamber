@@ -33,11 +33,6 @@ export const useSessionListSync = ({
   const authoritativeSessions = useGlobalSessionsStore((state) => state.authoritativeSessions);
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
 
-  // The only bootstrap demand owner. Known projects and worktrees are not
-  // demanded: their rows and sessions come from the global session list, so
-  // initializing them only created one OpenCode instance per directory at
-  // startup. Manual retry from a sidebar notice still requests bootstrap
-  // through the scheduler with `force`.
   React.useEffect(() => {
     childStores.setBootstrapDemand(bootstrapDemandOwner, buildSessionBootstrapDemands({
       currentDirectory,

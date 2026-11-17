@@ -136,9 +136,6 @@ export const PluginsPage: React.FC = () => {
   const [isAddOpen, setIsAddOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<PluginDeleteTarget | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
-  // The switch that writes these policies lives in the grid, so this reads the
-  // same revision the grid and config events bump; otherwise the page keeps an
-  // old deny after the plugin is on again.
   const policyRevision = usePluginsStore((state) => state.policyRevision);
   const policy = useIntegrationPolicyState(configDirectory, policyRevision);
 
@@ -148,8 +145,6 @@ export const PluginsPage: React.FC = () => {
     return () => window.removeEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
   }, []);
 
-  // The page opens on the plugin grid; leaving it drops the selection so the
-  // next visit starts there again.
   React.useEffect(() => () => {
     usePluginsStore.getState().setSelected(null);
   }, []);
@@ -226,9 +221,6 @@ export const PluginsPage: React.FC = () => {
     };
   }, [selectedEntry, selectedFile, readFile, setDraft, catalogIsCurrent, configDirectory, fileKey]);
 
-  // One routine for both shapes the page edits: a registry entry (spec +
-  // options) and a plugin file (its contents). Text fields commit on blur, so
-  // this runs with whatever the draft holds at that moment.
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     if (!draft || !catalogIsCurrent || getPluginsConfigDirectory() !== configDirectory) return AUTOSAVE_UNCHANGED;
 
@@ -332,9 +324,6 @@ export const PluginsPage: React.FC = () => {
   if (selectedEntry && draft && draft.mode === 'entry') {
     const optionsResult = parseOptionsJson(draft.optionsJson);
     const optionsValid = optionsResult.ok;
-    // A row switched off here stays silent: the list already carries that
-    // state on its switch. Only a rule the user wrote themselves needs a
-    // sentence, because nothing on this page can flip it.
     const blockedByConfig = selectedEntry.policyResource
       ? policy.status === 'ready' && selectedEntry.switchState !== 'off' && policy.isBlockedByRule(selectedEntry.policyResource)
       : false;
@@ -465,8 +454,6 @@ export const PluginsPage: React.FC = () => {
               setDraft({ ...draft, content: e.target.value })
             }
             onKeyDown={(event) => {
-              // The file editor is long enough that leaving the field to save
-              // is a chore; the usual shortcut writes it where you are.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 autosave.requestSave();

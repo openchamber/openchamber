@@ -1,6 +1,3 @@
-// Commit-message prompt assembly and parse/format helpers for the VS Code
-// extension host. Keep these templates aligned with
-// `packages/ui/src/lib/magicPrompts.ts` (`git.commit.generate.*`).
 
 export const COMMIT_DIFF_FILE_LIMIT = 30;
 export const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 120_000;
@@ -99,11 +96,6 @@ const overrideOf = (overrides: Record<string, string>, id: string): string | und
   Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : undefined
 );
 
-/**
- * `overrides` are the effective Magic Prompt overrides by prompt id. A
- * present key is used as written, an empty string included, the same as the
- * client; only an absent key falls back to the built-in text.
- */
 export const buildCommitGenerationPrompt = (
   files: string[],
   recentCommits: string,

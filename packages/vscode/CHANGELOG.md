@@ -1,3 +1,22 @@
+## [2.7.2] - 2026-11-15
+
+### New
+
+- Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.
+- Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).
+- Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: typing into a long draft keeps up, and an opened session shows its messages without jumping.
+- Chat: a shell command you stop shows its output so far.
+
+### Fixes
+
+- Chat: a very long reasoning block froze the chat when it finished.
+- Chat: sending a message closed a form whose tool call had already ended (thanks to @sergiopadure).
+- Chat: a background subagent without a report showed its launch notice as the answer.
+
 ## [2.7.1] - 2026-11-12
 
 ### New

@@ -3,20 +3,6 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { subscribeToConfigChanges } from '@/lib/configSync';
 
-/**
- * Whether OpenChamber's background model ("small model") can run right now.
- *
- * `GET /api/small-model` answers `available: false` when OpenCode has no model
- * a stateless generation may use — a fresh install on OpenCode's free tier,
- * for instance, has models for chat but none for this. Session renaming, the
- * session goal and the changes walkthrough all depend on it, so the surfaces
- * that start them read this store to show a disabled state with a reason
- * instead of failing after the click.
- *
- * Cached per runtime + directory and refreshed at most once a minute unless
- * something that changes the answer happens: a provider login or a settings
- * save emits a config change, a runtime switch drops everything.
- */
 
 export type SmallModelAvailability = 'unknown' | 'available' | 'unavailable';
 
@@ -29,9 +15,7 @@ const inFlight = new Map<string, Promise<void>>();
 
 interface SmallModelStore {
   byKey: Record<string, { availability: SmallModelAvailability; fetchedAt: number }>;
-  /** Fetch when unknown or stale; concurrent callers share one request. */
   ensureFresh: (directory?: string | null) => Promise<void>;
-  /** Forget every answer; the next reader fetches again. */
   invalidate: () => void;
 }
 
@@ -57,8 +41,6 @@ export const useSmallModelStore = create<SmallModelStore>()((set, get) => ({
         const payload = (await response.json().catch(() => null)) as { available?: boolean } | null;
         const available = payload?.available;
         if (available !== true && available !== false) return;
-        // A failed or malformed answer keeps the previous one: an unreachable
-        // server is not evidence that the model went away.
         set((state) => ({
           byKey: {
             ...state.byKey,
@@ -86,7 +68,5 @@ export const selectSmallModelAvailability = (
   directory: string | null | undefined,
 ): SmallModelAvailability => state.byKey[toKey(directory)]?.availability ?? 'unknown';
 
-// Logging into a provider, or changing the Small Model setting, changes the
-// answer; a runtime switch points at a different OpenCode entirely.
 subscribeToConfigChanges(() => useSmallModelStore.getState().invalidate());
 subscribeRuntimeEndpointChanged(() => useSmallModelStore.getState().invalidate());

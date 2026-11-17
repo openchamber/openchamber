@@ -4,14 +4,6 @@ import { z } from 'zod';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 
-/**
- * Ports the user hid from the browser panel's list of running servers.
- *
- * Discovery lists every listening loopback port, and on some machines most of
- * them belong to the OS or to other apps. The user hides those once; the port
- * stays hidden whenever something listens on it again. Kept per runtime, since
- * each machine has its own noise.
- */
 const STORAGE_KEY = 'oc.browser.hiddenDevServerPorts.v1';
 const storedSchema = z.record(z.string(), z.array(z.number().int().positive()));
 type StoredHiddenPorts = z.infer<typeof storedSchema>;

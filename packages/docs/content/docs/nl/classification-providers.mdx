@@ -22,7 +22,7 @@ Zonder provider zijn het vangnet en Auto verborgen. Sessies in uitvoering krijge
 
 ## Instellen
 
-Jev staat uit totdat u het inschakelt. Er gaat niets uit uw gesprekken naar een classificatieprovider voordat u er een kiest. Open **Instellingen → Providers → Classificatieproviders** en kies waar Jev-verzoeken naartoe gaan. Naast **Uit** zijn er zes opties.
+Jev staat uit totdat u het inschakelt. Er gaat niets uit uw gesprekken naar een classificatieprovider voordat u er een kiest. Open **Instellingen → Providers → Classificatieproviders** en kies waar Jev-verzoeken naartoe gaan. Naast **Uit** zijn er zeven opties.
 
 ### OpenCode Zen-actie
 
@@ -52,6 +52,17 @@ Deze optie gebruikt de AI Gateway API-sleutel uit OpenCode. De kosten komen op u
 
 1. Open **Instellingen → Providers** en voeg een API-sleutel toe aan **Vercel AI Gateway**.
 2. Ga terug naar **Classificatieproviders** en kies **Vercel AI Gateway-sleutel**.
+
+### Google Gemini
+
+Deze optie gebruikt Gemini Decision 1, het eigen beslismodel van Google, via de Decisions API van Google. De kosten komen op uw Google-account. OpenChamber stelt het dezelfde vragen als Jev. Bij de gratis versie van Google mag Google wat het ontvangt gebruiken om zijn producten te verbeteren ([voorwaarden van de Gemini API](https://ai.google.dev/gemini-api/terms#data-use-unpaid)).
+
+1. Vraag een API-sleutel aan in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Plak die in het veld **Gemini API-sleutel** en klik op **Opslaan**.
+
+Door een sleutel op te slaan selecteert u deze meteen. De sleutel blijft in een eigen bestand op de OpenChamber-server en wordt nooit naar de browser gestuurd.
+
+Heeft de provider **Google** in OpenCode al een API-sleutel, dan kunt u het veld overslaan en **Google Gemini** kiezen. Een sleutel in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` of `GEMINI_API_KEY` werkt ook. Een in OpenChamber opgeslagen sleutel gaat voor op beide. Bewaar de sleutel in OpenChamber als u Gemini alleen voor beslissingen wilt: een sleutel bij de Google-provider in OpenCode zet daar ook alle Gemini-chatmodellen open, en een Gemini API-sleutel kan niet tot één model worden beperkt.
 
 ### TypeSafe API-sleutel
 
@@ -90,7 +101,7 @@ De kaart bij **Instellingen → Providers** toont **Gereed** zodra een provider 
 
 ## Als uw keuze niet meer werkt
 
-Kan de gekozen provider niet worden gebruikt, bijvoorbeeld omdat de actie is afgelopen of een sleutel is verwijderd, dan kiest OpenChamber de eerste bruikbare eigen optie in deze volgorde: TypeSafe-sleutel, uw aangepaste adres, OpenRouter, Vercel AI Gateway en Zen-sleutel. Het valt nooit terug op de actie, en **Uit** blijft uit. De pagina laat zien welke provider momenteel wordt gebruikt.
+Kan de gekozen provider niet worden gebruikt, bijvoorbeeld omdat de actie is afgelopen of een sleutel is verwijderd, dan kiest OpenChamber de eerste bruikbare eigen optie in deze volgorde: TypeSafe-sleutel, uw aangepaste adres, OpenRouter, Vercel AI Gateway en Zen-sleutel. Het valt nooit terug op de actie of op Google Gemini, en **Uit** blijft uit. De pagina laat zien welke provider momenteel wordt gebruikt.
 
 Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie heeft daarvoor een veilige terugval:
 
@@ -101,9 +112,9 @@ Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie 
 
 ## Wat krijgt Jev te zien?
 
-Jev ontvangt korte fragmenten uit uw gesprek: uw laatste bericht en, ter context, maximaal drie eerdere beurten, elk ingekort tot de eerste paar honderd tekens. Voor het vangnet ontvangt het ook de te beoordelen actie zoals OpenCode die beschrijft: de opdracht die de agent wil uitvoeren, of het bestand en de wijziging bij een bewerking. Het krijgt nooit volledige bestanden of afbeeldingen.
+Jev ontvangt uw laatste bericht en, ter context, fragmenten uit het recente gesprek: maximaal drie eerdere beurten, elk ingekort tot een paar honderd tekens, en aan het einde van een beurt het begin en het einde van het antwoord van de agent. Voor het vangnet ontvangt het ook de actie waarvoor de agent toestemming vraagt, zoals OpenCode die beschrijft: de opdracht die de agent wil uitvoeren, of het bestand en de wijziging bij een bewerking. Maakt de agent een bestand aan, dan is die wijziging het volledige bestand, ook een afbeelding die als tekst is geschreven, zoals SVG. Controleert Jev een doel, dan ontvangt het het doel en het laatste antwoord van de agent, tot 10.000 tekens daarvan.
 
-Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe of uw aangepaste adres, afhankelijk van uw keuze.
+Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe of uw aangepaste adres, afhankelijk van uw keuze.
 
 ## Waar werkt het?
 

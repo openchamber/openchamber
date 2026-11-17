@@ -25,6 +25,8 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
+import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
+import { takeOverSession } from '@/sync/session-take-over';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
@@ -52,13 +54,6 @@ type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
 const collectDescendantIds = (node: SessionNode): string[] => node.children.flatMap((child) => [child.session.id, ...collectDescendantIds(child)]);
 
-/**
- * A session in the phone's list: the desktop row's content for a thumb. One
- * line is a tree row, its subsession chevron in the slot left of the title
- * and its live state on the right before the time. Two lines put the
- * branch on the second, with the chevron as its first icon. Swiping reveals
- * archive, pin, Track or Done, delete, rename and Copy ID.
- */
 export const MobileSessionRow: React.FC<{
   row: SessionRowModel;
   geometry: MobileTreeGeometry;
@@ -73,7 +68,6 @@ export const MobileSessionRow: React.FC<{
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
   const isCurrent = useSessionUIStore((state) => state.currentSessionId === session.id);
-  // A run's overview covers the session, and then the run's row is the selected one.
   const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
   const active = isCurrent && !runOverviewOpen;
   const isUnread = useSessionUnread(session.id);
@@ -85,7 +79,6 @@ export const MobileSessionRow: React.FC<{
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
   const hasChildren = node.children.length > 0;
   const expanded = row.expanded === true;
-  // A folded row stands for its subsessions too: their waiting requests count here.
   const familyIds = React.useMemo(
     () => (hasChildren && !expanded ? [session.id, ...collectDescendantIds(node)] : [session.id]),
     [expanded, hasChildren, node, session.id],
@@ -93,21 +86,15 @@ export const MobileSessionRow: React.FC<{
   const pendingRequests = usePendingRequests(familyIds);
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  // Only a work's own row tracks it, for every session of it: what nests in
-  // a work is tracked and finished with it.
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
-  // A pinned session is never in work, so it offers no Track or Done.
   const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory) && !pinned;
   const sessionsInWork = React.useMemo(() => (ownsWork ? collectSessionWorkInWork(node) : []), [node, ownsWork]);
   const work = ownsWork
     ? { inWork: sessionsInWork.length > 0, onToggle: () => { void toggleMobileSessionWork(session, sessionsInWork, t); } }
     : undefined;
   const pin = topLevel && directory ? { pinned, onToggle: () => toggleMobileSessionPin(session, pinned, t) } : undefined;
-  // The Pinned section's header already says its rows are pinned.
   const inPinnedZone = isPinnedZoneRowKey(row.key);
   const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
-  // Two lines in a zone with Detailed rows on ('timeline-mixed'), and under a
-  // project for the works there (`detailed`); what nests inside stays one line.
   const detailed = row.detailed === true || isMultiLineTimelineContext(row.renderContext);
   const project = useProjectsStore(React.useCallback(
     (state) => (detailed && row.renderContext === 'timeline-mixed' && row.projectId ? state.projects.find((entry) => entry.id === row.projectId) ?? null : null),
@@ -115,8 +102,6 @@ export const MobileSessionRow: React.FC<{
   ));
   const projectNamed = useZoneProjectNames();
   const branch = resolveTooltipBranchLabel(row.secondaryMeta, node.worktree?.branch ?? null);
-  // The PRs and issues linked to the session, as the desktop row shows them:
-  // the one that needs attention first, in its state's colour.
   const { refLines } = useSessionRefLines(session, node.worktree, false);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
@@ -132,7 +117,6 @@ export const MobileSessionRow: React.FC<{
     </span>
   ) : null);
   const inSpace = row.secondaryMeta?.inSpace === true;
-  // Extensions' marks, keyed as the desktop row keys them.
   const projectRoot = useProjectsStore(React.useCallback(
     (state) => (row.projectId ? state.projects.find((entry) => entry.id === row.projectId)?.path ?? null : null),
     [row.projectId],
@@ -154,7 +138,6 @@ export const MobileSessionRow: React.FC<{
 
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const select = () => {
-    // A tap while the actions are out only puts them away.
     if (revealed) {
       setRevealed(false);
       return;
@@ -162,7 +145,6 @@ export const MobileSessionRow: React.FC<{
     selectMobileSession(session, row.projectId, actions.close);
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
-  // Extensions' session actions, after the row's own, as the desktop menu lists them.
   const guestActions = guestSessionActions(useGuestActions());
   const loadRecords = useSessionMessageRecordsForExport();
   const runGuestAction = (entry: GuestActionEntry) => {
@@ -176,14 +158,10 @@ export const MobileSessionRow: React.FC<{
       onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
     });
   };
-  // As on the desktop, a request waiting on the user stands for the turn:
-  // the running mark and its timer step aside for the warning badge.
   const waitingOnUser = pendingRequests.hasPermission || pendingRequests.hasForm;
   const liveState = aiRename.pending
     ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-status-info" aria-label={t('sessions.aiRename.generating')} />
     : (isStreaming || showUnread) && !waitingOnUser ? <SessionActivityIndicator state={turnActivity ?? 'unread'} /> : null;
-  // No date, as on the desktop: the list is ordered by recency. A turn's
-  // duration shows while it runs and until it is read.
   const timeSlot = showActivityDuration && !waitingOnUser
     ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="shrink-0 typography-micro" />
     : null;
@@ -218,7 +196,6 @@ export const MobileSessionRow: React.FC<{
       <MobileProjectIcon project={project} size="xs" />
       {projectNamed ? <TimelineProjectName project={project} separated={false} /> : null}
     </> : null;
-    // A mark never opens a second line: with nothing else there it rides in the first.
     const hasSecondLine = Boolean(project || branch || getSessionGoal(session) || primaryRef || waitingOnUser);
     content = (
       <MobileTwoLineLayout
@@ -229,9 +206,9 @@ export const MobileSessionRow: React.FC<{
           ? renameForm(0, 'h-[1lh] pe-0 typography-ui-label [&_button]:size-6 [&_button>svg]:size-3.5')
           : <>
             {titleText}
+            {doneHint}
             {hasSecondLine ? null : marks}
             {pinMarker}
-            {doneHint}
             {liveState}
             {timeSlot}
           </>}
@@ -253,8 +230,6 @@ export const MobileSessionRow: React.FC<{
       />
     );
   } else {
-    // The slot holds the subsession chevron only; the live state sits on the
-    // right before the time, as on every row.
     content = <>
       {toggle ? (
         <MobileSlotChevron slotLeft={geometry.slotLeft(depth)}>
@@ -268,16 +243,13 @@ export const MobileSessionRow: React.FC<{
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >
-          {/* The desktop row's order: the goal, the PR, the extensions'
-              marks and the requests waiting on the user, then the pin, the
-              done hint, the live state and its time. */}
           {titleText}
+          {doneHint}
           <MobileSessionGoalGlyph session={session} />
           {refMark(false)}
           {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
           {pinMarker}
-          {doneHint}
           {liveState}
           {timeSlot}
         </button>
@@ -285,7 +257,6 @@ export const MobileSessionRow: React.FC<{
     </>;
   }
 
-  // The long press menu: what the swipe has no room for, then its own actions.
   const menu = (
     <>
       <SessionReadMenuItem sessionId={session.id} Item={ContextMenuItem} showShortcut={false} />
@@ -303,6 +274,12 @@ export const MobileSessionRow: React.FC<{
         <ContextMenuItem onClick={work.onToggle}>
           <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 size-4" />
           {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </ContextMenuItem>
+      ) : null}
+      {isOperatorChildSession(session) ? (
+        <ContextMenuItem onClick={() => { void takeOverSession(session.id, directory || null).catch(() => toast.error(t('sessions.sidebar.session.takeOver.failed'))); }}>
+          <Icon name="user" className="me-1 size-4" />
+          {t('sessions.sidebar.session.menu.takeOver')}
         </ContextMenuItem>
       ) : null}
       <ContextMenuItem onClick={() => { void runMobileSubtreeAction('archive', session, t); }}>
@@ -326,8 +303,7 @@ export const MobileSessionRow: React.FC<{
       revealed={revealed}
       onRevealedChange={setRevealed}
       dataActiveSession={active}
-      // A repeat of the open session (Pinned or In work above its project)
-      // takes no fill, as on the desktop: its full-strength title marks it.
+      sessionId={session.id}
       contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && !row.repeat && MOBILE_ACTIVE_ROW_CLASS)}
       actions={(
         <MobileSessionRowActions

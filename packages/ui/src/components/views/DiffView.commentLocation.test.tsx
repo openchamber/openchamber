@@ -101,7 +101,7 @@ test('a comment location reopens the pull request diff on its file', async () =>
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
     const settle = async () => {
-      for (let round = 0; round < 4; round += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+      for (let round = 0; round < 12; round += 1) await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
     };
     await settle();
     // Changes is open on the pull request scope when the comment asks for its

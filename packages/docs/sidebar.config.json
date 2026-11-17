@@ -222,6 +222,23 @@
           }
         },
         {
+          "label": "Agent Pages",
+          "link": "/agent-pages/",
+          "translations": {
+            "nl": "Pagina's van agents",
+            "uk": "Сторінки агента",
+            "zh-CN": "智能体页面",
+            "es": "Páginas del agente",
+            "pt-BR": "Páginas do agente",
+            "ko": "에이전트 페이지",
+            "pl": "Strony agenta",
+            "fr": "Pages de l’agent",
+            "ja": "エージェントページ",
+            "de": "Agenten-Seiten",
+            "tr": "Agent sayfaları"
+          }
+        },
+        {
           "label": "Workflows",
           "link": "/workflows/",
           "translations": {

@@ -9,7 +9,7 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# Four independent jobs on their own Blacksmith runners (same image as
+# Five independent jobs on their own Blacksmith runners (same image as
 # ubuntu-24.04, faster CPUs, colocated cache; the Blacksmith GitHub App is
 # installed on the openchamber org). None of them reads another's output: the
 # tests and type-check need only what `bun install` prepares (postinstall
@@ -43,6 +43,26 @@ jobs:
         run: bun run lint
       - name: Changelog outputs match their sources
         run: bun run changelog:check
+
+  # The part of `bun run check:changed` the other jobs do not run: dead code,
+  # the ratchet over the files the pull request touches, and the file size
+  # limit. The checkout is the merge commit, so its first parent is the base.
+  changed-gate:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Dead code
+        run: bun run dead-code
+      - name: Ratchet and file size
+        run: node scripts/check-changed.mjs --base HEAD^1 --ratchet-only
 
   tests:
     runs-on: blacksmith-4vcpu-ubuntu-2404

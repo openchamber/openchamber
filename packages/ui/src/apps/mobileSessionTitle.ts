@@ -1,12 +1,5 @@
 import type { PendingRequests } from './usePendingRequests';
 
-/**
- * A session title carries the session's state, as in the desktop sidebar: a
- * finished turn nobody has seen and a request waiting on the user read
- * semibold, a running turn at full strength, the rest a step below. The open session
- * takes the selection's text colour, as on the desktop; where it is listed
- * again lower down (`repeat`), it has no fill and takes the page's full text colour.
- */
 export const mobileSessionTitleClass = ({ active, repeat = false, unread, running, pending }: {
   active: boolean;
   repeat?: boolean;

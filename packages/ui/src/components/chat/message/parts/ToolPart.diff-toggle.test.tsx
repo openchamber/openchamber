@@ -1,7 +1,5 @@
 import { act } from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
-import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
@@ -12,17 +10,6 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { useGuestsStore } from '@/lib/guests/store';
 import { TOOL_DIFF_PREVIEW_MAX_CHARS } from './toolDiffPreview';
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'tool-guest-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(pathToFileURL(path.split('?')[0]).href)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const { default: ToolPart } = await import('./ToolPart');
 

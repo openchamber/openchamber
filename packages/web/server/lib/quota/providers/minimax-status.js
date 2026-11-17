@@ -1,16 +1,7 @@
-/**
- * MiniMax Provider - Business status
- *
- * The remains endpoints answer HTTP 200 and report failures in `base_resp`.
- * Web/Electron and VS Code both import this module so the card says the same.
- * @module quota/providers/minimax-status
- */
 
-// MiniMax answers 1004 ("cookie is missing, log in again") to a valid
-// Subscription Key: these endpoints share usage only with a web login (#5839).
+// external: #5839 MiniMax returns cookie-required error 1004 for valid Subscription Keys.
 const NO_USAGE_FOR_KEY = 1004;
 
-/** The card's error for a failed `base_resp`, or null when MiniMax reports success. */
 export const miniMaxStatusError = (baseResp) => {
   if (!baseResp) return null;
   const statusCode = Number(baseResp.status_code);

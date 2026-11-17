@@ -16,6 +16,7 @@ const theme: BrowserAnnotationOverlayTheme = {
   border: 'rgb(30, 30, 30)',
   text: 'rgb(240, 240, 240)',
   mutedText: 'rgb(160, 160, 160)',
+  danger: 'rgb(229, 72, 77)',
 };
 
 const labels = {

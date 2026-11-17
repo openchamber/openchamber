@@ -1014,3 +1014,22 @@ describe('the link item', () => {
     expect(push({ kind: 'link', identifier: 'D'.repeat(129) })).toBeNull();
   });
 });
+
+describe('microphone wire', () => {
+  const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION } as const;
+
+  test('the host takes an open at a real audio rate and a close', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-1', payload: { sampleRate: 48_000 } })).not.toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-close', id: 'oc-2' })).not.toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-3', payload: { sampleRate: 100 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'microphone-open', id: 'oc-4', payload: { sampleRate: 44_100.5 } })).toBeNull();
+  });
+
+  test('audio is a bounded Float32Array and an end names its reason', () => {
+    const audio = { ...envelope, type: 'microphone-audio', payload: { samples: new Float32Array(1024) } } as const;
+    expect(parseHostMessage(audio)).not.toBeNull();
+    expect(parseHostMessage({ ...audio, payload: { samples: new Float32Array(16_385) } })).toBeNull();
+    expect(readHostMessage(audio)).toEqual(audio);
+    expect(parseHostMessage({ ...envelope, type: 'microphone-ended', payload: { reason: 'device-lost' } })).not.toBeNull();
+  });
+});

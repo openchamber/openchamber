@@ -18,49 +18,9 @@ import { createPatAccountAuth } from './pat-account-auth.js';
 import { isProviderUsername } from './provider-id.js';
 import { createStandardMutations } from './standard-mutations.js';
 
-/**
- * An installed extension's Git host (`ext-<guestId>`) as a provider
- * implementation behind the shared route shell. The extension's service
- * answers the forwarded calls (`POST /source-control` on its loopback, the
- * SDK's wire 1); everything that must not depend on a third party stays here:
- * the accounts and tokens (`pat-account-auth.js` over the provider's own auth
- * store section), the mutation kinds and digests (`standard-mutations.js`),
- * which failures write an account off, and which writes count as failed.
- *
- * Every call reads the guest's current catalog row (`currentGuest`), which
- * applies enterprise policy on each read, and takes the grants from it: a
- * guest that is no longer eligible (paused, unapproved, refused by policy)
- * is refused as `NO_SERVICE` before anything is sent, and the registered set
- * is reconciled.
- *
- * The service never holds a token. Each forwarded call carries a fresh handle
- * (`outbound-handles.js`) bound to the instance origin and, when the call acts
- * as an account, its token; the handle ends with the call. Only
- * `mutation.perform` may send writes through its handle; every other call's
- * handle carries `GET` alone, so a write happens only where the mutation
- * executor keys, records and audits it. What the proxy saw
- * the forge answer through that handle is the evidence this module trusts:
- *
- * - A 401 the service reports writes the account off only when the proxy saw
- *   the forge answer 401 on that handle. Otherwise the answer is malformed.
- * - A mutation counts as `failed` (recorded, never retried) only when the
- *   service was never reached, or no write went out, or every write got a
- *   4xx. Any other failure may have changed the forge: `outcome-unknown`.
- *
- * Answers are checked with the SDK's `sourceControlProviderSchemasV1`; one
- * that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty
- * answer.
- *
- * Inputs a service built against an older manifest would not understand go
- * out only to a host whose manifest declares them: a read's `revision` needs
- * `capabilities.revisions`, a review's `votes` needs `reviewModel: 'votes'`.
- * Otherwise the call is refused with a 400 before anything is sent, as the
- * shell refuses it, so a service never answers a question it ignored.
- */
 
 const schemas = sourceControlProviderSchemasV1;
 
-// A service that never took the call: nothing reached the forge.
 const NOT_REACHED_CODES = new Set(['SERVICE_FAILED', 'NO_SERVICE', 'DISABLED']);
 
 const failureKindOfServiceError = (code) => {
@@ -69,7 +29,6 @@ const failureKindOfServiceError = (code) => {
   return 'provider-error';
 };
 
-/** `kind` is what `classifyFailure` answers for the error; `outbound` what the proxy saw during the call. */
 const callError = (message, { status, code, kind = 'provider-error', outbound = [], notReached = false } = {}) => {
   const error = new Error(message);
   if (status !== undefined) error.status = status;
@@ -84,24 +43,20 @@ const malformed = (label, detail, outbound = []) => callError(`${label} answered
   status: 502, code: 'MALFORMED_PROVIDER_RESPONSE', outbound,
 });
 
-/** Plain JSON of a value the shell built (frozen objects included), without `undefined` fields. */
 const json = (value) => JSON.parse(JSON.stringify(value));
 
 const TARGET_FIELDS = ['number', 'head', 'base', 'headSha'];
 const PROJECT_FIELDS = ['id', 'owner', 'name'];
 
 const READ_ONLY = Object.freeze(['GET']);
-/** The forge methods a forwarded call may send. */
 const outboundMethodsOf = (method) => (method === 'mutation.perform' ? SOURCE_CONTROL_OUTBOUND_METHODS : READ_ONLY);
 
-/** A refusal of the input itself: nothing was sent, so a write it stopped counts as failed. */
 const refusedInput = (code, message) => Object.assign(new Error(message), {
   status: 400, code, sourceControlNotReached: true,
 });
 
 const REVISION = /^[0-9a-f]{40}$/i;
 
-/** Thrown into a running call's account write after its provider was unregistered. */
 const disposedError = (label) => Object.assign(new Error(`${label} is no longer available`), {
   status: 404, code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE',
 });
@@ -130,9 +85,6 @@ export function createExtensionProvider({
   const basicAuth = tokenFormat?.scheme === 'basic';
   const serviceLogin = descriptor.authMethods.cli?.kind === 'service';
 
-  // After the registry unregisters the provider, a call still running (a
-  // connect waiting on the service) must not write an account back into a
-  // section that removal is about to drop or already dropped.
   let disposed = false;
   const guardedWrite = (write) => (...args) => {
     if (disposed) return Promise.reject(disposedError(label));
@@ -153,7 +105,6 @@ export function createExtensionProvider({
     notReached: NOT_REACHED_CODES.has(error.code),
   });
 
-  /** The guest as the catalog has it now; a guest that may no longer serve is refused before anything is sent. */
   const eligibleGuest = async () => {
     let current;
     try {
@@ -168,12 +119,6 @@ export function createExtensionProvider({
     throw serviceError(new GuestServiceError('the extension may no longer serve this Git host', 'NO_SERVICE'), []);
   };
 
-  /**
-   * One forwarded call. `token` is the secret the handle carries (null for
-   * none), `user` the acting account (null before one is known), `login` the
-   * username a `basic` token is sent with. Answers the parsed data and what
-   * the proxy saw the call send to the forge.
-   */
   const forward = async (method, { instance, token, user, login = null, input, tokenless = false }) => {
     if (token && basicAuth && !isProviderUsername(login)) {
       throw refusedInput('SOURCE_CONTROL_USERNAME_REQUIRED', `${label} signs in with a username, and this account has none it can send`);
@@ -232,7 +177,6 @@ export function createExtensionProvider({
           throw callError(message, { status: 401, code, kind: 'invalid-token', outbound: grant.outbound });
         }
         if (status === 401) {
-          // The service's word alone never writes an account off.
           if (!grant.outbound.some((request) => request.status === 401)) {
             throw malformed(label, 'a 401 the forge did not give', grant.outbound);
           }
@@ -244,7 +188,6 @@ export function createExtensionProvider({
       if (!data.success) throw malformed(label, `${method} does not match its schema`, grant.outbound);
       return { data: data.data, outbound: grant.outbound };
     } catch (error) {
-      // The proxy cannot observe writes a service performs through its own CLI.
       if (tokenless) error.sourceControlServiceLogin = true;
       throw error;
     } finally {
@@ -252,8 +195,6 @@ export function createExtensionProvider({
     }
   };
 
-  // The token behind a session stays in `pat-account-auth.js`; `tokenFor` reads it.
-  // A `basic` host's token is checked together with the username it is sent with.
   const verify = async (origin, token, { username = null } = {}) => (await forward('auth.verify', {
     instance: origin, token, user: null, login: username, input: {},
   })).data.user;
@@ -278,7 +219,6 @@ export function createExtensionProvider({
     return validId && login ? { id: userId, login } : null;
   };
 
-  /** A call as the session's account; a refused token carries the account for the shell's write-off. */
   const forwardAs = async (method, session, input) => {
     try {
       return await forward(method, {
@@ -298,7 +238,6 @@ export function createExtensionProvider({
     }
   };
 
-  /** `revision` goes out only to a host that declares revisions, and only as a commit sha. */
   const requireRevisionInput = (input) => {
     if (input.revision === undefined) return;
     if (!descriptor.capabilities.revisions) {
@@ -309,13 +248,11 @@ export function createExtensionProvider({
     }
   };
 
-  /** A resource read: the shell's input without the session, in plain JSON. */
   const read = (method) => async ({ session, ...input }) => {
     requireRevisionInput(input);
     return (await forwardAs(method, session, json(input))).data;
   };
 
-  /** The head's clone URL on the instance, naming the head project; else the answer is malformed. */
   const requireEndpoint = (instance, source) => {
     let endpoint;
     try { endpoint = new URL(source.endpoint); } catch { endpoint = null; }
@@ -361,7 +298,6 @@ export function createExtensionProvider({
   };
 
   const standardMutations = createStandardMutations(descriptor);
-  /** The normalized input without the digest fields the host keeps for itself; votes only to a votes host. */
   const stepInput = (input) => {
     const { digest: _digest, ...rest } = input;
     if (rest.votes !== undefined && descriptor.capabilities.reviewModel !== 'votes') {
@@ -370,7 +306,6 @@ export function createExtensionProvider({
     return json(rest);
   };
 
-  /** The resolved target describes the context the shell validated, field by field. */
   const requireTargetOf = (context, target, outbound) => {
     const expected = context.target;
     const matches = target.repositoryId === context.repositoryId
@@ -386,7 +321,6 @@ export function createExtensionProvider({
     if (replayOf) request.replayOf = json({ target: replayOf.target });
     const { data: resolved, outbound } = await forwardAs('mutation.resolveTarget', session, request);
     requireTargetOf(context, resolved.target, outbound);
-    // A replay acts on exactly what the first attempt did; only a create is resolved again.
     if (replayOf && kind !== 'change-request-create' && !isDeepStrictEqual(json(resolved.target), json(replayOf.target))) {
       throw Object.assign(new Error('Source control mutation idempotency key was already used with different input'), {
         code: 'SOURCE_CONTROL_MUTATION_CONFLICT', status: 409,
@@ -399,7 +333,6 @@ export function createExtensionProvider({
     route, kind, input: stepInput(input), resolved: json(resolved),
   })).data;
 
-  /** Decided on what the proxy saw, never on the status the service reports. */
   const classifyError = (error) => {
     if (error?.sourceControlNotReached) return 'failed';
     if (error?.sourceControlServiceLogin) return 'outcome-unknown';
@@ -441,7 +374,6 @@ export function createExtensionProvider({
       reconcile: mutationStep('mutation.reconcile'),
       classifyError,
     }),
-    /** Called by the registry when it unregisters the provider: account writes still in flight are refused. */
     dispose: () => { disposed = true; },
   });
 }

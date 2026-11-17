@@ -216,7 +216,8 @@ describe('ready notification while background subagents run', () => {
         return jobs ? Response.json({ data: jobs() }) : new Response(null, { status: 404 });
       }
       if (url.pathname === '/api/session/active') return Response.json({ data: active() });
-      if (url.pathname === '/api/session') return Response.json({ data: children, cursor: {} });
+      const child = children.find((record) => url.pathname === `/api/session/${record.id}`);
+      if (child) return Response.json({ data: child });
       return Response.json({});
     }));
   };

@@ -132,7 +132,10 @@ test("the phone's Changes surface opens the comparison a comment was written on"
           repository={{ rootIsGitRepo: true, gitDirectory: '/repo-comment', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }} />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    const settle = async () => {
+      for (let round = 0; round < 12; round += 1) await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
+    };
+    await settle();
     // The chat hands Changes a comment's place, as its context preview does:
     // the pull request, then the file and line.
     await act(async () => {
@@ -144,8 +147,8 @@ test("the phone's Changes surface opens the comparison a comment was written on"
         origin: { kind: 'change-request', provider: 'github', number: 42, repository: 'upstream/project' },
       });
     });
-    for (let round = 0; round < 4; round += 1) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    for (let round = 0; round < 12; round += 1) {
+      await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
     }
 
     expect(useUIStore.getState().pendingCommentLocation).toBeNull();

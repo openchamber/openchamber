@@ -185,6 +185,23 @@ The snapshot is `{ kind: "shells", scope, shells, ended }`, with `scope` echoing
 
 OpenCode keeps an ended command's output for its latest 25 ended commands per directory. A stopped command loses its output right away. Reading a shell OpenChamber never saw, or output OpenCode no longer has, is `NOT_FOUND`. So is stopping a shell that is not running. An unapproved `shells` capability is `NOT_GRANTED`.
 
+## Microphone
+
+With the `microphone` capability, `openMicrophone()` gives your panel the user's microphone as a `MediaStream`. Your frame can't call `getUserMedia` itself, since the browser refuses it to a sandboxed frame, so OpenChamber captures the audio and streams it in.
+
+```ts
+button.addEventListener("click", async () => {
+  const microphone = await host.openMicrophone();
+  peer.addTrack(microphone.stream.getAudioTracks()[0], microphone.stream);
+  microphone.onEnded((reason) => showEnded(reason));
+  hangUp.onclick = () => microphone.close();
+});
+```
+
+Open it from a click inside your frame: the audio starts only from the user's gesture. Check `features.microphone` in `onReady` first; older hosts and hidden background frames answer `UNSUPPORTED`. One microphone is open per frame, so a second call while it's open is `HOST_REJECTED`. A refusal by the user or the system is `DENIED`, no input device is `NOT_FOUND`, and an unapproved capability is `NOT_GRANTED`.
+
+`close()` stops the capture and ends the track. `onEnded` tells you when OpenChamber stopped it on its own: `revoked` when the user withdrew the capability or paused the extension, `device-lost` when the device went away. Reloading or removing the frame stops it too. The stream is mono, with echo cancellation, noise suppression and auto gain on.
+
 ## Persistent extension data
 
 ```ts

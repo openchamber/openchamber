@@ -17,7 +17,6 @@ type Options = {
 
 const NO_SECTIONS: ReadonlySet<SearchResultSection> = new Set();
 
-/** One status for the field's mark: still loading while either block is, a failure of either, else both ready. */
 function mergeContentSearchStatus(active: ContentSearchStatus, archived: ContentSearchStatus): ContentSearchStatus {
   if (active.kind === 'loading' || archived.kind === 'loading') return { kind: 'loading' };
   if (active.kind !== 'ready') return active;
@@ -31,12 +30,6 @@ function mergeContentSearchStatus(active: ContentSearchStatus, archived: Content
   };
 }
 
-/**
- * The sidebar's search: the active and the archived block each ask for their
- * own message matches and page on their own. One request for both lists the
- * newest matches first, so the archived ones, usually the oldest, would wait
- * pages below every active one.
- */
 export function useSidebarConversationSearch({ metadataItems, ...shared }: Options) {
   const activeItems = React.useMemo(() => metadataItems.filter((item) => !item.archived), [metadataItems]);
   const archivedItems = React.useMemo(() => metadataItems.filter((item) => item.archived), [metadataItems]);
@@ -44,8 +37,6 @@ export function useSidebarConversationSearch({ metadataItems, ...shared }: Optio
   const archived = useConversationSearch({ ...shared, lifecycle: 'archived', metadataItems: archivedItems, branchOnly: true });
 
   const results = React.useMemo(() => {
-    // A conversation archived or restored a moment ago can still sit in the other block's
-    // message matches. Its title match, or its first message match, is the one row it gets.
     const merged = [...active.results, ...archived.results];
     const listed = new Set(merged.flatMap((result) => (result.metadata ? [result.sessionId] : [])));
     return merged.filter((result) => {

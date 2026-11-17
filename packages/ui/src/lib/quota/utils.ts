@@ -85,12 +85,6 @@ export const formatQuotaResetLabel = (
   }
 };
 
-/**
- * A reset time short enough for a narrow row: the time alone today
- * ("17:00"), weekday and time within the week ("Wed 12:09"), month and day
- * beyond it ("Dec 1"), in the user's locale and clock. The full date and time
- * belong in a tooltip (`formatQuotaResetLabel`).
- */
 export const formatQuotaResetShort = (
   resetAt: number | null,
   fallback?: string | null,
@@ -110,11 +104,6 @@ export const formatQuotaResetShort = (
   return formatDateTimeForPreference(resetDate, timeFormatPreference, { month: 'short', day: 'numeric' });
 };
 
-/**
- * A provider's count label with its long numbers compacted as token counts
- * are ("10.2 / 20,000 used" reads "10.2 / 20K used"); numbers under 10,000
- * stay as written. The full label belongs in a tooltip.
- */
 export const compactQuotaValueLabel = (label: string): string => (
   label.replace(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{5,}(?:\.\d+)?/g, (match) => {
     const value = Number(match.replace(/,/g, ''));
@@ -143,6 +132,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return t('quota.window.daily');
   if (label === 'monthly') return t('quota.window.monthly');
   if (label === 'credits') return t('quota.window.credits');
+  if (label === 'usage') return t('chat.workStatus.section.usage');
   if (label === 'key_limit') return t('quota.window.keyLimit');
   if (label === 'credits_balance') return t('quota.window.creditsBalance');
   if (label === 'monthly_credits') return t('quota.window.monthlyCredits');
@@ -152,7 +142,6 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'plan_limit') return t('quota.window.planLimit');
   if (label === 'auto') return t('quota.window.auto');
   if (label === 'api') return t('quota.window.api');
-  // A product name, the same in every language.
   if (label === 'vibe') return 'Vibe';
   if (label === 'on_demand') return t('quota.window.onDemand');
   if (label === 'session') return t('quota.window.session');

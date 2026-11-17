@@ -29,32 +29,23 @@ import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { MobileRowMenu } from './MobileRowMenu';
+import { TakeOverWorktreeItem } from '@/components/session/sidebar/works/TakeOverWorktreeItem';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
 const ONE_LINE_ROW_CLASS = 'flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 
-/** The project of a row listed among other projects' works, for the icon that names it. */
 const useMixedRowProject = (projectId: string | null, shown: boolean) => useProjectsStore(React.useCallback(
   (state) => (shown && projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null),
   [projectId, shown],
 ));
 
-/** A row's state or mark in the slot left of its title, where the chevron is not. */
 const MobileSlotMark: React.FC<{ slotLeft: number; children: React.ReactNode }> = ({ slotLeft, children }) => (
   <span className="pointer-events-none absolute inset-y-0 z-10 flex w-3.5 items-center justify-center" style={{ insetInlineStart: slotLeft }}>
     {children}
   </span>
 );
 
-/**
- * A worktree work in the phone's list: one row for the worktree and every
- * session in it, as on the desktop. A tap opens what was last worked on
- * there; the chevron opens its sessions. Swiping reveals Done or Track,
- * Rename, Pin or Unpin, Archive worktree and Delete. An isolated space has
- * this row too, with its instance icon, its state as a mark at the end, and Done or
- * Track beside its actions sheet, which says what the mark stands for.
- */
 export const MobileWorktreeRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'group-header' }>;
   geometry: MobileTreeGeometry;
@@ -85,7 +76,6 @@ export const MobileWorktreeRow: React.FC<{
     work.open();
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
-  // The live state sits on the right before the time; the slot says what the row is.
   const stateMark = worktreeRemoving || finishing
     ? <Spinner className="size-3" />
     : activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
@@ -120,7 +110,6 @@ export const MobileWorktreeRow: React.FC<{
       dir="auto"
       className={cn(
         'block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label',
-        // The title carries the state as a session's does.
         selected
           ? MOBILE_ACTIVE_TITLE_CLASS
           : activityState === 'unread' || activityState === 'permission' || activityState === 'form'
@@ -150,8 +139,6 @@ export const MobileWorktreeRow: React.FC<{
     </span>
   ) : space ? <SpaceStatusMark spaceId={space.id} /> : null;
   const directoryIndicator = row.group.directory ? <DirectoryActionIndicator directory={row.group.directory} /> : null;
-  // The Pinned section's header already says its works are pinned; anywhere
-  // else the row carries the mark, as a session's does.
   const pinMark = work.pinned && !isPinnedZoneRowKey(row.key)
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
@@ -171,7 +158,6 @@ export const MobileWorktreeRow: React.FC<{
           {mixedProject ? <MobileProjectIcon project={mixedProject} size="xs" /> : null}
           {mixedProject && projectNamed ? <TimelineProjectName project={mixedProject} separated={false} /> : null}
           {branchMark}
-          {/* Beside the project's name the task's name is left out, as on the desktop. */}
           {secondName && !(mixedProject && projectNamed && secondName === title) ? <span dir="auto" className="block min-w-0 truncate typography-micro">{secondName}</span> : null}
           <span className="ms-auto flex shrink-0 items-center gap-1.5">{ref}{marks}</span>
         </>}
@@ -190,7 +176,6 @@ export const MobileWorktreeRow: React.FC<{
           aria-label={t('sessions.sidebar.work.openAria', { label })}
           onClick={select}
         >
-          {/* The desktop work row's order. */}
           {titleText}
           {missing}
           {pinMark}
@@ -205,7 +190,6 @@ export const MobileWorktreeRow: React.FC<{
   }
 
   const slots = (work.workAction ? 1 : 0) + (work.canRename ? 1 : 0) + (space ? 1 : 0) + (work.canPin ? 1 : 0) + (work.canArchive ? 1 : 0) + (worktree && !worktreeRemoving ? 1 : 0);
-  // The long press menu: what the swipe has no room for, then its own actions.
   const pinWork = () => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } });
   const menu = (
     <>
@@ -221,6 +205,7 @@ export const MobileWorktreeRow: React.FC<{
           {inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </ContextMenuItem>
       ) : null}
+      {worktree ? <TakeOverWorktreeItem path={work.directory} Item={ContextMenuItem} iconClassName="me-1 size-4" /> : null}
       {work.canRename ? (
         <ContextMenuItem onClick={() => useMobileSidebarRowsStore.getState().startRename(row.key)}>
           <Icon name="edit" className="me-1 size-4" />
@@ -313,11 +298,6 @@ export const MobileWorktreeRow: React.FC<{
   );
 };
 
-/**
- * A multi-run in the phone's list, a work like a worktree: a tap opens its
- * newest fusion, else its overview; the chevron opens its lanes. Swiping
- * reveals Done or Track, Open overview, Rename and Archive run.
- */
 export const MobileRunRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'run' }>;
   geometry: MobileTreeGeometry;
@@ -351,7 +331,6 @@ export const MobileRunRow: React.FC<{
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
   const runMark = <ArrowsMerge className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />;
   const titleText = (
-    // Muted like an idle session title; the run's state shows in its mark.
     <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', work.isActive ? MOBILE_ACTIVE_TITLE_CLASS : 'oc-title-rest')}>
       {run.title}
     </span>
@@ -385,7 +364,6 @@ export const MobileRunRow: React.FC<{
           {mixedProject ? <MobileProjectIcon project={mixedProject} size="xs" /> : null}
           {mixedProject && projectNamed ? <TimelineProjectName project={mixedProject} separated={false} /> : null}
           {runMark}
-          {/* Its own width as the basis, so the project's name gives way first. */}
           <span className="block min-w-0 flex-auto truncate typography-micro">
             {laneCount === 1
               ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
@@ -444,11 +422,6 @@ export const MobileRunRow: React.FC<{
   );
 };
 
-/**
- * A new session's draft not sent yet, where its session would go: a pen in
- * the slot and the start of what was typed. A tap opens it in the composer;
- * swiping reveals Discard, which throws it away without asking.
- */
 export const MobileDraftRow: React.FC<{
   row: Extract<SessionSidebarRow, { kind: 'draft' }>;
   geometry: MobileTreeGeometry;

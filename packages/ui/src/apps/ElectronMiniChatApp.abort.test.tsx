@@ -1,20 +1,7 @@
-import { plugin } from 'bun';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-
-
-// Bun does not implement Vite's worker asset-query imports.
-plugin({
-  name: 'mini-chat-abort-worker-url',
-  setup(build) {
-    build.onLoad({ filter: /\.worker\.ts\?worker&url$/ }, ({ path }) => ({
-      contents: `export default ${JSON.stringify(`blob:${path}`)};`,
-      loader: 'js',
-    }));
-  },
-});
 
 const directory = '/workspace/mini-chat-abort';
 const sessionId = 'ses_mini';

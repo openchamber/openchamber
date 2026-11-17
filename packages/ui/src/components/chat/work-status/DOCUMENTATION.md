@@ -4,6 +4,126 @@ A card rendered to the right of the transcript, in the right slot it shares
 with the context panel. It reports the state of the current session, its branch, its quotas and its
 subagents.
 
+## Ownership
+
+This module owns work-status readouts, section composition and the shared row
+controls used by the desktop card and phone Status tab. Stores and sync modules
+own data fetching and reconciliation; the layout's right slot owns column width.
+
+## Invariants
+
+- The Checks dot owns its blinking subscription, so its clock redraws only the
+  dot rather than the section.
+- Loaded-skill rows include disabled installed skills, because a skill loaded
+  before being disabled must still open. Their history subscription watches parts
+  because a skill call can finish after its message arrives.
+- Installed skills resolve loaded-skill files by id, then name. The tool-reported
+  folder supplies a file before the installed list arrives; built-ins and entries
+  without a file open in Settings.
+- Session knowledge reads its server summary independently of the notes panel.
+  OpenChamber metadata, source content and memory invalidate it; whole-session
+  updates would refetch it on every step without changing its contents.
+- Linked-item summaries stay associated with their list index, because the same
+  repository thread can be linked from different instances. The session's links
+  stay observed even when its sidebar row is absent.
+- Context-source headings prioritize attached threads and pinned knowledge over
+  ambient counts, because these identify the session's chosen material. MCP
+  counts include only connected servers, which contribute context.
+- Linked rows use kind icons so agent-created links without avatars remain
+  distinguishable as issues or change requests. Identifiers and states keep their
+  space while titles truncate.
+- On the phone, opening a skill in Files switches drawer tabs without closing the
+  drawer. Copy and unlink controls have separate touch targets so a missed copy
+  cannot unlink an item.
+- Pinned-message selectors retain only pinned text. Selecting the entire parts
+  map would redraw on every stream update and retain evicted transcript parts
+  through render closures.
+- Repository readouts use the Git tab's selected nested repository while
+  navigation stays keyed to the project root. Project ownership uses the shared
+  worktree-aware resolver because worktrees can sit beside their project.
+- Changed-file rows remain hidden through bootstrap and the first successful
+  status refresh afterward, because the shared cache can hold setup-file changes
+  that the initial reset removes.
+- Cost formatting keeps 4 decimal places for budget comparisons and drops trailing
+  zeros. Recursive cost walks guard against cycles in parent links, and the own
+  cost is derived from total minus child costs so the displayed split adds up.
+- Context fill stays neutral below its warning band, because green denotes
+  completion. A subagent cost split appears only when subagents exist, when it
+  explains spend beyond the displayed session.
+- Context fill uses the server-reported total for the latest round trip.
+  Breakdown counters accumulate across round trips in a multi-step turn, so
+  summing them overstates the current window.
+- Row values keep their width while labels truncate, so long names cannot hide
+  the reading. Authored names and titles use automatic direction, branches and
+  paths use left-to-right direction, and translated labels follow the interface.
+  Numeric values retain their own direction in RTL layouts.
+- Row actions sit above a stretched, explicitly named row button. Nested buttons
+  are invalid, and a control press must not also navigate the row. Disabled
+  controls use a wrapper to keep their tooltip reachable despite row pointer
+  filtering.
+- Dense rows indicate interactivity through text rather than hover fills, which
+  resemble selection at this density. Tooltips open above rows so they leave
+  subsequent rows and their actions visible.
+- A nonzero context meter has a visible dot-sized minimum fill and keeps vertical
+  room around its text. Its explanatory captions align with the meter and icon
+  edge, because label-column indentation makes them look detached from the bar.
+- Task ordering preserves the agent's order within each state rank and retains
+  completed tasks as a session record. Active work leads because it answers what
+  is happening now.
+- Confirmed absence of quota providers creates no ongoing refresh demand after
+  discovery. Credential changes invalidate that absence.
+- Whole-session token totals remain unavailable when counters are stripped from
+  a persisted snapshot or contain only zeros, until live usage arrives.
+- Telemetry unions overlapping tool intervals before subtracting tool time, so
+  parallel tools cannot subtract the same time twice. TTFT excludes creation
+  stamps copied onto parts, because they are not observed first-output times.
+  Trailing plumbing records do not move a turn's conversation boundary. Positive
+  waits below 50ms remain distinguishable from zero when formatting seconds.
+- Quota aliases identify the same billed account. `claude-agent` and
+  `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
+  `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- Built-in section ids stay stable because saved order and visibility use them.
+  Hidden-state checks test membership of available sections because stale ids
+  from removed sections can inflate a count.
+- Subagent permission requests remain visible in the work-status section because
+  the parent transcript has no representation of those child blockers.
+- Presence reports clear on section unmount, so an absent section cannot keep the
+  card visible. Hidden retained cards are inert so keyboard focus cannot reach
+  invisible controls.
+- Overlay dismissal listeners run only while visible and ignore the header
+  toggle, which closes the overlay itself. Otherwise a press can be swallowed or
+  close and immediately reopen it.
+- The card clips its internal scroll shadows to its rounded edge and hides the
+  scrollbar, which would consume trailing-value space. Horizontal margins leave
+  room for its shadow, and the overlay stays outside flex flow so it cannot push
+  the transcript.
+
+## Decisions
+
+### Why guest meters jump and not glide
+
+Guest meters apply each sample immediately and slide a full-width rounded fill
+inside a clipped track. Animating every polled sample keeps the GPU drawing
+between reads, while the clipped fill preserves its rounded end without a glide.
+
+### Why charts keep chronological direction and not interface direction
+
+Guest charts run from older samples on the left to newer samples on the right in
+every locale. Their own hover labels retain the chart's time and value context,
+so a row tooltip attaches to the label when a chart occupies the middle.
+
+### Why unknown guest icons stay absent and not use a substitute
+
+An unknown icon has no reliable visual meaning in the host. The row keeps its
+label without introducing a replacement glyph.
+
+### Why glass uses an inner layer and not the shadowed card
+
+The overlay separates its glass layer from the card's shadow because combining
+them makes Chromium extend the backdrop-filter layer by the shadow blur and paint
+a grey band past the edge. The glass and edge fade independently while the outer
+overlay keeps full opacity.
+
 ## Structure
 
 Every readout is a **labelled row**: icon, name, trailing value. A number
@@ -145,6 +265,17 @@ closed, so the panel reappeared only once that number crossed the threshold:
 the chat widened and then narrowed again. The chat area does not move when the
 context panel opens. `useWorkStatusVisibility.test.ts` pins both properties.
 
+### Why the area is taken at the width the sidebar leaves it
+
+The session sidebar does move the chat area, over its own animation. The
+decision uses the measured width plus what the sidebar still has to travel
+(`sidebarPendingWidth`), re-decided in the commit that toggles the sidebar, so
+the answer is the settled one from the first frame. The alternative, the width
+as measured, flipped the answer mid-animation: collapsing an expanded context
+panel unfolds the sidebar, the card took its column beside the panel while the
+area was still wide, and gave it back when the area crossed the threshold, so
+the slot animated twice.
+
 The context-panel check mirrors `ContextPanel`'s own derivation: `isOpen` alone
 is not enough, because a panel with no resolvable active tab renders nothing
 and therefore displaces nothing.
@@ -218,7 +349,9 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
+| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row); all of it in `useSubagentRows`, shared with the Subagents panel | |
+| Subagent activity and context | the child's own messages and parts in the directory store (`subagentActivity.ts`, `SubagentLive.tsx`), one leaf subscription per row | see *What a subagent is doing* below |
+| Subagent report | the newest `<subagent>` report in the parent: a report message for a background run, the call's own result for a foreground one (`useSubagentReports`) | recomputed when the parent's message list changes (per message, never per streamed part), with each message's and each part array's reports cached; nothing is read while the session has no subagents |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
@@ -264,9 +397,72 @@ removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
 
-Hovering or focusing a row shows its session model's catalog display name,
-falling back to the formatted model ID. Missing model metadata produces no
-tooltip. Model-only session updates invalidate the live-session comparison.
+Each row has a second line. A working subagent's is its agent and model, led
+by a retry or by how long it has been silent when either holds (the current
+tool call changes every few seconds, too fast to read in a row, so only the
+Subagents panel shows it); a finished one's is how long it ran, then its agent and
+model; any other row shows the agent and model. The figure that changes
+leads in both, so long agent and model names truncate before it does. The report never takes that
+line: who ran the work is what the row is scanned for, and the report's
+first line sits in the tooltip, the whole report in the panel. The value column
+adds the context fill while the subagent works or waits on the user, muted
+until the header's warning band. The tooltip holds the agent, the model and
+the report line whole. Tokens in the value column are what the subagent spent on its own work:
+input, output, reasoning and cache writes, from its session record. Cache
+reads are left out, as the Workflows panel leaves them out: each step
+re-reads the whole cached prompt, so a 25-step run read 2.2M from cache
+while its own work was 118K. The heading's button opens the Subagents panel
+(`components/chat/subagents`) where a context panel exists; on the phone and
+in VS Code it is absent.
+
+### What a subagent is doing
+
+OpenCode streams a child session's steps and parts into its directory's
+store, whether or not anyone opened the child's chat. That is the parent's
+store until the child moves to another worktree, so the row reads the
+child's own directory, never the panel's. It skips plumbing messages (a
+report from a nested subagent, a system notice) to find the step in progress
+(`getLastConversationMessage`), so a report landing during a long command
+does not turn the command into silence. The row reads
+(`readSubagentActivity`): a running or pending tool call with
+its argument and, after 10 seconds, its own time; reasoning or text still
+streaming; a retry with its countdown; or, when nothing streams and no tool
+runs, a wait since the last progress, shown as the last tool call until it
+passes 90 seconds (`SUBAGENT_SILENCE_MS`) and then as silence in yellow. A
+long command is a running tool, so it never reads as silence. A child that
+started before the window shows only what arrived since: enough for "what
+now", never a step count.
+
+Each row subscribes on its own, with a selector that returns the activity as
+a string. Text streaming into a part changes nothing the row shows, so it
+re-renders nothing; the one-second clock ticks only the line itself.
+
+#### Why reports follow the parent's message list and not the store
+
+A store selector runs on every flush of the directory, streamed parts of any
+session included. Collecting reports there walked the whole parent history
+per flush, so the hook subscribes to the parent's message list instead, whose
+identity changes once per message: a background report is a message, and a
+foreground call's step completes as a message update after its result. An
+earlier version subscribed to a string naming every report source and kept
+it only as a `useMemo` dependency (`void fingerprint`); the React Compiler
+dropped that unused read and the reports never refreshed.
+
+#### Why the activity selector remembers its inputs
+
+The row's selector also runs on every flush. It returns the last answer while
+the child's message list, the parts of its newest step and its status are the
+same objects, and a tool call's label is cached per part object, so a large
+patch or script is described once, not once per flush. In the section the
+selector keeps only what can raise an alert (`subagentAlertInputs`: a retry,
+or a wait with its start), so a new tool call re-renders nothing and the
+one-second clock runs only while a row waits or retries.
+
+#### Why the activity leads the second line
+
+The agent and model came first in the design, and a real model name ("general
+· DeepSeek V4.1 Flash 1017") left no room for the call, which is the part
+that changes. So the activity leads and the identity truncates first.
 
 ### Turn stats
 
@@ -309,6 +505,13 @@ Waiting for each model response remains included. Invalid or missing inputs
 omit the dependent metric rather than becoming zero; reported zeros remain
 valid. TTFT averages the earliest text/reasoning start delay from every step,
 only when all steps have a valid sample.
+
+"Average first output" is a separate row from OpenCode's `time.firstToken`
+on each step: when the provider streamed its first output of any kind, a tool
+call included. It is hidden when any step of the turn lacks the field (steps
+written before OpenCode 2.3.0). It does not replace TTFT: a step that opens
+with a tool call would change what TTFT means, so the number would no longer
+be the time to the first visible text.
 
 Either rate above 5,000 tok/s is reported as unknown. No provider streams that
 fast, so such a value means the measured window is broken: a tool that runs
@@ -670,9 +873,9 @@ The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
 just collapsed it.
 
-Its expanded list is capped at eight rows and scrolls independently, so a
-session with many subagents does not crowd every section below it out of the
-panel.
+Its expanded list is capped at eight two-line rows and scrolls independently,
+so a session with many subagents does not crowd every section below it out of
+the panel.
 
 ## Collapsed Usage headline
 
@@ -715,6 +918,7 @@ Rows that name something the app can already show are buttons:
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | The Tracker's branch tab (`openContextPanelTab(dir, { mode: 'pr' })`) |
 | Subagent | that child session's chat tab, read-only |
+| Subagents heading button | the Subagents panel (`openSubagentsPanel`) |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
 | MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`); switching on a `needs_auth` server signs in instead |
@@ -822,7 +1026,33 @@ a tab.
 ## Context sources
 
 The plan the session works on and linked issues and change requests first,
-then pinned knowledge, memory, skills and MCP counts.
+then pinned knowledge, the skills the session loaded, memory, skills and MCP
+counts.
+
+### Skills the session loaded
+
+One row per skill, in the order it first loaded, read from the session's
+loaded history (`loadedSkills.ts`): completed `skill` tool calls, skills
+attached to a prompt (`$name`, the user message's `skills`), and skill
+activations (`role: "skill"`). A pending, running or failed call loaded
+nothing. A later load of the same skill keeps the first one's place and adds
+the folder an attached skill lacks. History the session has not paged in is not read, so a skill loaded
+only there has no row. The Skills count below stays the number of skills the
+session could load.
+
+A row opens the skill's `SKILL.md` the way the transcript's Load Skill row
+does: an editor tab in VS Code, the Files pane on the phone, the context panel
+elsewhere. The file comes from the skills of the session's own directory, so
+a worktree session opens its own copy. A built-in skill has no file, so it
+opens in Settings > Skills on that skill, which shows OpenCode's text
+read-only; in VS Code the Settings tab gets the skill in its navigation
+request.
+
+### Why the skills come from history and not from a server list
+
+Every source is already in the loaded transcript, live through the same
+events. A server read of the full history would add a route and a request per
+session for skills the transcript already shows.
 
 ### The plan the session works on
 

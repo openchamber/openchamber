@@ -12,14 +12,12 @@ import { subscribeStreamGap } from '@/sync/stream-gap';
 import { isDesktopShell } from '@/lib/desktop';
 
 export const GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS = 10 * 60_000;
-/** How soon a load that failed after startup is tried again. */
 export const GLOBAL_SESSIONS_RETRY_INTERVAL_MS = 45_000;
 const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 type ScheduleTimeout = (callback: () => void, delay: number) => number;
 type ClearTimeout = (timeoutId: number) => void;
 
-/** Whether anyone can see the app, and a way to hear when they can again. */
 type PollingVisibility = {
   isHidden: () => boolean;
   onVisible: (listener: () => void) => () => void;
@@ -27,23 +25,14 @@ type PollingVisibility = {
 
 const NEVER_HIDDEN: PollingVisibility = { isHidden: () => false, onVisible: () => () => undefined };
 
-/** Hears when OpenCode first answers, the moment a failed startup load can succeed. */
 type SubscribeServerReady = (listener: () => void) => () => void;
 
 const NEVER_READY: SubscribeServerReady = () => () => undefined;
 
-/** Hears a gap in the live event stream, after which sessions may have been missed. */
 type SubscribeStreamGap = (listener: () => void) => () => void;
 
 const NEVER_GAP: SubscribeStreamGap = () => () => undefined;
 
-/**
- * Desktop windows run with background throttling off, so the document stays
- * `visible` while the window is hidden or minimized. Its own visibility comes
- * from the shell's events instead. Only an event hides the window here: Mini
- * Chat starts hidden and the shell sends it none, so a queried starting state
- * would keep its refresh stopped for good.
- */
 const desktopWindowVisibility = (): PollingVisibility => {
   let hidden = false;
   const listeners = new Set<() => void>();
@@ -106,14 +95,9 @@ export const startGlobalSessionsPolling = (
   let startupRetries = 0;
   let hasSucceeded = false;
   let running = false;
-  // OpenCode answered while a load that started before it was in flight.
   let readyDuringRun = false;
   let fullRefreshPending = false;
-  // A stream gap ended while a load ran: that load may have read the list
-  // before the gap, so the head is checked right after it.
   let gapDuringRun = false;
-  // When a failed read after a success is tried again. Absolute, so the head
-  // checks of later gaps cannot keep pushing a failed snapshot's retry away.
   let fullRetryAt: number | null = null;
   let headRetryAt: number | null = null;
   let lastFullRefreshAt = Number.NEGATIVE_INFINITY;
@@ -162,7 +146,6 @@ export const startGlobalSessionsPolling = (
       return;
     }
     if (!hasSucceeded && readyDuringRun) {
-      // That load may have failed only because OpenCode was still starting.
       void run(refresh);
       return;
     }
@@ -182,8 +165,6 @@ export const startGlobalSessionsPolling = (
     if (running) { fullRefreshPending = true; return; }
     void run(refresh);
   });
-  // Until a load succeeds, OpenCode answering ends the wait for the next
-  // retry, which after the startup retries is the retry interval.
   const stopReadyListening = subscribeServerReady(() => {
     if (disposed || hasSucceeded) return;
     if (running) {
@@ -194,12 +175,9 @@ export const startGlobalSessionsPolling = (
     timeoutId = undefined;
     void run(refresh);
   });
-  // Sessions created while the stream was away arrive in no event: the head
-  // of the list, newest first, names them. Deletions wait for the full sweep.
   const stopGapListening = subscribeStreamGapListener(() => {
     if (disposed) return;
     if (running) { gapDuringRun = true; return; }
-    // Before a first success the next retry reads the whole list anyway.
     if (!hasSucceeded) return;
     void run(headCheck, false);
   });
@@ -213,20 +191,6 @@ export const startGlobalSessionsPolling = (
   };
 };
 
-/**
- * Owns the one global-session polling lifecycle for the main app runtime.
- * The live event stream keeps the list current: `session.created` reaches
- * this client for every directory. So the list is read only where the stream
- * cannot answer: a complete snapshot every ten minutes (the baseline that
- * finds deletions missed while away), when the app becomes visible again, and
- * the head of the list after a stream gap. The timed snapshot pauses while
- * the app is hidden, which on desktop is the window's native visibility.
- *
- * Each complete load is followed by the host status seed: unopened directories are
- * never bootstrapped, so a turn already running there when this client
- * started is only known to the host's cross-project map. The seed resolves
- * directories from the list just loaded, which is why it runs after it.
- */
 export const useGlobalSessionsPolling = (enabled: boolean): void => {
   React.useEffect(() => {
     if (!enabled) return;
@@ -239,7 +203,6 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
         else await refreshGlobalSessions();
         if (!active || getRuntimeKey() !== runtimeKey) return false;
         void seedGlobalSessionStatusFromHost();
-        // The store preserves cached sessions on failure instead of throwing.
         return useGlobalSessionsStore.getState().status === 'ready';
       };
       const stop = startGlobalSessionsPolling(

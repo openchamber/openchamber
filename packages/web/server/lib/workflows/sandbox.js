@@ -2,21 +2,9 @@ import { Worker } from 'node:worker_threads';
 
 import { wrapWorkflowBody } from './script.js';
 
-// One script may hold this much memory; a runaway loop dies in its worker.
 const WORKER_HEAP_MB = 256;
-// The largest list one parallel() or pipeline() call may fan out over.
 const MAX_FAN_OUT = 4096;
 
-/**
- * Runs first inside the script's vm context and builds what the script sees:
- * agent(), parallel(), pipeline(), phase() and log() over the host functions
- * the worker hands in as `__host`. parallel() and pipeline() are written here,
- * in the script's own realm, so the promises and arrays they return are the
- * script's own.
- *
- * Math.random(), Date.now() and new Date() throw: a resumed run replays the
- * script and must ask for the same agents again.
- */
 const CONTEXT_PRELUDE = `
 'use strict';
 const host = globalThis.__host;
@@ -70,17 +58,6 @@ globalThis.pipeline = (items, ...stages) => {
 };
 `;
 
-/**
- * The worker that runs a workflow body. Evaluated from this string rather than
- * loaded from a file, so it runs the same from the source tree under Bun, from
- * node_modules under Node, and from inside the desktop app's asar archive.
- *
- * The body runs in a vm context of its own inside the worker: it sees plain
- * JavaScript plus the prelude's functions and args, and no require, process,
- * fetch, timers or filesystem. The vm boundary is not a security boundary
- * against the agent, which has a shell anyway; it keeps a script from reaching
- * the server, and the worker can always be terminated.
- */
 const WORKER_SOURCE = `
 const { parentPort } = require('node:worker_threads');
 const vm = require('node:vm');
@@ -158,15 +135,6 @@ parentPort.on('message', (message) => {
 
 const stoppedError = () => Object.assign(new Error('The workflow was stopped'), { stopped: true });
 
-/**
- * Runs a parsed workflow body in its own worker.
- *
- * `onAgent({ prompt, options, phase })` answers each agent() call; whatever it
- * resolves to goes back into the script, and a rejection reaches the script
- * as null, the way a failed agent does. `result` resolves to the script's
- * return value and rejects with its error; `terminate()` ends the worker and
- * rejects `result` with an error carrying `stopped: true`.
- */
 export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = () => {}, onLog = () => {} }) => {
   const worker = new Worker(WORKER_SOURCE, {
     eval: true,
@@ -186,7 +154,6 @@ export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = ()
   });
 
   worker.on('message', (message) => {
-    // Calls, phases and logs still queued when the run ended belong to no run.
     if (settled) return;
     if (message.type === 'call') {
       Promise.resolve()

@@ -232,6 +232,18 @@ export const prepareImageToSave = async (
     }
 };
 
+/**
+ * Links to files on disk (`[name](/abs/path)`, `[name](<C:/with space/x.png>)`),
+ * the form `buildImagePathCitationText` writes for an image saved as a file:
+ * the composer draws each as the file's chip. Links to the web stay links.
+ */
+export const findLocalFileLinks = (text: string): Array<{ start: number; end: number; name: string; path: string }> => (
+    Array.from(text.matchAll(/\[([^\]\n]+)\]\((<[^>\n]+>|[^)\s]+)\)/g), (match) => {
+        const path = match[2].startsWith('<') ? match[2].slice(1, -1) : match[2];
+        return { start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, name: match[1].trim(), path };
+    }).filter((link) => /^(?:\/|[A-Za-z]:\/)/.test(link.path))
+);
+
 /** Names of the markdown links already in the text, so a new paste picks a free one. */
 export const findImagePathCitationNames = (text: string): string[] => (
     Array.from(text.matchAll(/\[([^\]\n]+)\]\(/g), (match) => match[1])

@@ -446,4 +446,306 @@ describe('Gitea mutations', () => {
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))
       .resolves.toMatchObject({ state: 'failed' });
   });
+
+  describe('issue updates', () => {
+    const issueTarget = { ...providerTarget, number: fixtures.issue.number };
+    const issuePath = `/repos/alice/app/issues/${fixtures.issue.number}`;
+    const patched = (extra = {}) => ({ ...fixtures.issue, title: 'Startup crash', body: 'Fixed by upgrading.', ...extra });
+
+    it('replaces the title and body through the issue a pull request also is', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched() });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${issuePath}`);
+      expect(patch.body).toEqual({ title: 'Startup crash', body: 'Fixed by upgrading.' });
+    });
+
+    it('sends the title alone when no body is asked for', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched({ body: fixtures.issue.body }) });
+
+      await expect(service.updateIssue({ providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash' }))
+        .resolves.toEqual({});
+      expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ title: 'Startup crash' });
+    });
+
+    it('refuses a response that does not restate the title or body asked for', async () => {
+      const staleTitle = setup({ [`PATCH ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(staleTitle.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+
+      const staleBody = setup({ [`PATCH ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(staleBody.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+    });
+
+    it('refuses a response for another issue number', async () => {
+      const { service } = setup({ [`PATCH ${issuePath}`]: patched({ number: issueTarget.number + 1 }) });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+    });
+
+    it('reconciles the edit only from the values it reads back', async () => {
+      const exact = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(exact.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const titleOnly = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(titleOnly.service.reconcileIssueUpdate(issueTarget, 'Startup crash', undefined))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const otherTitle = setup({ [`GET ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(otherTitle.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const otherBody = setup({ [`GET ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(otherBody.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
+
+  describe('conversation comments', () => {
+    const commentPath = '/repos/alice/app/issues/comments/41';
+    // Gitea answers the HTML address, not the API path; a pull request comment
+    // leaves `issue_url` empty and names the pull request instead.
+    const onIssue = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: `${ORIGIN}/alice/app/issues/${number}`,
+    });
+    const onPull = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: '', pull_request_url: `${ORIGIN}/alice/app/pulls/${number}`,
+    });
+    const writes = (calls) => calls.filter((call) => call.method !== 'GET');
+    const conflict = { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 };
+
+    it('edits the comment on the target issue, requiring the answered body', async () => {
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(patch.body).toEqual({ body: 'Fixed' });
+      // The comment is read first, so a foreign id is refused before any write.
+      expect(calls[0].method).toBe('GET');
+    });
+
+    it('refuses an answered body that differs from the one asked for', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Still old'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).rejects.toThrow('Gitea returned an unexpected comment body');
+    });
+
+    it('accepts a pull request comment, whose issue_url is empty', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onPull(1),
+        [`PATCH ${commentPath}`]: onPull(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+    });
+
+    it('refuses a comment whose address names another item, with no write', async () => {
+      for (const foreign of [
+        onIssue(2),
+        onPull(2),
+        { ...onIssue(1), issue_url: 'https://gitea.example.com/bob/app/issues/1' },
+        { ...onIssue(1), issue_url: 'https://elsewhere.example.com/alice/app/issues/1' },
+        { id: 41, body: 'Old text' },
+      ]) {
+        const { service, calls } = setup({ [`GET ${commentPath}`]: foreign });
+
+        await expect(service.updateIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+        })).rejects.toMatchObject(conflict);
+        await expect(service.deleteIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+        })).rejects.toMatchObject(conflict);
+        expect(writes(calls)).toEqual([]);
+      }
+    });
+
+    it('deletes the comment and confirms it through a follow-up read that answers 404', async () => {
+      let deleted = false;
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: () => (deleted
+          ? new Response(JSON.stringify({ message: 'not found' }), { status: 404 })
+          : onIssue(1)),
+        [`DELETE ${commentPath}`]: () => {
+          deleted = true;
+          return {};
+        },
+      });
+
+      await expect(service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      })).resolves.toEqual({});
+
+      const del = calls.find((call) => call.method === 'DELETE');
+      expect(del.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(calls.map((call) => call.method)).toEqual(['GET', 'DELETE', 'GET']);
+    });
+
+    it('leaves a delete whose comment is still readable afterwards unknown, never failed', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`DELETE ${commentPath}`]: {},
+      });
+
+      const refusal = await service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      }).then(() => null, (error) => error);
+      expect(refusal?.message).toBe('Gitea kept a comment it was asked to delete');
+      // No status: a stale read looks like a lost write, so the shell records outcome-unknown.
+      expect(refusal?.status).toBeUndefined();
+    });
+
+    it('reconciles an edit only on the exact body, never as a definite failure', async () => {
+      const exact = setup({ [`GET ${commentPath}`]: onIssue(1, 'Fixed') });
+      await expect(exact.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const other = setup({ [`GET ${commentPath}`]: onIssue(1, 'Something else') });
+      await expect(other.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('reconciles a delete from the follow-up read: 404 is gone, present or unreadable is unknown', async () => {
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const present = setup({ [`GET ${commentPath}`]: onIssue(1) });
+      await expect(present.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const unreadable = setup({
+        [`GET ${commentPath}`]: () => new Response(JSON.stringify({ message: 'boom' }), { status: 500 }),
+      });
+      await expect(unreadable.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
+});
+
+describe('Gitea label filtering', () => {
+  it('asks the issue list for each label, comma-joined and in order', async () => {
+    const { service, calls } = setup({ 'GET /repos/bob/app/issues': () => pullsPage([]) });
+
+    await service.listIssues('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listIssues('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+  });
+
+  it('reads a labelled pull list through the issue list, never the pull list that combines labels with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([]),
+    });
+
+    await service.listChangeRequests('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(one.url.searchParams.get('type')).toBe('pulls');
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listChangeRequests('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+    expect(calls.some((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls')).toBe(false);
+  });
+
+  it('narrows a labelled issue page by name, which Gitea would otherwise answer unfiltered', async () => {
+    // Gitea drops a label name the repository does not have; with every name
+    // dropped it answers the whole list while the filter chip still shows.
+    const { service } = setup({
+      'GET /repos/bob/app/issues': () => pullsPage([
+        { ...fixtures.issue, number: 5, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { ...fixtures.issue, number: 6, title: 'Not labelled', labels: [] },
+      ]),
+    });
+
+    const page = await service.listIssues('/repo', { labels: ['gone-from-this-repository'] });
+    expect(page.items.map((item) => item.number)).toEqual([]);
+    const kept = await service.listIssues('/repo', { labels: ['bug'] });
+    expect(kept.items.map((item) => item.number)).toEqual([5]);
+  });
+
+  it('narrows a labelled pull page read through the issue list the same way', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([
+        { number: 9, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { number: 8, title: 'Not labelled', labels: [] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { labels: ['bug'] });
+    expect(page.items.map((item) => item.number)).toEqual([9]);
+  });
+
+  it('finishes the review-requested search with AND, which Gitea combines with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/issues/search': () => pullsPage([
+        { repository: { id: 1 }, number: 9, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+        { repository: { id: 1 }, number: 8, labels: [{ name: 'bug' }] },
+        { repository: { id: 2 }, number: 7, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { people: 'reviewRequested', labels: ['bug', 'needs review'] });
+
+    const search = calls.find((call) => call.url.pathname === '/api/v1/repos/issues/search');
+    expect(search.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(page.items.map((item) => item.number)).toEqual([9]);
+  });
+
+  it('sends no label parameter for an empty filter', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/bob/app/issues': () => pullsPage([]),
+    });
+    await service.listChangeRequests('/repo', { labels: [] });
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls').at(-1).url.searchParams.has('labels')).toBe(false);
+    await service.listIssues('/repo', {});
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1).url.searchParams.has('labels')).toBe(false);
+  });
+
+  it('refuses a label containing a comma before any provider call', async () => {
+    const { service, calls } = setup();
+    await expect(service.listChangeRequests('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    await expect(service.listIssues('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    expect(calls).toHaveLength(0);
+  });
 });

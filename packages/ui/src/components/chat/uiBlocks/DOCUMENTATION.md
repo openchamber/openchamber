@@ -6,7 +6,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 ## Invariants
 
-- Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and a subagent call's expanded row draws the subagent's reply the same way (`ToolPart`). Copies and image exports keep the source. User messages, reasoning, other tool output and documents show the fence as code.
+- Assistant replies and their image exports draw blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and a subagent call's expanded row draws the subagent's reply the same way (`ToolPart`). Copies keep the source. User messages, reasoning, other tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures of the built-in components. An extension's component never takes a catalog name or one an earlier extension holds. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
 - A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. One exception: a reply's block with no fields, Buttons or expressions that is not cut short draws its sound parts and says what it lost, under the block. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
@@ -17,8 +17,21 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 - The renderer also runs outside the app, in a page shared with other people (`../../../share-document/DOCUMENTATION.md`), built with the app's stores, runtime and Markdown renderer swapped for small stand-ins. A new import in its subtree lands in every shared page and may need a stand-in there.
+- Finished trees pass the runtime schemas even when the parser accepts them: object-literal elements, partial nodes and chart series with a different value count from their labels remain invalid.
+- An answer is claimed synchronously before React state updates, because an extension frame can submit twice within one render. Only a failed send releases the claim; an answer arriving through session sync also freezes the mounted block.
+- A note sits outside a button Row, which moves as one unit. A tab's content container stays mounted even without a selected tab so an inserted Send remains reachable.
+- A missing chart point stays missing: lines break there and bars omit it. An isolated point always has a dot because no line reaches it.
+- Chart focus and pinned labels clear when streamed edits or tab changes shrink their data, so they never reference removed entries. Pointer exit has a short delay so slipping off a line and back does not make its focus blink.
+- The kit's theme variables reach the root before paint and update with theme changes, so blocks share the page's colours on their first frame.
+- Choice controls own keyboard focus and stop their click from bubbling to the clickable option row, so one press changes the selection once. Disabling a date field includes its time inputs and menu.
 
 ## Decisions
+
+### Why image exports draw an inert block
+
+Detached exports use `UiBlock` because they have no session provider. Nested Markdown inherits the image purpose, theme and highlighting. Both renderers load before capture; animations stop so bars retain their full size.
+
+Extension frames have no offscreen snapshot, so exports keep their source and diagnostic beside sound built-in parts. A failed chunk also keeps source. Export loading retries without navigation because a reload would cancel capture ([on-demand imports](../../../lib/DOCUMENTATION.md#on-demand-imports)).
 
 ### Why an extension's component is a frame in the block
 
@@ -113,3 +126,47 @@ Signatures print as `label: string`, so agents write `Choice("a", [...], label: 
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.
+
+### Why Card requires a title and not an optional first argument
+
+Arguments bind by position, so a missing first argument cannot express a titleless card. An empty title preserves the position of the children.
+
+### Why guidance shares vocabulary and not repeated signature details
+
+Every session reads the guidance, so child-list rules and tones appear once, and descriptions cover only what signatures leave unclear. Its examples remain valid blocks so the agent learns the same language the parser accepts.
+
+### Why loaded renderers and parsers stay cached
+
+The first visible block loads its renderer, and the first extension block loads its panel, keeping session sync and extension UI out of ordinary Markdown loading. Loaded renderers survive virtualized remounts, and the extension parser is reused for the same catalog because every streaming update parses again while catalog changes are rare.
+
+### Why extension frames retain height and use inline padding
+
+Remembered measurements restore a virtualized frame's height before its page loads, keeping the chat from jumping. Inline zero padding overrides the kit's later `.oc-box` rule so padding does not consume the requested frame height.
+
+### Why the block reads its own directory
+
+Blocks render both in replies and on agent pages, where a reply's Markdown context is unavailable. The block resolves its directory independently for nested Markdown.
+
+### Why embedded styles override the shared kit
+
+Tables inside cards need important utilities because the Markdown table rules are unlayered. Kit badges keep their own width inside flex columns so the column does not stretch them.
+
+### Why numeric rendering preserves values and controls rounding
+
+Tables and stats preserve the agent's numbers, with narrow-space grouping in every UI language because the agent's language can differ from the UI's. Progress multiplies before dividing so floating-point error does not turn 29 of 100 into 28 percent; slider starts clear float noise so the answer matches the thumb.
+
+### Why axis ticks use indexed steps and bounded generation
+
+Each tick is computed from the first and rounded at the step's precision so accumulated float noise and large bases do not merge distinct ticks; very small steps use significant digits beyond the fixed-decimal threshold. Finite data can approach `Number.MAX_VALUE`, so overflow falls back to the data bounds and a tick limit bounds generation.
+
+### Why chart dots use HTML and steps use their own layout
+
+HTML dots stay circular while the SVG stretches, and chart time stays left to right in every UI language. Steps switch to a column when a row cannot fit because sideways scrolling hides later steps; plain divs avoid surrounding Markdown list styles, and padding protects the current mark's halo from the reply's clipping.
+
+### Why source updates reset failures without remounting
+
+A new source clears a drawing failure while preserving a working tree. Streaming updates therefore keep the user's selected tab.
+
+### Why answer summaries omit send controls and keep full data separately
+
+A form's Send and a lone button beneath fields only dispatch the values, so naming them adds no answer information. The server limits the summary's length, while the answer data retains the full values.

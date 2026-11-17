@@ -1,21 +1,3 @@
-/**
- * Zhipu AI Coding Plan quota fetch
- *
- * API: https://open.bigmodel.cn/api/monitor/usage/quota/limit
- *
- * bigmodel.cn reports business failures inside HTTP 200 bodies
- * (`{code, msg, success: false}`), so the envelope must be validated before
- * `data.limits` is parsed. A missing envelope is treated as legacy success.
- *
- * Response limits:
- * - TOKENS_LIMIT / CREDIT_LIMIT: token/credit usage windows (5-hour and weekly).
- *   The API renamed TOKENS_LIMIT to CREDIT_LIMIT; CREDIT_LIMIT entries
- *   additionally carry `usage` (total), `currentValue` (consumed), `remaining`,
- *   and `percentage` (used percent, derived from currentValue/usage when absent).
- * - TIME_LIMIT: MCP tools usage (monthly window)
- *
- * `data.level` is the plan tier (for example "lite") and becomes `planLabel`.
- */
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import {
@@ -35,8 +17,6 @@ export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
 const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
-// Mirrors the Z.ai credit label (same monitor API family): `usage` is the
-// total, `currentValue` the consumed amount.
 const formatCreditAmount = (value) => {
   if (value < 1000) return value.toLocaleString('en-US');
   return `${Math.round(value / 100) / 10}k`;
@@ -49,8 +29,6 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
-// `percentage` is the used percent; when the API omits it, derive it from
-// currentValue/usage (observed percentages are integers).
 const resolveUsedPercent = (limit) => {
   const percentage = toNumber(limit?.percentage);
   if (percentage !== null) {
@@ -62,7 +40,6 @@ const resolveUsedPercent = (limit) => {
   return Math.round((used / total) * 100);
 };
 
-/** A business failure reported inside an HTTP 200 body; shared with the z.ai provider (same monitor API). */
 export const envelopeError = (payload) => {
   const code = payload?.code;
   if (payload?.success !== false && !(code !== undefined && code !== null && code !== 200)) {
@@ -149,9 +126,6 @@ export const fetchQuota = async () => {
 
     const windows = {};
 
-    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the
-    // same, so both limit types map to the same windows. Unit 3 marks hourly
-    // blocks (5h), unit 6 weekly.
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
       const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
@@ -165,10 +139,8 @@ export const fetchQuota = async () => {
       });
     }
 
-    // Handle TIME_LIMIT (MCP tools monthly window)
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
-      // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
       const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;

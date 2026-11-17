@@ -2,25 +2,9 @@ import { z } from 'zod';
 
 import type { JsonValue } from '@/lib/opencode/model';
 
-/**
- * The frame protocol between a shared page and the relay's viewer (the
- * viewer's half is `apps/relay/src/share/viewer.ts` in the website repository;
- * change both together):
- *
- *   page -> viewer  { source: "openchamber-share-document", type: "submit", data, summary }
- *   viewer -> page  { source: "openchamber-share-viewer", type: "init", wantsAnswer, locale, answer? }
- *                   { source: "openchamber-share-viewer", type: "submit-result", ok, error? }
- *
- * The page runs in an opaque origin; the viewer is its only parent. `answer`
- * is the data this page already sent, which only the recipient's app sends
- * (it shows an answered page again, decision 0013; the relay's viewer never
- * does): the page shows it and takes no other.
- */
-
 export const SHARE_DOCUMENT_SOURCE = 'openchamber-share-document';
 export const SHARE_VIEWER_SOURCE = 'openchamber-share-viewer';
 
-/** What the viewer posts to the page; parse `MessageEvent.data` with it where the message arrives. */
 export const viewerMessageSchema = z.discriminatedUnion('type', [
   z.object({
     source: z.literal(SHARE_VIEWER_SOURCE),
@@ -40,21 +24,12 @@ export const viewerMessageSchema = z.discriminatedUnion('type', [
 export type ViewerMessage = z.infer<typeof viewerMessageSchema>;
 type ViewerInit = Extract<ViewerMessage, { type: 'init' }>;
 
-/** What the page posts to the viewer. */
 export type ShareSubmitMessage = { source: typeof SHARE_DOCUMENT_SOURCE; type: 'submit'; data: JsonValue; summary: string };
 
-/** The page's own submit message, read where the app plays the viewer (the author's preview). */
 export const shareSubmitMessageSchema = z.object({ source: z.literal(SHARE_DOCUMENT_SOURCE), type: z.literal('submit') });
 
-/**
- * The page's side of the protocol: `submit` posts one answer and settles when
- * the viewer says whether it was delivered. Only one answer is on its way at a
- * time, and none after one went through; a viewer that said the share takes
- * no answer refuses it here too (the viewer checks again).
- */
 export function createShareSubmitter({ post, listen, onInit }: {
   post: (message: ShareSubmitMessage) => void;
-  /** Subscribes to the viewer's messages, already parsed with `viewerMessageSchema`. */
   listen: (handler: (message: ViewerMessage) => void) => void;
   onInit?: (init: ViewerInit) => void;
 }) {

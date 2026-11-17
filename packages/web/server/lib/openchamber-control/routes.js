@@ -1,7 +1,10 @@
 import express from 'express';
+import { OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
 import { asControlError } from './error.js';
 
-export const registerOpenChamberControlRoutes = (app, { controlService }) => {
+const AGENT_TOOL_ONLY_ACTIONS = new Set(OPENCHAMBER_TERMINAL_ACTIONS);
+
+export const registerOpenChamberControlRoutes = (app, { controlService, laterPages = null }) => {
   app.post('/api/openchamber/control', express.json({ limit: '1mb' }), async (req, res) => {
     const controller = new AbortController();
     const abortOnDisconnect = () => {
@@ -11,6 +14,9 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     res.once('close', abortOnDisconnect);
     try {
       const action = typeof req.body?.action === 'string' ? req.body.action : '';
+      if (AGENT_TOOL_ONLY_ACTIONS.has(action)) {
+        return res.status(403).json({ error: `${action} is available only to agents through the openchamber_terminal tool` });
+      }
       const requestInput = req.body?.input;
       const input = requestInput && typeof requestInput === 'object' && !Array.isArray(requestInput)
         ? requestInput
@@ -34,18 +40,26 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     }
   });
 
-  // The user answered a page an agent is waiting on (render.page with
-  // awaitAnswer). The agent's call holds the matching request open.
-  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), (req, res) => {
+  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), async (req, res) => {
     try {
-      return res.json(controlService.answerPage(req.body ?? {}));
+      return res.json(await controlService.answerPage(req.body ?? {}));
     } catch (error) {
       const controlError = asControlError(error, 'Could not deliver the answer');
       return res.status(controlError.statusCode).json({ error: controlError.message });
     }
   });
 
-  // The fields a waiting secret.run card asks for, without any value.
+  app.get('/api/openchamber/render/later', async (_req, res) => {
+    if (!laterPages) return res.status(503).json({ error: 'This server cannot keep pages open for a later answer' });
+    try {
+      await laterPages.load();
+      return res.json(laterPages.snapshot());
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not read the pages');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
+
   app.get('/api/openchamber/secret/fields', (req, res) => {
     try {
       return res.json(controlService.secretFields(req.query ?? {}));
@@ -55,9 +69,6 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     }
   });
 
-  // The user saved or declined a secret an agent asked for (secret.request),
-  // or gave the secrets of a secret.run (up to 8 values of 16,000 characters).
-  // The body carries the secrets: it is never logged or echoed back.
   app.post('/api/openchamber/secret/answer', express.json({ limit: '512kb' }), async (req, res) => {
     try {
       return res.json(await controlService.answerSecret(req.body ?? {}));

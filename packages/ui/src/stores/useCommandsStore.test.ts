@@ -26,7 +26,14 @@ const listCommandsMock = async (directory?: string | null) => {
 };
 
 const getDirectoryMock = () => getDirectoryImpl();
-const runtimeFetchMock = async () => runtimeFetchImpl();
+// These tests read entries per command, as against a server without the batch
+// route; `batchEntries` answers that route when a test sets it.
+let batchEntries: ((names: string[]) => Promise<Response>) | null = null;
+const runtimeFetchMock = async (input: string) => {
+  if (!input.startsWith('/api/config/command-configs')) return runtimeFetchImpl();
+  if (!batchEntries) return new Response(null, { status: 404 });
+  return batchEntries(new URLSearchParams(input.split('?')[1]).getAll('name'));
+};
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
@@ -81,6 +88,67 @@ describe('useCommandsStore', () => {
       isLoading: false,
       commandDraft: null,
     });
+  });
+
+  test('reads every command entry in one request when the server has the batch route', async () => {
+    let perCommandReads = 0;
+    const batches: string[][] = [];
+    listCommandsImpl = async () => [{ name: 'review' }, { name: 'git/commit' }, { name: 'unknown' }];
+    runtimeFetchImpl = async () => {
+      perCommandReads += 1;
+      return Response.json({});
+    };
+    batchEntries = async (names) => {
+      batches.push(names);
+      return Response.json({ commands: [
+        { name: 'review', entry: { source: 'none', scope: null, path: null, legacy: false, config: {} } },
+        { name: 'git/commit', entry: { source: 'md', scope: 'user', path: '/home/commands/git/commit.md', legacy: false, config: { description: 'Commit' } } },
+      ] });
+    };
+    try {
+      expect(await useCommandsStore.getState().loadCommands()).toBe(true);
+    } finally {
+      batchEntries = null;
+    }
+    expect(batches).toEqual([['review', 'git/commit', 'unknown']]);
+    expect(perCommandReads).toBe(0);
+    expect(useCommandsStore.getState().commands).toMatchObject([
+      { name: 'review', fromOpenCode: true },
+      { name: 'git/commit', scope: 'user', description: 'Commit', path: '/home/commands/git/commit.md' },
+      { name: 'unknown' },
+    ]);
+  });
+
+  test('an invalidated batch metadata read cannot publish stale entries', async () => {
+    const pending = deferred<Response>();
+    const started = deferred<void>();
+    let reads = 0;
+    listCommandsImpl = async () => [{ name: 'review' }];
+    batchEntries = async () => {
+      reads += 1;
+      if (reads === 1) {
+        started.resolve();
+        return pending.promise;
+      }
+      return Response.json({ commands: [{ name: 'review', entry: { config: { description: 'fresh' } } }] });
+    };
+    const descriptions: Array<string | undefined> = [];
+    const unsubscribe = useCommandsStore.subscribe(state => descriptions.push(state.commands[0]?.description));
+    try {
+      const first = useCommandsStore.getState().loadCommands();
+      await started.promise;
+      invalidateCommandsLoadCache(activeProjectPath);
+      const refreshed = useCommandsStore.getState().loadCommands();
+      pending.resolve(Response.json({ commands: [{ name: 'review', entry: { config: { description: 'stale' } } }] }));
+      expect(await Promise.all([first, refreshed])).toEqual([true, true]);
+      expect(useCommandsStore.getState().commands[0]?.description).toBe('fresh');
+      expect(descriptions).not.toContain('stale');
+      expect(reads).toBe(2);
+    } finally {
+      pending.resolve(Response.json({ commands: [] }));
+      unsubscribe();
+      batchEntries = null;
+    }
   });
 
   test('command scope enrichment stays bounded and leaves room for session lists', async () => {
@@ -258,14 +326,14 @@ describe('useCommandsStore', () => {
     expect(selectCommandsForDirectory(useCommandsStore.getState(), '/workspace/project').map(c => c.name)).toEqual(['first']);
   });
 
-  test('successful empty discovery clears only that project and is cached', async () => {
+  test('successful empty discovery clears only that project and allows a fresh read', async () => {
     const commands = [{ name: 'old' }];
     useCommandsStore.setState({ commands, commandsByDirectory: { [activeProjectPath]: commands } });
     expect(await useCommandsStore.getState().loadCommands()).toBe(true);
     expect(selectCommandsForDirectory(useCommandsStore.getState(), activeProjectPath)).toEqual([]);
     expect(useCommandsStore.getState().commands).toEqual([]);
     await useCommandsStore.getState().loadCommands();
-    expect(listCommandsCalls).toBe(1);
+    expect(listCommandsCalls).toBe(2);
   });
 
 

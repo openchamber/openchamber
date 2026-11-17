@@ -9,9 +9,9 @@ module owns everything on the server after the call: the group on disk, the
 crypto, the signed relay calls, polling, delivery and the card's routes.
 
 - `render-page.js` (`../openchamber-control/`) validates the page as for any
-  render call, refuses `share` with `awaitAnswer`, and asks `createGroup` for
-  the group. The tool result carries `{ title, shared: { recipients,
-  expiresAt }, note }` and never a link or PIN: those go no further than this
+  render call, refuses `share` with `awaitAnswer` or `answerLater`, and asks
+  `createGroup` for the group. The tool result carries `{ title, shared: {
+  recipients, expiresAt }, note }` and never a link or PIN: those go no further than this
   store and the card, so they never reach the transcript or the model provider.
 - The chat (packages/ui) builds the shared document, a self-contained HTML page
   with its renderer and bootstrap, and posts it. This module seals and uploads
@@ -67,10 +67,22 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - Keys and PINs live only in the group file (owner-readable, `0600` in a `0700`
   directory) and the GET answer. They are never logged, never in a tool result,
   never sent to the relay, which receives ciphertext and `SHA-256(auth)` only.
+- The host and the relay's browser viewer use the same byte-level crypto
+  contract in `openchamber-website/apps/relay/src/share/viewer.ts`. A 32-byte
+  link key and UTF-8 PIN salt feed HKDF-SHA-256 with separate
+  `openchamber-share-v1 auth` and `openchamber-share-v1 enc` info strings.
+  The blob is version byte `0x01`, a 12-byte IV and AES-256-GCM ciphertext
+  with its tag. Document and answer AAD keep the two purposes separate.
 - The lifetime is two working days from the call, in this server's local time
   zone with Saturday and Sunday skipped and every weekday hour counted
   (Friday 17:00 ends Tuesday 17:00, a weekend start ends Wednesday 00:00).
-  `expiresInHours` only shortens it. The absolute deadline goes to the relay.
+  Public holidays count as weekdays; clock changes count actual elapsed hours.
+  `expiresInHours` only shortens it. The server computes the absolute deadline
+  and the relay enforces it.
+- The document route accepts 40 MB of JSON so a page can inline 25 MB of
+  images plus the renderer. The sealed document must still fit the relay's
+  32 MiB ciphertext limit, and uploads stop within 5 minutes of expiry because
+  the relay refuses shares with less remaining lifetime.
 - Every recipient gets the same document: the first one posted is stored as
   the preview and a retry for a failed recipient uploads that copy, whatever
   the later post carries. One failed upload marks that recipient `failed` with
@@ -82,6 +94,9 @@ Every change to a group is broadcast on the OpenChamber control stream as
   than 45 s late means the clock jumped), and on the relay's control-socket
   nudge `{ type: 'share-state', shareId }` while the private relay host runs
   (`../relay/host-client.js`).
+- The relay keeps expired state for 1 week. A share still open or locked
+  locally expires after 8 days past its deadline even if no state arrives,
+  because the relay can no longer report it.
 - An answer is decrypted and stored with a message id minted before the first
   delivery attempt, so a retry never posts it twice. Delivery is
   `POST /api/session/:id/synthetic` with `delivery: 'steer'`, `resume: true`;
@@ -94,7 +109,9 @@ Every change to a group is broadcast on the OpenChamber control stream as
   between the admission and that call loses only the notification.
 - Only after delivery is the share closed on the relay (ack), which deletes the
   page and the answer there. An answer that cannot be decrypted marks the
-  recipient `failed` and is closed too.
+  recipient `failed` and is closed too. At expiry the relay deletes the page
+  itself; an answer not collected yet stays there a week longer, for a laptop
+  that slept through it.
 - At most 100 groups stay on disk. Past that, the oldest finished groups go,
   json and local page copy together: finished means every recipient is
   answered (and delivered), expired, cancelled or failed. A group with a
@@ -111,6 +128,24 @@ Every change to a group is broadcast on the OpenChamber control stream as
 - An answer and its message id are on disk before anything delivers or
   acknowledges it: a failed save puts the recipient back as it was, so the
   next poll reads the answer again and no second id can reach the session.
+- A stale poll result cannot create a new delivery after another path settles
+  the recipient, such as cancellation collecting its answer.
+- JSON embedded in the answer message escapes `<` so recipient data cannot
+  close the `openchamber-share-answer` envelope early.
+- Both stores serialize atomic writes and capture each save's snapshot before
+  queuing it. They publish the working object after the write succeeds;
+  returned objects remain mutable references and do not prove a later edit is
+  on disk.
+- Both stores move malformed record files aside and continue loading other
+  records. A directory read failure blocks writes until a load succeeds, so a
+  partial view cannot overwrite records that have not loaded.
+- Retention keeps the just-saved record so an arriving answer survives pruning.
+  Cleanup failure cannot turn a committed save into a failed save.
+- Host calls use the private and push relays' signing identity. Their signature
+  covers the method, path, body hash and metadata header to match the relay's
+  `buildSharePayload` contract. Resetting the identity invalidates the cached
+  signer; `unavailable` state can mean another identity owns the share after a
+  reset and supplies no state to apply.
 - A restart in the middle of an upload is finished at start from the stored
   document, for the recipients still `preparing`; the card posts only while
   the document is preparing, so nothing else would.
@@ -125,8 +160,8 @@ Every change to a group is broadcast on the OpenChamber control stream as
 
 ## Receiving side
 
-A person who got a link and PIN and has OpenChamber opens the page in the app
-(decision 0013): the composer turns a pasted link into a chip with a PIN
+A person who got a link and PIN and has OpenChamber opens the page in the app,
+so their own agent can explain it before they answer: the composer turns a pasted link into a chip with a PIN
 field, the agent reads the page with the message, and the page opens as a tab
 of the context panel, where its Send answers it. The UI is in
 `packages/ui/src/components/chat/sharePages/received/`.
@@ -141,7 +176,7 @@ Routes under UI auth, `/api/openchamber/received-pages`:
   composer. 400 `invalid_link` or `link_not_allowed`.
 - `GET /` -> `{ pages }`: every received page, newest first, as a page
   without its `source` and with the answer's summary only, for the `pages`
-  surface's list (decision 0018). Pages belong to this server, not a
+  surface's list. Pages belong to this server, not a
   project; in enterprise mode only those on the pinned relay.
 - `GET /:id`, `POST /:id/status` (asks the relay; 502 when it cannot be read,
   and the state already kept stays), `GET /:id/document` (`{ html }`, 404
@@ -172,6 +207,12 @@ Invariants:
   the client knows the page by `receivedId`. The PIN is never kept: opening
   keeps `auth` and the AES key bytes derived from it (`deriveShareSecrets`,
   equal to what `deriveShareKeys` derives). No response carries any of them.
+- Registration assigns the page id without waiting for the relay, so the
+  composer can replace the link immediately. Registering the same share can
+  replace its link key only before the page opens.
+- An existing received record remains usable on its original relay outside
+  enterprise mode. Only enterprise policy narrows existing records to the
+  pinned relay.
 - `<dataDir>/received-pages/<id>.json` (`0600` in a `0700` directory) holds
   the record, `<id>.html` the decrypted document. The id hashes the relay
   base and the share id, so the same link finds the same page. At most 100
@@ -185,9 +226,27 @@ Invariants:
   whatever the relay reports later (the author's collection deletes the
   relay's copy).
 - The source text is cut at 200,000 characters on both sides; the agent
-  never gets a page past that.
+  never gets a page past that. Truncation keeps oversized pages readable.
+- Answer input follows the relay viewer's limits: summaries are cut at 500
+  characters and JSON data over 16,000 characters is refused.
 
 ## Decisions
+
+### Why PIN generation uses rejection sampling and not only modulo
+
+Rejection sampling keeps all 6-digit PINs equally likely. Reducing every
+32-bit random value modulo 1,000,000 would bias the distribution.
+
+### Why share input accepts JSON text and not only objects
+
+Models sometimes send the share object as JSON text. Parsing that form once
+accepts the same request while keeping malformed input a field-specific usage
+error.
+
+### Why received pages belong to the server and not a project
+
+A link from another person names no local folder. The received-page list
+therefore spans the server's records, subject to enterprise relay policy.
 
 ### Why the chat builds the document and the server only seals it
 
@@ -206,7 +265,36 @@ does (`../dispatch-results/`, `../workflows/`), so the agent's turn is never hel
 The label is the name the user gave the agent; whoever holds the link and PIN
 can answer. The message tells the agent to treat the content as that person's
 answer and as data, not instructions, and keeps `verified="false"` for the day
-accounts can verify it.
+accounts can verify it. The label is a typed field so that day changes what
+fills it, not the flow. A code sent by email was rejected as the way to verify
+the person: it needs a mail provider and its bill, and the author still
+forwards the link by hand; accounts with known teammates remove both. Until
+then the page names no author either (no name from git or a setting): with no
+accounts there is nothing to vouch for it.
+
+### Why one link and PIN per recipient
+
+One shared link for several people would make their answers impossible to
+tell apart. "Ask Yulia and Denis" gives two links, each answer arriving under
+its own label.
+
+### Why a share cannot be extended and an answer cannot be edited
+
+The lifetime is short (two working days) and the author can only shorten it.
+A longer default with an extend button was rejected: extending needs a view of
+pending answers that nobody would dig through sessions for, and the author
+knows when the recipient is away. An answer is final because the agent
+already acted on the first one. The relay deletes the page and the answer as
+soon as they are collected: the frozen copy lives in the session card, so
+nothing needs to stay on the relay until expiry.
+
+### Why there is no switch for sharing outside enterprise mode
+
+Nothing reaches a person until the user copies a link and sends it, and the
+relay stores only ciphertext, so asking the agent to share is the opt-in. A
+Settings switch before the first share would be a step that protects nothing.
+Enterprise mode is the exception, where the policy decides
+(`../enterprise-mode.js`).
 
 ### Why the group keeps the relay it was made on
 

@@ -67,36 +67,15 @@ import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
 
 interface WalkthroughViewProps {
   directory: string;
-  /**
-   * The context panel keeps this view mounted but hidden via CSS, so work
-   * that should only run for a visible consumer has to be told. Defaults to
-   * true for mounts that have no visibility signal.
-   */
   visible?: boolean;
 }
 
 const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
 
-// Below this the table of contents would squeeze the diff into uselessness, so
-// the stream takes the whole panel and the header arrows carry navigation.
 const TOC_MIN_PANEL_WIDTH = 720;
 const TOC_MIN_WIDTH = 180;
-// The diff is the point of the surface; the contents column may never take more
-// than half the panel no matter how far the user drags.
 const TOC_MAX_FRACTION = 0.5;
 
-// The header never wraps. While its row does not fit it gives up room in
-// steps (the CSS is in `index.css`): first the labels, keeping the icons that
-// already name each control; then the model, the language and the guide move
-// into "More"; then the step arrows and Generate go, leaving the step list and
-// "More" to reach them; last the scope keeps only its icon. A fixed width
-// cannot pick the step: the pickers in the row change with the scope and the
-// language.
-//
-// Every control in this row is 28px tall — `Button` size `sm` and the dropdown
-// trigger's default size are both h-7, the design system's toolbar scale
-// rather than a number picked here. Three heights in one row read as
-// misalignment, not hierarchy.
 const WALKTHROUGH_HEADER_FIT = {
   steps: [
     'data-walkthrough-header-compact',
@@ -112,13 +91,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const inPanelHeader = useInContextPanelHeader();
   const [panelWidth, setPanelWidth] = useState(0);
 
-  // The walkthrough documents one repository: the one picked from the picker,
-  // or the root when nothing is picked. Everything below keys off `directory`.
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(rootDirectory || null, { enabled: visible, recheckOnOpen: true });
   const directory = gitDirectory ?? rootDirectory;
 
-  // Panel width, not viewport width: this surface is resizable independently of
-  // the window.
   useEffect(() => {
     const element = rootRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
@@ -129,9 +104,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     return () => observer.disconnect();
   }, []);
 
-  // Fitted against the header's own width, not the panel's: inside the context
-  // panel header it shares the row with the panel's fullscreen and close
-  // buttons.
   const headerRef = useRef<HTMLElement | null>(null);
   useToolbarFit(headerRef, WALKTHROUGH_HEADER_FIT);
 
@@ -140,9 +112,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const [draggingToc, setDraggingToc] = useState(false);
 
   const showToc = panelWidth === 0 || panelWidth >= TOC_MIN_PANEL_WIDTH;
-  // Clamped on read rather than on write: the panel can be resized after the
-  // width was stored, and a remembered 400px column must not swallow a narrow
-  // panel.
   const tocWidth = Math.min(
     Math.max(storedTocWidth, TOC_MIN_WIDTH),
     Math.max(TOC_MIN_WIDTH, (panelWidth || TOC_MIN_PANEL_WIDTH) * TOC_MAX_FRACTION)
@@ -153,7 +122,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = tocWidth;
-      // The contents column is at the start; in RTL dragging left widens it.
       const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
       const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
       setDraggingToc(true);
@@ -193,15 +161,11 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
 
   const diffLayoutPreference = useUIStore((state) => state.diffLayoutPreference);
   const wrapLines = useUIStore((state) => state.diffWrapLines);
-  // The walkthrough column is narrower than the diff surface and stops are read
-  // top-to-bottom, so `dynamic` resolves to inline here rather than guessing
-  // from the window width.
   const renderSideBySide = diffLayoutPreference === 'side-by-side';
 
   const requestedTarget = useWalkthroughStore((state) => state.getRequestedTarget(directory));
   const clearRequestedTarget = useWalkthroughStore((state) => state.clearRequestedTarget);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  // The panel this view lives in, which may show another project's PR here.
   const panelDirectory = useEffectiveDirectory() ?? rootDirectory;
 
   const status = useGitStatus(directory || null);
@@ -221,8 +185,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     if (visible && directory) void ensureAll(directory, git);
   }, [directory, ensureAll, git, visible]);
 
-  // Changes and the walkthrough share one base: the person's explicit choice,
-  // else the open pull request's base, the reflog, then the default branch.
   const currentBranch = status?.current ?? null;
   const choosingCommit = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'commit' && !requestedTarget;
   const isCommitScope = choosingCommit || requestedTarget?.source.kind === 'commit';
@@ -241,7 +203,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     currentBranch && comparisonBase ? { kind: 'branch', baseRef: comparisonBase, headRef: currentBranch } : null
   ), [comparisonBase, currentBranch]);
 
-  // The branch comparison reads its pull request base; ask for it here too.
   useBranchPullRequestRequest(directory || null, currentBranch, binding);
   const readContext = binding.contexts[0] ?? null;
 
@@ -250,14 +211,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const prComparison = usePullRequestComparison(directory || null, currentBranch, readContext, visible && isPrScope,
     requestedTarget?.source.kind === 'pr' ? requestedTarget.source : undefined);
   const selectedPr = prComparison.selectedSource;
-  // A change request on any provider the server serves has a published diff to walk through.
   const readsChangeRequests = prComparison.readContext !== null;
-  // Offered while the provider list is still unknown too; the picker waits for
-  // it. A host that lists change requests without serving their diff has
-  // nothing to walk through.
   const offersChangeRequests = useChangeRequestDiffServing(readContext?.provider) !== 'not-served' && readContext !== null;
-  // A pull request scope kept from before (a handoff from Changes) on such a
-  // host says so instead of offering to generate.
   const prDiffUnavailable = isPrScope && prComparison.diffUnavailable;
   const changeRequestTerm = useChangeRequestTerm(prComparison.provider);
 
@@ -274,8 +229,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const source = target.source;
   const commentOrigin = useMemo(() => diffCommentOriginFromTarget(target), [target]);
   const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, directory, visible && isPrScope);
-  // A scope the person picked before its subject exists: the base of a branch
-  // comparison, or which commit to read. Nothing loads until they say.
   const choosingBranchBase = pendingSourceSelection?.directory === directory
     && pendingSourceSelection.kind === 'branch' && !requestedTarget;
   const isBranchScope = choosingBranchBase || source.kind === 'branch';
@@ -308,8 +261,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     requestTarget(directory, { source: { kind: 'commit', hash: selectedCommitHash } });
     setPendingSourceSelection(null);
   }, [choosingCommit, directory, requestTarget, selectedCommitHash]);
-  // Reads again when the subject moves: a branch's new commits, a push to the
-  // pull request.
   const sourceRevision = source.kind === 'branch' ? branchRevision : '';
   const prPushRevision = source.kind === 'pr' ? pushRevision : 0;
   const review = useWalkthroughReview({
@@ -344,9 +295,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           ? t('walkthrough.scope.staged')
           : t('walkthrough.scope.working');
   const openChanges = () => openContextPanelTab(panelDirectory, { mode: 'diff', diffScope: 'pr', targetDirectory: rootDirectory });
-  // Before the first walkthrough the empty state holds the model, the language
-  // and Generate, so the header does not repeat them; a blocker keeps them in
-  // the header, where a roomier model is the way past it.
   const headerOffersGeneration = Boolean(view || review.blocked);
   const sourceIcon = isPrScope ? 'git-pull-request' : isCommitScope ? 'git-commit' : isBranchScope ? 'git-branch' : 'file-edit';
 
@@ -356,9 +304,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   if (unreadable) {
     return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
   }
-  // Non-repo root: surface nested-repository resolution while the operating
-  // directory has not proven to be a repository (discovering, failed,
-  // unsupported, none found, or settling on the auto-selected one).
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return (
       <NestedRepoResolutionStates
@@ -443,9 +388,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 selectWorkingTree(value as WalkthroughWorkingTreeScope);
               }}
             >
-              {/* Grouped so "everything" is visibly scoped to uncommitted work:
-                  on its own next to "This branch" it read as "all changes that
-                  exist", which is the opposite of what it selects. */}
               <DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
                 {t('walkthrough.scope.group.workingTree')}
               </DropdownMenuLabel>
@@ -458,8 +400,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                       : t('walkthrough.scope.working')}
                 </DropdownMenuRadioItem>
               ))}
-              {/* The branch scope is offered on any branch: without a base yet,
-                  picking it asks for one instead of hiding the option. */}
               {currentBranch && (
                 <>
                   <DropdownMenuSeparator />
@@ -486,6 +426,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             <BranchComparisonSelector
               key={JSON.stringify([directory, currentBranch])}
               branches={branches?.all ?? []}
+              defaultBranches={branches?.defaultBranches}
+              primaryRemote={binding.contexts[0]?.primaryRemote}
               currentBranch={currentBranch}
               base={comparisonBase}
               automatic={comparisonBaseSource !== 'chosen'}
@@ -573,9 +515,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.action.previous')}</TooltipContent>
               </Tooltip>
-              {/* Without the contents column the arrows alone say neither where
-                  the reader is nor what is ahead, so the position opens the
-                  list of steps. */}
               {!showToc && <WalkthroughStepMenu review={review} view={view} />}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -607,7 +546,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             />
           )}
           <Popover.Root open={moreOpen} onOpenChange={setMoreOpen}>
-            {/* The popover keeps the page live under it, so a pointer back on the button would reopen the tooltip over it. */}
             <Tooltip disabled={moreOpen}>
               <TooltipTrigger asChild>
                 <Popover.Trigger

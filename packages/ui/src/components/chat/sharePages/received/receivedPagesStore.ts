@@ -8,14 +8,6 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime
 import { isSharingTurnedOff } from '@/lib/share-pages/api';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
-/**
- * The pages this server received (decision 0018): what the `pages` surface
- * lists, and whether the rail shows it at all. One feed for every reader (the
- * rail, the switch shortcut, the list, the phone's drawer), read on first use,
- * again on every `received-page-changed` event and after the event stream
- * reconnects. `pages` stays null until a read succeeds; a failed read keeps
- * the pages already shown, and enterprise mode without a relay empties them.
- */
 type ReceivedPagesState = {
   pages: ReceivedPageItem[] | null;
   error: string | null;
@@ -42,7 +34,6 @@ const reload = async () => {
   }
 };
 
-/** Starts the feed for this server and policy, once; a new server or policy starts it again from empty. */
 export const ensureReceivedPagesFeed = (enterpriseMode: boolean) => {
   if (isVSCodeRuntime()) return;
   const key = `${getRuntimeKey()}\n${enterpriseMode}`;
@@ -55,8 +46,6 @@ export const ensureReceivedPagesFeed = (enterpriseMode: boolean) => {
   let connected = false;
   const stopEvents = subscribeOpenchamberEvents((event) => {
     if (event.type === 'event-stream-ready') {
-      // A reconnect reads again; so does the first connection when no read has
-      // succeeded yet (the server was not up for the first one).
       if (connected || useReceivedPagesStore.getState().pages === null) void reload();
       connected = true;
     }
@@ -73,15 +62,12 @@ export const ensureReceivedPagesFeed = (enterpriseMode: boolean) => {
   };
 };
 
-/** The received pages, kept current while any reader is mounted. */
 export function useReceivedPages(): ReceivedPagesState {
   const enterpriseMode = useEnterpriseMode();
   React.useEffect(() => { ensureReceivedPagesFeed(enterpriseMode); }, [enterpriseMode]);
   return useReceivedPagesStore();
 }
 
-/** Whether the rail shows the `pages` surface: the server has received a page (or a tab of it is open). */
 export const hasReceivedPages = (state: ReceivedPagesState): boolean => !state.turnedOff && (state.pages?.length ?? 0) > 0;
 
-/** Reads the latest list again (Retry). */
 export const reloadReceivedPages = () => { void reload(); };

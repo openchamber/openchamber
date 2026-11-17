@@ -99,8 +99,7 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  // OpenCode 2.x accepts session metadata only at create time, so the goal
-  // record lives in OpenChamber's own store next to the objective text.
+  // external: https://github.com/anomalyco/opencode OpenCode 2.x accepts session metadata only at creation; goals use OpenChamber's store.
   void baseUrl;
   void authHeaders;
   if (typeof persistSessionGoal !== 'function') {

@@ -1,7 +1,8 @@
 import React from 'react';
 import { hasReceivedPages, useReceivedPagesStore } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
-import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { getTerminalFocusOwner, isTerminalEventTarget } from '@/lib/terminalFocus';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
@@ -16,7 +17,7 @@ import { handleSettingsShortcut } from './useSettingsKeyboardShortcuts';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
-import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import {
   eventMatchesShortcut,
   eventMatchesShortcutPrefix,
@@ -82,9 +83,6 @@ export const useKeyboardShortcuts = () => {
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
   const { phase: sessionPhase } = useCurrentSessionActivity();
-  // Double Escape from a composer (useComposerAbortEscape). The composer of a
-  // chat pinned in the side panel stops that chat's session, which the column
-  // names on its root; the main composer stops the main chat's.
   const { handleKeyDown: handleAbortEscapeKeyDown, reset: resetAbortPriming } = useComposerAbortEscape({
     isBlocked: () => hasOverlayOpen() || hasOpenDropdown(),
     resolveTarget: (target) => {
@@ -129,7 +127,6 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
 
-
   const toggleTerminalSurface = () => {
     if (!currentDirectory) return;
     useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'terminal');
@@ -137,8 +134,6 @@ export const useKeyboardShortcuts = () => {
 
   useKeybinds({
     open_command_palette: () => {
-      // The palette renders only in the MainLayout (web and desktop); in VS Code
-      // this keystroke is Quick Open.
       if (isVSCodeRuntime()) return false;
       useUIStore.getState().toggleCommandPalette();
     },
@@ -147,7 +142,6 @@ export const useKeyboardShortcuts = () => {
       useUIStore.getState().setTimelineDialogOpen(true);
     },
     toggle_source_board: () => {
-      // A desktop and web page: the phone shell and VS Code have no board.
       const state = useUIStore.getState();
       if (state.isMobile || isVSCodeRuntime()) return false;
       state.setSourceBoardOpen(!state.isSourceBoardOpen);
@@ -158,9 +152,6 @@ export const useKeyboardShortcuts = () => {
         state.setSessionSwitcherOpen(true);
         return;
       }
-      // The switcher dropdown only mounts while the sidebar is collapsed;
-      // with the sidebar visible the list is already on screen, so the
-      // shortcut opens the sidebar's session search instead.
       if (state.isSidebarOpen) {
         window.dispatchEvent(new CustomEvent('openchamber:sidebar-session-search'));
         return;
@@ -190,7 +181,6 @@ export const useKeyboardShortcuts = () => {
       useUIStore.getState().toggleHelpDialog();
     },
     open_project_actions: () => {
-      // Desktop and web only: VS Code and the phone shell run no project actions.
       const state = useUIStore.getState();
       if (state.isMobile || isVSCodeRuntime()) return false;
       state.setProjectActionsDialogOpen(!state.isProjectActionsDialogOpen);
@@ -280,13 +270,10 @@ export const useKeyboardShortcuts = () => {
       state.addRecentAgent(next);
     },
     toggle_terminal: () => {
-      // Desktop and web only: no terminal surface renders in VS Code, where
-      // this keystroke toggles the bottom panel.
       if (useUIStore.getState().isMobile || isVSCodeRuntime()) return false;
       return toggleTerminalSurface();
     },
     toggle_context_panel_expanded: () => {
-      // No ContextPanel renders in VS Code, so the store change would be invisible.
       if (useUIStore.getState().isMobile || isVSCodeRuntime() || !currentDirectory) return false;
       toggleExpandedContextZone(currentDirectory);
     },
@@ -337,8 +324,6 @@ export const useKeyboardShortcuts = () => {
   });
 
   function navigateSessionHistoryByShortcut(event: KeyboardEvent, delta: -1 | 1): boolean | void {
-    // An editor that already handled the chord (CodeMirror outdent/indent)
-    // keeps it.
     if (event.defaultPrevented) return false;
     return navigateSessionHistory(delta) ? undefined : false;
   }
@@ -373,6 +358,7 @@ export const useKeyboardShortcuts = () => {
       const handler = shortcutRegistry.get(actionId);
       return handler ? handler(event) !== false : false;
     };
+    const terminalZoomKeyCodes = new Set<string>();
     const handleTerminalShortcutCapture = (event: KeyboardEvent) => {
       if (!isTerminalEventTarget(event.target)) return;
       const getBinding = (actionId: ShortcutActionId) => getEffectiveShortcutCombo(
@@ -384,6 +370,19 @@ export const useKeyboardShortcuts = () => {
       if (actionId && invokeRegistered(actionId, event)) {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      if (getTerminalFocusOwner(event.target) === 'main' && !isDesktopShell() && !isVSCodeRuntime() && !isMobileSurfaceRuntime() && !event.defaultPrevented && !isIMECompositionEvent(event)) {
+        const zoom = eventMatchesShortcut(event, getBinding('zoom_in')) ? 'zoom-in'
+          : eventMatchesShortcut(event, getBinding('zoom_out')) ? 'zoom-out'
+          : eventMatchesShortcut(event, getBinding('zoom_reset')) ? 'zoom-reset' : null;
+        if (zoom) {
+          event.preventDefault();
+          event.stopPropagation();
+          terminalZoomKeyCodes.add(event.code);
+          window.dispatchEvent(new CustomEvent('openchamber:zoom', { detail: zoom }));
+          return;
+        }
       }
     };
     const handleSelectionToolbarKeyDownCapture = (event: KeyboardEvent) => {
@@ -452,9 +451,6 @@ export const useKeyboardShortcuts = () => {
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (isTerminalEventTarget(event.target)) return;
       if (!dispatcher.hasActivePrefix()) return;
-      // An unmodified completion key typed into an editable target is only a
-      // deliberate sequence when the prefix was armed from that same target;
-      // otherwise it is regular typing and must not be swallowed.
       if (
         !event.ctrlKey && !event.metaKey && !event.altKey
         && isEditableEventTarget(event.target)
@@ -551,8 +547,6 @@ export const useKeyboardShortcuts = () => {
     const handleWindowFocus = () => {
       if (useUIStore.getState().isMobile) return;
       if (windowFocusFrame !== null) cancelAnimationFrame(windowFocusFrame);
-      // The element that held focus gets it back after the window's own
-      // event; check what holds it once that has happened.
       windowFocusFrame = requestAnimationFrame(() => {
         windowFocusFrame = requestAnimationFrame(() => {
           windowFocusFrame = null;
@@ -568,9 +562,11 @@ export const useKeyboardShortcuts = () => {
     const handleKeyUp = (event: KeyboardEvent) => {
       heldKeysRef.current.delete(event.key.toLowerCase());
       heldKeysRef.current.delete(resolveShortcutEventKey(event).toLowerCase());
+      if (terminalZoomKeyCodes.delete(event.code)) event.stopPropagation();
     };
     const handleBlur = () => {
       heldKeysRef.current.clear();
+      terminalZoomKeyCodes.clear();
       dispatcher.handleBlur();
       selectionToolbarDispatcher.handleBlur();
     };
@@ -587,8 +583,6 @@ export const useKeyboardShortcuts = () => {
     window.addEventListener('pointerup', inputRedirect.releaseMiddleClick, true);
     window.addEventListener('pointercancel', inputRedirect.releaseMiddleClick, true);
     window.addEventListener('focusin', inputRedirect.rememberColumn, true);
-    // Pair a Linux middle click with its paste before a focused editor can
-    // consume it. Keyboard paste keeps the bubble listener below.
     const captureMiddleClickPaste = isLinuxPlatform();
     const handleMiddleClickPaste = (event: ClipboardEvent) => {
       inputRedirect.captureMiddleClickPaste(event);

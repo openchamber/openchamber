@@ -8,42 +8,10 @@ import {
   type CrashRecoveryState,
 } from '@/lib/browser/crashRecovery';
 
-/**
- * Translates `<webview>` lifecycle events into a single navigation status.
- *
- * Chromium reports failures and successes through separate events that can
- * arrive in either order, and it emits `did-fail-load` for sub-resources as
- * well as for the main frame. Both are handled here so the panel only ever
- * sees one authoritative state:
- *
- * - Sub-frame failures are ignored; only the main frame changes the status.
- * - `ERR_ABORTED` is not a failure. It is what Chromium reports when a
- *   navigation is superseded by the next one, and treating it as an error puts
- *   an error screen over a page that is loading perfectly well.
- *
- * Takes the element rather than a ref so the listeners attach when the view
- * actually appears. A ref is stable, so an effect keyed on it runs once — and
- * silently attaches nothing at all when the view mounts a render later.
- *
- * `<webview>` puts its event payload directly on the event object rather than
- * under `detail`, so reading `detail` yields a failure with no code and no
- * description — an error screen that says nothing. Both shapes are read here.
- *
- * A lost renderer is handled here too. It is reported by neither of the above:
- * the page simply stops existing, and the panel would otherwise stay blank with
- * no indication that anything happened.
- */
 
-/** Chromium's code for "this navigation was replaced by another one". */
+// external: https://source.chromium.org/chromium/chromium/src/+/main:net/base/net_error_list.h ERR_ABORTED (-3) marks a cancelled navigation.
 const ERR_ABORTED = -3;
 
-/**
- * `about:blank` is the view's resting state, not somewhere the user went. It
- * arrives through `did-navigate` like any other address, and taking it at face
- * value puts it in the address bar and makes the panel look like it is showing
- * a page — which hides the empty state that would otherwise offer somewhere to
- * go.
- */
 const isRealPageUrl = (url: unknown): url is string => (
   typeof url === 'string' && url.length > 0 && url !== 'about:blank'
 );
@@ -55,7 +23,7 @@ type FailLoadDetail = {
   isMainFrame?: boolean;
 };
 
-/** Reads a webview event payload, whichever shape this Electron version uses. */
+// external: https://www.electronjs.org/docs/latest/api/webview-tag#event-did-fail-load Electron webview events expose payload fields directly on the event.
 export const readEventPayload = <T extends object>(event: Event): Partial<T> => {
   const record = event as unknown as { detail?: unknown };
   if (record.detail && typeof record.detail === 'object') return record.detail as Partial<T>;
@@ -85,8 +53,6 @@ export const useWebviewNavigation = (
   const urlChangeRef = React.useRef(onUrlChange);
   urlChangeRef.current = onUrlChange;
 
-  // Survives re-attaches so a view that keeps crashing cannot restart its own
-  // budget by being remounted.
   const crashStateRef = React.useRef<CrashRecoveryState>(INITIAL_CRASH_RECOVERY_STATE);
 
   React.useEffect(() => {
@@ -132,8 +98,6 @@ export const useWebviewNavigation = (
       setTitle(pageTitle);
       commitUrl(current);
       syncHistory();
-      // A failure already produced a terminal status; getURL() may be blank or
-      // still point at the previous page when `did-stop-loading` follows it.
       setStatus((previous) => (
         previous.kind === 'failed'
           ? previous
@@ -184,8 +148,6 @@ export const useWebviewNavigation = (
       const target = readCurrentUrl();
       const plan = planCrashRecovery(crashStateRef.current, Date.now());
       if (!plan) {
-        // Out of attempts: say what happened rather than reload again. The
-        // toolbar's own reload stays available, which is the user's call.
         setStatus({ kind: 'failed', url: target, code: 0, description: '', crashed: true });
         return;
       }
@@ -208,15 +170,10 @@ export const useWebviewNavigation = (
     webview.addEventListener('page-title-updated', onTitleUpdated);
     webview.addEventListener('page-favicon-updated', onFaviconUpdated);
     webview.addEventListener('did-fail-load', onFailLoad);
-    // Electron renamed this event; older builds still emit only the old name.
+    // external: https://www.electronjs.org/docs/latest/breaking-changes#removed-crashed-event Keep the legacy crashed event alongside render-process-gone for older hosts.
     webview.addEventListener('render-process-gone', onCrashed);
     webview.addEventListener('crashed', onCrashed);
 
-    // The webview may already be settled by the time this effect runs. Only
-    // treat it as settled when a page is actually loaded: a freshly created
-    // view reports "not loading" before its guest attaches, and settling on
-    // that would declare an empty page ready and hide the real one behind an
-    // empty state.
     try {
       if (!webview.isLoading() && readCurrentUrl()) onStopLoading();
     } catch {

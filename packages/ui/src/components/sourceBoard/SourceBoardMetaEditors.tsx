@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { recordLabelWrite } from '@/components/references/labelWrites';
 import type { CachedValue } from '@/components/references/referenceCache';
 import { labelColor, referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
@@ -58,17 +59,20 @@ const MetaValue: React.FC<{ empty: boolean; children: React.ReactNode; picker: R
     );
 };
 
-/** An issue's, discussion's or PR's labels, changed as one set from the repository's labels. */
+const recordUnlistedLabelWrite = (reference: RepositoryReference, labels: Label[]) => recordLabelWrite(reference, labels, null);
+
 export const SourceBoardLabels: React.FC<{
     reference: RepositoryReference;
     context: SourceControlReadContext;
+    onWritten?: (reference: RepositoryReference, labels: Label[]) => void;
     onChanged: () => void;
-}> = ({ reference, context, onChanged }) => {
+}> = ({ reference, context, onWritten = recordUnlistedLabelWrite, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const [busy, setBusy] = React.useState(false);
     const descriptor = useSourceControlProvider(reference.provider);
     const project = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo };
+    const repositoryLabels = React.useRef<Label[]>([]);
 
     const commit = async (labels: string[]) => {
         setBusy(true);
@@ -82,6 +86,11 @@ export const SourceBoardLabels: React.FC<{
             if (reference.kind === 'pull') await sourceControl.changeRequestSetLabels(payload);
             else if (reference.kind === 'discussion') await sourceControl.discussionSetLabels(payload);
             else await sourceControl.issueSetLabels(payload);
+            onWritten(reference, labels.map((name) => (
+                reference.labels.find((label) => label.name === name)
+                    ?? repositoryLabels.current.find((label) => label.name === name)
+                    ?? { name }
+            )));
         } catch (error) {
             toast.error(t('sourceBoard.toast.labelsFailed', { reference: referenceNumberLabel(reference, descriptor) }), {
                 description: error instanceof Error ? error.message : String(error),
@@ -102,7 +111,10 @@ export const SourceBoardLabels: React.FC<{
                     emptyText={t('sourceBoard.labels.empty')}
                     selected={reference.labels.map((label) => label.name)}
                     selectedChoices={reference.labels.map(labelChoice)}
-                    loadChoices={async () => (await sourceControl.referenceLabels(context, project)).map(labelChoice)}
+                    loadChoices={async () => {
+                        repositoryLabels.current = await sourceControl.referenceLabels(context, project);
+                        return repositoryLabels.current.map(labelChoice);
+                    }}
                     onCommit={(labels) => void commit(labels)}
                     busy={busy}
                 />
@@ -113,7 +125,6 @@ export const SourceBoardLabels: React.FC<{
     );
 };
 
-/** Who an open PR asks to review, changed as one set from the people who can. */
 export const SourceBoardReviewers: React.FC<{
     pull: RepositoryChangeRequestReference;
     detail: CachedValue<RepositoryReferenceDetail>;
@@ -146,8 +157,6 @@ export const SourceBoardReviewers: React.FC<{
         }
     };
 
-    // The current set comes with the detail: no picker until it is known. A
-    // detail that failed says so in the rows above, and nothing more comes.
     if (detail.status === 'error') return null;
     if (!reviewers) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
     return (
@@ -161,7 +170,7 @@ export const SourceBoardReviewers: React.FC<{
                     selected={reviewers.map((person) => person.id)}
                     selectedChoices={reviewers.map(reviewerChoice)}
                     loadChoices={async () => (await sourceControl.referenceReviewers(context, project))
-                        // Some hosts refuse to ask a PR's author for its review (GitHub); others allow it (GitLab).
+                        // external: https://docs.github.com/en/rest/pulls/review-requests#request-reviewers-for-a-pull-request GitHub refuses review requests to the PR author; GitLab allows them.
                         .filter((person) => descriptor.features.authorCanReview || person.login !== pull.author?.login)
                         .map(reviewerChoice)}
                     onCommit={(ids) => void commit(ids)}

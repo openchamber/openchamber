@@ -6,15 +6,12 @@ import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { useIsSessionAiRenamePending, useSessionAiRename } from '@/sync/use-session-ai-rename';
 import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
 
-/** Menus and mobile swipe actions check history only while their controls are open. */
 export function useSessionAiRenameAction(sessionID: string, directory: string | null | undefined, open: boolean) {
   const { t } = useI18n();
   const { prepare, rename } = useSessionAiRename(sessionID, directory);
   const pending = useIsSessionAiRenamePending(sessionID, directory);
   const [availability, setAvailability] = useState<'checking' | 'ready' | 'empty' | 'error'>('checking');
   const unsupported = isVSCodeRuntime();
-  // Renaming runs on the small model; without one the item is disabled with
-  // the reason rather than failing after the click.
   const smallModel = useSmallModelAvailability(directory, open && !unsupported);
   const noSmallModel = smallModel === 'unavailable';
 

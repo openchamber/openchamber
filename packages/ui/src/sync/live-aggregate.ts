@@ -14,10 +14,6 @@ const getSessionUpdatedAt = (session: Session): number => {
   return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0
 }
 
-// The fields a live-session consumer renders or orders by. Compared field by
-// field rather than through a joined string: this runs over every live
-// session each time any directory's session list changes, and an unchanged
-// session is usually the same object, which is checked first.
 const areSessionsEquivalent = (left: Session, right: Session): boolean => {
   if (left === right) return true
   return left.id === right.id
@@ -29,8 +25,12 @@ const areSessionsEquivalent = (left: Session, right: Session): boolean => {
     && (left.parentID ?? '') === (right.parentID ?? '')
     && left.model?.id === right.model?.id
     && left.model?.providerID === right.model?.providerID
-    // A metadata write leaves time.updated alone. By reference: a patch brings
-    // a new object, and every other update carries the same one over.
+    && left.cost === right.cost
+    && left.tokens?.input === right.tokens?.input
+    && left.tokens?.output === right.tokens?.output
+    && left.tokens?.reasoning === right.tokens?.reasoning
+    && left.tokens?.cache?.read === right.tokens?.cache?.read
+    && left.tokens?.cache?.write === right.tokens?.cache?.write
     && left.metadata === right.metadata
 }
 
@@ -47,8 +47,6 @@ const getStatusPriority = (status: SessionStatus | undefined): number => {
   }
 }
 
-// Only the retry variant carries attempt/message/next, so equality compares
-// those fields when both sides are retries and the discriminator otherwise.
 const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
   if (left?.type !== right?.type) return false
   if (left?.type !== 'retry' || right?.type !== 'retry') return true
@@ -130,11 +128,24 @@ export const areStatusMapsEquivalent = (
   return true
 }
 
+let lastSources: ReadonlyArray<LiveStateSlice["session"]> = []
+let lastAggregate: Session[] = []
+
 export function aggregateLiveSessions(states: Iterable<LiveStateSlice>): Session[] {
+  const sources = Array.from(states, (state) => state.session)
+  if (sources.length === lastSources.length && sources.every((source, index) => source === lastSources[index])) {
+    return lastAggregate
+  }
+  lastAggregate = aggregateSessionLists(sources)
+  lastSources = sources
+  return lastAggregate
+}
+
+function aggregateSessionLists(sources: ReadonlyArray<LiveStateSlice["session"]>): Session[] {
   const sessionsById = new Map<string, Session>()
 
-  for (const state of states) {
-    for (const session of state.session) {
+  for (const list of sources) {
+    for (const session of list) {
       if (!session?.id) {
         continue
       }

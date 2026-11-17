@@ -55,7 +55,6 @@ const MESSAGE_STREAM_TRANSPORT_OPTIONS: Array<{ id: 'auto' | 'ws' | 'sse'; label
   },
 ];
 
-/** Files and the editor: keymap, tree side, saving, hidden files, preview. */
 const FilesAndEditorSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -183,7 +182,6 @@ const FilesAndEditorSection: React.FC = () => {
   );
 };
 
-/** The built-in terminal: which shell, login mode, quick keys. Not in VS Code. */
 const TerminalSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -196,6 +194,8 @@ const TerminalSection: React.FC = () => {
   const setShowTerminalQuickKeysOnDesktop = useUIStore((state) => state.setShowTerminalQuickKeysOnDesktop);
   const terminalCloseOnExit = useUIStore((state) => state.terminalCloseOnExit);
   const setTerminalCloseOnExit = useUIStore((state) => state.setTerminalCloseOnExit);
+  const terminalOpenOnProjectAction = useUIStore((state) => state.terminalOpenOnProjectAction);
+  const setTerminalOpenOnProjectAction = useUIStore((state) => state.setTerminalOpenOnProjectAction);
   const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
   const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
 
@@ -277,6 +277,16 @@ const TerminalSection: React.FC = () => {
         />
         {!isMobile ? (
           <SettingsCheckboxRow
+            checked={terminalOpenOnProjectAction}
+            onChange={setTerminalOpenOnProjectAction}
+            label={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            ariaLabel={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            info={t('settings.openchamber.visual.field.terminalOpenOnProjectActionInfo')}
+            settingsItem="appearance.terminal-open-on-project-action"
+          />
+        ) : null}
+        {!isMobile ? (
+          <SettingsCheckboxRow
             checked={showTerminalQuickKeysOnDesktop}
             onChange={setShowTerminalQuickKeysOnDesktop}
             label={t('settings.openchamber.visual.field.terminalQuickKeys')}
@@ -293,7 +303,6 @@ const TerminalSection: React.FC = () => {
   );
 };
 
-/** How the window behaves: header tabs, panel motion, scrollbars, where links open. */
 const PanelsAndLinksSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -396,7 +405,6 @@ const PanelsAndLinksSection: React.FC = () => {
   );
 };
 
-/** How the window behaves, and the phone's workspace tabs. Not in VS Code. */
 export const GeneralInterfaceSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
   if (isVSCodeRuntime()) return null;
@@ -408,7 +416,6 @@ export const GeneralInterfaceSettings: React.FC = () => {
   );
 };
 
-/** Files and the editor, then the terminal. VS Code keeps only the editor settings it applies. */
 export const GeneralFilesAndTerminalSettings: React.FC = () => (
   <>
     <FilesAndEditorSection />
@@ -416,7 +423,6 @@ export const GeneralFilesAndTerminalSettings: React.FC = () => (
   </>
 );
 
-/** The last sections of General: how messages stream in, and usage reports. */
 export const GeneralConnectionAndPrivacySettings: React.FC = () => {
   const { t } = useI18n();
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
@@ -430,7 +436,6 @@ export const GeneralConnectionAndPrivacySettings: React.FC = () => {
     void updateDesktopSettings({ messageStreamTransport: mode });
   }, [setMessageStreamTransport]);
 
-  // Sync reportUsage changes to server settings
   const handleReportUsageChange = React.useCallback((enabled: boolean) => {
     setReportUsage(enabled);
     void updateDesktopSettings({ reportUsage: enabled });

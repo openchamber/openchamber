@@ -11,7 +11,7 @@ description: OpenChamber에 말하고 응답을 소리내어 들으세요.
 
 응답을 읽는 방식을 선택합니다.
 
-- **browser** — 브라우저의 내장 음성, 설정 불필요
+- **browser**는 브라우저에서 사용할 수 있는 음성을 사용합니다. Linux 데스크톱에서는 `speech-dispatcher`, 클라이언트 라이브러리 `libspeechd`, `espeak-ng` 같은 음성 엔진을 설치하세요. 배포판에서 speech-dispatcher 서비스를 자동으로 시작하지 않으면 서비스를 활성화한 뒤 OpenChamber를 다시 시작하세요.
 - **OpenAI** — OpenAI의 음성. API 키를 붙여넣고 음성을 선택합니다
 - **OpenAI-compatible** — OpenAI 형식을 지원하는 모든 서비스. URL과, 필요하다면 API 키를 입력합니다
 - **macOS say** — 내장 `say` 명령. 이를 지원하는 Mac에서 사용 가능

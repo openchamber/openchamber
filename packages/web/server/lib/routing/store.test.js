@@ -137,6 +137,25 @@ describe('routing store', () => {
     expect(await store.readToken()).toBe('ts-secret');
   });
 
+  it('keeps the Gemini key in its own 0600 file apart from the TypeSafe key, and reads a broken file as none', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    expect(await store.readGeminiKey()).toBeNull();
+    await store.writeToken('ts-secret');
+    await store.writeGeminiKey('g-secret');
+    expect(await store.readGeminiKey()).toBe('g-secret');
+    expect(await store.readToken()).toBe('ts-secret');
+    const file = path.join(dir, 'classifier-gemini-key.json');
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    await store.writeClassifierSource('gemini');
+    expect(await store.readClassifierSource()).toBe('gemini');
+    await store.clearGeminiKey();
+    expect(await store.readGeminiKey()).toBeNull();
+    expect(await store.readToken()).toBe('ts-secret');
+    await fs.writeFile(file, '{"key":');
+    expect(await store.readGeminiKey()).toBeNull();
+  });
+
   it('reads a hand-edited custom endpoint with an unsafe URL as none', async () => {
     const dir = await tempDir();
     const store = createRoutingStore({ dataDir: dir });

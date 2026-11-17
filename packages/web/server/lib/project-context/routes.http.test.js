@@ -120,6 +120,16 @@ describe('todo item routes', () => {
     await request(app).patch(`${BASE}/todos/x`).send({}).expect(400);
     expect((await request(app).get(BASE).expect(200)).body.todos).toEqual([]);
   }));
+
+  it('refuses a whole list read from the other store with 409', () => withRuntime(async ({ app }) => {
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A' }).expect(201);
+    const read = (await request(app).get(BASE).expect(200)).body;
+    expect(read.notesTodosStore).toMatch(/^local:/);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'repository:other.0' }).expect(409);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'elsewhere' }).expect(400);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['a']);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: read.notesTodosStore }).expect(200);
+  }));
 });
 
 describe('plan links over HTTP', () => {

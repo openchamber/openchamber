@@ -1926,7 +1926,7 @@ describe('openchamber session routes', () => {
         location: { directory: '/repo/app' },
       }));
       sessionListMock.mockImplementation(async ({ parentID, archived }) => ({
-        data: tree.filter((session) => session.parentID === parentID && (!archived || session.time.archived)),
+        data: tree.filter((session) => (parentID === undefined || session.parentID === parentID) && (!archived || session.time.archived)),
       }));
     };
     const send = (app, sessionID) => request(app)
@@ -1945,6 +1945,21 @@ describe('openchamber session routes', () => {
 
       expect(response.body.promptDispatched).toBe(true);
       expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+    });
+
+    it("brings back the root's workflow agents, which only OpenChamber's metadata links to it", async () => {
+      useTree([
+        ...archivedTree,
+        { id: 'ses_agent', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_root' } }, time: { created: 1, archived: 1700 } },
+        { id: 'ses_agent_sub', parentID: 'ses_agent', time: { created: 1, archived: 1700 } },
+      ]);
+      const { app } = createApp();
+
+      await send(app, 'ses_root');
+
+      expect(restoredIds().sort()).toEqual(['ses_agent', 'ses_agent_sub', 'ses_child', 'ses_grandchild', 'ses_root']);
+      // Every folder's archive: a subsession can stay behind when its parent moves to another worktree.
+      expect(sessionListMock.mock.calls.every(([input]) => !('directory' in input))).toBe(true);
     });
 
     it('leaves the session archived when it was archived again while the send went out', async () => {

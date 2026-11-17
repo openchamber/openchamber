@@ -36,7 +36,8 @@ import { FilePathLabel } from './files/FilePathLabel';
 import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
-import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
+import { DetachableEditorMarker, useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
+import { whenLayoutSettled } from '@/lib/layoutAnimation';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { MarkdownPreviewOutline } from './MarkdownPreviewOutline';
 import { createFileContentPoller } from './fileContentPoller';
@@ -48,7 +49,7 @@ import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/l
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
-import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
+import { ensurePierreThemeRegistered, getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
 import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
@@ -115,6 +116,7 @@ import { useRawAssetUrl } from './files/useRawAssetUrl';
 import { useHtmlPreviewAnnotation } from './files/useHtmlPreviewAnnotation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import { textLineSource } from '@/lib/commentAnchor';
 import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, isWholeFileComment, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection, useWholeFileComment } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -1223,6 +1225,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const markdownPreviewRef = React.useRef<HTMLDivElement | null>(null);
 
+  // Comments follow their code when the file changes on disk. Only a loaded
+  // text counts: an empty or half-loaded file would read as every commented
+  // line being gone.
+  const commentLineSource = React.useMemo(
+    () => (fileContent && !fileLoading && loadedFilePath === selectedFile?.path ? textLineSource(fileContent) : null),
+    [fileContent, fileLoading, loadedFilePath, selectedFile?.path],
+  );
   const fileCommentController = useInlineCommentController<SelectedLineRange>({
     source: 'file',
     fileLabel: selectedFile?.path ?? null,
@@ -1230,6 +1239,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     getCodeForRange: (range) => extractSelectedCode(fileContent, normalizeLineRange(range)),
     toStoreRange: (range) => ({ startLine: range.start, endLine: range.end }),
     fromDraftRange: (draft) => ({ start: draft.startLine, end: draft.endLine }),
+    lineSource: () => commentLineSource,
+    contentVersion: commentLineSource,
+    onSelectionMoved: setLineSelection,
   });
 
   const {
@@ -2138,7 +2150,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     await readFile(node.path)
-      .then((content) => {
+      .then(async (content) => {
+        // A file that arrives while its zone is still opening renders after
+        // the animation: a long file's first render takes several frames,
+        // and inside the animation it stopped the panel halfway.
+        await whenLayoutSettled();
         if (!isCurrentLoad()) {
           return;
         }
@@ -3727,17 +3743,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     // Same language resolver as the view, so both agree on the language. When
     // it is the color source, drop the lezer token colors to avoid a
     // competing highlighter (Keep the lezer language for indentation/folding).
-    const shikiLanguage = getLanguageFromExtension(selectedFile.path);
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
+    const highlightLanguage = getLanguageFromExtension(selectedFile.path);
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, highlightLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
     }
-    if (shikiLanguage) {
+    if (highlightLanguage) {
       extensions.push(codeHighlightExtension({
-        language: shikiLanguage,
-        themeName: getThemeRenderName(currentTheme),
-        theme: getCodeTokenTheme(currentTheme),
+        language: highlightLanguage,
+        theme: getCodeTokenTheme(currentTheme).zed,
       }));
     }
     if (wrapLines) {
@@ -5244,6 +5259,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} viewRef={editorViewRef} />
               )}
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
+                <DetachableEditorMarker />
                 <FilePositionEditor
                   key={filePositionKey}
                   positionKey={filePositionKey}

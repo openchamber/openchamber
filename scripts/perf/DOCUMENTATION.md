@@ -111,6 +111,24 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## The User's Session List In The Stand
+
+What the sidebar and the global session list cost scales with how many
+sessions, projects and worktrees there are, and a stand with a handful of
+sessions hides it: one 21-step turn allocated 0.1 GB there and 2.5 GB with a
+real list of 3,700 sessions. `node scripts/perf/seed-session-list.mjs --root
+tmp/scale` copies the user's session records (no messages) and projects into a
+stand of its own, every path rewritten under the root, so the stand's server
+never touches the user's repositories; OpenCode's worktree folders become real
+worktrees. It reads the user's database read-only. Then `bun run profile:serve
+-- --root tmp/scale` and the profile commands with `--dir tmp/scale/project`.
+Seed again before each run of a comparison, since a run adds a session.
+
+`profile:session --heap-sampling` reports the megabytes allocated during the
+turn (`heapSampling.sampledMb`), the figure that moved with churn fixes while
+heap max stayed flat; `syncCounters.sidebarStructureBuilds` counts the sidebar
+rebuilds behind it.
+
 ## A Real Session In The Stand
 
 The stand's synthetic sessions miss bugs that depend on the shape of a real
@@ -587,8 +605,7 @@ Clicks sidebar session rows with real mouse input and measures, per click:
 - `content`: messages that were not rendered before are rendered (a timeline kept
   in the DOM under `display: none` counts as not rendered). They may still
   be invisible: a freshly opened timeline stays at opacity 0 while renderers
-  hold their provisional first paint (`data-timeline-reveal="pending"`), then
-  fades in;
+  hold their provisional first paint (`data-timeline-reveal="pending"`);
 - `visible`: every new message that intersects the chat viewport has an
   effective opacity (its own times every ancestor's) of 1, checked once per
   animation frame. This is when the user sees the session, and it does not
@@ -654,7 +671,12 @@ the process was spawned: the main process's own `[startup-performance]` marks
 (entry module, Electron ready, window created and shown, main module loaded,
 server start and ready, OpenCode ready, application navigation and load), and
 renderer readiness from `startup-probe.mjs`, a recorder installed into the
-application document before it runs and checked once per animation frame:
+application document and checked once per animation frame. The application
+navigates before the debugging port answers, so the recorder usually goes into
+a document that is already loading; marks from before that moment come from
+the polled fields, and `trace:` marks the app made earlier are missing.
+`applicationDocuments` in a sample counts the application documents seen: more
+than one means the window loaded the application again during startup.
 
 - `reactMounted`: a child of `#root` carries React's fiber expando. `#root`
   holds the HTML splash `#initial-loading` from the first parsed byte, so a
@@ -672,6 +694,11 @@ application document before it runs and checked once per animation frame:
   and a selected model;
 - `trace:<name>`: the first occurrence of every `markStartupTrace` mark (the
   recorder turns the `OPENCHAMBER_STARTUP_TRACE` flag on);
+- `transcriptPresent` and `transcriptShown` with `--transcript`: a message of
+  the session the launch restores is rendered, then its reveal has finished.
+  The home has to restore one: import a session into the bench home
+  (*A Real Session In The Stand*, with the bench home's `HOME` and `XDG_*`),
+  open it once in the bench app and quit, then run without `--fresh`;
 - `rendererIdle` once the renderer main thread stayed quiet for `--settle-ms`.
 
 Medians and p95 with min…max over the measured runs. A launch fails, and the
@@ -860,7 +887,9 @@ open when wider than 1 px, so a baseline from before them still measures. The
 `file` surface opens tree-only (240 px) in a project with no file open;
 `--open-file <name>` first opens that root-level file of the project from the
 panel's tree, so every panel toggle shows the editor with it, and a
-`panel-open` whose editor does not show the file afterwards is invalid.
+`panel-open` whose editor does not show the file afterwards is invalid. A file
+that opens rendered (Markdown) has no editor: there the panel's card must hold
+over 2000 characters of it.
 `--surface context` measures a full-width panel. `--method key` presses `mod+b` and
 `mod+alt+<rail digit>`, as the app's shortcuts read them. The pointer rests on
 the button for `--hover` ms before a phase, so its tooltip opens there; the

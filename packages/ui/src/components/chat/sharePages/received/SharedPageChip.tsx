@@ -3,7 +3,6 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { refreshReceivedPage } from '@/lib/received-pages/api';
 import { isSharingTurnedOff } from '@/lib/share-pages/api';
@@ -18,17 +17,9 @@ import { useReceivedPageText } from './useReceivedPageText';
 
 type SharedPageReference = Extract<ComposerReference, { kind: 'shared-page' }>;
 
-/**
- * A share link pasted or typed into the composer, standing in for the link
- * (decision 0013). Before the PIN it says whether the page can still be
- * opened; the right PIN opens it here and the chip shows its title and
- * outline, and the agent then gets the page's content with the message.
- * Sent without the PIN, the agent learns only that a link was shared.
- */
-export function SharedPageChip({ reference, onChange, onRemove }: {
+export function SharedPageChip({ reference, onChange }: {
   reference: SharedPageReference;
   onChange: (next: SharedPageReference) => void;
-  onRemove: () => void;
 }) {
   const { t } = useI18n();
   const [registerError, setRegisterError] = React.useState<string | null>(null);
@@ -39,7 +30,6 @@ export function SharedPageChip({ reference, onChange, onRemove }: {
   const page = state.page;
   const text = useReceivedPageText(page);
 
-  // The link went to the server when it left the text; the chip learns the page's id from its answer.
   const latest = React.useRef(reference);
   latest.current = reference;
   React.useEffect(() => {
@@ -62,7 +52,6 @@ export function SharedPageChip({ reference, onChange, onRemove }: {
     return () => { live = false; };
   }, [accept, fail, onChange, reference.receivedId, reference.shareKey, t]);
 
-  // Before the PIN, what the relay says now: locked, expired, answered or withdrawn show at once.
   const [checked, setChecked] = React.useState(false);
   React.useEffect(() => {
     if (!reference.receivedId) return;
@@ -79,7 +68,6 @@ export function SharedPageChip({ reference, onChange, onRemove }: {
     return () => { live = false; };
   }, [accept, fail, reference.receivedId]);
 
-  // Once opened, the agent's copy is the page itself.
   React.useEffect(() => {
     if (!page?.opened || !text) return;
     const current = latest.current;
@@ -146,19 +134,6 @@ export function SharedPageChip({ reference, onChange, onRemove }: {
       <div className="flex min-w-0 items-center gap-1.5">
         <Icon name="pages" className="size-3.5 shrink-0 text-muted-foreground" />
         <span dir="auto" className="min-w-0 flex-1 truncate text-foreground" title={title}>{title}</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={onRemove}
-              className="flex size-5 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--interactive-hover)] pointer-coarse:size-8"
-              aria-label={t('chat.sharedPage.chip.remove')}
-            >
-              <Icon name="close" className="size-3.5 text-muted-foreground" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6}>{t('chat.sharedPage.chip.remove')}</TooltipContent>
-        </Tooltip>
       </div>
       {detail ? <div className="flex min-w-0 items-center">{detail}</div> : null}
     </div>

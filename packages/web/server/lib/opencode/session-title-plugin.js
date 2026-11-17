@@ -1,9 +1,5 @@
 const PLUGIN_ID = 'openchamber-session-title';
 
-// Same title style as the regeneration prompt in
-// packages/ui/src/lib/sessionTitle.ts; change both together. This one names a
-// session from OpenCode's input: the first message, or for a renamed session
-// its original request and recent messages.
 const TITLE_SYSTEM_PROMPT = [
   'You name coding sessions so the user can find them later in a list.',
   'Reply with a title of two to four words in the language of the user\'s message, at most 40 characters. Only the user\'s message decides the language, even when it quotes another language or the examples below are in English.',
@@ -15,22 +11,9 @@ const TITLE_SYSTEM_PROMPT = [
   'Most titles are two or three words: the shortest label that still tells this session apart from others.',
 ].join('\n');
 
-// A first message shorter than this names nothing on its own ("", "fix this"),
-// so the title also reads the context the user attached to it.
 const SHORT_MESSAGE_LENGTH = 20;
-// The same bound OpenCode puts on the first message it sends to the title model.
 const MAX_ATTACHED_CONTEXT_LENGTH = 2000;
 
-// No imports: OpenCode loads the entry from its own directory, where nothing
-// is installed. Configured plugins activate after OpenCode's built-in agents
-// and before its config agents, so this replaces the built-in title prompt
-// while an `agents.title.system` from the user's config still wins.
-//
-// OpenCode titles a session from the first user message's text only. Context
-// the user attached (a file comment, a browser annotation) is admitted as
-// synthetic messages right before that message, so a session started with
-// context alone would be titled from an empty message. The title hook adds
-// that context to the request when the message itself is too short to name.
 const PLUGIN_SOURCE = `const TITLE_SYSTEM_PROMPT = ${JSON.stringify(TITLE_SYSTEM_PROMPT)}
 const SHORT_MESSAGE_LENGTH = ${SHORT_MESSAGE_LENGTH}
 const MAX_ATTACHED_CONTEXT_LENGTH = ${MAX_ATTACHED_CONTEXT_LENGTH}
@@ -52,17 +35,28 @@ const attachedContextOfShortFirstMessage = (messages) => {
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
+    let originalTitleSystem
     await ctx.agent.transform((editor) => {
       if (!editor.get("title")) return
+      if (editor.get("title").system !== TITLE_SYSTEM_PROMPT) originalTitleSystem = editor.get("title").system
       editor.update("title", (agent) => {
         agent.system = TITLE_SYSTEM_PROMPT
       })
     })
     await ctx.session.hook("title", async (draft) => {
+      const request = draft.messages.at(-1)
+      // Free OpenCode models failed to generate titles with a replaced system
+      // prompt. Keep the native prompt and give the same style in the input.
+      // A user-configured title prompt wins and must not be rewritten here.
+      if (draft.model?.providerID === "opencode" && draft.model.id.endsWith("-free")
+        && originalTitleSystem && draft.system.length === 1 && draft.system[0].text === TITLE_SYSTEM_PROMPT
+        && request?.role === "user") {
+        draft.system[0].text = originalTitleSystem
+        request.content.push({ type: "text", text: TITLE_SYSTEM_PROMPT })
+      }
       // A failed read leaves the title to the message alone, as OpenCode built it.
       const context = await ctx.session.context({ sessionID: draft.sessionID })
         .then(attachedContextOfShortFirstMessage, () => "")
-      const request = draft.messages.at(-1)
       if (!context || request?.role !== "user") return
       // A text part on the same user message: some providers reject two user messages in a row.
       draft.messages = [

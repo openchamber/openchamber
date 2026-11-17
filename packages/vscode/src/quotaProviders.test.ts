@@ -1149,10 +1149,11 @@ describe('Codex quota provider (VS Code parity)', () => {
   });
 
   for (const { balance, unlimited, expected } of [
-    { balance: 62500, unlimited: false, expected: '62500' },
-    { balance: '62500.00', unlimited: false, expected: '62500' },
-    { balance: 12.3456, unlimited: false, expected: '12.3456' },
-    { balance: '12.3456', unlimited: false, expected: '12.3456' },
+    { balance: 62500, unlimited: false, expected: '62,500' },
+    { balance: '62500.00', unlimited: false, expected: '62,500' },
+    { balance: 12.3456, unlimited: false, expected: '12.3' },
+    { balance: '12.3456', unlimited: false, expected: '12.3' },
+    { balance: 38538.5254395, unlimited: false, expected: '38,538.5' },
     { balance: 0, unlimited: false, expected: '0' },
     { balance: null, unlimited: true, expected: 'Unlimited' },
     { balance: 62500, unlimited: true, expected: 'Unlimited' },
@@ -1285,6 +1286,21 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
   });
+
+  for (const unit of ['usd', 'credits', undefined]) {
+    test(`formats the individual allowance for unit ${unit}`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        spend_control: { individual_limit: { unit, used: '8.104', limit: '150', used_percent: 5 } },
+      })));
+
+      const result = await fetchQuotaForProvider('codex');
+      const key = unit === 'usd' ? 'usage' : 'credits';
+
+      assert.equal(result.usage!.windows[key]!.valueLabel, unit === 'usd' ? '$8.10 / $150.00' : '8 / 150 used');
+      assert.equal(result.usage!.windows[key]!.usedPercent, 5);
+      assert.deepEqual(Object.keys(result.usage!.windows), [key]);
+    });
+  }
 });
 
 describe('GitHub Copilot quota provider (VS Code parity)', () => {
@@ -2533,6 +2549,51 @@ describe('Cursor quota provider (VS Code parity)', () => {
     ]);
     assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 42);
   });
+
+  test('reads the dashboard individual allowance when Enterprise request limits are null', async () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_test' })).toString('base64url');
+    fs.writeFileSync(cursorCredentialPath, JSON.stringify({ accessToken: `header.${payload}.signature` }));
+    routeCursorApi({
+      ...enterpriseRoutes,
+      'auth/usage': { body: { 'gpt-4': { numRequests: 90, maxRequestUsage: null } } },
+      'usage-summary': { body: {
+        billingCycleEnd: '2026-12-01T00:00:00.000Z',
+        individualUsage: { overall: { enabled: true, used: 1234, limit: 15000 } },
+      } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.valueLabel, '$12.34 / $150.00');
+    assert.equal(result.usage!.windows.billing_cycle!.resetAt, Date.parse('2026-12-01T00:00:00.000Z'));
+    assert.equal(result.usage!.windows.on_demand, undefined);
+  });
+
+  for (const used of ['', '   ']) {
+    test(`does not turn a blank dashboard used into zero spend: ${JSON.stringify(used)}`, async () => {
+      const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_test' })).toString('base64url');
+      fs.writeFileSync(cursorCredentialPath, JSON.stringify({ accessToken: `header.${payload}.signature` }));
+      const blankSummary = { body: { billingCycleEnd: '2026-12-01T00:00:00.000Z', individualUsage: { overall: { enabled: true, used, limit: 15000 } } } };
+      const nullRequestLimits = { body: { 'gpt-4': { numRequests: 90, maxRequestUsage: null } } };
+
+      routeCursorApi({ ...enterpriseRoutes, 'auth/usage': nullRequestLimits, 'usage-summary': blankSummary });
+      const withoutSpend = await fetchQuotaForProvider('cursor');
+      assert.equal(withoutSpend.ok, false);
+      assert.equal(withoutSpend.error, 'No active Cursor subscription');
+
+      routeCursorApi({
+        ...enterpriseRoutes,
+        'auth/usage': nullRequestLimits,
+        'usage-summary': blankSummary,
+        GetTeamSpend: { body: { teamMemberSpend: [{ userId: 424242, spendCents: 672 }] } },
+      });
+      const withSpend = await fetchQuotaForProvider('cursor');
+      assert.equal(withSpend.ok, true);
+      assert.equal(withSpend.usage!.windows.billing_cycle, undefined);
+      assert.equal(withSpend.usage!.windows.on_demand!.valueLabel, '$6.72 / $250.00');
+    });
+  }
 
   test('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     let hardLimitBody = '';

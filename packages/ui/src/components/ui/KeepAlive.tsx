@@ -6,11 +6,9 @@ type Entry = {
 };
 
 type KeepAliveProps = {
-  /** Null hides the pool without adding a loading/empty-state entry. */
   cacheKey: string | null;
   capacity: number;
   children: React.ReactNode;
-  /** Runs before React hides the outgoing entry, while its DOM is measurable. */
   onBeforeHide?: () => void;
 };
 
@@ -31,7 +29,6 @@ export class KeepAlive extends React.Component<KeepAliveProps> {
   }
 }
 
-/** Retains keyed React subtrees. Removing the least-recent entry unmounts it. */
 function RetainedEntries({ cacheKey, capacity, children }: KeepAliveProps) {
   if (!Number.isInteger(capacity) || capacity < 1) {
     throw new Error('KeepAlive capacity must be a positive integer');
@@ -49,14 +46,10 @@ function RetainedEntries({ cacheKey, capacity, children }: KeepAliveProps) {
   if (next.length > capacity) {
     next = next.slice(-capacity);
   }
-  // Update only this component's state. An abandoned concurrent render cannot
-  // evict anything from the committed tree or mutate its stored JSX.
   if (next !== entries) {
     setEntries(next);
   }
 
-  // LRU promotion must not move retained DOM: moving an iframe can reload it.
-  // A stable key order changes only membership, independently of recency.
   const ordered = [...next].sort((left, right) => {
     if (left.key === right.key) return 0;
     return left.key < right.key ? -1 : 1;

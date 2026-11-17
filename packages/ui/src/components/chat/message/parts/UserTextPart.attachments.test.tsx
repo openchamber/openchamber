@@ -112,7 +112,8 @@ const PASTED = filePart('pasted-context-1.txt', 'text/plain', `data:text/plain;b
 const IMAGE = filePart('image-1.png', 'image/png', 'data:image/png;base64,iVBORw0KGgo=');
 const BY_PATH = filePart('notes.md', 'text/plain', 'file:///repo/docs/notes.md');
 const PDF = filePart('spec.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERg==');
-const FILES = [PASTED, IMAGE, BY_PATH, PDF];
+const ZIP = filePart('build.zip', 'application/zip', 'data:application/zip;base64,UEsDBA==');
+const FILES = [PASTED, IMAGE, BY_PATH, PDF, ZIP];
 
 const unavailable = (): never => { throw new Error('Attachment citations must not call these runtime APIs'); };
 const vscodeRuntime = (openFile: (path: string) => Promise<void>): RuntimeAPIs => ({
@@ -216,11 +217,19 @@ describe('a file-name citation in a sent message', () => {
     });
 
     test('a file the app cannot show stays a plain label', async () => {
-        await renderMessage('the [spec.pdf] attached');
+        await renderMessage('the [build.zip] attached');
 
-        expect(container.querySelector('[data-attachment-open="spec.pdf"]')).toBeNull();
+        expect(container.querySelector('[data-attachment-open="build.zip"]')).toBeNull();
         expect(container.querySelector('button')).toBeNull();
-        expect(container.textContent).toContain('spec.pdf');
+        expect(container.textContent).toContain('build.zip');
+    });
+
+    test('a pdf sent inline opens the document dialog', async () => {
+        const popups = await renderMessage('the [spec.pdf] attached');
+        await act(async () => chip('spec.pdf').click());
+
+        expect(popups).toHaveLength(1);
+        expect(popups[0].document?.filename).toBe('spec.pdf');
     });
 
     test('a click that ends a text selection over the chip keeps it closed', async () => {

@@ -24,11 +24,8 @@ const decodeCssUrl = (value: string): string => value.replace(/\\(?:([0-9a-f]{1,
   return escaped === '\n' || escaped === '\r' ? '' : escaped ?? '';
 });
 
-// Comments and standalone strings are consumed too, so URL-like text inside
-// them is never fetched. Both @import "file" and @import url(file) are covered.
 const CSS_REFERENCES = /\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\burl\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^)\\])*?))\s*\)|@import\s+(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')/gi;
 
-/** Prepare package-owned static resources for an iframe that has no HTTP origin. */
 export const loadRelayGuestDocument = async (
   guestId: string,
   entry: string,
@@ -140,15 +137,10 @@ export const loadRelayGuestDocument = async (
     const declaredTarget = document.querySelector('base[target]')?.getAttribute('target');
     const effectiveBase = declaredBase ? new URL(declaredBase, base) : base;
     for (const node of document.querySelectorAll('base')) node.remove();
-    // Unresolved relative navigations must not accidentally load the host UI.
     const baseElement = document.createElement('base');
     baseElement.href = effectiveBase.href;
     if (declaredTarget) baseElement.target = declaredTarget;
     document.head.prepend(baseElement);
-    // A srcDoc gets no response headers, so the network lock the server sends
-    // for direct frames travels as the document's first element instead.
-    // Everything here is already inlined as data: URLs; only the origins the
-    // user approved may be reached.
     const policy = document.createElement('meta');
     policy.httpEquiv = 'Content-Security-Policy';
     policy.content = guestFramePolicy(null, origins);

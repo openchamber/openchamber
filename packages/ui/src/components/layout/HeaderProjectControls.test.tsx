@@ -26,6 +26,7 @@ const projectSetupReads: Array<{ id: string; path: string }> = [];
 const uiState = {
   terminalShell: 'zsh',
   terminalLoginShells: ['zsh'],
+  terminalOpenOnProjectAction: true,
   setSettingsPage: () => undefined,
   setSettingsDialogOpen: () => undefined,
   setSettingsProjectsSelectedId: () => undefined,
@@ -245,12 +246,14 @@ describe('HeaderProjectAction lifecycle', () => {
     toastCalls.success.length = 0;
     openContextPreviewCalls.length = 0;
     openContextPanelTabCalls.length = 0;
+    uiState.terminalOpenOnProjectAction = true;
     openExternalCalls.length = 0;
     detectedDevServer.command = null;
     detectedDevServer.previewUrlHint = null;
     detectedDevServer.actionId = undefined;
     mockedDeviceInfo.isMobile = true;
     effectiveDirectory = '/repo';
+    uiState.terminalOpenOnProjectAction = true;
     projectSetupReads.length = 0;
     sessionCounter = 0;
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', icon: 'build' }];
@@ -559,6 +562,26 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(openContextPanelTabCalls).toEqual([{ directory: '/repo-worktree', mode: 'terminal', targetDirectory: null }]);
   });
 
+  test('with the terminal setting off, an action runs without switching the panel', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    effectiveDirectory = '/repo-worktree';
+    await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo-worktree')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
+  });
+
   test('parent action runs in the parent checkout, stores its tab there, and reveals it from the live worktree host', async () => {
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', icon: 'build', runIn: 'parent' }];
     effectiveDirectory = '/repo-worktree';
@@ -598,6 +621,25 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0]?.cwd).toBe('/repo-worktree');
     expect(openContextPanelTabCalls).toEqual([{ directory: '/live-host', mode: 'terminal', targetDirectory: '/repo-worktree' }]);
+  });
+
+  test('project action starts without revealing its terminal when the setting is off', async () => {
+    uiState.terminalOpenOnProjectAction = false;
+    await renderButton();
+
+    const primaryButton = runButton();
+    if (!primaryButton) {
+      throw new Error('expected primary button');
+    }
+
+    await act(async () => {
+      primaryButton.dispatchEvent(new Event('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(createCalls).toHaveLength(1);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')?.tabs.some((tab) => tab.purpose.type === 'project-action' && tab.purpose.actionId === 'build')).toBe(true);
+    expect(openContextPanelTabCalls).toEqual([]);
   });
 
   test('auto-discover without a preview hint settles on an announced localhost URL in context preview only', async () => {

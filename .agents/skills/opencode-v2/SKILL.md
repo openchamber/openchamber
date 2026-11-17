@@ -160,6 +160,13 @@ gap.
   call settles at once with `metadata.status: "running"`, and the parent gets
   a `<subagent>` report every time the child goes idle. Foreground calls exist
   only in older history; `readBackgroundSubagentChildID` tells the two apart.
+- **Any session created with `parentID` reports to its parent** (2.3.0):
+  every busy period that ends with an assistant message sends a `<subagent>`
+  report into the parent's inbox and wakes it for a model turn, whoever
+  prompted the child. There is no opt-out (`subagent.notify` was removed in
+  #63413). A session OpenChamber runs and collects itself, such as a workflow
+  agent, is created without `parentID` and linked by metadata
+  (`workflows/DOCUMENTATION.md`).
 - **A plugin tool that reads `context.signal` opts into a cooperative stop**
   (2.3.0): on the user's Stop the signal aborts and whatever the tool returns
   is stored as the call's result. The `agent-tool` plugin reads it, so its

@@ -12,7 +12,6 @@ const ACTIONS = new Set([
 ]);
 const FAILURE_CLASSES = new Set(['timeout', 'connection_refused', 'connection_reset', 'invalid_response', 'error']);
 
-/** Process-local history. Only fixed actions and numeric/enum details may enter this buffer. */
 export function createServerDiagnosticJournal({ now = Date.now, maxEvents = MAX_EVENTS, maxAgeMs = MAX_AGE_MS } = {}) {
   const events = new Array(maxEvents);
   let head = 0;

@@ -28,6 +28,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   shellsUnsubscribe: overrides.shellsUnsubscribe ?? (() => {}),
   shellOutput: overrides.shellOutput ?? (async () => ({ output: '', cursor: 0, skipped: false })),
   shellStop: overrides.shellStop ?? (async () => ({ stopped: true })),
+  microphoneOpen: overrides.microphoneOpen ?? (async () => {}),
+  microphoneClose: overrides.microphoneClose ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
   setStatusControls: overrides.setStatusControls ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),

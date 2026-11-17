@@ -197,6 +197,19 @@ describe('createRuntimeUrlResolver', () => {
     }
   });
 
+  test('keeps a query key a URLSearchParams names twice', () => {
+    // Two `label`s narrow a list together; `set` would keep only the last one.
+    const repeated = new URLSearchParams([['label', 'bug'], ['label', 'docs']]);
+    const urls = createRuntimeUrlResolver();
+    expect(urls.api('/api/source-control/github/issues/list', repeated)).toBe(
+      '/api/source-control/github/issues/list?label=bug&label=docs',
+    );
+    const absolute = createRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+    expect(absolute.api('/api/source-control/github/issues/list', repeated)).toBe(
+      'https://api.example/api/source-control/github/issues/list?label=bug&label=docs',
+    );
+  });
+
   test('does not put the long-lived client token in URLs', () => {
     setRuntimeBearerToken('oc_client_secret');
     try {

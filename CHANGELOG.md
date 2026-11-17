@@ -2,6 +2,64 @@
 
 <!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->
 
+## [2.7.2] - 2026-11-15
+
+### New
+
+- **Share pages: an agent can ask your teammates.** When an answer has to come from someone else, the agent [sends them a page](https://docs.openchamber.dev/agent-pages/), and the chat shows a link and PIN for each person. Their answers come back into the session with a notification.
+- Share pages: a shared link pasted into the composer opens the page in your own OpenChamber, so your agent sees it too. Pages on the rail lists every page you received, and Add to chat attaches one to your message.
+- **Browser: dictate into annotation comments and mark up PDFs.** The comment field takes your voice and shows the microphone level, and a PDF in the panel takes Region and Draw marks.
+- Browser: the agent clicks, types, drags and uploads files in the panel the way a person does, also inside embedded frames. It answers page dialogs itself and browses in a profile of its own unless you share yours.
+- Chat: pick the chat width in Settings > Chat > Reading: Default, Wider or Full. The old wide layout is Full.
+- Chat: questions can show as cards in the chat in Settings > Chat > Composer > Questions (thanks to @sergiopadure).
+- Agents: an agent can show you a page and keep working. Your answer comes later and shows as its own row in the chat (thanks to @sergiopadure).
+- Agents: an agent can wait on a timer from 1 minute to 24 hours, and its session wakes up when the time is up (thanks to @sergiopadure).
+- Agents: /btw sees the turn that is still running, so a side question asked mid-turn knows what the agent is doing right now.
+- Agents: your messages tell the agent which project actions are already running and on which address, so it doesn't start a second copy of your dev server.
+- Terminal: Settings > General > Terminal can keep the terminal closed when a project action starts.
+- Sidebar: "Sessions before Show more" in the sections manager sets how many sessions a project, worktree, Pinned or your own section shows at first. New section offers a Recent template for the last 7 days.
+- Auto routing: Google's Gemini Decision 1 as the classification model, with its own key or the Google key from OpenCode (thanks to @sergiopadure).
+- Providers: a custom provider takes a client certificate in its Client certificate section.
+- Mobile: Sessions and Usage home screen widgets on Android (thanks to @chaosmanage).
+- Mobile: Settings > About on Android offers the app update, also after you dismissed its toast.
+- Turn stats: an Average first output row next to the time to first token.
+- CLI: `openchamber schedule update` changes only the fields you name, and `--target-session` runs a scheduled task in an existing session (thanks to @sergiopadure).
+
+### Improvements
+
+- **Performance: the desktop app starts sooner and uses less memory.** The window is usable about 0.3 s sooner on launch, both of its processes hold tens of MB less, and a long agent turn no longer keeps the sidebar busy at every step.
+- Chat: an opened session shows at once without a fade, and typing into a long draft keeps up.
+- Side panel: a long diff, a rendered file and a browser page open and resize without stutter.
+- Mobile: over the relay the app connects sooner after launch and opens your last session about 2 s sooner. The sessions list and terminal history load faster on a slow connection.
+- Connection: after a short drop the chat catches up on what it missed without reloading every open session.
+- Mini chat: the window opens at once, and its messages show without jumping.
+- Browser: the panel waits for a project action's dev server as long as the action runs. Cmd/Ctrl+R reloads the page, and the mouse side buttons go back and forward.
+- Chat: a shell command you stop shows its output so far.
+- Themes: chat text is brighter in the built-in themes, bold text uses the text color, and inline code in the OpenChamber themes is green again.
+
+### Fixes
+
+- **Folder trust: a repository could send values from your environment or files to its own server, or allow actions you set to ask, without asking you.** The trust prompt now lists both, and repositories whose agent files change nothing for you no longer ask.
+- Sessions: a session moved into a folder behind a symlink, such as /tmp on macOS, vanished from the sidebar and opened empty.
+- Chat: a link to an old message could leave you at the end of the chat without finding it.
+- Chat: a very long reasoning block froze the chat when it finished.
+- Chat: sending a message closed a form whose tool call had already ended, and the status said the agent was waiting for you while it worked (thanks to @sergiopadure).
+- Chat: a waiting page or secret card closed when another agent, a schedule or the queue sent a prompt (thanks to @sergiopadure), and a stopped one vanished from the chat.
+- Chat: a background subagent without a report showed its launch notice as the answer.
+- Git: after a branch in a stack was rebased onto a new layer, Changes showed the lower layer's commits as its own.
+- Sidebar: deleting the last chat hid the Chats section and its + button.
+- Layout: collapsing an expanded side panel next to the Work status card moved twice and squeezed the chat.
+- Relay: a frame lost on the way could make a cut-off message look complete (thanks to @sergiopadure).
+- Themes: Catppuccin Light draws bold text again.
+
+### SDK
+
+- Microphone: declare `microphone` under `contributes.capabilities` and call `host.openMicrophone()` to record audio in an extension panel. The rail icon shows a red dot while the extension listens.
+
+### Misc
+
+- Bundled OpenCode updated to 2.3.0.
+
 ## [2.7.1] - 2026-11-12
 
 ### New

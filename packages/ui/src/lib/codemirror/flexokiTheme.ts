@@ -10,9 +10,6 @@ import { resolveSyntaxTokens } from '../theme/syntax';
 
 export function createFlexokiCodeMirrorTheme(
   theme: Theme,
-  // When syntax colors are provided elsewhere (e.g. the Shiki decoration
-  // extension), pass `{ syntaxColors: false }` to keep only the editor UI theme
-  // (gutters, selection, cursor) and avoid a competing token color source.
   options?: { syntaxColors?: boolean; fontSize?: number },
 ): Extension {
   const isDark = theme.metadata.variant === 'dark';
@@ -34,13 +31,11 @@ export function createFlexokiCodeMirrorTheme(
     },
     '.cm-scroller': {
       fontFamily: `var(--font-mono, ${monoFont})`,
-      // On the scroller: CodeMirror's base theme sets its 1.4 line height
-      // there, which beats one set on the editor root.
+      // external: https://github.com/codemirror/view/blob/main/src/theme.ts CodeMirror sets line height on the scroller, overriding an inherited value from the editor root.
       lineHeight: contentLineHeight,
       backgroundColor,
     },
 
-    /* StreamLanguage/legacy-modes tokens (class-based) */
     '.cm-comment': {
       color: theme.colors.syntax.base.comment,
     },
@@ -71,7 +66,6 @@ export function createFlexokiCodeMirrorTheme(
     '.cm-def': {
       color: tokens.variableGlobal || theme.colors.syntax.base.variable,
     },
-    // Legacy shell flags (--foo, -bar)
     '.cm-attribute': {
       color: tokens.variableOther || tokens.variableProperty || theme.colors.syntax.base.operator,
     },
@@ -137,7 +131,6 @@ export function createFlexokiCodeMirrorTheme(
     '.cm-activeLine': {
       backgroundColor: `color-mix(in srgb, ${theme.colors.syntax.base.foreground} 5%, transparent)`,
     },
-    /* ── Floating search: panels container ── */
     '.cm-panels': {
       backgroundColor: 'transparent',
       color: theme.colors.surface.elevatedForeground,
@@ -172,7 +165,6 @@ export function createFlexokiCodeMirrorTheme(
       padding: '2px 8px',
     },
 
-    /* ── Floating search panel ── */
     '.cm-panel.cm-search': {
       pointerEvents: 'auto',
       padding: '4px',
@@ -185,7 +177,6 @@ export function createFlexokiCodeMirrorTheme(
       maxWidth: '480px',
     },
 
-    /* ── Search inner layout: flexbox rows ── */
     '.cm-search': {
       display: 'flex',
       flexWrap: 'wrap',
@@ -198,20 +189,13 @@ export function createFlexokiCodeMirrorTheme(
       lineHeight: '1',
     },
 
-    /* ── Hide <br>; we force row break via replace input's flex-basis ── */
     '.cm-search br': {
       display: 'none',
     },
 
-    /* ──────────────────────────────────────────────────
-       ROW 1: [Find input] [Aa] [ab] [.*] [match count] [↑] [↓] [≡] [×]
-       ────────────────────────────────────────────────── */
 
-    /* ── Text input base: border-radius matches action buttons (4px) ── */
     '.cm-search .cm-textfield': {
       appearance: 'none',
-      // 26px at the default interface size, like the buttons beside it; the
-      // text scales with the interface size, so the field grows with it.
       height: 'calc(1em + 14px)',
       margin: 0,
       padding: '0 8px',
@@ -233,7 +217,6 @@ export function createFlexokiCodeMirrorTheme(
       borderColor: theme.colors.interactive.borderFocus,
     },
 
-    /* Find input: row 1, max-width matches replace input for alignment */
     '.cm-search .cm-textfield[name="search"]': {
       order: 1,
       flex: '1 1 120px',
@@ -241,13 +224,7 @@ export function createFlexokiCodeMirrorTheme(
       minWidth: '100px',
     },
 
-    /* Replace input is styled below in the row-2 section */
 
-    /* ────────────────────────────────────────────────────
-       ICON-ONLY TOGGLE BUTTONS (checkbox labels → icon toggles)
-       Labels contain: [checkbox] "match case" / "regexp" / "by word"
-       We hide text, hide the checkbox, and show icon via label::after
-       ──────────────────────────────────────────────────── */
     '.cm-search label': {
       order: 2,
       display: 'inline-flex',
@@ -263,10 +240,10 @@ export function createFlexokiCodeMirrorTheme(
       borderRadius: '4px',
       border: `1px solid transparent`,
       backgroundColor: 'transparent',
-      color: 'transparent', /* hide label text */
+      color: 'transparent',
       cursor: 'pointer',
       userSelect: 'none' as const,
-      fontSize: '1px', /* near-zero to collapse text nodes */
+      fontSize: '1px',
       lineHeight: '0',
       overflow: 'hidden',
       position: 'relative' as const,
@@ -280,7 +257,6 @@ export function createFlexokiCodeMirrorTheme(
       borderColor: theme.colors.interactive.border,
     },
 
-    /* Hide the actual checkbox input inside labels */
     '.cm-search [type="checkbox"]': {
       appearance: 'none',
       WebkitAppearance: 'none',
@@ -294,7 +270,6 @@ export function createFlexokiCodeMirrorTheme(
       pointerEvents: 'none' as const,
     },
 
-    /* Icon via ::after on each label - absolutely positioned so text-hiding doesn't affect it */
     '.cm-search label::after': {
       position: 'absolute' as const,
       top: '50%',
@@ -314,19 +289,16 @@ export function createFlexokiCodeMirrorTheme(
       color: theme.colors.surface.elevatedForeground,
     },
 
-    /* Case sensitive: "Aa" */
     '.cm-search label:has(input[name="case"])::after': {
       content: '"Aa"',
       fontSize: '12px',
       letterSpacing: '-0.5px',
     },
-    /* Regex: ".*" */
     '.cm-search label:has(input[name="re"])::after': {
       content: '".*"',
       fontSize: '13px',
       fontFamily: 'monospace',
     },
-    /* Whole word: "ab" with underline */
     '.cm-search label:has(input[name="word"])::after': {
       content: '"ab"',
       fontSize: '12px',
@@ -334,9 +306,6 @@ export function createFlexokiCodeMirrorTheme(
       textUnderlineOffset: '2px',
     },
 
-    /* ────────────────────────────────────────────────────
-       MATCH COUNT (search message - "X of Y")
-       ──────────────────────────────────────────────────── */
     '.cm-search .cm-search-message': {
       order: 3,
       color: theme.colors.surface.mutedForeground,
@@ -349,10 +318,6 @@ export function createFlexokiCodeMirrorTheme(
       lineHeight: '26px',
     },
 
-    /* ────────────────────────────────────────────────────
-       ICON-ONLY ACTION BUTTONS
-       Hide button text with font-size:0, show icon via ::after
-       ──────────────────────────────────────────────────── */
     '.cm-search .cm-button': {
       appearance: 'none',
       WebkitAppearance: 'none',
@@ -370,9 +335,9 @@ export function createFlexokiCodeMirrorTheme(
       border: 'none',
       backgroundColor: 'transparent',
       backgroundImage: 'none',
-      color: 'transparent', /* hide button text */
+      color: 'transparent',
       cursor: 'pointer',
-      fontSize: '1px', /* near-zero to collapse text */
+      fontSize: '1px',
       fontWeight: '400',
       lineHeight: '0',
       overflow: 'hidden',
@@ -409,7 +374,6 @@ export function createFlexokiCodeMirrorTheme(
       pointerEvents: 'none' as const,
     },
 
-    /* prev → ↑ arrow (row 2) */
     '.cm-search .cm-button[name="prev"]': {
       order: 21,
       marginTop: '2px',
@@ -417,7 +381,6 @@ export function createFlexokiCodeMirrorTheme(
     '.cm-search .cm-button[name="prev"]::after': {
       content: '"↑"',
     },
-    /* next → ↓ arrow (row 2) */
     '.cm-search .cm-button[name="next"]': {
       order: 22,
       marginTop: '2px',
@@ -425,7 +388,6 @@ export function createFlexokiCodeMirrorTheme(
     '.cm-search .cm-button[name="next"]::after': {
       content: '"↓"',
     },
-    /* select all → ≡ (row 2) */
     '.cm-search .cm-button[name="select"]': {
       order: 23,
       marginTop: '2px',
@@ -435,7 +397,6 @@ export function createFlexokiCodeMirrorTheme(
       fontSize: '17px',
     },
 
-    /* ── Close button (×) - not a .cm-button, separate selector ── */
     '.cm-panel.cm-search button[name="close"]': {
       order: 5,
       appearance: 'none',
@@ -467,11 +428,7 @@ export function createFlexokiCodeMirrorTheme(
       color: theme.colors.surface.elevatedForeground,
     },
 
-    /* ──────────────────────────────────────────────────
-       ROW 2: [Replace input] [replace icon] [replace-all icon]
-       ────────────────────────────────────────────────── */
 
-    /* replace → swap icon (row 2) */
     '.cm-search .cm-button[name="replace"]': {
       order: 24,
       marginTop: '2px',
@@ -479,7 +436,6 @@ export function createFlexokiCodeMirrorTheme(
     '.cm-search .cm-button[name="replace"]::after': {
       content: '"⇄"',
     },
-    /* replace all → double arrow icon (row 2) */
     '.cm-search .cm-button[name="replaceAll"], .cm-search .cm-button[name="replace-all"]': {
       order: 25,
       marginTop: '2px',
@@ -488,11 +444,10 @@ export function createFlexokiCodeMirrorTheme(
       content: '"⇉"',
     },
 
-    /* ── Replace input: forces wrap to row 2, same width as find input ── */
     '.cm-search .cm-textfield[name="replace"]': {
       order: 20,
       flex: '1 1 100%',
-      maxWidth: 'calc(100% - 142px)', /* room for ↑↓≡⇄⇉ (5 × 27px + gaps) */
+      maxWidth: 'calc(100% - 142px)',
       minWidth: '80px',
       marginTop: '2px',
     },
@@ -507,15 +462,10 @@ export function createFlexokiCodeMirrorTheme(
       color: theme.colors.interactive.selectionForeground,
       boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.borderFocus}`,
     },
-    /* Other occurrences of the word at the cursor or of the selected text: a
-       neutral tone step of the text colour. The warm selection tint under a
-       red keyword read as an error box; red stays for diagnostics. */
     '.cm-selectionMatch': {
       backgroundColor: `color-mix(in srgb, ${theme.colors.surface.foreground} 9%, transparent)`,
       borderRadius: '2px',
     },
-    // The word at the cursor (or the selection itself) is outlined only, so it
-    // stays distinguishable from the other occurrences.
     '.cm-selectionMatch-main': {
       backgroundColor: 'transparent',
       boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,

@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -102,7 +102,8 @@
     "profile:toggle": "node scripts/profile-toggle.mjs",
     "profile:ios": "node scripts/profile-ios.mjs",
     "profile:serve": "node scripts/perf/isolated-server.mjs",
-    "profile:analyze": "node scripts/perf/analyze-run.mjs"
+    "profile:analyze": "node scripts/perf/analyze-run.mjs",
+    "verify": "node scripts/verify/run.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
@@ -159,7 +160,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "yaml": "^2.8.1",
-    "zod": "^4.3.6",
+    "zod": "^4.6.7",
     "zustand": "^5.0.8"
   },
   "overrides": {
@@ -207,6 +208,7 @@
     "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch",
     "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch",
     "happy-dom@21.0.4": "bun-patches/happy-dom@21.0.4.patch",
-    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch"
+    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch",
+    "zod@4.6.7": "bun-patches/zod@4.6.7.patch"
   }
 }

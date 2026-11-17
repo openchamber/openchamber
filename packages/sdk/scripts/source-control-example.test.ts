@@ -245,6 +245,51 @@ describe('source-control provider example', () => {
     expect(stale).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' } });
   });
 
+  test('a comment is edited or deleted only on the item it belongs to', async () => {
+    const commentsOn = async (number: number): Promise<Array<{ id: number; body: string }>> => (
+      await fetch(`${forge.origin}/api/v1/repos/mona/teapot/issues/${number}/comments`, { headers: { authorization: 'token good' } })
+    ).json();
+    const post = async (number: number, kind: 'issue-comment' | 'change-request-comment', body: string) => {
+      const resolved = await data('mutation.resolveTarget', { context: mutationContext({ number }), kind, input: { body } });
+      await data('mutation.perform', {
+        route: kind === 'issue-comment' ? '/issues/comment' : '/pr/comment', kind, input: { body },
+        resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') },
+      });
+      const comment = (await commentsOn(number)).find((entry) => entry.body === body);
+      if (!comment) throw new Error(`${body} was not posted`);
+      return String(comment.id);
+    };
+    const step = async (number: number, kind: string, input: SourceControlJsonObject) => {
+      const resolved = await data('mutation.resolveTarget', { context: mutationContext({ number }), kind, input });
+      return {
+        route: kind.startsWith('issue-') ? '/issues/comment' : '/pr/comment', kind, input,
+        resolved: { providerTarget: field(resolved, 'providerTarget'), target: field(resolved, 'target') },
+      };
+    };
+    const onIssue = await post(1, 'issue-comment', 'Kept on the issue');
+    // Gitea leaves `issue_url` empty on a pull request comment and names the pull request instead.
+    const onPull = await post(2, 'change-request-comment', 'Kept on the pull request');
+    const before = forge.writes.length;
+
+    // Another item's comment id is refused before anything is written.
+    for (const wrong of [
+      await step(1, 'issue-comment-update', { commentId: onPull, body: 'Hijacked' }),
+      await step(1, 'issue-comment-delete', { commentId: onPull }),
+      await step(2, 'change-request-comment-update', { commentId: onIssue, body: 'Hijacked' }),
+      await step(2, 'change-request-comment-delete', { commentId: onIssue }),
+    ]) {
+      expect(await call('mutation.perform', wrong), wrong.kind).toMatchObject({ ok: false, error: { status: 409, code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' } });
+    }
+    expect(forge.writes.length).toBe(before);
+
+    // Each on its own item lands.
+    expect(await data('mutation.perform', await step(1, 'issue-comment-update', { commentId: onIssue, body: 'Edited on the issue' }))).toEqual({});
+    expect(await data('issueComments', { ...read(), number: 1 })).toMatchObject(expect.arrayContaining([expect.objectContaining({ body: 'Edited on the issue' })]));
+    expect(await data('mutation.perform', await step(2, 'change-request-comment-delete', { commentId: onPull }))).toEqual({});
+    expect((await commentsOn(2)).map((entry) => String(entry.id))).not.toContain(onPull);
+    expect(forge.writes.length).toBe(before + 2);
+  });
+
   test('a merged branch shows its pull request, not an offer to open one', async () => {
     // Merged in the test above, so it is no longer among the open pull requests.
     const status = await data('changeRequestStatus', { ...read(), branch: 'feature', force: false });

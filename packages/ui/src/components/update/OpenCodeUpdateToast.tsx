@@ -36,7 +36,6 @@ export const OpenCodeUpdateToast: React.FC = () => {
     toast.dismiss(UPGRADE_TOAST_ID);
     void reloadOpenCodeConfiguration({
       message: t('opencodeUpdate.toast.reload.message'),
-      mode: 'projects',
       scopes: ['all'],
     }).catch(() => undefined);
   }, [t]);
@@ -79,12 +78,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
   }, [reloadOpenCode, t]);
 
   React.useEffect(() => {
-    // Managed CLI installations upgrade through the host. External runtimes
-    // keep the informational toast because the host cannot run their CLI.
     const showUpdateAvailableToast = (version: string, supported: boolean) => {
-      // Upstream setting wins over our dedup logic: if user disabled
-      // OpenCode update notifications, dismiss any active toast and bail
-      // before consulting dedup state.
       if (!useUIStore.getState().showOpenCodeUpdateNotifications) {
         toast.dismiss(UPDATE_TOAST_ID);
         return;
@@ -99,10 +93,6 @@ export const OpenCodeUpdateToast: React.FC = () => {
       }
       seenVersionsRef.current.add(version);
 
-      // Closing it with the cross, or swiping it away, skips this version:
-      // the cross is the only way to put it away, so it does what a Dismiss
-      // button did. Update replaces it without skipping anything, and the app
-      // closing it (notifications turned off) is not the user's answer.
       const skipVersion = () => {
         if (!useUIStore.getState().showOpenCodeUpdateNotifications) return;
         getDeferredSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);

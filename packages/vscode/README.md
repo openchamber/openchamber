@@ -92,6 +92,21 @@ cd packages/vscode && bunx vsce package --no-dependencies
 
 Install locally: `code --install-extension packages/vscode/openchamber-*.vsix`
 
+The Settings command regression check runs in the real extension host after
+`bun run vscode:build`. With an isolated home and OpenCode data directories, run:
+
+```bash
+OPENCHAMBER_DISABLE_WEBVIEW_HMR=1 code --disable-extensions --skip-welcome \
+  --user-data-dir=/path/to/temporary-profile \
+  --extensions-dir=/path/to/temporary-extensions \
+  --extensionDevelopmentPath="$PWD/packages/vscode" \
+  --extensionTestsPath="$PWD/packages/vscode/src/settings-command.integration.cjs"
+```
+
+It checks null and omitted arguments, valid navigation, repeated invocation,
+and rejection of malformed navigation. It is separate from `bun run test`
+because it needs VS Code's extension API and window.
+
 </details>
 
 ## License

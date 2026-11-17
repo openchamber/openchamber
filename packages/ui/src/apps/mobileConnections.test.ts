@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
@@ -94,6 +94,7 @@ describe('mobile HTTP headers', () => {
       const saved = await upsertMobileConnection({ label: 'Protected', candidates: [{ kind: 'direct', url }], clientToken: 'client-token', requestHeaders: config });
       expect(await loadMobileConnectionHeaders(saved[0].id)).toEqual(config);
       expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(Object.values(JSON.parse(window.localStorage.getItem('openchamber.mobile.lastTransport.v1') ?? '{}'))).toEqual(['direct']);
       expect(await reprobeActiveConnection({ fast: false })).toBe('unchanged');
       expect((await runtimeFetch('/api/config/settings')).ok).toBe(true);
       const session = requests.find((request) => request.url === `${url}/auth/session`);
@@ -147,6 +148,39 @@ describe('mobile HTTP headers', () => {
     ])).toEqual({ 'x-proxy': 'second' });
     expect(() => buildMobileHeaderValues([{ name: 'X-Proxy', value: 'value\r\nInjected: yes' }])).toThrow();
   });
+});
+
+describe('direct address probing', () => {
+  afterEach(restoreGlobals);
+
+  test('dead addresses cost one timeout together, and the first live one in order still wins', async () => {
+    installTestWindow();
+    const asked: string[] = [];
+    let live: string | null = null;
+    Object.defineProperty(globalThis, 'fetch', { configurable: true, value: (input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      if (live && url.startsWith(live)) {
+        return Promise.resolve(Response.json(url.endsWith('/health') ? { ok: true } : { authenticated: true, disabled: true }));
+      }
+      return new Promise(() => undefined);
+    } });
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: 'lan', label: 'LAN', lastUsedAt: 1, candidates: [{ kind: 'direct', url: 'http://10.0.0.1:1' }, { kind: 'direct', url: 'http://10.0.0.2:1' }, { kind: 'direct', url: 'http://10.0.0.3:1' }] },
+    ]));
+
+    const started = Date.now();
+    expect(await autoConnectLastInstance({ fast: true })).toEqual({ status: 'unreachable', label: 'LAN' });
+    // One fast window, not three in a row.
+    expect(Date.now() - started).toBeLessThan(4_500);
+    expect(asked.filter((url) => url.endsWith('/health'))).toHaveLength(3);
+
+    live = 'http://10.0.0.2:1';
+    asked.length = 0;
+    expect(await autoConnectLastInstance({ fast: true })).toEqual({ status: 'connected' });
+    // Only the chosen address is asked for the session.
+    expect(asked.filter((url) => url.endsWith('/auth/session'))).toEqual(['http://10.0.0.2:1/auth/session']);
+  }, 20_000);
 });
 
 describe('mobile connection storage', () => {
@@ -684,6 +718,34 @@ describe('relay probe while the runtime is on the relay', () => {
       restoreRelayGlobals();
     }
   });
+
+  test('a device that last connected over the relay dials it without waiting for dead direct addresses', async () => {
+    const dialedWithin = async (lastTransport: string | null, waitMs: number) => {
+      installRelayWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        { id: 'relay-device', label: 'Relay', lastUsedAt: 1, candidates: [{ kind: 'direct', url: 'https://lan.example' }, { kind: 'relay', relay: liveRelay }] },
+      ]));
+      if (lastTransport) {
+        window.localStorage.setItem('openchamber.mobile.lastTransport.v1', JSON.stringify({ [`relay:${liveRelay.serverId}@${liveRelay.relayUrl}`]: lastTransport }));
+      }
+      // A LAN address away from home: the request hangs until its timeout.
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, value: () => new Promise(() => undefined) });
+      try {
+        const outcome = autoConnectLastInstance({ fast: true });
+        await sleep(waitMs);
+        const dialed = dials.length;
+        await outcome;
+        return dialed;
+      } finally {
+        restoreRelayGlobals();
+      }
+    };
+
+    expect(await dialedWithin('relay', 300)).toBe(1);
+    // Without the record, and after a direct connection, direct keeps its head start.
+    expect(await dialedWithin(null, 300)).toBe(0);
+    expect(await dialedWithin('direct', 300)).toBe(0);
+  }, 20_000);
 
   test('a relay refusal for another reason stays unreachable', async () => {
     try {

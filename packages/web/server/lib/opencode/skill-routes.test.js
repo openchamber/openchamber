@@ -247,6 +247,13 @@ describe('skill-routes directory soft fallback', () => {
             description: 'v2 built-in skill with a synthetic path',
           },
           {
+            id: 'report',
+            name: 'Report',
+            path: 'skill://report/SKILL.md',
+            description: 'Built-in skill as OpenCode 2.2.7 reports it',
+            content: '# Report\n\nCollect diagnostics.',
+          },
+          {
             id: 'unlocated-skill',
             name: 'unlocated-skill',
             description: 'Has neither field; must be dropped',
@@ -284,6 +291,16 @@ describe('skill-routes directory soft fallback', () => {
 
       expect(byName.get('OpenCode')?.path).toBe('<built-in>');
       expect(byName.get('OpenCode')?.renamable).toBe(false);
+
+      // A `skill://` built-in has no file: it is marked built-in, so Settings
+      // shows the content OpenCode sent, read-only.
+      expect(byName.get('Report')).toMatchObject({ id: 'report', path: '<built-in>', renamable: false });
+      const detailResponse = await fetch(
+        `${appHandle.baseUrl}/api/config/skills/Report?directory=${encodeURIComponent(projectRoot)}`,
+      );
+      expect(detailResponse.status).toBe(200);
+      const detail = await detailResponse.json();
+      expect(detail.sources.md).toMatchObject({ exists: true, path: null, instructions: '# Report\n\nCollect diagnostics.' });
 
       expect(byName.has('unlocated-skill')).toBe(false);
     } finally {

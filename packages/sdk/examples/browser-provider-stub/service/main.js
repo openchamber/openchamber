@@ -130,7 +130,9 @@ var HOST_PUSH_TYPES = new Set([
   "file-open",
   "file-snapshot",
   "file-saved",
-  "generate-late"
+  "generate-late",
+  "microphone-audio",
+  "microphone-ended"
 ]);
 // packages/sdk/src/service-providers.ts
 var BROWSER_PROVIDER_PATH = "/browser-control";

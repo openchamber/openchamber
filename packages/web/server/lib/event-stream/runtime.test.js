@@ -57,9 +57,58 @@ it('delivers oversized events live, but reports a replay gap instead of replayin
     expect(hub.replayAfter('last')).toEqual([]);
     runtime.wsServer.emit('connection', reconnect, { url: '/api/global/event/ws?lastEventId=first' });
     await expect.poll(() => reconnect.sent.length).toBeGreaterThan(0);
-    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true }]);
+    expect(reconnect.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, cursor: 'last' }]);
   } finally {
     first.close(); reconnect.close(); hub.stop(); await runtime.close();
+  }
+});
+
+it('reports a complete replay, and resets a cursor from before an upstream reconnect', async () => {
+  let reads = 0;
+  const hub = createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    upstreamReconnectDelayMs: 1,
+    fetchImpl: async (_url, options) => {
+      reads += 1;
+      return reads === 1
+        ? createSseResponse({ signal: options.signal, blocks: ['data: {"id":"before","type":"before","properties":{}}\n\n'] })
+        : createSseResponse({
+          signal: options.signal, holdOpen: true,
+          blocks: ['data: {"id":"after","type":"after","properties":{}}\n\n', 'data: {"id":"last","type":"last","properties":{}}\n\n'],
+        });
+    },
+  });
+  const runtime = createMessageStreamWsRuntime({
+    server: new EventEmitter(), globalEventHub: hub, wsClients: new Set(),
+    uiAuthController: null, isRequestOriginAllowed: async () => true,
+    rejectWebSocketUpgrade() {}, buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}), processForwardedEventPayload() {},
+  });
+  const first = new FakeSocket();
+  const acrossGap = new FakeSocket();
+  const current = new FakeSocket();
+  const idle = new FakeSocket();
+  const idleAgain = new FakeSocket();
+  try {
+    runtime.wsServer.emit('connection', first, { url: '/api/global/event/ws' });
+    await expect.poll(() => first.sent.filter(frame => frame.type === 'event').map(frame => frame.eventId)).toEqual(['before', 'after', 'last']);
+    runtime.wsServer.emit('connection', acrossGap, { url: '/api/global/event/ws?lastEventId=before' });
+    await expect.poll(() => acrossGap.sent.length).toBeGreaterThan(0);
+    expect(acrossGap.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, cursor: 'last' }]);
+    runtime.wsServer.emit('connection', current, { url: '/api/global/event/ws?lastEventId=after' });
+    await expect.poll(() => current.sent.length).toBe(2);
+    expect(current.sent[0]).toEqual({ type: 'ready', scope: 'global', replayed: true });
+    expect(current.sent[1].eventId).toBe('last');
+    // A client that received no event resumes from the cursor its ready frame named.
+    runtime.wsServer.emit('connection', idle, { url: '/api/global/event/ws' });
+    await expect.poll(() => idle.sent.length).toBe(1);
+    expect(idle.sent[0]).toEqual({ type: 'ready', scope: 'global', cursor: 'last' });
+    runtime.wsServer.emit('connection', idleAgain, { url: '/api/global/event/ws?lastEventId=last' });
+    await expect.poll(() => idleAgain.sent.length).toBe(1);
+    expect(idleAgain.sent).toEqual([{ type: 'ready', scope: 'global', replayed: true }]);
+  } finally {
+    first.close(); acrossGap.close(); current.close(); idle.close(); idleAgain.close(); hub.stop(); await runtime.close();
   }
 });
 
@@ -224,8 +273,8 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(fetchCalls).toBe(1);
-    expect(firstSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
-    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
+    expect(firstSocket.sent).toContainEqual(expect.objectContaining({ type: 'ready', scope: 'global' }));
+    expect(secondSocket.sent).toContainEqual(expect.objectContaining({ type: 'ready', scope: 'global' }));
     expect(firstSocket.sent).toContainEqual({
       type: 'event',
       payload: { id: 'evt-1', type: 'server.connected', data: {} },
@@ -244,7 +293,7 @@ describe('message stream websocket runtime', () => {
     await runtime.close();
   });
 
-  it('replays buffered global events after a reconnecting client Last-Event-ID', async () => {
+  it('resets a reconnecting client whose cursor predates a hub restart', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();
     let fetchCalls = 0;
@@ -293,13 +342,9 @@ describe('message stream websocket runtime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
-    expect(secondSocket.sent).toContainEqual({
-      type: 'event',
-      payload: { id: 'evt-2', type: 'session.renamed', location: { directory: '/tmp/project' }, data: { sessionID: 's1', title: 't' } },
-      eventId: 'evt-2',
-      directory: '/tmp/project',
-    });
+    // The hub read nothing between the two sockets, so the suffix it kept
+    // cannot stand for what the client missed.
+    expect(secondSocket.sent).toEqual([{ type: 'ready', scope: 'global', replayReset: true, cursor: expect.any(String) }]);
 
     secondSocket.close();
     await runtime.close();

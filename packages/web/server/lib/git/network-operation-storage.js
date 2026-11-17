@@ -18,6 +18,10 @@ const EVICTABLE_STATES = new Set(['succeeded', 'partial', 'conflicted', 'failed'
 const STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
 ]);
+const OPERATIONS = new Set([
+  'fetch', 'pull', 'push', 'delete-remote-branch', 'sync', 'clone',
+  'contributor-fetch', 'checkout-hydration', 'checkout-actions',
+]);
 const ERROR_CODES = new Set([
   'INVALID_REQUEST', 'NOT_FOUND', 'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG',
   'REMOTE_CHANGED', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
@@ -67,6 +71,44 @@ const exactKeys = (value, required, optional = []) => {
 const isIdentifier = (value, max = 1024) => isString(value) && value.length > 0
   && value.length <= max && value.trim() === value && !/[\0\r\n]/.test(value);
 const isOperationId = (value) => isString(value) && /^[A-Za-z0-9_-]{1,200}$/.test(value);
+const isVocabularyName = (value) => isString(value) && /^[a-z][a-z0-9-]{0,63}$/.test(value);
+const isOpaqueTargetValue = (value, key = '', depth = 0) => {
+  if (depth > 8) return false;
+  if (value === null || value === true || value === false || Number.isSafeInteger(value)) return true;
+  if (isString(value)) {
+    if (key === 'displayUrl') return isSafeDisplayEndpoint(value);
+    return value.length <= 1024 && !/[\0\r\n]/.test(value)
+      && !value.includes('://') && !value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length <= 256 && value.every((entry) => isOpaqueTargetValue(entry, key, depth + 1));
+  }
+  if (!isPlainObject(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 64
+    && entries.every(([name, entry]) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name)
+      && isOpaqueTargetValue(entry, name, depth + 1));
+};
+const foreignNames = (record) => {
+  const snapshot = record?.snapshot;
+  const operation = snapshot?.target?.operation;
+  const steps = Array.isArray(snapshot?.completedSteps)
+    ? snapshot.completedSteps.filter((step) => !STEPS.has(step)) : [];
+  const errors = [
+    snapshot?.error,
+    ...(Array.isArray(snapshot?.stepResults) ? snapshot.stepResults.map((step) => step?.error) : []),
+    ...(Array.isArray(snapshot?.hydration?.submodules) ? snapshot.hydration.submodules.map((part) => part?.error) : []),
+    ...(Array.isArray(snapshot?.hydration?.lfs) ? snapshot.hydration.lfs.map((part) => part?.error) : []),
+  ];
+  const codes = [...new Set(errors.map((error) => error?.code)
+    .filter((code) => isErrorCodeName(code) && !ERROR_CODES.has(code)))];
+  return [
+    ...(OPERATIONS.has(operation) ? [] : [`operation ${operation}`]),
+    ...steps.map((step) => `step ${step}`),
+    ...codes.map((code) => `error ${code}`),
+  ].join(', ');
+};
+const isErrorCodeName = (value) => isString(value) && /^[A-Z][A-Z0-9_]{0,63}$/.test(value);
 const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
 const invalidStore = (cause) => Object.assign(new Error('Git network operation storage is invalid', { cause }), {
   code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID',
@@ -93,8 +135,6 @@ const isSafeDisplayEndpoint = (value) => {
   try {
     const endpoint = new URL(value);
     const pathname = decodeURIComponent(endpoint.pathname);
-    // Plain HTTP only to this machine (a provider's loopback development
-    // instance); the planner decided it may be reached.
     return (['https:', 'ssh:'].includes(endpoint.protocol) || (endpoint.protocol === 'http:' && isLoopbackHost(endpoint.hostname)))
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
@@ -176,9 +216,9 @@ const immutablePlan = (snapshot) => {
 const isRuntimeIdentity = (value) => isPlainObject(value)
   && exactKeys(value, ['id', 'platform'])
   && isIdentifier(value.id, 512) && ['web', 'desktop'].includes(value.platform);
-const isPublicError = (value) => isPlainObject(value)
+const isPublicError = (value, allowUnknownCode = false) => isPlainObject(value)
   && exactKeys(value, ['code', 'message'])
-  && ERROR_CODES.has(value.code)
+  && (ERROR_CODES.has(value.code) || (allowUnknownCode && isErrorCodeName(value.code)))
   && isString(value.message) && value.message.length > 0 && value.message.length <= 4096
   && value.message.trim() === value.message && !value.message.includes('\0');
 const isEndpoint = (value) => isPlainObject(value)
@@ -211,8 +251,6 @@ const isTransport = (value) => {
     && isVerification(value.verification, value.mode);
 };
 const isRef = (value) => isIdentifier(value, 4096) && value.startsWith('refs/');
-// Revision 0 is a repository nobody bound: its remotes use system Git, and the
-// planner and binding service accept it, so its operations are stored too.
 const isRepositoryTargetBase = (value, operation, required = [], optional = []) => isPlainObject(value)
   && exactKeys(value, ['operation', 'repositoryId', 'bindingRevision', 'configRevision', 'remote', ...required], optional)
   && value.operation === operation
@@ -220,8 +258,9 @@ const isRepositoryTargetBase = (value, operation, required = [], optional = []) 
   && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 0
   && isIdentifier(value.configRevision)
   && isRemote(value.remote);
-const isTarget = (value) => {
-  if (!isPlainObject(value) || !isIdentifier(value.operation, 64)) return false;
+const isTarget = (value, allowUnknownVocabulary = false) => {
+  if (!isPlainObject(value) || !isOperationId(value.operation)) return false;
+  if (!OPERATIONS.has(value.operation)) return allowUnknownVocabulary && isVocabularyName(value.operation) && isOpaqueTargetValue(value);
   if (value.operation === 'checkout-actions') {
     return exactKeys(value, ['operation']);
   }
@@ -272,23 +311,23 @@ const isTarget = (value) => {
     && (!Object.hasOwn(value, 'force') || remoteFetch && typeof value.force === 'boolean')
     && (!Object.hasOwn(value, 'configureUpstream') || value.operation === 'push' && value.configureUpstream === true);
 };
-const isStepResults = (value) => Array.isArray(value) && value.length === 3
+const isStepResults = (value, allowUnknownVocabulary = false) => Array.isArray(value) && value.length === 3
   && value.every((step, index) => isPlainObject(step)
     && exactKeys(step, ['step', 'status'], ['error'])
     && step.step === ['fetch', 'pull', 'push'][index]
     && ['succeeded', 'skipped', 'conflicted', 'failed', 'cancelled'].includes(step.status)
-    && (['succeeded', 'skipped'].includes(step.status) ? step.error === undefined : isPublicError(step.error)));
+    && (['succeeded', 'skipped'].includes(step.status) ? step.error === undefined : isPublicError(step.error, allowUnknownVocabulary)));
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
 ]);
-const isHydrationPart = (value) => isPlainObject(value)
+const isHydrationPart = (value, allowUnknownVocabulary = false) => isPlainObject(value)
   && exactKeys(value, ['path', 'status'], ['endpoint', 'error'])
   && isRelativeCheckoutPath(value.path)
   && HYDRATION_STATUSES.has(value.status)
   && (value.endpoint === undefined || isEndpoint(value.endpoint))
   && (['succeeded', 'not-needed'].includes(value.status)
     ? value.error === undefined
-    : isPublicError(value.error));
+    : isPublicError(value.error, allowUnknownVocabulary));
 const expectedHydrationStatus = (parts) => {
   const statuses = parts.map((entry) => entry.status);
   if (!statuses.length || statuses.every((status) => status === 'not-needed')) return 'not-needed';
@@ -297,47 +336,53 @@ const expectedHydrationStatus = (parts) => {
   }
   return 'succeeded';
 };
-const isHydration = (value) => isPlainObject(value)
+const isHydration = (value, allowUnknownVocabulary = false) => isPlainObject(value)
   && exactKeys(value, ['status', 'submodules', 'lfs'])
   && HYDRATION_STATUSES.has(value.status)
   && Array.isArray(value.submodules) && value.submodules.length <= 256
-  && value.submodules.every(isHydrationPart)
+  && value.submodules.every((part) => isHydrationPart(part, allowUnknownVocabulary))
   && Array.isArray(value.lfs) && value.lfs.length <= 256
-  && value.lfs.every(isHydrationPart)
+  && value.lfs.every((part) => isHydrationPart(part, allowUnknownVocabulary))
   && expectedHydrationStatus([...value.submodules, ...value.lfs]) === value.status;
-const isSnapshot = (value, operationId, state, completedSteps) => isPlainObject(value)
-  && exactKeys(value, ['operationId', 'runtimeIdentity', 'transport', 'target', 'completedSteps', 'state'], [
-    'error', 'stepResults', 'hydration',
-  ])
-  && value.operationId === operationId
-  && value.state === state
-  && isRuntimeIdentity(value.runtimeIdentity)
-  && (isTransport(value.transport) || value.transport === null && value.target?.operation === 'checkout-hydration')
-  && isTarget(value.target)
-  && Array.isArray(value.completedSteps)
-  && JSON.stringify(value.completedSteps) === JSON.stringify(completedSteps)
-  && (state === 'succeeded' ? value.error === undefined
-    : ['planned', 'running'].includes(state) ? value.error === undefined
-      : isPublicError(value.error) && STATE_ERROR_CODES[state]?.has(value.error.code))
-  && (value.target.operation === 'sync' && TERMINAL_STATES.has(state)
-    ? isStepResults(value.stepResults)
-    : value.stepResults === undefined)
-  && !(state === 'partial' && value.target.operation === 'clone'
-    && !value.completedSteps.includes('checked-out'))
-  && (value.hydration === undefined || TERMINAL_STATES.has(state) && isHydration(value.hydration))
-  && !(state === 'succeeded' && value.hydration
-    && !['succeeded', 'not-needed'].includes(value.hydration.status))
-  && validatePublicValue(value);
+const isSnapshot = (value, operationId, state, completedSteps, allowUnknownVocabulary = false) => {
+  const foreignOperation = allowUnknownVocabulary && !OPERATIONS.has(value?.target?.operation);
+  const errorCodeFits = (code) => STATE_ERROR_CODES[state]?.has(code)
+    || (allowUnknownVocabulary && !ERROR_CODES.has(code) && isErrorCodeName(code));
+  return isPlainObject(value)
+    && exactKeys(value, ['operationId', 'runtimeIdentity', 'transport', 'target', 'completedSteps', 'state'], [
+      'error', 'stepResults', 'hydration',
+    ])
+    && value.operationId === operationId
+    && value.state === state
+    && isRuntimeIdentity(value.runtimeIdentity)
+    && (isTransport(value.transport)
+      || value.transport === null && (foreignOperation || value.target?.operation === 'checkout-hydration'))
+    && isTarget(value.target, allowUnknownVocabulary)
+    && Array.isArray(value.completedSteps)
+    && JSON.stringify(value.completedSteps) === JSON.stringify(completedSteps)
+    && (state === 'succeeded' ? value.error === undefined
+      : ['planned', 'running'].includes(state) ? value.error === undefined
+        : isPublicError(value.error, allowUnknownVocabulary) && errorCodeFits(value.error.code))
+    && (value.stepResults === undefined
+      ? !(value.target.operation === 'sync' && TERMINAL_STATES.has(state))
+      : (value.target.operation === 'sync' || foreignOperation)
+        && isStepResults(value.stepResults, allowUnknownVocabulary))
+    && !(state === 'partial' && value.target.operation === 'clone'
+      && !value.completedSteps.includes('checked-out'))
+    && (value.hydration === undefined
+      || TERMINAL_STATES.has(state) && isHydration(value.hydration, allowUnknownVocabulary))
+    && !(state === 'succeeded' && value.hydration
+      && !['succeeded', 'not-needed'].includes(value.hydration.status))
+    && validatePublicValue(value);
+};
 
-// The process that claimed a record. Several OpenChamber servers may share one
-// data directory (the desktop app and a CLI server, say), so recovery must not
-// treat another live server's running operation as one a restart interrupted.
 const isOwner = (value) => isPlainObject(value)
   && exactKeys(value, ['pid', 'host', 'instance'])
   && Number.isSafeInteger(value.pid) && value.pid > 0
   && isIdentifier(value.host, 256) && isIdentifier(value.instance, 128);
 
-const parseRecord = (value, id) => {
+const parseRecord = (value, id, allowUnknownVocabulary = false) => {
+  const foreignOperation = allowUnknownVocabulary && !OPERATIONS.has(value?.snapshot?.target?.operation);
   if (!isPlainObject(value) || !exactKeys(value, [
     'operationId', 'runtimeIdentity', 'repositoryId', 'targetFingerprints', 'snapshot', 'state',
     'completedSteps', 'createdAt', 'startedAt', 'finishedAt', 'expiresAt',
@@ -345,8 +390,8 @@ const parseRecord = (value, id) => {
   ], ['owner']) || value.operationId !== id
     || (value.owner !== undefined && !isOwner(value.owner)) || !isOperationId(id)
     || !TERMINAL_STATES.has(value.state) && !['planned', 'running'].includes(value.state)
-    || !Array.isArray(value.completedSteps) || value.completedSteps.length > STEPS.size
-    || value.completedSteps.some((step) => !STEPS.has(step))
+    || !Array.isArray(value.completedSteps) || value.completedSteps.length > (allowUnknownVocabulary ? 32 : STEPS.size)
+    || value.completedSteps.some((step) => !(STEPS.has(step) || (allowUnknownVocabulary && isVocabularyName(step))))
     || new Set(value.completedSteps).size !== value.completedSteps.length
     || !isTimestamp(value.createdAt)
     || (value.startedAt !== null && (!isTimestamp(value.startedAt) || value.startedAt < value.createdAt))
@@ -358,10 +403,10 @@ const parseRecord = (value, id) => {
     || !Array.isArray(value.targetFingerprints) || value.targetFingerprints.length > 3
     || value.targetFingerprints.some((fingerprint) => !isIdentifier(fingerprint))
     || !isRuntimeIdentity(value.runtimeIdentity)
-    || !isSnapshot(value.snapshot, id, value.state, value.completedSteps)
+    || !isSnapshot(value.snapshot, id, value.state, value.completedSteps, allowUnknownVocabulary)
     || JSON.stringify(value.runtimeIdentity) !== JSON.stringify(value.snapshot.runtimeIdentity)
-    || value.repositoryId !== repositoryIdFor(value.snapshot)
-    || JSON.stringify(value.targetFingerprints) !== JSON.stringify(targetFingerprints(value.snapshot.target))) {
+    || (!foreignOperation && (value.repositoryId !== repositoryIdFor(value.snapshot)
+      || JSON.stringify(value.targetFingerprints) !== JSON.stringify(targetFingerprints(value.snapshot.target))))) {
     throw invalidStore();
   }
   if (value.state === 'planned' && (value.startedAt !== null || value.finishedAt !== null || value.expiresAt !== null)) throw invalidStore();
@@ -370,16 +415,26 @@ const parseRecord = (value, id) => {
   if (TERMINAL_STATES.has(value.state) && value.finishedAt === null) throw invalidStore();
   if (value.state === 'outcome-unknown' && value.expiresAt !== null) throw invalidStore();
   if (EVICTABLE_STATES.has(value.state) && value.expiresAt === null) throw invalidStore();
-  if (value.remotePublicationStarted && !['push', 'delete-remote-branch', 'sync'].includes(value.snapshot.target.operation)) throw invalidStore();
-  if (value.localIntegrationStarted && !['pull', 'sync'].includes(value.snapshot.target.operation)) throw invalidStore();
+  if (!foreignOperation && value.remotePublicationStarted && !['push', 'delete-remote-branch', 'sync'].includes(value.snapshot.target.operation)) throw invalidStore();
+  if (!foreignOperation && value.localIntegrationStarted && !['pull', 'sync'].includes(value.snapshot.target.operation)) throw invalidStore();
   return value;
 };
 
-const parseState = (value, maxRecords) => {
+const parseState = (value, maxRecords, onForeignRecords) => {
   if (!isPlainObject(value) || !exactKeys(value, ['version', 'records'])
     || value.version !== VERSION || !isPlainObject(value.records)
     || Object.keys(value.records).length > maxRecords) throw invalidStore();
-  for (const [id, record] of Object.entries(value.records)) parseRecord(record, id);
+  const foreign = [];
+  for (const [id, record] of Object.entries(value.records)) {
+    try {
+      parseRecord(record, id);
+    } catch (error) {
+      if (error?.code !== 'GIT_NETWORK_OPERATION_STORAGE_INVALID') throw error;
+      parseRecord(record, id, true);
+      foreign.push([id, record]);
+    }
+  }
+  onForeignRecords?.(foreign);
   return value;
 };
 
@@ -454,6 +509,14 @@ export function createGitNetworkOperationStore({
     catch (error) { return error?.code === 'EPERM'; }
   };
   let writes = Promise.resolve();
+  let reportedForeignRecords = new Set();
+  const reportForeignRecords = (foreign) => {
+    for (const [id, record] of foreign) {
+      if (reportedForeignRecords.has(id)) continue;
+      console.warn(`[git] operation record ${id} is kept verbatim; this build does not know its ${foreignNames(record)}`);
+    }
+    reportedForeignRecords = new Set(foreign.map(([id]) => id));
+  };
   const enqueue = (operation) => {
     const next = writes.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
     writes = next.then(() => undefined, () => undefined);
@@ -472,7 +535,7 @@ export function createGitNetworkOperationStore({
       const stats = await handle.stat();
       if (!stats.isFile() || stats.size > maxBytes
         || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
+      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords, reportForeignRecords);
     } catch (error) {
       if (error?.code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID') throw error;
       throw invalidStore(error);
@@ -592,7 +655,7 @@ export function createGitNetworkOperationStore({
     let changed = false;
     for (const [id, record] of Object.entries(state.records)) {
       if ((record.state === 'planned' || record.state === 'running') && !ownerAlive(record.owner)) {
-        state.records[id] = parseRecord(recoveredSnapshot(record, timestamp, terminalRetentionMs), id);
+        state.records[id] = parseRecord(recoveredSnapshot(record, timestamp, terminalRetentionMs), id, true);
         changed = true;
       }
     }

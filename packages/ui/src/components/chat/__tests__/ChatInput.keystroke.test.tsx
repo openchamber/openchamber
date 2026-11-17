@@ -135,8 +135,7 @@ plugin({
     // A load transform, as the sibling tests do it, and never an onResolve into a namespace of
     // its own: Bun keeps transpiled files in a cache on disk that every test process shares, and
     // a rewritten import specifier cached from this file broke every later file that imports
-    // markdown-worker with "Cannot find module 'worker-url:...'".
-    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
+    // the rewritten module.
     build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
       const directory = resolve(dirname(path), '../assets/provider-logos');
       const logos = Object.fromEntries(readdirSync(directory).filter((name) => name.endsWith('.svg')).map((name) => [

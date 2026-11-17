@@ -541,6 +541,7 @@ describe('core-routes', () => {
       allowedClientKinds: ['mobile'],
       createdByClientId: null,
       usesRelay: false,
+      localOnly: true,
     });
   });
 
@@ -596,7 +597,7 @@ describe('core-routes', () => {
       hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' },
       priority: 30,
     };
-    const { app } = createPairingRouteApp({ getRelayPairingCandidate: vi.fn(async () => relayCandidate) });
+    const { app, dependencies } = createPairingRouteApp({ getRelayPairingCandidate: vi.fn(async () => relayCandidate) });
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
@@ -608,6 +609,24 @@ describe('core-routes', () => {
       { type: 'lan', url: 'http://runtime.example', priority: 10 },
       relayCandidate,
     ]);
+    expect(dependencies.clientPairingRuntime.createPairingSession).toHaveBeenCalledWith(
+      expect.objectContaining({ usesRelay: true, localOnly: false }),
+    );
+  });
+
+  it('does not mark a device local-only when it may reach the server through a public tunnel', async () => {
+    const { app, dependencies } = createPairingRouteApp();
+
+    await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'chamber.example.com')
+      .set('X-Forwarded-Proto', 'https')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606', includeRelay: false })
+      .expect(201);
+
+    expect(dependencies.clientPairingRuntime.createPairingSession).toHaveBeenCalledWith(
+      expect.objectContaining({ usesRelay: false, localOnly: false }),
+    );
   });
 
   it('still returns the direct candidate when the relay candidate lookup throws', async () => {
@@ -667,6 +686,24 @@ describe('core-routes', () => {
       .post('/api/client-auth/pairing/redeem')
       .send({ pairingId: 'pair_2', secret: 'wrong' })
       .expect(400, { error: 'Invalid or expired pairing session' });
+  });
+
+  it('removes the push registrations of the device record a pairing replaces before answering', async () => {
+    const removeClientPushDevices = vi.fn(async () => {});
+    const { app, dependencies } = createPairingRouteApp({ removeClientPushDevices });
+    dependencies.clientPairingRuntime.redeemPairingSession.mockResolvedValueOnce({
+      pairing: { fingerprint: 'ABCD-1234' },
+      client: { id: 'client-2', label: 'Phone', authMethod: 'pairing' },
+      token: 'oc_client_token',
+      replacedClientIds: ['client-1'],
+    });
+
+    await request(app)
+      .post('/api/client-auth/pairing/redeem')
+      .send({ pairingId: 'pair_1', secret: 'secret', clientKind: 'mobile' })
+      .expect(200);
+
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
   });
 
   it('rate limits pairing redeem attempts by socket address and pairingId, then resets after the window', async () => {
@@ -910,6 +947,37 @@ describe('client auth routes', () => {
       { type: 'lan', url: 'http://10.0.0.5:3000', priority: 10 },
       relayCandidate,
     ]);
+  });
+
+  it('keeps the relay away from a device paired for the home network only', async () => {
+    const app = express();
+    const dependencies = {
+      ...createDependencies({ resolveAuthContext: async () => ({ type: 'client', clientId: 'client-1', client: { id: 'client-1', localOnly: true } }) }),
+      getDirectCandidateUrls: () => ['http://192.168.1.20:3000'],
+      getRelayPairingCandidate: async () => ({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'server-abc', hostEncPubJwk: {}, priority: 30 }),
+      getServerId: async () => 'server-abc',
+    };
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/client-auth/connection/candidates');
+    expect(response.status).toBe(200);
+    expect(response.body.candidates).toEqual([{ type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 }]);
+  });
+
+  it('judges the device by its own bearer token when a cookie session rides along', async () => {
+    const app = express();
+    const dependencies = createDependencies({ resolveAuthContext: async () => ({ type: 'session', token: 'cookie' }) });
+    dependencies.remoteClientAuthRuntime.authenticateBearerToken = async (token) => (
+      token === 'oc_client_home' ? { ok: true, client: { id: 'client-1', localOnly: true } } : null
+    );
+    dependencies.getDirectCandidateUrls = () => ['http://192.168.1.20:3000'];
+    dependencies.getRelayPairingCandidate = async () => ({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 's', hostEncPubJwk: {}, priority: 30 });
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const home = await request(app).get('/api/client-auth/connection/candidates').set('Authorization', 'Bearer oc_client_home');
+    expect(home.body.candidates.map((candidate) => candidate.type)).toEqual(['lan']);
+    const owner = await request(app).get('/api/client-auth/connection/candidates');
+    expect(owner.body.candidates.map((candidate) => candidate.type)).toEqual(['lan', 'relay']);
   });
 
   it('omits serverId and relay candidate when unavailable and survives failures', async () => {

@@ -2,20 +2,8 @@ const OPEN_TAG = '<openui-lang>';
 const CLOSE_TAG = '</openui-lang>';
 const OPEN_LINE = /^ {0,3}<openui-lang>/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
-// A fence named after the library instead of its language.
 const SHORT_FENCE = /^( {0,3}(?:`{3,}|~{3,}))[ \t]*openui[ \t\r]*$/;
 
-/**
- * Turns the ways models mislabel a UI block into an `openui-lang` fence; the
- * program inside is fine in both.
- *
- * - `<openui-lang>…</openui-lang>`: weaker models read the guidance inside XML
- *   context tags and wrap a block in a tag of the same shape. A tag opens only
- *   at the start of a line outside code fences, so a sample of the tag in code
- *   stays text. An unclosed tag becomes an unclosed fence, which draws as a
- *   streaming block.
- * - A fence opened as `openui`, the library's name.
- */
 export function fenceUiBlocks(text: string): string {
   if (!text.includes('openui')) return text;
   const out: string[] = [];

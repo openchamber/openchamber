@@ -32,15 +32,17 @@ const emptyPersonal = {
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  notesTodosInRepository: false,
 };
 
-const createRuntime = async () => {
+const createRuntime = async (deps = {}) => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-setup-'));
   const runtime = createProjectConfigRuntime({
     fsPromises: await import('fs/promises'),
     path,
     projectsDirPath: path.join(tempRoot, 'projects'),
     createTaskID: () => 'task-fixed-id',
+    ...deps,
   });
   return {
     runtime,
@@ -119,6 +121,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev', '', 'dev', 7],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      notesTodosInRepository: true,
       scheduledTasks: [{ id: 't' }],
     })).toEqual({
       setupWorktree: ['bun install'],
@@ -131,6 +134,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      notesTodosInRepository: true,
     });
     expect(projectSetupViewOf(null)).toEqual(emptyPersonal);
   });
@@ -162,6 +166,10 @@ describe('project setup sanitizers', () => {
     expect(() => projectSetupPatchToStored({ setupWorktreeMode: 'merge' })).toThrow('setupWorktreeMode must be');
     expect(() => projectSetupPatchToStored({ sharedTrustHash: '' })).toThrow('sharedTrustHash must be');
     expect(projectSetupPatchToStored({ sharedTrustHash: null })).toEqual({ sharedTrust: undefined });
+    expect(projectSetupPatchToStored({ notesTodosInRepository: true })).toEqual({ notesTodosInRepository: true });
+    // Off removes the key: the personal file holds only what the user turned on.
+    expect(projectSetupPatchToStored({ notesTodosInRepository: false })).toEqual({ notesTodosInRepository: undefined });
+    expect(() => projectSetupPatchToStored({ notesTodosInRepository: 'yes' })).toThrow('notesTodosInRepository must be');
     expect(projectSetupPatchToStored({ sharedTrustHash: 'sha256:x' }).sharedTrust).toMatchObject({ hash: 'sha256:x' });
     expect(() => projectSetupPatchToStored([])).toThrow('patch must be');
   });
@@ -430,6 +438,43 @@ describe('project setup runtime', () => {
       await runtime.updateProjectSetup('project-a', { projectActionsPrimaryId: null });
       expect(await readRaw('project-a')).not.toHaveProperty('projectActionsPrimaryId');
       expect((await runtime.readProjectSetup('project-a')).projectActionsPrimaryId).toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('turns repository notes and todos on per project through the switch, which commits the option', async () => {
+    const switched = [];
+    const { runtime, tempRoot, cleanup } = await createRuntime({
+      switchNotesTodosStorage: async (id, { enabled, file, commit }) => {
+        switched.push({ id, enabled, file });
+        await commit();
+      },
+    });
+    try {
+      const projectID = createProjectIdFromPath(path.join(tempRoot, 'repo'));
+      const file = path.join(tempRoot, 'repo', '.openchamber', 'notes-todos.json');
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBeNull();
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: true });
+      expect((await runtime.readProjectSetup(projectID)).personal.notesTodosInRepository).toBe(true);
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBe(file);
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: true });
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: false });
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBeNull();
+      expect(switched).toEqual([{ id: projectID, enabled: true, file }, { id: projectID, enabled: false, file }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the option when the switch fails', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime({
+      switchNotesTodosStorage: async () => { throw new Error('move failed'); },
+    });
+    try {
+      const projectID = createProjectIdFromPath(path.join(tempRoot, 'repo'));
+      await expect(runtime.updateProjectSetup(projectID, { notesTodosInRepository: true })).rejects.toThrow('move failed');
+      expect((await runtime.readProjectSetup(projectID)).personal.notesTodosInRepository).toBe(false);
     } finally {
       await cleanup();
     }

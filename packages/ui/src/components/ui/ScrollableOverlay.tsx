@@ -1,31 +1,26 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
-import { ScrollShadow } from "./ScrollShadow";
+import { ScrollShadow, ScrollShadowBands } from "./ScrollShadow";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
   hideDelayMs?: number;
   as?: React.ElementType;
   outerClassName?: string;
-  /** Style of the outer frame, for a size given as a value (a max height from a prop). */
   outerStyle?: React.CSSProperties;
   scrollbarClassName?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
   fillContainer?: boolean;
-  /** Prevent scroll from propagating to parent when at boundaries */
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
-  /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
+  scrollShadowSurface?: string;
   hideTopScrollShadow?: boolean;
-  /** Suppress the bottom fade while retaining scroll-state tracking. */
   hideBottomScrollShadow?: boolean;
   userIntentOnly?: boolean;
-  /** Pixels kept clear above the vertical scrollbar track. */
   verticalTrackStart?: number;
-  /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
 
@@ -46,6 +41,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     preventOverscroll = false,
     useScrollShadow = false,
     scrollShadowSize,
+    scrollShadowSurface,
     hideTopScrollShadow = false,
     hideBottomScrollShadow = false,
     userIntentOnly = false,
@@ -70,6 +66,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             as={Component}
             ref={containerRef as React.Ref<HTMLElement>}
             size={scrollShadowSize}
+            surface={scrollShadowSurface}
             hideTopShadow={hideTopScrollShadow}
             hideBottomShadow={hideBottomScrollShadow}
             className={cn(
@@ -101,6 +98,9 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             {children}
           </Component>
         )}
+        {useScrollShadow && scrollShadowSurface ? (
+          <ScrollShadowBands surface={scrollShadowSurface} size={scrollShadowSize} />
+        ) : null}
         <OverlayScrollbar
           containerRef={containerRef}
           minThumbSize={minThumbSize}

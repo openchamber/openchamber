@@ -1,6 +1,3 @@
-// Tray menu content, kept free of Electron so it can be built and compared in
-// plain tests. `tray.mjs` turns the template into a native menu and rebuilds it
-// only when `trayMenuKey` changes.
 
 const isLinux = process.platform === 'linux';
 
@@ -13,8 +10,6 @@ const truncate = (value, max) => {
   return `${text.slice(0, Math.max(0, max - 1))}…`;
 };
 
-// Which status icon key a session maps to. 'blank' (a transparent image)
-// reserves the same left gutter for idle rows so every row aligns.
 const statusIconKey = (session) => {
   if (session.status === 'busy') return 'busy';
   if (session.status === 'retry') return 'retry';
@@ -24,8 +19,6 @@ const statusIconKey = (session) => {
 };
 
 const sessionLabel = (session) => {
-  // The status is a native left icon (the ✓ already signals unread), so the
-  // label is just the session title.
   return truncate(session.title || 'Untitled session', 40);
 };
 
@@ -56,8 +49,6 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
           label: approvalLabel(approval),
           submenu: [
             { label: 'Allow once', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'once' }) },
-            // Only when the request carries save patterns; otherwise "always"
-            // behaves like "once" and remembers nothing.
             ...(approval.canSave ? [{ label: 'Allow always', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'always' }) }] : []),
             { type: 'separator' },
             { label: 'Deny', click: () => onAction({ type: 'respond-permission', sessionId: approval.sessionId, id: approval.id, response: 'reject' }) },
@@ -86,10 +77,7 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
 
   const sessionItem = (session) => ({
     label: sessionLabel(session),
-    // Status icon on the left, centred across both lines; idle uses the blank
-    // placeholder so every row keeps the same gutter.
     icon: statusIcons[statusIconKey(session)] || statusIcons.blank,
-    // Secondary smaller line (macOS): project · branch.
     ...(session.subtitle ? { sublabel: truncate(session.subtitle, 48) } : {}),
     click: () => onAction({ type: 'focus-session', sessionId: session.id, directory: session.directory || '' }),
   });
@@ -110,8 +98,6 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
     template.push({ label: 'No active sessions', enabled: false });
   }
 
-  // Usage submenu — only when the user has enabled providers for the dropdown
-  // (same "configured to show" rule as the header/mobile); omitted otherwise.
   const usage = snapshot.usage && typeof snapshot.usage === 'object' ? snapshot.usage : null;
   const usageGroups = usage && Array.isArray(usage.groups) ? usage.groups : [];
   if (usageGroups.length > 0) {
@@ -119,9 +105,6 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
     const usageSubmenu = [];
     usageGroups.forEach((group, index) => {
       if (index > 0) usageSubmenu.push({ type: 'separator' });
-      // Read-only info rows. NSMenu only offers greyed-out for non-clickable
-      // items (no custom text contrast), so these render dimmed — at the mercy
-      // of macOS's menu contrast choices. Provider flush, rows indented.
       usageSubmenu.push({ label: group.provider, enabled: false });
       if (group.status) {
         usageSubmenu.push({ label: `    ${truncate(group.status, 40)}`, enabled: false });
@@ -143,8 +126,6 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
   );
 
   if (isLinux || process.platform === 'win32') {
-    // Right-click context menu: show / hide / close (quit). Matches the
-    // expected AppImage / Windows tray controls.
     template.push(
       { type: 'separator' },
       { label: 'Show Window', click: () => onAction({ type: 'show-main-window' }) },
@@ -163,8 +144,6 @@ export const buildTrayMenuTemplate = (snapshot, { onAction, statusIcons }) => {
   return template;
 };
 
-// Lightweight signature of the menu-affecting content — skips nativeImage
-// and click handlers that can't be serialized. Cheaper than building the menu.
 export const trayMenuKey = (snapshot) => {
   const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];

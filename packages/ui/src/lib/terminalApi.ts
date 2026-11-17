@@ -11,7 +11,8 @@ import { z } from 'zod';
 
 type ClientMessage =
   | { t: 'hello' | 'ping'; v: 3 }
-  | { t: 'attach' | 'detach'; v: 3; s: string }
+  | { t: 'attach'; v: 3; s: string; z?: 1 }
+  | { t: 'detach'; v: 3; s: string }
   | { t: 'write'; v: 3; s: string; d: string };
 type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type ProjectionHistory = {
@@ -22,7 +23,6 @@ type ProjectionHistory = {
 type TerminalProjection = {
   sequence: number;
   history: ProjectionHistory;
-  /** Current PTY size: what the server reported at attach, updated by every accepted resize. */
   cols?: number;
   rows?: number;
   status: TerminalStreamEvent['status'];
@@ -34,16 +34,14 @@ type TerminalProjection = {
   ptyBackend?: string;
 };
 const TAG = 1;
+const GZIP_TAG = 2;
+const canGunzip = typeof DecompressionStream === 'function';
+const gunzip = (frame: ArrayBuffer): Promise<ArrayBuffer> =>
+  new Response(new Blob([new Uint8Array(frame, 1)]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
 const MAX_PROJECTION_BYTES = 512 * 1024;
 const PROJECTION_PART_BYTES = 8 * 1024;
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
-/**
- * Switching terminal tabs detaches the old terminal before attaching the new one,
- * which momentarily leaves zero subscribers. Closing the socket there forced a
- * token refresh, a fresh upgrade and a full snapshot replay on every switch, so
- * hold the idle socket briefly and reuse it instead.
- */
 const IDLE_SOCKET_GRACE_MS = 15_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -119,11 +117,6 @@ const decode = (data: RelayTunnelSocketMessageEvent['data']): TerminalMessage | 
   try { return terminalMessageSchema.safeParse(JSON.parse(decoder.decode(bytes))).data ?? null; } catch { return null; }
 };
 
-/**
- * Server error code for a terminal request whose working directory no longer
- * exists (a deleted worktree). Mirrors `TERMINAL_CWD_MISSING_CODE` in
- * `packages/web/server/lib/terminal/runtime.js`.
- */
 const TERMINAL_CWD_MISSING_CODE = 'TERMINAL_CWD_MISSING';
 
 export class TerminalRequestError extends Error {
@@ -136,7 +129,6 @@ export class TerminalRequestError extends Error {
   }
 }
 
-/** The PTY size a snapshot's history was drawn for, when the server reported one. */
 export const terminalSnapshotSize = (event: Pick<TerminalStreamEvent, 'cols' | 'rows'>): TerminalChunkSize | undefined =>
   event.cols !== undefined && event.rows !== undefined ? { cols: event.cols, rows: event.rows } : undefined;
 
@@ -223,8 +215,6 @@ const appendProjectionBytes = (history: ProjectionHistory, bytes: Uint8Array): v
 
 const appendProjection = (history: ProjectionHistory, value: string): void => {
   if (!value) return;
-  // Encoding separately would replace a surrogate split between PTY messages.
-  // Keep the original string until concatenating the next message resolves it.
   if (history.malformed !== null || !isWellFormed(value)) {
     const combined = trimProjection(projectionText(history) + value);
     history.parts = [];
@@ -275,6 +265,8 @@ export class TerminalTransport {
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
   private disposed = false;
+  private inflating: Promise<void> | null = null;
+  private gunzipFailed = false;
 
   constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies(null)) {}
 
@@ -294,7 +286,7 @@ export class TerminalTransport {
     this.ensureConnected().then(() => {
       const current = this.subscribers.get(sessionId);
       if (first && socketWasOpen && current === set && current.size > 0) {
-        this.send({ t: 'attach', v: 3, s: sessionId });
+        this.attach(sessionId);
       }
     }).catch((error) => {
       if (!set.has(subscriber)) return;
@@ -313,11 +305,9 @@ export class TerminalTransport {
         this.cancelReconnect();
         this.failures = 0;
         if (this.socket?.readyState === SOCKET_OPEN) {
-          // Healthy socket: hold it briefly so a tab switch can reattach to it.
           this.scheduleIdleClose();
           return;
         }
-        // Nothing to reuse, so abandon any dial that is still in flight.
         this.generation += 1;
         this.opening = null;
         this.closeSocket();
@@ -352,11 +342,6 @@ export class TerminalTransport {
     this.projections.delete(sessionId);
   }
 
-  /**
-   * Records a resize the server accepted, so a projection snapshot replayed to
-   * a later subscriber (tab switch, remount) still names the size the
-   * terminal's current screen is drawn for.
-   */
   noteResize(sessionId: string, cols: number, rows: number): void {
     const projection = this.projections.get(sessionId);
     if (!projection) return;
@@ -413,11 +398,11 @@ export class TerminalTransport {
             opened = true;
             this.failures = 0;
             this.send({ t: 'hello', v: 3 });
-            for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
+            for (const sessionId of this.subscribers.keys()) this.attach(sessionId);
             this.startKeepalive();
             finish();
           };
-          socket.onmessage = (event) => void this.handleMessage(event.data);
+          socket.onmessage = (event) => this.receive(socket, event.data);
           socket.onerror = () => {
             const current = isCurrentSocket();
             if (current) invalidatePreOpenAuth();
@@ -428,9 +413,6 @@ export class TerminalTransport {
             const current = isCurrentSocket();
             if (current) {
               this.stopKeepalive();
-              // An upgrade rejected before `open` commonly means the cached
-              // URL-scoped auth token is stale. Retrying it reaches the 8s
-              // backoff cap instead of minting a fresh token.
               invalidatePreOpenAuth();
             }
             if (this.socket === socket) this.socket = null;
@@ -451,6 +433,24 @@ export class TerminalTransport {
         this.opening = null;
       }
     }
+  }
+
+  private attach(sessionId: string): void {
+    this.send({ t: 'attach', v: 3, s: sessionId, ...(canGunzip && !this.gunzipFailed ? { z: 1 as const } : {}) });
+  }
+
+  private receive(socket: RelayTunnelWebSocket, raw: RelayTunnelSocketMessageEvent['data']): void {
+    const gzipped = raw instanceof ArrayBuffer && raw.byteLength > 1 && new Uint8Array(raw, 0, 1)[0] === GZIP_TAG;
+    if (!gzipped && !this.inflating) { this.handleMessage(raw); return; }
+    const next = (this.inflating ?? Promise.resolve())
+      .then(() => (gzipped ? gunzip(raw) : raw))
+      .then((data) => { if (this.socket === socket) this.handleMessage(data); })
+      .catch(() => {
+        this.gunzipFailed = true;
+        if (this.socket === socket) socket.close();
+      })
+      .finally(() => { if (this.inflating === next) this.inflating = null; });
+    this.inflating = next;
   }
 
   private handleMessage(raw: RelayTunnelSocketMessageEvent['data']): void {
@@ -557,11 +557,6 @@ export class TerminalTransport {
   private closeSocket(): void { this.stopKeepalive(); const socket = this.socket; this.socket = null; if (socket && (socket.readyState === SOCKET_CONNECTING || socket.readyState === SOCKET_OPEN)) socket.close(); }
 }
 
-/**
- * One socket per target: the host, or one isolated space, whose socket names the space's root
- * as its `directory`, which the server sends into that space. The target is the terminal's
- * working directory, so every call names it; a call without one is the host's.
- */
 const HOST_TARGET = '';
 const transports = new Map<string, TerminalTransport>();
 

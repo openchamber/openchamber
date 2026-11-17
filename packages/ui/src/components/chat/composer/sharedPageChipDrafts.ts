@@ -6,13 +6,6 @@ import { unopenedPageAgentText } from '../sharePages/received/pageText';
 
 import type { ComposerReference } from './composerReferences';
 
-/**
- * The page chips of each draft, kept across reloads. A share link leaves the
- * text the moment it lands, so without this a reload would lose the page
- * entirely. Only what names the page is kept: `receivedId` (the server holds
- * the link's key), its host and title. The agent's copy is rebuilt from the
- * server when the chip mounts, so a page's content never sits in storage.
- */
 
 type SharedPageReference = Extract<ComposerReference, { kind: 'shared-page' }>;
 
@@ -24,6 +17,7 @@ const storedChipSchema = z.object({
   receivedId: z.string().min(1),
   host: z.string(),
   title: z.string().nullable(),
+  link: z.string().optional(),
 });
 
 const envelopeSchema = z.object({
@@ -39,7 +33,6 @@ const readJson = (raw: string | null) => {
   }
 };
 
-/** The stored chips by draft key; anything unreadable reads as none. */
 export function parseSharedPageChips(raw: string | null): Map<string, SharedPageReference[]> {
   const drafts = new Map<string, SharedPageReference[]>();
   const envelope = envelopeSchema.safeParse(readJson(raw));
@@ -48,7 +41,6 @@ export function parseSharedPageChips(raw: string | null): Map<string, SharedPage
     const chips = entries.flatMap((entry) => {
       const chip = storedChipSchema.safeParse(entry);
       if (!chip.success) return [];
-      // Opened again from the server once mounted: the chip rebuilds what the agent reads.
       return [{ kind: 'shared-page' as const, ...chip.data, opened: false, contextText: unopenedPageAgentText(chip.data.host) }];
     });
     if (chips.length > 0) drafts.set(key, chips);
@@ -56,12 +48,11 @@ export function parseSharedPageChips(raw: string | null): Map<string, SharedPage
   return drafts;
 }
 
-/** What is kept of the drafts' chips: page chips the server has read, for at most 50 drafts. */
 export function serializeSharedPageChips(drafts: ReadonlyMap<string, readonly ComposerReference[]>): string | null {
   const kept: [string, z.infer<typeof storedChipSchema>[]][] = [];
   for (const [key, references] of drafts) {
     const chips = references.flatMap((reference) => (reference.kind === 'shared-page' && reference.receivedId
-      ? [{ shareKey: reference.shareKey, receivedId: reference.receivedId, host: reference.host, title: reference.title }]
+      ? [{ shareKey: reference.shareKey, receivedId: reference.receivedId, host: reference.host, title: reference.title, link: reference.link }]
       : []));
     if (chips.length > 0) kept.push([key, chips]);
   }

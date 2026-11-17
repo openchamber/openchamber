@@ -4,9 +4,9 @@ import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import {
-  useWorkerHighlightedLines,
-  type WorkerHighlightedLinesResult,
-} from '@/components/code/useWorkerHighlightedLines';
+  useHighlightedLines,
+  type HighlightedLinesResult,
+} from '@/components/code/useHighlightedLines';
 import { parseDiffToUnified } from './message/toolRenderers';
 
 // Keep the line's layout stable while a cold worker request finishes. Plain
@@ -14,7 +14,7 @@ import { parseDiffToUnified } from './message/toolRenderers';
 interface CodeLineContentProps {
   content: string;
   html: string | undefined;
-  status: WorkerHighlightedLinesResult['status'];
+  status: HighlightedLinesResult['status'];
 }
 
 const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status }) => {
@@ -28,7 +28,7 @@ const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status
   return <span className="whitespace-pre-wrap break-all">{content}</span>;
 };
 
-const highlightedLineAt = (result: WorkerHighlightedLinesResult, index: number): string | undefined => (
+const highlightedLineAt = (result: HighlightedLinesResult, index: number): string | undefined => (
     result.status === 'loading' ? result.carriedLines[index] : result.lines?.[index]
 );
 
@@ -48,7 +48,7 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
         () => hunks.flatMap((hunk) => hunk.lines.map((line) => line.content)).join('\n'),
         [hunks],
     );
-    const highlighted = useWorkerHighlightedLines(flatContent, language);
+    const highlighted = useHighlightedLines(flatContent, language);
 
     let lineCursor = 0;
     return (
@@ -109,7 +109,7 @@ export const WritePreview: React.FC<WritePreviewProps> = ({ content, filePath })
     const displayPath = filePath?.split('/').pop() || 'New file';
     const lineCount = Math.max(lines.length, 1);
     const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
-    const highlighted = useWorkerHighlightedLines(content, language);
+    const highlighted = useHighlightedLines(content, language);
 
     return (
         <div className="w-full min-w-0" style={syntaxVars as React.CSSProperties}>

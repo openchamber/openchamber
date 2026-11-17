@@ -3,7 +3,6 @@ import type { Part } from '@/lib/opencode/model';
 type TextLikePart = Part & { text?: string; content?: string };
 type UserTextPart = Part & { text?: string; content?: string; shellAction?: { output?: unknown; command?: unknown } };
 
-/** The non-empty text parts of an assistant message, trimmed, in order. Tool and reasoning parts are left out. */
 export const assistantTextSegments = (parts: Part[]): string[] => parts
     .filter((part): part is TextLikePart => part?.type === 'text')
     .map((part) => (part.text || part.content || '').trim())

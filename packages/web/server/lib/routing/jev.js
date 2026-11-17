@@ -1,7 +1,3 @@
-/**
- * The Jev side of routing: request shapes and the HTTP call. Pure builders are
- * exported so the decision logic can be tested without a network.
- */
 import { z } from 'zod';
 import {
   JEV_LINGER_MS,
@@ -21,10 +17,6 @@ export const buildRoutingRequest = ({ categories, history, request }) => {
   };
 };
 
-/**
- * `permission` is the v2 request OpenCode reported: the action (tool kind), the
- * resources it touches and its metadata. Jev's contract keeps its own names.
- */
 export const buildPermissionRequest = (permission) => ({
   state: {
     permission: {
@@ -39,10 +31,6 @@ export const buildPermissionRequest = (permission) => ({
   },
 });
 
-/**
- * The Settings "Test" request: one tiny choice with an obvious answer, so any
- * working provider answers it and the reply proves the whole round trip.
- */
 export const buildProbeRequest = () => ({
   state: { request: 'Which of these is a colour: blue or table?' },
   questions: {
@@ -54,9 +42,21 @@ export const buildProbeRequest = () => ({
   },
 });
 
+// external: https://aistudio.google.com/docs/decisions-api Google takes structured input as JSON text, renamed predicate criteria and string instructions.
+export const toGeminiDecisionsRequest = ({ state, questions }) => ({
+  input: JSON.stringify(state),
+  questions: Object.fromEntries(Object.entries(questions).map(([id, question]) => {
+    const mapped = { ...question };
+    if (Array.isArray(question.instructions)) mapped.instructions = question.instructions.join('\n');
+    if (question.type === 'noul' && question.criteria) {
+      mapped.criteria = { true_description: question.criteria.true, false_description: question.criteria.false };
+    }
+    return [id, mapped];
+  })),
+});
+
 const choiceAnswerSchema = z.object({ choice: z.string(), confidence: z.number() });
 
-/** True when the probe came back as a choice answer, whichever choice it made. */
 export const isProbeAnswer = (answer) => choiceAnswerSchema.safeParse(answer).success;
 const noulAnswerSchema = z.object({ noul: z.number() });
 const permissionAnswersSchema = z.object({
@@ -64,10 +64,6 @@ const permissionAnswersSchema = z.object({
   kind: z.object({ choice: z.string() }).partial().optional(),
 });
 
-/**
- * Maps a Jev answer onto the category to use. Anything short of a confident,
- * known, enabled category is the fallback; the reason says which.
- */
 export const decideRouting = (answer, { categories, minConfidence }) => {
   const parsed = choiceAnswerSchema.safeParse(answer);
   if (!parsed.success) return { category: null, reason: 'unknown-category', confidence: 0 };
@@ -86,8 +82,6 @@ export const decidePermission = (answers, { threshold }) => {
 
 const responseSchema = z.object({ answers: z.record(z.string(), z.unknown()) });
 
-// Endpoints with a timed-out request still running; shared by every client in
-// the process so routing, session work and goals together keep at most one.
 const lingeringEndpoints = new Set();
 
 export const createJevClient = ({
@@ -96,23 +90,22 @@ export const createJevClient = ({
   lingerMs = JEV_LINGER_MS,
   lingering = lingeringEndpoints,
 } = {}) => ({
-  /**
-   * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-   * throws with `status` on an HTTP error and `code: 'timeout'` after
-   * `timeoutMs`. The first request to time out on an endpoint is not aborted:
-   * it runs on, up to `lingerMs`, so a local model can finish loading, and its
-   * answer is dropped. Any other timed-out request is aborted.
-   */
   ask: async (request, endpoint) => {
     const abort = new AbortController();
     const started = Date.now();
     const call = (async () => {
-      const response = await fetchImpl(endpoint.url, {
-        method: 'POST',
-        headers: { ...endpoint.headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ ...request, model: endpoint.model }),
-        signal: abort.signal,
-      });
+      let response;
+      try {
+        response = await fetchImpl(endpoint.url, {
+          method: 'POST',
+          headers: { ...endpoint.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ ...(endpoint.format === 'gemini' ? toGeminiDecisionsRequest(request) : request), model: endpoint.model }),
+          signal: abort.signal,
+        });
+      } catch (error) {
+        if (endpoint.format === 'gemini') throw new Error('Could not reach Google Gemini');
+        throw error;
+      }
       const text = await response.text();
       if (!response.ok) {
         throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });

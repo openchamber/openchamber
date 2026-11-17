@@ -8,24 +8,15 @@ export type LayoutDirection = 'ltr' | 'rtl';
 
 const RTL_LOCALES: ReadonlySet<Locale> = new Set<Locale>(['ar', 'he']);
 
-/** The one rule for the app's layout direction: right-to-left locales mirror the UI, every other locale stays left to right. */
 export function getLocaleDirection(locale: Locale): LayoutDirection {
   return RTL_LOCALES.has(locale) ? 'rtl' : 'ltr';
 }
 
-/**
- * The window edge where a line of the layout starts. OS window controls stay on
- * their physical edge in every language, so window chrome maps them through this.
- */
 export function getInlineStartSide(direction: LayoutDirection): 'left' | 'right' {
   return direction === 'rtl' ? 'right' : 'left';
 }
 
-/**
- * Whether an element lays out right to left: the nearest explicit `dir`
- * decides (the document root carries the UI direction). Read from the
- * attribute because `matches(':dir(rtl)')` throws on WebKit before 16.4.
- */
+// external: https://developer.mozilla.org/en-US/docs/Web/CSS/:dir WebKit before 16.4 rejects :dir(), so direction follows the nearest explicit dir attribute.
 export function isRightToLeft(element: Element): boolean {
   return element.closest('[dir="rtl"], [dir="ltr"]')?.getAttribute('dir') === 'rtl';
 }
@@ -54,16 +45,16 @@ type StoredLocale = {
   locale?: unknown;
 };
 
-export function normalizeLocale(value: string | undefined | null): Locale {
+function supportedLocale(value: string | undefined | null): Locale | undefined {
   if (!value) {
-    return DEFAULT_LOCALE;
+    return undefined;
   }
 
   const normalized = value.toLowerCase().replace(/_/g, '-');
   if (normalized === 'zh-cn' || normalized === 'zh-hans' || normalized.startsWith('zh-hans-')) {
     return 'zh-CN';
   }
-  if (normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
+  if (normalized === 'zh-tw' || normalized === 'zh-hk' || normalized === 'zh-mo' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
     return 'zh-TW';
   }
   if (normalized.startsWith('zh')) {
@@ -105,11 +96,14 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'ar' || normalized.startsWith('ar-')) {
     return 'ar';
   }
-  // Java and Android still report Hebrew under its retired code `iw`.
   if (normalized === 'he' || normalized.startsWith('he-') || normalized === 'iw' || normalized.startsWith('iw-')) {
     return 'he';
   }
-  return DEFAULT_LOCALE;
+  return undefined;
+}
+
+export function normalizeLocale(value: string | undefined | null): Locale {
+  return supportedLocale(value) ?? DEFAULT_LOCALE;
 }
 
 function readStoredLocale(): Locale | undefined {
@@ -143,7 +137,6 @@ export function writeStoredLocale(locale: Locale): void {
 
 declare global {
   interface Window {
-    /** The host application's display language (VS Code sets it), used before the user picks a locale. */
     __OPENCHAMBER_HOST_LANGUAGE__?: string;
   }
 }
@@ -157,6 +150,11 @@ export function detectInitialLocale(): Locale {
   const hostLanguage = globalThis.window?.__OPENCHAMBER_HOST_LANGUAGE__;
   if (hostLanguage) {
     return normalizeLocale(hostLanguage);
+  }
+
+  for (const language of globalThis.window?.navigator.languages ?? []) {
+    const locale = supportedLocale(language);
+    if (locale) return locale;
   }
 
   return DEFAULT_LOCALE;
