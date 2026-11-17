@@ -77,7 +77,7 @@ export type TrackerAuthMethod = 'oauth' | 'token';
 export type TrackerDescriptor = {
   id: TrackerProviderId;
   name: string;
-  authMethods: TrackerAuthMethod[];
+  authMethods: readonly TrackerAuthMethod[];
   capabilities: {
     multipleAccounts: boolean;
     stateUpdate: boolean;
@@ -89,8 +89,8 @@ export type TrackerDescriptor = {
     sessionComments: boolean;
     hostAccess: boolean;
   };
-  stateFilters: string[];
-  urlPatterns: { host: string; path: string; query?: { name: string } }[];
+  stateFilters: readonly string[];
+  urlPatterns: readonly { host: string; path: string; query?: { name: string } }[];
   identifierPattern: string;
 };
 
@@ -171,7 +171,7 @@ export type TrackerEntry = {
 export interface TrackerRegistry {
   has(id: string): boolean;
   descriptor(id: string): TrackerDescriptor | null;
-  descriptors(): TrackerDescriptor[];
-  list(): TrackerProviderId[];
+  descriptors(): readonly TrackerDescriptor[];
+  list(): readonly TrackerProviderId[];
   implementation(id: string): Promise<TrackerImplementation | null>;
 }
