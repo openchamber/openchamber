@@ -35,13 +35,24 @@ describe('submodule discovery', () => {
     expect(Object.isFrozen(result.modules[0])).toBe(true);
   });
 
-  it('skips a .gitmodules entry whose path has no gitlink, as Git does', () => {
+  it('skips .gitmodules entries whose path has no gitlink, as Git does', () => {
     const result = parseSubmoduleManifest({
       gitmodulesConfig: configOutput([
         ['submodule.alpha.path', 'vendor/alpha'],
         ['submodule.alpha.url', '../alpha.git'],
         ['submodule.vendored.path', 'vendor/vendored'],
         ['submodule.vendored.url', 'https://example.com/team/vendored.git'],
+        ['submodule.again.path', 'vendor/vendored'],
+        ['submodule.again.url', '../again.git'],
+        ['submodule.no-url.path', 'vendor/no-url'],
+        ['submodule.no-path.url', '../no-path.git'],
+        ['submodule.slash.path', 'vendor/slash/'],
+        ['submodule.slash.url', '../slash.git'],
+        ['submodule.backslash.path', 'vendor\\backslash'],
+        ['submodule.backslash.url', '../backslash.git'],
+        ['submodule.command.path', 'vendor/command'],
+        ['submodule.command.url', 'ext::sh -c bad'],
+        ['submodule.command.update', '!run-command'],
       ]),
       gitlinks: gitlinkOutput([[SHA_A, 'vendor/alpha']]),
     });

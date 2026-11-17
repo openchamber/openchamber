@@ -134,12 +134,12 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
   const seenPaths = new Set<string>();
   const modules = [];
   for (const entry of entries.values()) {
-    if (entry.path === undefined || entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
+    const commit = gitlinksByPath.get(entry.path);
+    if (!commit) continue;
+    if (entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
     const modulePath = validateModulePath(entry.path, limits);
     if (seenPaths.has(modulePath)) throw manifestError(`Submodule path ${modulePath} is duplicated`);
     seenPaths.add(modulePath);
-    const commit = gitlinksByPath.get(modulePath);
-    if (!commit) continue;
     const update = entry.update?.toLowerCase() ?? 'checkout';
     if (entry.update !== undefined) {
       if (entry.update.startsWith('!') || !UPDATE_MODES.has(update)) {
