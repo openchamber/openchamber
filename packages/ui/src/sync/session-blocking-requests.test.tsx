@@ -3,9 +3,12 @@ import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { OpenCode } from '@opencode/client'
 import { opencodeClient } from '@/lib/opencode/client'
-import type { FormRequest, PermissionRequest } from '@/lib/opencode/model'
+import type { FormRequest, PermissionRequest, Session } from '@/lib/opencode/model'
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore'
+import { useProjectsStore } from '@/stores/useProjectsStore'
+import { ChildStoreManager } from './child-store'
 import { applyGlobalBlockingRequestEvents, readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from './global-blocking-requests'
-import { SyncProvider, useDirectoryStore, useSessionBlockingRequests } from './sync-context'
+import { SyncProvider, useDirectoryStore, useSessionBlockingRequests, useScopedBlockingPermissions, useScopedBlockingForms } from './sync-context'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
 
 // The provider has no current directory to bootstrap; the two scoped stores
@@ -40,6 +43,14 @@ type ProbeStores = {
 let stores: ProbeStores | null = null
 let rendered: { hasPermission: boolean; hasForm: boolean } | null = null
 let renderCount = 0
+type ComposerRequests = { permissions: PermissionRequest[]; forms: FormRequest[] }
+let composerRequests: ComposerRequests
+
+const session = (id: string, directory: string, parentID?: string): Session => ({
+  id, directory, parentID, projectID: 'project', title: id, cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 },
+})
 
 /**
  * A collapsed row subscribes to its own bucket plus every hidden descendant's;
@@ -58,6 +69,14 @@ const CountsProbe = ({ includeChild }: { includeChild: boolean }) => {
     : [{ directory: PARENT_DIR, sessionIDs: ['parent'] }]), [includeChild])
   rendered = useSessionBlockingRequests(scopes)
   renderCount += 1
+  return null
+}
+
+const ComposerProbe = () => {
+  composerRequests = {
+    permissions: useScopedBlockingPermissions('parent', PARENT_DIR),
+    forms: useScopedBlockingForms('parent', PARENT_DIR),
+  }
   return null
 }
 
@@ -81,6 +100,7 @@ const withProbe = async (includeChild: boolean, assert: () => Promise<void>) => 
     await act(async () => root.render(
       <SyncProvider sdk={createSdk()} directory="">
         <CountsProbe includeChild={includeChild} />
+        <ComposerProbe />
       </SyncProvider>,
     ))
     await assert()
@@ -97,6 +117,134 @@ const withProbe = async (includeChild: boolean, assert: () => Promise<void>) => 
 }
 
 describe('useSessionBlockingRequests', () => {
+  test('loads pending descendants without opening unrelated directories (#5490)', async () => {
+    const previousEntities = useGlobalSessionsStore.getState().entityById
+    const previousProjects = useProjectsStore.getState().projects
+    const bootstrap = spyOn(ChildStoreManager.prototype, 'requestBootstrap').mockImplementation(() => undefined)
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        useProjectsStore.setState({ projects: [{ id: 'child-project', path: CHILD_DIR, addedAt: 1 }] })
+        stores!.child.setState({ status: 'partial' })
+        useGlobalSessionsStore.setState({
+          entityById: new Map([
+            ['parent', session('parent', PARENT_DIR)],
+            ['child', session('child', CHILD_DIR, 'parent')],
+            ['unrelated', session('unrelated', '/unrelated')],
+            ['detached', session('detached', '/unadmitted', 'parent')],
+          ]),
+        })
+        const initialCalls = bootstrap.mock.calls.length
+        await act(async () => {
+          applyGlobalBlockingRequestEvents(CHILD_DIR, [{
+            type: 'permission.asked',
+            properties: permission('pending-child', 'child'),
+          }])
+          applyGlobalBlockingRequestEvents('/unrelated', [{
+            type: 'permission.asked',
+            properties: permission('pending-unrelated', 'unrelated'),
+          }])
+          applyGlobalBlockingRequestEvents('/unadmitted', [{
+            type: 'permission.asked',
+            properties: permission('pending-detached', 'detached'),
+          }])
+        })
+        expect(bootstrap.mock.calls.slice(initialCalls).some(([demand]) => demand.directory === CHILD_DIR)).toBe(true)
+        expect(bootstrap.mock.calls.some(([demand]) => demand.directory === '/unrelated')).toBe(false)
+        expect(bootstrap.mock.calls.some(([demand]) => demand.directory === '/unadmitted')).toBe(false)
+        const pendingCalls = bootstrap.mock.calls.length
+        await act(async () => {
+          stores!.child.setState({ status: 'complete' })
+          applyGlobalBlockingRequestEvents(CHILD_DIR, [{
+            type: 'permission.asked',
+            properties: permission('another-pending-child', 'child'),
+          }])
+        })
+        expect(bootstrap.mock.calls.slice(pendingCalls).some(([demand]) => demand.directory === CHILD_DIR)).toBe(false)
+      })
+    } finally {
+      bootstrap.mockRestore()
+      resetGlobalBlockingRequests()
+      useGlobalSessionsStore.setState({ entityById: previousEntities })
+      useProjectsStore.setState({ projects: previousProjects })
+    }
+  })
+
+  test('uses cold ancestor metadata without loading its directory (#5490)', async () => {
+    const previousEntities = useGlobalSessionsStore.getState().entityById
+    try {
+      await withProbe(true, async () => {
+        const request = permission('grandchild-permission', 'grandchild')
+        await act(async () => {
+          stores!.parent.setState({ session: [session('parent', PARENT_DIR)] })
+          stores!.child.setState({
+            session: [session('grandchild', CHILD_DIR, 'middle')],
+            permission: { grandchild: [request] },
+          })
+        })
+        expect(composerRequests.permissions).toEqual([])
+        await act(async () => {
+          useGlobalSessionsStore.setState({ entityById: new Map([
+            ['middle', session('middle', '/cold-middle', 'parent')],
+          ]) })
+        })
+        expect(composerRequests.permissions).toEqual([request])
+      })
+    } finally {
+      useGlobalSessionsStore.setState({ entityById: previousEntities })
+    }
+  })
+
+  test('the parent composer follows child requests across directories and clears settled requests (#5490)', async () => {
+    await withProbe(true, async () => {
+      const childPermission = permission('cross-directory-permission', 'child')
+      const childForm = form('cross-directory-form', 'child')
+      await act(async () => {
+        stores!.parent.setState({ session: [session('parent', PARENT_DIR)] })
+        stores!.child.setState({
+          session: [session('child', CHILD_DIR, 'parent')],
+          permission: { child: [childPermission], unrelated: [permission('unrelated', 'unrelated')] },
+          form: { child: [childForm], global: [form('other-location', 'global')] },
+        })
+      })
+      expect(composerRequests.permissions).toEqual([childPermission])
+      expect(composerRequests.forms).toEqual([childForm])
+
+      const previous = composerRequests
+      await act(async () => stores!.child.setState({ session_status: { child: { type: 'busy' } } }))
+      expect(composerRequests.permissions).toBe(previous.permissions)
+      expect(composerRequests.forms).toBe(previous.forms)
+
+      await act(async () => stores!.child.setState({ permission: {}, form: {} }))
+      expect(composerRequests.permissions).toEqual([])
+      expect(composerRequests.forms).toEqual([])
+    })
+  })
+
+  test('follows metadata lineage through a cold intermediate directory (#5490)', async () => {
+    const previousEntities = useGlobalSessionsStore.getState().entityById
+    try {
+      await withProbe(true, async () => {
+        const request = permission('grandchild-request', 'grandchild')
+        await act(async () => {
+          useGlobalSessionsStore.setState({ entityById: new Map([
+            ['parent', session('parent', PARENT_DIR)],
+            ['intermediate', session('intermediate', '/cold', 'parent')],
+            ['grandchild', session('grandchild', CHILD_DIR, 'intermediate')],
+          ]) })
+          stores!.parent.setState({ session: [session('parent', PARENT_DIR)] })
+          stores!.child.setState({
+            session: [session('grandchild', CHILD_DIR, 'intermediate')],
+            permission: { grandchild: [request] },
+          })
+        })
+        expect(composerRequests.permissions).toEqual([request])
+      })
+    } finally {
+      useGlobalSessionsStore.setState({ entityById: previousEntities })
+    }
+  })
+
   test('rolls a hidden cross-directory subagent permission up to its collapsed parent (#2247)', async () => {
     await withProbe(true, async () => {
       // An unbootstrapped store contributes nothing rather than inventing a request.

@@ -49,6 +49,7 @@ import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
 import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteDeferredAnswersLoaded, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
 import { subscribeSessionAdmission } from "./session-admission"
+import { subscribePendingDescendantRequests } from "./pending-descendant-requests"
 import { setSyncRefs, getAllSyncSessions, emitSyncConfigChanged, getDirectoryState } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -3607,13 +3608,6 @@ export const collectComposerForms = (
   return own === empty ? locationScoped : [...own, ...locationScoped]
 }
 
-type ScopedBlockingRequestCache<T extends { id: string }> = {
-  sessionID: string | null
-  sessions: Session[] | null
-  requestsBySession: Record<string, T[] | undefined> | null
-  result: T[]
-}
-
 function useScopedBlockingRequests<T extends { id: string }>(
   sessionID: string | null,
   directory: string | undefined,
@@ -3626,36 +3620,40 @@ function useScopedBlockingRequests<T extends { id: string }>(
     empty: T[],
   ) => T[] = collectScopedBlockingRequests,
 ): T[] {
-  const cacheRef = useRef<ScopedBlockingRequestCache<T>>({
-    sessionID: null,
-    sessions: null,
-    requestsBySession: null,
-    result: empty,
-  })
-
-  return useDirectorySync(
-    useCallback((state: State) => {
-      const requestsBySession = selectRequestsBySession(state)
-      const cache = cacheRef.current
-      if (
-        cache.sessionID === sessionID
-        && cache.sessions === state.session
-        && cache.requestsBySession === requestsBySession
-      ) {
-        return cache.result
+  const { childStores } = useSyncRuntime()
+  const store = useDirectoryStore(directory)
+  useEffect(() => {
+    if (!sessionID) return
+    return subscribePendingDescendantRequests(childStores, sessionID)
+  }, [childStores, sessionID])
+  return useLiveSyncSelector(
+    useCallback((states: State[]) => {
+      if (!sessionID) return empty
+      const requestsBySession: Record<string, T[] | undefined> = {}
+      for (const state of states) {
+        for (const [id, requests] of Object.entries(selectRequestsBySession(state))) {
+          if (id === LOCATION_SCOPED_FORM_SESSION_ID) continue
+          if (requests?.length) requestsBySession[id] = requests
+        }
       }
-
-      const next = collect(state.session, requestsBySession, sessionID, empty)
-      const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
-      cacheRef.current = {
-        sessionID,
-        sessions: state.session,
-        requestsBySession,
-        result,
+      requestsBySession[LOCATION_SCOPED_FORM_SESSION_ID] = selectRequestsBySession(store.getState())[LOCATION_SCOPED_FORM_SESSION_ID]
+      const sessions = new Map(useGlobalSessionsStore.getState().entityById)
+      for (const session of aggregateLiveSessions(states)) sessions.set(session.id, session)
+      return collect([...sessions.values()], requestsBySession, sessionID, empty)
+    }, [collect, empty, selectRequestsBySession, sessionID, store]),
+    areRequestArraysReferentiallyEqual,
+    useCallback((childStores: ChildStoreManager, notify: () => void) => {
+      const unsubscribeSessions = childStores.subscribeAllSelected((state) => state.session, notify)
+      const unsubscribeRequests = childStores.subscribeAllSelected(selectRequestsBySession, notify)
+      const unsubscribeMetadata = useGlobalSessionsStore.subscribe((state, previous) => {
+        if (state.entityById !== previous.entityById) notify()
+      })
+      return () => {
+        unsubscribeSessions()
+        unsubscribeRequests()
+        unsubscribeMetadata()
       }
-      return result
-    }, [collect, empty, selectRequestsBySession, sessionID]),
-    directory,
+    }, [selectRequestsBySession]),
   )
 }
 

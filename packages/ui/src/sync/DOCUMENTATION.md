@@ -13,6 +13,7 @@ This document covers the current client-side session/data architecture in `packa
 - An ended text or reasoning snapshot retains the start time already streamed. Its own `start` value names the ending timestamp and cannot replace the real start.
 - A repeated session-create event preserves title and usage learned since creation. An inbox delivery alone may move a synthetic message's creation time.
 - Session-list trimming preserves sessions with pending requests and excludes them from the limit, because the composer follows their parent links to find subagent requests. Eviction uses creation time; ID-sorted array position can identify the newest session as the oldest.
+- Composer permissions and forms follow the session subtree across live directory stores, including children moved to another worktree. Location-scoped MCP elicitations stay in the composer's own directory. Request replies resolve the directory holding the request.
 - List records retain only the revert marker and omit revert file diffs, snapshots and session permission rules. These detail-only fields add storage and memory without contributing to list rendering.
 - A fetched part snapshot cannot erase progress metadata received live after that snapshot was taken. OpenCode publishes some progress fields only when they change, so losing them can hide a subagent link until the call settles.
 - A fork patch received while its initial record is being fetched requires another read. The global router cannot apply the patch before it knows the fork, so the first response alone can miss its metadata.
@@ -26,6 +27,10 @@ This document covers the current client-side session/data architecture in `packa
 - File and selection chips receive a new identity when reattached after removal, so the composer recognizes them as new. Attachment names remain unique within a draft so each citation identifies one file.
 
 ## Decisions
+
+### Why composer requests use live stores and global ancestry
+
+Live directory stores own request contents, while global session metadata connects descendants through ancestors whose directories have not loaded. A pending descendant request demands bootstrap only for its admitted directory when that store is incomplete; this recovers requests after a cold open without starting unrelated or detached locations.
 
 ### Why live aggregates share immutable arrays and not serialized signatures
 
