@@ -103,6 +103,10 @@ const inputSchema = z
     url: optionalText,
     code: optionalText,
     questions: z.array(z.unknown()).optional().catch(undefined),
+    question: optionalText,
+    header: optionalText,
+    options: z.array(z.unknown()).optional().catch(undefined),
+    multiple: booleanish,
     action: optionalText,
     parameters: z
       .object({
@@ -158,6 +162,64 @@ const metadataSchema = z
 type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
+
+export type CoercedQuestion = {
+  question?: unknown
+  header?: unknown
+  options?: unknown
+  multiple?: unknown
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const reviveQuestionsField = (value: unknown): unknown[] | undefined => {
+  if (value === undefined) return undefined
+  if (Array.isArray(value)) return value
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    try {
+      const revived: unknown = JSON.parse(trimmed)
+      if (Array.isArray(revived)) return revived
+      if (asRecord(revived)) return [revived]
+    } catch {
+    }
+    return undefined
+  }
+  const record = asRecord(value)
+  return record ? [record] : undefined
+}
+
+export function questionPrompts(input: ToolInput | undefined): CoercedQuestion[] {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return []
+  const record = input as Record<string, unknown>
+  const fromField = reviveQuestionsField(record.questions)
+  if (fromField && fromField.length > 0) {
+    return fromField
+      .map((entry) => asRecord(entry) ?? null)
+      .filter((entry): entry is Record<string, unknown> => entry !== null)
+      .map((entry) => ({
+        question: entry.question,
+        header: entry.header,
+        options: entry.options,
+        multiple: entry.multiple,
+      }))
+  }
+  if (typeof record.question === "string" || typeof record.header === "string" || record.options !== undefined) {
+    return [
+      {
+        question: record.question,
+        header: record.header,
+        options: record.options,
+        multiple: record.multiple,
+      },
+    ]
+  }
+  return []
+}
 
 const renderPageShareObjectSchema = z.object({
   recipients: z.array(z.string()).catch([]),
@@ -852,7 +914,7 @@ export function toolDescription(
       return text(parsed.query) ?? text(parsed.search) ?? text(parsed.provider)
 
     case OPENCODE_TOOLS.question: {
-      const count = parsed.questions?.length ?? 0
+      const count = questionPrompts(input).length
       return count > 0 ? { kind: "questions", count } : null
     }
 

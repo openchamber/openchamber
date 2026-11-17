@@ -23,7 +23,7 @@ import { extractFirstChangedLineFromDiff, getDiffPatchEntries, getToolFallbackDi
 import { useStreamingTextThrottle } from '../../../hooks/useStreamingTextThrottle';
 import { getToolOutput } from '../toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
-import { executeOutputTruncation, executeScript, executeToolCalls, isEditTool, isExecuteTool, isFileChangeTool, isPatchTool, isQuestionTool, isShellTool, isSubagentTool, isTodoWriteTool, isWebSearchTool, todoWriteItems, isWriteTool, isOpenChamberTool, openChamberCallSummary } from '@/lib/opencode/tools';
+import { executeOutputTruncation, executeScript, executeToolCalls, isEditTool, isExecuteTool, isFileChangeTool, isPatchTool, isQuestionTool, isShellTool, isSubagentTool, isTodoWriteTool, isWebSearchTool, todoWriteItems, isWriteTool, isOpenChamberTool, openChamberCallSummary, questionPrompts } from '@/lib/opencode/tools';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
 import { OpenChamberToolOutput } from '../OpenChamberToolOutput';
 import { OpencodeToolOutput } from '../OpencodeToolOutput';
@@ -38,7 +38,7 @@ import { TOOL_COLLAPSED_CUSTOM_STYLE, CODE_TAG_PROPS, TOOL_ERROR_TITLE_STYLE } f
 import { getRelativePath } from './toolPaths';
 import { buildWritePreviewPatch } from './toolChangeSummary';
 import { getToolDiagnosticSection } from './toolDiagnostics';
-import { parseQuestionOutput } from './questionOutput';
+import { parseQuestionOutput, coerceQuestionOptions } from './questionOutput';
 import { ToolScrollableSection } from './ToolScrollableSection';
 import { CommandOutput } from './CommandOutput';
 import { ToolScrollableTextOutput } from './ToolScrollableTextOutput';
@@ -300,43 +300,76 @@ export const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.mem
             }
 
             if (state.status === 'error' && 'error' in state) {
+                const failedQuestions = questionPrompts(input);
                 return (
-                    <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
-                        <div className="typography-meta p-2 rounded-xl" style={{
-                            backgroundColor: 'var(--status-error-background)',
-                            color: 'var(--status-error)',
-                        }}>
-                            {coerceToText(state.error)}
+                    <div className="space-y-2">
+                        <div>
+                            <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
+                            <div className="typography-meta p-2 rounded-xl" style={{
+                                backgroundColor: 'var(--status-error-background)',
+                                color: 'var(--status-error)',
+                            }}>
+                                {coerceToText(state.error)}
+                            </div>
                         </div>
+                        {failedQuestions.length > 0 ? (
+                            <div className="space-y-2">
+                                {failedQuestions.map((q, index) => {
+                                    const options = coerceQuestionOptions(q.options);
+                                    const questionText = coerceToText(q.question) || coerceToText(q.header);
+                                    return (
+                                        <div key={index} className="space-y-0.5">
+                                            {q.header && questionText && coerceToText(q.header) !== questionText ? (
+                                                <div dir="auto" className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
+                                            ) : null}
+                                            {questionText ? (
+                                                <FormMarkdown content={questionText} size="meta" className="text-foreground" />
+                                            ) : null}
+                                            {options.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                                    {options.map((opt) => (
+                                                        <span key={coerceToText(opt.label)} dir="auto" className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                                                            {coerceToText(opt.label)}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
                     </div>
                 );
             }
 
-            // Show question content from input whenever available, whether the tool is
-            // pending/running or completed without parseable output. This ensures question
-            // text persists across refreshes even if the QuestionCard store data is lost.
-            const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
-            if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
+            const coercedQuestions = questionPrompts(input);
+            if (coercedQuestions.length > 0) {
                 return renderScrollableBlock(
                     <div className="space-y-2">
-                        {questionInput.questions.map((q, index) => (
-                            <div key={index} className="space-y-0.5">
-                                {q.header ? (
-                                    <div dir="auto" className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
-                                ) : null}
-                                <FormMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
-                                {Array.isArray(q.options) && q.options.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 mt-0.5">
-                                        {q.options.map((opt) => (
-                                            <span key={coerceToText(opt.label)} dir="auto" className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
-                                                {coerceToText(opt.label)}
-                                            </span>
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ))}
+                        {coercedQuestions.map((q, index) => {
+                            const options = coerceQuestionOptions(q.options);
+                            const questionText = coerceToText(q.question) || coerceToText(q.header);
+                            return (
+                                <div key={index} className="space-y-0.5">
+                                    {q.header && questionText && coerceToText(q.header) !== questionText ? (
+                                        <div dir="auto" className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
+                                    ) : null}
+                                    {questionText ? (
+                                        <FormMarkdown content={questionText} size="meta" className="text-foreground" />
+                                    ) : null}
+                                    {options.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                            {options.map((opt) => (
+                                                <span key={coerceToText(opt.label) || String(index)} dir="auto" className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                                                    {coerceToText(opt.label)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : null}
+                                </div>
+                            );
+                        })}
                     </div>,
                     { maxHeightClass: 'max-h-[40vh]' }
                 );

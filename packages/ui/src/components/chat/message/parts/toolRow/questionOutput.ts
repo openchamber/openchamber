@@ -20,3 +20,31 @@ export const parseQuestionOutput = (output: string): Array<{ question: string; a
 
     return pairs.length > 0 ? pairs : null;
 };
+
+export type CoercedQuestionOption = { label?: unknown; description?: unknown };
+
+const isOptionRecord = (value: unknown): value is CoercedQuestionOption =>
+    typeof value === "object" && value !== null;
+
+/**
+ * A question's options, leniently read. The model sometimes sends `options`
+ * as JSON text alongside a stringified `questions` array; strict
+ * `Array.isArray` then drops all options. Parse once, accept a single
+ * object, otherwise no options. Never throws (#7084).
+ */
+export const coerceQuestionOptions = (value: unknown): CoercedQuestionOption[] => {
+    if (Array.isArray(value)) return value.filter(isOptionRecord)
+    if (typeof value === "string") {
+        const trimmed = value.trim()
+        if (!trimmed) return []
+        try {
+            const revived: unknown = JSON.parse(trimmed)
+            if (Array.isArray(revived)) return revived.filter(isOptionRecord)
+            if (isOptionRecord(revived)) return [revived]
+        } catch {
+        }
+        return []
+    }
+    if (isOptionRecord(value)) return [value]
+    return []
+};

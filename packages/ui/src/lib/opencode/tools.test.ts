@@ -28,7 +28,7 @@ import {
   todoWriteItems,
   toolDescription,
   toolFileDiffs,
-  toolInputPath, isShownInPlace, proposedWorkflowRunId, generatedImagePaths } from "./tools"
+  toolInputPath, isShownInPlace, proposedWorkflowRunId, generatedImagePaths, questionPrompts } from "./tools"
 import type { Metadata, ToolInput, ToolState } from "./model"
 
 describe("tool identity", () => {
@@ -185,6 +185,25 @@ describe("tool row description", () => {
       .toEqual({ kind: "questions", count: 2 })
     expect(toolDescription("question", { questions: [{ question: "a" }] }, undefined))
       .toEqual({ kind: "questions", count: 1 })
+  })
+
+  test("question counts stringified and single-shape inputs instead of blanking", () => {
+    expect(toolDescription("question", { questions: JSON.stringify([{ question: "a" }, { question: "b" }]) }, undefined))
+      .toEqual({ kind: "questions", count: 2 })
+    expect(toolDescription("question", { questions: { question: "a", header: "H", options: [] } }, undefined))
+      .toEqual({ kind: "questions", count: 1 })
+    expect(toolDescription("question", { question: "a", header: "H", options: [{ label: "A", description: "a" }] }, undefined))
+      .toEqual({ kind: "questions", count: 1 })
+    expect(toolDescription("question", { questions: "not-json" }, undefined)).toBe(null)
+    expect(toolDescription("question", {}, undefined)).toBe(null)
+  })
+
+  test("questionPrompts revives malformed inputs", () => {
+    expect(questionPrompts({ questions: [{ question: "a" }] })).toHaveLength(1)
+    expect(questionPrompts({ questions: JSON.stringify([{ question: "a" }]) })).toHaveLength(1)
+    expect(questionPrompts({ question: "a", header: "H" })).toHaveLength(1)
+    expect(questionPrompts({ questions: "nope" })).toEqual([])
+    expect(questionPrompts(undefined)).toEqual([])
   })
 
   test("todowrite counts done items and names the one in progress", () => {
