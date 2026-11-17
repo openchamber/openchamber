@@ -1,16 +1,23 @@
-// external: https://www.rfc-editor.org/rfc/rfc6265#section-8.5 Cookies are shared across ports, so session cookie names include the request port.
+import type { IncomingHttpHeaders } from 'node:http';
+
+export interface SessionCookieRequest {
+  headers?: IncomingHttpHeaders;
+}
+
 export const SESSION_COOKIE_BASE = 'oc_ui_session';
 
-const forwardedHost = (headers) => {
+const isHostHeader = (value: unknown): value is string => typeof value === 'string';
+
+const forwardedHost = (headers: IncomingHttpHeaders) => {
   const forwarded = headers?.['x-forwarded-host'];
-  if (typeof forwarded === 'string' && forwarded.trim().length > 0) {
-    return forwarded.split(',')[0].trim();
+  if (isHostHeader(forwarded) && forwarded.trim().length > 0) {
+    return forwarded.split(',')[0]?.trim() ?? '';
   }
   const host = headers?.host;
-  return typeof host === 'string' ? host.trim() : '';
+  return isHostHeader(host) ? host.trim() : '';
 };
 
-const hostPort = (host) => {
+const hostPort = (host: string) => {
   if (host.startsWith('[')) {
     const end = host.indexOf(']');
     if (end === -1) return null;
@@ -22,7 +29,7 @@ const hostPort = (host) => {
   return matches ? matches[1] : null;
 };
 
-export const sessionCookieNameForRequest = (req, base = SESSION_COOKIE_BASE) => {
+export const sessionCookieNameForRequest = (req: SessionCookieRequest | null | undefined, base = SESSION_COOKIE_BASE) => {
   const host = forwardedHost(req?.headers || {});
   const port = host ? hostPort(host) : null;
   if (!port) return base;
