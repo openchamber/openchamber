@@ -68,13 +68,28 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     if (until.error) {
       return res.status(400).json({ error: until.error });
     }
-    const limitRaw = typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined;
+    // #2156: an omitted limit stays undefined so listRuns applies the
+    // documented default; a supplied limit must be a single plain-decimal
+    // integer spelling (the shared parse-int judgement in
+    // shared/parse-int.js). A malformed, empty, or repeated limit is a
+    // 400, never a silent fallback to the default — a caller's typo must
+    // not page at 200 rows without saying so. A valid integer keeps the
+    // downstream 1-1000 clamp (so 0 still clamps to 1).
+    const limitParam = req.query?.limit;
+    let limit;
+    if (limitParam !== undefined) {
+      const text = typeof limitParam === 'string' ? limitParam.trim() : '';
+      if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) {
+        return res.status(400).json({ error: 'limit must be a single integer' });
+      }
+      limit = Number(text);
+    }
     const runs = scheduledTaskRunHistory.listRuns({
       projectID,
       taskID: asNonEmptyString(req.query?.taskId) ?? undefined,
       since: since.value,
       until: until.value,
-      limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+      limit,
     });
     return res.json({ runs });
   });
