@@ -3368,12 +3368,17 @@ async function readStatus(normalizedDirectory, lightMode) {
         const absolutePath = path.join(repoRoot, file.path);
 
         try {
-          const stat = await fsp.stat(absolutePath);
-          if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
+          // Bounded handle-based read (design #1254): the cap is enforced
+          // during the read, not only on a pre-read stat - a file grown
+          // past the cap after a stat is refused, not counted whole, and
+          // a FIFO swapped in after a stat is rejected as non-regular
+          // instead of wedging the serialized status queue on the read.
+          const bounded = await readBoundedFile(absolutePath, MAX_NEW_FILE_STAT_SIZE);
+          if (!bounded.ok) {
             continue;
           }
 
-          const buffer = await fsp.readFile(absolutePath);
+          const buffer = bounded.buffer;
           if (buffer.indexOf(0) !== -1) {
             newFileStats.push({
               target,
