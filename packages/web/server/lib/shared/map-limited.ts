@@ -1,5 +1,9 @@
-export async function mapLimited(items, limit, task) {
-  const results = new Array(items.length);
+export async function mapLimited<Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  task: (item: Item | undefined) => Result | PromiseLike<Result>,
+) {
+  const results = new Array<Result>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
