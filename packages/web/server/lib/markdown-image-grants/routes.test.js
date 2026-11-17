@@ -392,6 +392,48 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('does not close a backtick fence on a longer run followed by text (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '```md\n```` not-a-closer\n![hidden](' + source + ')\n```' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('does not close a tilde fence on a longer run followed by text (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '~~~md\n~~~~ not-a-closer\n![hidden](' + source + ')\n~~~' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('recognizes an image after a longer closing run followed only by spaces/tabs (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '```md\n![fenced](ignored)\n````  \t\n![outside](' + source + ')' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'ready', path: decodeURIComponent(new URL(source).pathname) }]);
+  });
+
   it('keeps fenced-code state across assistant text parts', async () => {
     const fixture = await createFixture();
     const source = fixture.sources[0];
