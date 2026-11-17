@@ -36,9 +36,9 @@ const BRIDGE_TAG = `<script data-openchamber-preview-bridge>${BRIDGE_SOURCE}</sc
 
 const UTF8_BOM = [0xef, 0xbb, 0xbf];
 
-const startsWithBytes = (content, bytes) => bytes.every((byte, index) => content[index] === byte);
+const startsWithBytes = (content: Buffer, bytes: number[]) => bytes.every((byte, index) => content[index] === byte);
 
-export const injectPreviewBridge = (content) => {
+export const injectPreviewBridge = (content: Buffer) => {
   if (startsWithBytes(content, [0xfe, 0xff]) || startsWithBytes(content, [0xff, 0xfe])) {
     return content;
   }

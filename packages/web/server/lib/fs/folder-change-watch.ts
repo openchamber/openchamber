@@ -1,17 +1,47 @@
 import { watch } from 'node:fs';
 
+export interface FolderWatchTimer {
+  unref?: () => void;
+}
+
+export interface FolderWatchTimers<Timer extends FolderWatchTimer> {
+  setTimeout: (callback: () => void | Promise<void>, delay: number) => Timer;
+  setInterval: (callback: () => void | Promise<void>, delay: number) => Timer;
+  clearTimeout: (timer: Timer | undefined) => void;
+  clearInterval: (timer: Timer) => void;
+}
+
+interface FolderWatcher {
+  close: () => void;
+  on: (event: 'error' | 'close', listener: () => void) => FolderWatcher;
+}
+
+interface FolderChangeWatchOptions {
+  root: string;
+  fingerprint: () => Promise<string>;
+  onChange: () => void;
+  pollMs: number;
+  recursive?: boolean;
+  fsWatch?: ((root: string, options: { recursive: boolean; persistent: boolean }, listener: () => void) => FolderWatcher) | undefined;
+  logger?: Pick<Console, 'warn'>;
+}
+
+const hasWatchErrorMessage = (error: unknown): error is { message?: unknown } => (
+  error !== null && (typeof error === 'object' || typeof error === 'function')
+);
+
 const SAFETY_POLL_MS = 30_000;
 
-export const createFolderChangeWatch = ({
+const watchFolder = <Timer extends FolderWatchTimer>({
   root, fingerprint, onChange, pollMs, recursive = false, fsWatch = watch,
-  timers = globalThis, logger = console,
-}) => {
-  let watcher = null;
-  let pending = null;
-  let running = null;
+  logger = console,
+}: FolderChangeWatchOptions, timers: FolderWatchTimers<Timer>) => {
+  let watcher: FolderWatcher | null = null;
+  let pending: Timer | null = null;
+  let running: Promise<void> | null = null;
   let stopped = false;
-  let reported = null;
-  let seen = null;
+  let reported: string | null = null;
+  let seen: string | null = null;
 
   const schedule = () => {
     if (stopped || pending !== null) return;
@@ -22,7 +52,7 @@ export const createFolderChangeWatch = ({
     pending.unref?.();
   };
 
-  const check = () => {
+  const check = (): Promise<void> => {
     if (stopped) return Promise.resolve();
     if (running) {
       schedule();
@@ -44,7 +74,7 @@ export const createFolderChangeWatch = ({
           onChange();
         }
       } catch (error) {
-        logger.warn('Failed to check a watched folder:', error?.message ?? error);
+        logger.warn('Failed to check a watched folder:', (hasWatchErrorMessage(error) ? error.message : undefined) ?? error);
       } finally {
         running = null;
         if (!watcher) schedule();
@@ -94,9 +124,15 @@ export const createFolderChangeWatch = ({
     stop: () => {
       stopped = true;
       closeWatcher();
-      timers.clearTimeout(pending);
+      timers.clearTimeout(pending ?? undefined);
       pending = null;
       timers.clearInterval(safety);
     },
   };
 };
+
+export const createFolderChangeWatch = <Timer extends FolderWatchTimer = ReturnType<typeof setTimeout>>(
+  options: FolderChangeWatchOptions & { timers?: FolderWatchTimers<Timer> | undefined },
+) => options.timers === undefined
+  ? watchFolder(options, globalThis)
+  : watchFolder(options, options.timers);
