@@ -219,7 +219,6 @@ export type InputState = {
   pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   pendingDraftSubmit: { draftId: number; text: string } | null
   pendingDraftContent: { draftId: number; files: File[]; text: string | null } | null
-  /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
