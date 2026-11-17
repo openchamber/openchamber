@@ -60,15 +60,11 @@ const assertThemeIcon = (root) => {
   if (!fs.existsSync(path.join(root, '.DirIcon'))) throw new Error('Missing AppImage icon: .DirIcon does not resolve');
 };
 
-// The packaged executable answers `--version` for the bundled server only on a host of its architecture.
+// Node answers `--version`: the app executable loads GTK before it reads ELECTRON_RUN_AS_NODE, and CI
+// runners need not have it.
 const defaultServerCheck = ({ root, targetArchitecture, expectedOpenCodeVersion }) => verifyOpenCodeServer(
   path.join(root, 'resources', 'opencode-server'),
-  {
-    platform: 'linux',
-    arch: targetArchitecture,
-    version: expectedOpenCodeVersion,
-    runtime: targetArchitecture === process.arch && process.platform === 'linux' ? path.join(root, 'openchamber') : process.execPath,
-  },
+  { platform: 'linux', arch: targetArchitecture, version: expectedOpenCodeVersion, runtime: process.execPath },
 );
 
 export const verifyExtractedPayload = ({

@@ -39,10 +39,12 @@ const packagedExecutable = (serverDir) => {
   return fs.existsSync(candidate) ? candidate : null;
 };
 
+// --version loads no native code, so Node can answer it for any target architecture. The Linux app
+// executable loads GTK before it reads ELECTRON_RUN_AS_NODE, and CI runners need not have it.
 const runtimeFor = (serverDir, arch) => {
+  if (process.platform === 'linux') return process.execPath;
   const executable = packagedExecutable(serverDir);
   if (executable && arch === process.arch && readBinaryArchitecture(executable, process.platform) === process.arch) return executable;
-  // --version loads no native code, so Node can answer it for any target architecture.
   return process.execPath;
 };
 
