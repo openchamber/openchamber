@@ -5,15 +5,25 @@ import { markSessionViewed } from "./notification-store"
 import { isSessionUnread } from "./session-unread"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 
-export let _activeDirectory = ""
+let _activeDirectory = ""
 
-export let _activeSession = ""
+let _activeSession = ""
 
-export const externallyViewedSessions = new Map<string, number>()
+const externallyViewedSessions = new Map<string, number>()
 
 const EXTERNAL_VIEW_TTL_MS = 15_000
 
-export const viewedSessionKey = (directory: string, sessionId: string) => `${directory}\n${sessionId}`
+const viewedSessionKey = (directory: string, sessionId: string) => `${directory}\n${sessionId}`
+
+export function getActiveSession() {
+  return { directory: _activeDirectory, sessionId: _activeSession }
+}
+
+export function isSessionCacheViewed(directory: string, sessionID: string): boolean {
+  return (
+    directory === _activeDirectory && sessionID === _activeSession
+  ) || (externallyViewedSessions.get(viewedSessionKey(directory, sessionID)) ?? 0) > Date.now()
+}
 
 function pruneExternallyViewedSessions(now = Date.now()) {
   for (const [key, expiresAt] of externallyViewedSessions.entries()) {

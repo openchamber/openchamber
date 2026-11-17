@@ -6,7 +6,11 @@ Managed restart notifications use `opencode-restart-resuming` only when every in
 
 This document covers the current client-side session/data architecture in `packages/ui/src/sync` and the rules for updating stores safely.
 
-`sync-context.tsx` composes the provider's lifecycle hooks and retains the public exports. Runtime contexts keep their global identity in `sync-runtime-context.ts`; `sync-observers.ts` installs the module-lifetime observers. Provider hooks keep initialization, event streams, recovery, location release, and message-cache lifecycle in their existing effect order. Event dispatch, routing, snapshots, and reactive readers own their mechanics outside the provider.
+`sync-context.tsx` owns the provider's shared recovery refs, lifecycle effects and public exports. Its module-lifetime observers run in the module body after dependency evaluation. Runtime contexts keep their global identity in `sync-runtime-context.ts`. Event dispatch, routing, snapshots, and reactive readers own their mechanics outside the provider. `viewed-sessions.ts` keeps mutable view tracking private and exposes reads through accessors.
+
+### Why provider effects keep their shared refs together
+
+Bootstrap disposal, stream reconnect and the watchdog share recovery state for the provider's lifetime. Keeping those effects with their refs preserves the original dependency arrays and effect order without threading mutable refs through unrelated lifecycle hooks.
 
 ## Invariants
 
@@ -74,7 +78,7 @@ When every global bootstrap request fails, the OpenChamber health endpoint can r
 There are **two distinct session data scopes** in the UI:
 
 1. **Directory-scoped sync stores**
-   - Owned by the sync layer child stores created in `use-sync-provider-state.ts` and composed by `sync-context.tsx`
+    - Owned by the sync layer child stores created in `sync-context.tsx`
    - Source for per-directory live session/message/part/permission/form state
    - Backed by SSE / directory-scoped polling
    - Read via hooks like `useSessions()`, `useDirectorySync()`, `getSyncSessions()`, `getDirectoryState()`
@@ -1114,7 +1118,7 @@ Fork permission modes are independent copies of the source's effective mode, inc
 
 Child-session discovery (`child-session-discovery.ts`) adds only children the global sessions cache does not list as archived: the listing asks for active children, but a response that left the server before an archive completed still carries them without `time.archived`, and re-adding them would show the just-archived subagents as active orphans until the next refresh.
 
-The active-session watchdog in `use-sync-watchdog.ts` sends status recovery through the active-session priority of `runBackgroundNetworkTask`. Its child-session discovery pages use `runSessionListNetworkTask`, alongside global and bootstrap session pages. Both lanes live in `@/lib/background-network`. Git, skills, and directory initialization use the background lane. These limits reserve browser connections for interactive message requests rather than letting startup fan-out occupy the whole pool.
+The active-session watchdog in `sync-context.tsx` sends status recovery through the active-session priority of `runBackgroundNetworkTask`. Its child-session discovery pages use `runSessionListNetworkTask`, alongside global and bootstrap session pages. Both lanes live in `@/lib/background-network`. Git, skills, and directory initialization use the background lane. These limits reserve browser connections for interactive message requests rather than letting startup fan-out occupy the whole pool.
 
 Queued reads belong to the instance where they were submitted. On an instance change, both lanes retire their waiters and the new instance gets its own capacity. Active old requests finish against their original lane counters. A retired task resolves `undefined`; value-consuming callers must preserve state or signal failure, never turn retirement into an empty snapshot. Multi-step reads also check ownership before their next request, because the queue cannot stop a callback that has already started. Session pagination retains one owner across pages and retries.
 
