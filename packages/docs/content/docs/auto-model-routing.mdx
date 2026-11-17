@@ -134,7 +134,8 @@ then the session idle longest. The last session on a target stays. Their caches
 restart one at a time instead of all at once. A moved session
 runs on that model directly, outside the pool, so it no longer fails over; pick
 the pool again to bring it back. Sessions on **Auto** are never moved. Recent
-moves are listed under the switch. When OpenCode runs on another machine, rotation makes no moves.
+moves are listed under the switch. A target with no linked plan, or no projection, can be chosen too even though
+its headroom is unknown. When OpenCode runs on another machine, rotation makes no moves.
 
 ## What happens when you send
 
