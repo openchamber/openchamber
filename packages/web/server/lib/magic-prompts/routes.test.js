@@ -186,6 +186,9 @@ describe('magic prompt routes', () => {
 
   it.each([
     ['projectId without scope', '?projectId=repo', {}, 400],
+    ['a repeated scope', '?scope=global&scope=project', {}, 400],
+    ['a nested scope', '?scope[value]=project&projectId=repo', {}, 400],
+    ['a repeated project', '?scope=project&projectId=repo&projectId=repo', {}, 400],
     ['selectors in the body', '', { scope: 'project', projectId: 'repo' }, 400],
     ['an unknown project', '?scope=project&projectId=nope', {}, 404],
   ])('refuses %s and never writes the global file instead', async (_label, query, extraBody, status) => {
