@@ -3,7 +3,6 @@ import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { getProtectedSessionCacheIds, pickSessionCacheEvictions } from "./session-cache"
 import type { SessionMessageTarget } from "./session-message-loader"
 
-/** How long a settled, unviewed session keeps its history before eviction. */
 const SESSION_CACHE_IDLE_TTL_MS = 5 * 60 * 1000
 
 type RetentionOptions = {
@@ -17,20 +16,12 @@ type RetentionOptions = {
 
 type DirectoryEntry = {
   store: StoreApi<DirectoryStore>
-  /** Navigation recency, oldest first. */
   seen: Set<string>
-  /** When each cached session last became eligible for eviction. */
   idleSince: Map<string, number>
   timer: ReturnType<typeof setTimeout> | null
   unsubscribe: () => void
 }
 
-/**
- * Whole-session eviction, never partial trimming. A cached history is either
- * fully present or gone. Settled sessions nobody is looking at are dropped
- * after an idle grace period, so a quick return needs no request; the count
- * limit is a safety net that evicts the least recently visited session first.
- */
 export class SessionCacheRetention {
   private readonly directories = new Map<string, DirectoryEntry>()
   private readonly pending = new Set<string>()
@@ -59,8 +50,6 @@ export class SessionCacheRetention {
     if (entry.seen.has(target.sessionID) || messages[target.sessionID] !== undefined) return true
     const occupied = new Set([...entry.seen, ...Object.keys(messages)])
     if (occupied.size >= this.options.limit) return false
-    // Reserve capacity before HTTP starts. Speculative history is older than
-    // every visited session and never promotes a cache hit's navigation recency.
     entry.seen = new Set([target.sessionID, ...entry.seen])
     return true
   }
@@ -98,7 +87,6 @@ export class SessionCacheRetention {
       if (this.directories.has(directory)) continue
       const seen = new Set(Object.keys(store.getState().message))
       const unsubscribe = store.subscribe((state, previous) => {
-        // Token/part deltas do not affect retention eligibility.
         if (state.message === previous.message
           && state.session_status === previous.session_status
           && state.permission === previous.permission

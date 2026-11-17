@@ -14,17 +14,11 @@ interface InlineCommentCardProps {
   onDelete: () => void;
   className?: string;
   maxWidth?: number;
-  /** Beside review comments, the card says it goes to the agent and leaves the file to its place under the lines. */
   forAgent?: boolean;
 }
 
 const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 
-/**
- * A saved inline comment shown under its lines in the diff/editor: a header
- * naming the file and range with direct edit/remove actions, and the comment
- * text below, on one tone so the card stands apart from the lines around it.
- */
 export function InlineCommentCard({
   draft,
   onEdit,
@@ -37,7 +31,6 @@ export function InlineCommentCard({
   const [isOpen, setIsOpen] = useState(false);
   const draftText = draft.text;
 
-  // Check if content is long enough to warrant collapsing (rough estimate)
   const isLongContent = draftText.length > 150 || draftText.split('\n').length > 3;
 
   return (
@@ -57,7 +50,6 @@ export function InlineCommentCard({
           {forAgent ? t('review.card.forAgent') : draft.fileLabel}
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">•</span>
-        {/* "Whole file" is short and never shrinks, so a narrow panel truncates the path instead. */}
         <span className={cn('me-auto text-xs text-muted-foreground', isWholeFileComment(draft) ? 'shrink-0' : 'min-w-0 truncate')}>
           {isWholeFileComment(draft)
             ? t('inlineComment.range.wholeFile')
@@ -129,7 +121,6 @@ export function InlineCommentCard({
           )}
 
           <CollapsibleContent>
-            {/* Used for animation purposes if we want to animate height */}
           </CollapsibleContent>
         </Collapsible>
       </div>

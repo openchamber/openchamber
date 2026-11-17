@@ -142,7 +142,6 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
       id: auditId(record),
       initiator: 'user',
       executorKind: 'provider-api',
-      // A restart resumes the original audit identity, not the new server's identity.
       runtime: existing?.runtime ?? runtimeIdentity,
       repositoryId: record.target.repositoryId,
       providerAccountId,

@@ -20,6 +20,7 @@ import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { FormDockModeContext } from './formsInChat';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
@@ -55,7 +56,7 @@ import {
  * Mounted once per composer, inside the shared floating frame, so it shares
  * the frame's clearance and hides behind an expanded BTW. The BTW
  * sheet keeps the inline `FormCard` for its child session's forms. With
- * questions set to show in the chat (`inChat`), the cards sit at the end of
+ * questions set to show in the chat (`FormDockModeContext`), the cards sit at the end of
  * the transcript (`TranscriptForms`) and the dock is a one-line pointer.
  */
 
@@ -63,14 +64,12 @@ interface FormDockProps {
     sessionId: string | null;
     directory?: string;
     hidden: boolean;
-    /**
-     * The chat shows the questions as cards at its end ("Questions: in the
-     * chat"), so the dock is only a line that brings the reader to them.
-     */
-    inChat?: boolean;
 }
 
-const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, inChat = false }) => {
+const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden }) => {
+    const mode = React.useContext(FormDockModeContext);
+    const inChat = mode === 'in-chat';
+    const readingHistory = mode === 'reading';
     const forms = useScopedBlockingForms(sessionId, directory);
     // The session's own forms come first; a location-scoped form (an MCP
     // elicitation, owned by no session) follows and shows in every session
@@ -108,7 +107,7 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, i
             {hidden ? null : form ? (
                 webSearchConsent
                     ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                    : <FormDockPanel key={`${runtimeKey}\u0000${form.id}`} form={form} forms={forms} directory={directory} runtimeKey={runtimeKey} />
+                    : <FormDockPanel key={`${runtimeKey}\u0000${form.id}`} form={form} forms={forms} directory={directory} runtimeKey={runtimeKey} readingHistory={readingHistory} />
             ) : recoveredFirst ? (
                 <FormDockPanel
                     key={`${runtimeKey}\u0000${recoveredFirst.form.id}`}
@@ -116,6 +115,7 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, i
                     forms={forms}
                     directory={directory}
                     runtimeKey={runtimeKey}
+                    readingHistory={readingHistory}
                     recovered={recoveredFirst}
                 />
             ) : null}
@@ -184,9 +184,10 @@ const FormDockPanel: React.FC<{
     directory?: string;
     /** The runtime the panel was mounted for; its draft stays under this key. */
     runtimeKey: string;
+    readingHistory: boolean;
     /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
-}> = ({ form, forms, directory, runtimeKey, recovered }) => {
+}> = ({ form, forms, directory, runtimeKey, readingHistory, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     // The sessions of the chat this dock belongs to, which may be a chat of
@@ -212,7 +213,22 @@ const FormDockPanel: React.FC<{
     });
     const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields));
     const [step, setStep] = React.useState(restored?.step ?? 0);
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapse, setCollapse] = React.useState<'open' | 'user' | 'reading'>(readingHistory ? 'reading' : 'open');
+    const [answerField, setAnswerField] = React.useState<HTMLElement | null>(null);
+    const [seenReadingHistory, setSeenReadingHistory] = React.useState(readingHistory);
+    if (seenReadingHistory !== readingHistory) {
+        setSeenReadingHistory(readingHistory);
+        if (readingHistory && collapse === 'open' && !answerField?.isConnected) setCollapse('reading');
+        if (!readingHistory && collapse === 'reading') setCollapse('open');
+    }
+    const collapsed = collapse !== 'open';
+    const toggleCollapsed = () => {
+        if (collapsed) setCollapse('open');
+        else setCollapse(readingHistory ? 'reading' : 'user');
+    };
+    const trackAnswerFocus = (event: React.FocusEvent<HTMLDivElement>) => {
+        setAnswerField(event.type === 'focus' && event.target.matches('textarea, input') ? event.target : null);
+    };
     const [isResponding, setIsResponding] = React.useState(false);
     const respondingRef = React.useRef(false);
     const [showErrors, setShowErrors] = React.useState(false);
@@ -220,7 +236,7 @@ const FormDockPanel: React.FC<{
     // "Open session" on a question's toast expands the dock, including for a
     // question queued behind the one shown.
     const formIds = React.useMemo(() => forms.map((item) => item.id), [forms]);
-    useRequestReveal(formIds, React.useCallback(() => setCollapsed(false), []));
+    useRequestReveal(formIds, React.useCallback(() => setCollapse('open'), []));
 
     const appliedSignatureRef = React.useRef(fieldsSignature);
     React.useEffect(() => {
@@ -402,12 +418,13 @@ const FormDockPanel: React.FC<{
             role="dialog"
             ariaLabel={title}
             compact={collapsed}
+            holdReserve={collapse === 'reading'}
             header={<>
                 <Tooltip>
                 <TooltipTrigger asChild>
                 <button
                     type="button"
-                    onClick={() => setCollapsed((value) => !value)}
+                    onClick={toggleCollapsed}
                     aria-expanded={!collapsed}
                     aria-label={collapsed ? t('chat.formDock.expandAria') : t('chat.formDock.collapseAria')}
                     className="flex min-w-0 flex-1 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
@@ -482,7 +499,7 @@ const FormDockPanel: React.FC<{
             </>}
         >
             {!collapsed ? (
-                <div onKeyDown={handlePanelKeyDown}>
+                <div onKeyDown={handlePanelKeyDown} onFocus={trackAnswerFocus} onBlur={trackAnswerFocus}>
                     {recovered ? (
                         <div className="typography-micro mx-1.5 mb-1 rounded bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
                             {t(recovered.evidence === 'deferred-on-send' ? 'chat.formCard.deferredNotice' : 'chat.formCard.recoveredNotice')}

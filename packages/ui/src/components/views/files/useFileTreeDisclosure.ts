@@ -7,21 +7,8 @@ import {
   ROW_DISCLOSURE_MS,
 } from '@/lib/motion/rowDisclosure';
 
-/**
- * Opening and closing a folder in a file tree moves the rows the way the
- * sessions sidebar does: the folder's rows are revealed above a boundary moving
- * down from the folder row, or folded under it moving up, and every row below
- * slides with that boundary.
- *
- * The trees draw their rows differently (nested lists, a flat list, a virtual
- * list), so this works on the rows in the document: each row carries its path
- * in `data-tree-disclosure-path`, in tree order, and a folder's rows are the
- * rows right after it whose paths lie inside it. A folder that loads its
- * children after opening animates when they arrive.
- */
 
 const ROW_SELECTOR = '[data-tree-disclosure-path]';
-/** How long an opened folder waits for its rows, or a closed one for its rows to go, before giving up. */
 const PENDING_LIMIT_MS = 1500;
 
 const rowPath = (row: Element): string => row.getAttribute('data-tree-disclosure-path') ?? '';
@@ -41,7 +28,6 @@ const findFolderRows = (container: HTMLElement, path: string): FolderRows | null
   return { block: rows.slice(headerIndex + 1, end), following: rows.slice(end) };
 };
 
-/** Height the folder's rows take, measured to the next row when it is in the document. */
 const blockHeight = ({ block, following }: FolderRows): number => {
   const top = block[0].getBoundingClientRect().top;
   const next = following[0];
@@ -50,7 +36,6 @@ const blockHeight = ({ block, following }: FolderRows): number => {
     : block[block.length - 1].getBoundingClientRect().bottom - top;
 };
 
-/** Whether a row whose box will span `top`..`bottom` (client px), moved by up to `reach`, is ever on screen. */
 const nearViewport = (top: number, bottom: number, reach: number): boolean =>
   bottom + reach > 0 && top - reach < window.innerHeight;
 
@@ -64,7 +49,6 @@ const slideKeyframes = (row: HTMLElement, distance: number): Keyframe[] => {
 
 type Ghost = { element: HTMLElement; top: number; height: number };
 
-/** Inert copies of the closing rows, drawn where the rows were while they fold away. */
 const cloneGhosts = (container: HTMLElement, block: HTMLElement[], reach: number): Ghost[] => {
   const box = container.getBoundingClientRect();
   const ghosts: Ghost[] = [];
@@ -131,11 +115,9 @@ const animateClose = (container: HTMLElement, rows: FolderRows, pending: Extract
   const animations: Animation[] = [];
   for (const ghost of pending.ghosts) {
     container.appendChild(ghost.element);
-    // Held shut after the end, so a ghost never flashes back before it goes.
     animations.push(ghost.element.animate(boundaryClipKeyframes(ghost.top, ghost.height, from, to), { ...timing, fill: 'forwards' }));
     animations.push(ghost.element.animate(ROW_DISCLOSURE_FADE_OUT, { ...timing, fill: 'forwards' }));
   }
-  // Keeps the list as tall as it was, so a list scrolled to its end does not jump up.
   container.style.minHeight = `${pending.height}px`;
   if (pending.distance === 0) return animations;
   for (const row of rows.following) {
@@ -146,11 +128,6 @@ const animateClose = (container: HTMLElement, rows: FolderRows, pending: Extract
   return animations;
 };
 
-/**
- * Returns `toggle(path, expanded, commit)`: call it in place of the tree's own
- * toggle, with whether the folder is open now and the state change that opens
- * or closes it. `onSettled` runs when a motion ends or is dropped.
- */
 export function useFileTreeDisclosure(
   containerRef: React.RefObject<HTMLElement | null>,
   options?: { onSettled?: () => void },
@@ -184,8 +161,6 @@ export function useFileTreeDisclosure(
     onSettledRef.current?.();
   }, [clearPending, stop]);
 
-  // A folder that never gets its rows (an empty one, a failed load) or never
-  // loses them gives up on its own, so nothing it pinned stays mounted.
   const setPending = React.useCallback((pending: Pending) => {
     clearPending();
     pendingRef.current = pending;
@@ -203,8 +178,6 @@ export function useFileTreeDisclosure(
     }, () => undefined);
   }, [settle]);
 
-  // After each commit: start the motion a toggle asked for once its rows are in
-  // (or, for a close, out of) the document.
   React.useLayoutEffect(() => {
     const pending = pendingRef.current;
     if (!pending) return;
@@ -235,7 +208,6 @@ export function useFileTreeDisclosure(
     const container = containerRef.current;
     const rows = container && expanded ? findFolderRows(container, path) : null;
     if (!container || prefersReducedMotion() || (expanded && (!rows || rows.block.length === 0))) {
-      // No motion: whatever the commit set up for one is released at once.
       commit();
       onSettledRef.current?.();
       return;

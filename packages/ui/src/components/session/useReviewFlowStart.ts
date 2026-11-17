@@ -6,11 +6,6 @@ import { useI18n } from '@/lib/i18n';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-/**
- * What the review dialog's Start button runs, shared by every place that
- * offers the review: it starts the flow for `sessionId` in the session's own
- * directory (else `fallbackDirectory`) and calls `onStarted` once it is under way.
- */
 export function useReviewFlowStart(
   sessionId: string | null | undefined,
   fallbackDirectory: string | null | undefined,

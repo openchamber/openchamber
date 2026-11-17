@@ -1,11 +1,8 @@
 import { asNonEmptyString, toNumber, toTimestamp } from '../utils/transformers.js';
 import { formatMoney, toUsageWindow } from '../utils/formatters.js';
 
-// Number('') and Number('  ') are 0, so a blank meter would read as no spend.
 const toMeterNumber = (value) => (/^\s*$/.test(value) ? null : toNumber(value));
 
-// Shared by the server and VS Code. Enterprise contracts can have an individual
-// dollar allowance while the older request and per-member spend APIs omit it.
 export const fetchCursorSummaryWindow = async (accessToken) => {
   let subject;
   try {

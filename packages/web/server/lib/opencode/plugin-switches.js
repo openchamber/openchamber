@@ -12,7 +12,6 @@ const FILE_VERSION = 1;
 
 const isPluginResource = (value) => isString(value) && value.startsWith(PLUGIN_RESOURCE_PREFIX) && value.length > PLUGIN_RESOURCE_PREFIX.length;
 
-/** The absolute path a `file://` URL names, or null when the URL is unusable. */
 const fileUrlAbsolutePath = (spec) => {
   try {
     return fileURLToPath(spec);
@@ -21,12 +20,6 @@ const fileUrlAbsolutePath = (spec) => {
   }
 };
 
-/**
- * The target OpenCode's `PluginModule.load` checks for a package or Git spec:
- * everything before the last `@`, whatever that `@` means in the spec. Parsing
- * the spec as an npm name would deny a resource OpenCode never compares for a
- * Git spec with more than one `@`.
- */
 const packagePolicyTarget = (spec) => {
   const version = spec.lastIndexOf('@');
   return version > 0 ? spec.slice(0, version) : spec;
@@ -43,13 +36,7 @@ const packagePolicyTarget = (spec) => {
  * @returns {string | null}
  */
 export const pluginPolicyResource = (spec, sourcePath) => {
-  // A control entry (`-name`, `*`, `name.*`, `opencode.<name>`) changes the
-  // plugin list itself; it is not a plugin OpenCode loads, so it has no switch.
   if (isPluginControlSpec(spec)) return null;
-  // OpenCode recognizes `file://` specs and drops the plugin by the path the
-  // URL names. Any other `file:` spelling names no file OpenCode matches, so it
-  // gets no switch; falling through to npm parsing would write a deny for a
-  // resource nothing compares.
   if (/^file:/i.test(spec)) {
     if (!/^file:\/\//i.test(spec)) return null;
     const fileUrlPath = fileUrlAbsolutePath(spec);
@@ -64,7 +51,6 @@ export const pluginPolicyResource = (spec, sourcePath) => {
   return target ? `plugin:${target}` : null;
 };
 
-/** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */
 const matchesPolicyPattern = (target, pattern) => {
   let escaped = pattern
     .replaceAll('\\', '/')
@@ -75,7 +61,6 @@ const matchesPolicyPattern = (target, pattern) => {
   return new RegExp(`^${escaped}$`, 's').test(target.replaceAll('\\', '/'));
 };
 
-/** The plugin pattern of a config statement, in either spelling OpenCode accepts; null for any other statement. */
 const pluginStatementPattern = (statement) => {
   if (!isRecord(statement) || !isString(statement.resource)) return null;
   if (statement.action === 'plugin.use') return statement.resource;
@@ -142,8 +127,6 @@ export const createPluginSwitchStore = ({ filePath }) => {
   /**
    * @returns {{ ok: true, resources: string[] } | { ok: false, error: Error }}
    */
-  // The last state read whole, kept beside the store: what a broken store
-  // falls back to, across restarts too.
   const lastGoodPath = `${filePath}.last-good`;
 
   const parse = (text) => {
@@ -188,10 +171,6 @@ export const createPluginSwitchStore = ({ filePath }) => {
     writeFileAtomic(filePath, serialize(resources));
   };
 
-  /**
-   * Persist one switch. An unreadable file fails the change instead of
-   * overwriting state OpenChamber cannot account for.
-   */
   const set = (resource, enabled) => {
     if (!isPluginResource(resource)) {
       throw new Error(`Invalid plugin resource for a switch: ${resource}`);
@@ -212,12 +191,6 @@ export const createPluginSwitchStore = ({ filePath }) => {
     return { changed };
   };
 
-  /**
-   * The denials for the managed config layer. Each whole read is copied beside
-   * the store; an unreadable store falls back to that copy, so a broken file
-   * neither stops OpenCode from starting nor turns switched-off plugins back
-   * on, and the page reports the store as unreadable until it is fixed.
-   */
   const denials = () => {
     let current = read();
     if (current.ok) {

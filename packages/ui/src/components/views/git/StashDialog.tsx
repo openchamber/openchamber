@@ -40,7 +40,6 @@ export const StashDialog: React.FC<StashDialogProps> = ({
       await onConfirm(restoreAfter);
       onOpenChange(false);
     } catch (err) {
-      // Show error to user - parent may also handle it but user should see feedback
       const message = err instanceof Error ? err.message : `Failed to ${operation}`;
       toast.error(message);
     } finally {

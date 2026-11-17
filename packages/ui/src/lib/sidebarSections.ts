@@ -1,20 +1,7 @@
 import { z } from 'zod';
 import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 
-/**
- * The sidebar's sections: an ordered list the user arranges, shared by every
- * client of the server (`sidebarSections`). Four are built in (Chats, Pinned,
- * In work, Projects); the rest are the user's own, each a filter over the
- * works the sidebar lists. Which sections a surface shows is its own choice
- * (`sidebarHiddenSections` for the user's, the existing show toggles for the
- * built-in ones), so the phone can hide what the desktop shows.
- *
- * Sections take works from the top down: a section that claims its works
- * hides them from every section below it and from their projects; one that
- * does not claim them shows them and lets them through.
- */
 
-// Pages (the app's own screens) leads by default, above the sections of works.
 const BUILTIN_SIDEBAR_SECTION_IDS = ['pages', 'chats', 'pinned', 'work', 'projects'] as const;
 export type BuiltinSidebarSectionId = typeof BUILTIN_SIDEBAR_SECTION_IDS[number];
 
@@ -29,13 +16,8 @@ export type SidebarSectionLink = typeof SIDEBAR_SECTION_LINKS[number];
 export const SIDEBAR_SECTION_ACTIVITY = ['any', 'today', 'two-days', 'week', 'stalled'] as const;
 export type SidebarSectionActivity = typeof SIDEBAR_SECTION_ACTIVITY[number];
 
-/** The pins a filter can ask for: the Pinned list, or one of the user's named lists by id. */
 export const DEFAULT_PIN_LIST = 'pinned';
 
-/**
- * Chips by category. Inside a category any chip matches; across categories
- * every category with a chip must match. An empty category asks nothing.
- */
 export type SidebarSectionFilter = {
   states: readonly SidebarSectionState[];
   work: readonly SidebarSectionWorkState[];
@@ -43,23 +25,11 @@ export type SidebarSectionFilter = {
   kinds: readonly SidebarSectionKind[];
   links: readonly SidebarSectionLink[];
   projectIds: readonly string[];
-  /** Folders of a project's root, by id; a filed worktree counts as a work in its folder. */
   folders: readonly string[];
   activity: SidebarSectionActivity;
-  /**
-   * Phrases to find in the work's title or branch, any one of them: each
-   * matches as the sidebar's search matches, every word at the start of a
-   * word in a session's title, the worktree's name or its branch. Empty asks
-   * nothing.
-   */
   text: readonly string[];
 };
 
-/**
- * `grouping: 'project'` lists whole projects under their headers (a group of
- * projects such as "Clients"), so its filter takes projects only, and it always
- * claims them: a project is drawn in one place.
- */
 export type CustomSidebarSection = {
   kind: 'custom';
   id: string;
@@ -72,7 +42,6 @@ export type CustomSidebarSection = {
 
 export type SidebarSectionEntry = { kind: 'builtin'; id: BuiltinSidebarSectionId } | CustomSidebarSection;
 
-/** A named list of pins the user files works into with Pin to. */
 export type SidebarPinList = { id: string; name: string };
 
 export const SIDEBAR_SECTION_NAME_MAX = 60;
@@ -81,7 +50,6 @@ export const SIDEBAR_PIN_LISTS_MAX = 24;
 export const SIDEBAR_SECTION_TEXT_MAX = 100;
 export const SIDEBAR_SECTION_PHRASES_MAX = 12;
 
-/** How many works a list shows before Show more (`sidebarSessionBatchSize`); the server holds the same range. */
 export const SIDEBAR_SESSION_BATCH_DEFAULT = 7;
 export const SIDEBAR_SESSION_BATCH_MIN = 3;
 export const SIDEBAR_SESSION_BATCH_MAX = 50;
@@ -97,15 +65,12 @@ export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze(
 const idSchema = z.string().trim().min(1).max(64);
 const phraseSchema = z.string().trim().transform((value) => value.slice(0, SIDEBAR_SECTION_TEXT_MAX));
 const nameSchema = z.string().trim().min(1).transform((value) => value.slice(0, SIDEBAR_SECTION_NAME_MAX));
-// Chips the build does not know (a newer client's) are dropped, the rest kept once.
 const chips = <const T extends readonly [string, ...string[]]>(values: T) => z.array(z.unknown()).transform((entries) => (
   [...new Set(entries.flatMap((entry) => {
     const parsed = z.enum(values).safeParse(entry);
     return parsed.success ? [parsed.data] : [];
   }))]
 ));
-// A project's id names its folder (`path_` and the path encoded), so it grows
-// with the path; the ids this module makes itself stay short.
 const projectIdSchema = z.string().trim().min(1).max(4096);
 const idList = (schema: z.ZodType<string>) => z.array(z.unknown()).transform((entries) => (
   [...new Set(entries.flatMap((entry) => {
@@ -125,7 +90,6 @@ const filterSchema = z.object({
   projectIds: projectIds.catch([]),
   folders: ids.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
-  // A list of phrases; a build before lists kept one phrase as a string.
   text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
     [...new Set(entries.flatMap((entry) => {
       const phrase = phraseSchema.safeParse(entry);
@@ -148,7 +112,6 @@ const builtinIdSchema = z.enum(BUILTIN_SIDEBAR_SECTION_IDS);
 const builtinSchema = z.object({ kind: z.literal('builtin'), id: builtinIdSchema });
 
 const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'project'): SidebarSectionFilter => (
-  // A group of projects lists whole projects; the other chips do not apply to it.
   grouping === 'project'
     ? { ...EMPTY_SIDEBAR_SECTION_FILTER, projectIds: filter.projectIds ?? [] }
     : {
@@ -164,11 +127,6 @@ const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'proj
     }
 );
 
-/**
- * The stored list made whole: invalid and repeated entries dropped, and every
- * built-in section present. A built-in one missing from the list (a list saved
- * before it existed) goes back where the default order puts it.
- */
 export const DEFAULT_SIDEBAR_SECTIONS: readonly SidebarSectionEntry[] = BUILTIN_SIDEBAR_SECTION_IDS.map((id) => ({ kind: 'builtin', id }));
 
 export const sidebarSectionsSchema = z.array(z.unknown()).transform((stored): SidebarSectionEntry[] => {
@@ -189,13 +147,11 @@ export const sidebarSectionsSchema = z.array(z.unknown()).transform((stored): Si
     entries.push({
       ...custom.data,
       filter: toFilter(custom.data.filter, custom.data.grouping),
-      // A project shows in one place: a group of projects always takes its own.
       claims: custom.data.grouping === 'project' ? true : custom.data.claims,
     });
   }
   BUILTIN_SIDEBAR_SECTION_IDS.forEach((id, defaultIndex) => {
     if (seen.has(id)) return;
-    // After the built-in section that precedes it by default, else first.
     const previous = BUILTIN_SIDEBAR_SECTION_IDS.slice(0, defaultIndex).reverse().find((candidate) => seen.has(candidate));
     const at = previous ? entries.findIndex((entry) => entry.kind === 'builtin' && entry.id === previous) + 1 : 0;
     entries.splice(at, 0, { kind: 'builtin', id });
@@ -218,15 +174,10 @@ export const sidebarPinListsSchema = z.array(z.unknown()).transform((stored): Si
 
 export const hiddenSidebarSectionsSchema = ids;
 
-/** A fresh id for a section or a pin list. */
 export const createSidebarSectionId = (): string => (
   `s${Date.now().toString(36)}${Math.floor(Math.random() * 0x100000).toString(36)}`
 );
 
-/**
- * Whether a filter asks for anything. A section that asks nothing lists
- * nothing: listing every work would repeat the whole sidebar in it.
- */
 export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boolean => (
   filter.states.length > 0
   || filter.work.length > 0
@@ -239,49 +190,35 @@ export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boole
   || filter.text.length > 0
 );
 
-/** Whether a section asks for plans, which live with the project's knowledge, not with the session. */
 export const sidebarSectionReadsPlans = (filter: SidebarSectionFilter): boolean => filter.links.includes('plan');
 
-/** Whether a section's filter reads live state, which changes on every turn. */
 export const sidebarSectionReadsLiveState = (filter: SidebarSectionFilter): boolean => (
   filter.states.some((state) => state !== 'looks-done')
 );
 
-/** What the filter is matched against: one work's facts. */
 export type SidebarWorkFacts = {
-  /** What the work is; a scheduled task's run is also a session or a worktree, so it is its own fact. */
   kind: Exclude<SidebarSectionKind, 'scheduled'>;
-  /** A scheduled task started one of its top-level sessions. */
   scheduled: boolean;
   projectId: string | null;
-  /** The folder of the project's root the work is filed in, or null. */
   folderId: string | null;
-  /** The pin list the work is filed in (`DEFAULT_PIN_LIST` for Pinned), or null. */
   pin: string | null;
   inWork: boolean;
   done: boolean;
   running: boolean;
   needsAnswer: boolean;
   unread: boolean;
-  /** The last turn of a top-level session in it failed. */
   failed: boolean;
   looksDone: boolean;
   hasPr: boolean;
-  /** An issue on a repository or another service, not a tracker's. */
   hasIssue: boolean;
-  /** A tracker's work item, such as a Linear issue. */
   hasTrackerItem: boolean;
-  /** A project plan was sent to one of its sessions. */
   hasPlan: boolean;
   hasGoal: boolean;
-  /** The latest activity in the work, in ms; 0 when unknown. */
   lastActivityAt: number;
-  /** What the text condition reads: the titles of its top-level sessions, the worktree's name and branch. */
   texts: readonly string[];
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// A work nobody has touched for this long has stalled (the Overview's rule).
 const STALLED_MS = 3 * DAY_MS;
 
 const startOfLocalDay = (now: number): number => {
@@ -332,7 +269,6 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
 
-/** The starting points the section editor offers; names are set by the editor, translated. */
 const SIDEBAR_SECTION_TEMPLATES = ['recent', 'waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
 export type SidebarSectionTemplate = typeof SIDEBAR_SECTION_TEMPLATES[number];
 
@@ -341,8 +277,6 @@ export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplat
     kind: 'custom', id: createSidebarSectionId(), name, grouping: 'time', filter: EMPTY_SIDEBAR_SECTION_FILTER, claims: false, hideWhenEmpty: true,
   };
   switch (template) {
-    // A section asks something to list anything, so Recent asks for the last
-    // 7 days; Show more pages through them.
     case 'recent': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, activity: 'week' } };
     case 'waiting': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['needs-answer', 'unread'] } };
     case 'running': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } };

@@ -10,17 +10,11 @@ interface SnippetAliasesFieldProps {
   className?: string;
 }
 
-/**
- * Aliases as chips. Enter, comma or space adds the typed alias, Backspace in
- * an empty field takes the last one back, and leaving the field keeps what
- * was typed.
- */
 export const SnippetAliasesField: React.FC<SnippetAliasesFieldProps> = ({ aliases, onChange, className }) => {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
-  // Adds the valid, new ones among `candidates` and keeps `rest` in the field.
   const add = (candidates: string[], rest = '') => {
     setDraft(rest);
     const next = [...aliases];
@@ -60,7 +54,6 @@ export const SnippetAliasesField: React.FC<SnippetAliasesFieldProps> = ({ aliase
         ref={inputRef}
         value={draft}
         onChange={(event) => {
-          // A comma or a space ends an alias, typed or pasted.
           const parts = event.target.value.split(/[,\s]+/).map(normalizeSnippetNameInput);
           const rest = parts.pop() ?? '';
           if (parts.length > 0) add(parts, rest);

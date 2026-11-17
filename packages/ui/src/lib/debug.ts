@@ -170,7 +170,6 @@ export const debugUtils = {
     }));
   },
 
-  /** Cached message count per session in the current directory store; -1 when not cached. */
   getCachedMessageCount(sessionId: string, directory?: string) {
     const state = getDirectoryState(directory);
     return state?.message[sessionId]?.length ?? -1;
@@ -283,9 +282,6 @@ export const debugUtils = {
     settingsInfo = await safeFetchJson('/api/config/settings');
 
     try {
-      // OpenChamber's own health route. Every field read below
-      // (`openCodePort`, `openCodeRunning`, `isOpenCodeReady`, ...) is
-      // OpenChamber's; OpenCode 2.0.8 removed `/api/health` entirely.
       const resp = await runtimeFetch('/health');
       const contentType = resp.headers.get('content-type') || '';
       const body = await safeText(resp);
@@ -387,12 +383,7 @@ export const debugUtils = {
       openchamber: {
         settingsInfo,
       },
-      // Empty is a meaningful answer here: it means no prompt was rejected in
-      // this session, so a "my message disappeared" report is not a rejected
-      // send and needs a different explanation.
       recentSendFailures: getRecentSendFailures(),
-      // Same reasoning: empty means OpenCode reported no failed turn in this
-      // app session.
       recentSessionErrors: getRecentSessionErrors(),
       currentSessionDirectoryResolution: sessionState.currentSessionId
         ? this.diagnoseSessionDirectory(sessionState.currentSessionId)
@@ -403,20 +394,12 @@ export const debugUtils = {
     return report;
   },
 
-  /**
-   * The same text the status report dialog ("Show OpenCode status") shows, for a
-   * console or remote session that cannot press the shortcut.
-   */
   async statusReport() {
     const text = await buildOpenCodeStatusReport();
     console.log(text);
     return text;
   },
 
-  /**
-   * Prompt sends that were rejected and rolled back in this app session.
-   * Newest first; empty means no send was rejected.
-   */
   getRecentSendFailures() {
     const failures = getRecentSendFailures();
     if (failures.length === 0) {
@@ -428,12 +411,6 @@ export const debugUtils = {
     return failures;
   },
 
-  /**
-   * Report how a session's directory is resolved, from every source, in
-   * precedence order. A send is routed by the winning value, so a disagreement
-   * here explains a prompt that vanishes without an error: it was posted
-   * against a directory that does not own the session.
-   */
   diagnoseSessionDirectory(sessionId?: string) {
     const sessionState = useSessionUIStore.getState();
     const targetSessionId = sessionId ?? sessionState.currentSessionId;
@@ -459,10 +436,6 @@ export const debugUtils = {
     const sources = {
       attachment,
       worktreeMetadata,
-      // Record first, matching the resolver: holding a session proves
-      // containment, not ownership, so the parent repository holds its
-      // worktrees' sessions too. Reporting membership first made this
-      // diagnostic contradict the routing it exists to explain.
       authoritative: recordDirectory ?? owningStoreDirectory,
       selected,
       remembered: remembered.runtime,

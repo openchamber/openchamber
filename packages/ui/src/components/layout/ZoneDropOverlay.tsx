@@ -11,18 +11,11 @@ const TARGET_LABEL_KEYS = {
   right: 'contextPanel.zone.dropRight',
 } as const;
 
-/**
- * The drop targets while a surface is dragged, over a scrim, and a chip with
- * its name under the pointer. Pointer-transparent: the drag source keeps the gesture. The
- * chip follows the pointer by writing its own transform, so a drag renders
- * React only when the hovered target changes.
- */
 export const ZoneDropOverlay: React.FC = () => {
   const { t } = useI18n();
   const drag = useZoneDragStore((state) => state.drag);
   const hovered = useZoneDragStore((state) => state.hovered);
   const chipRef = React.useRef<HTMLDivElement | null>(null);
-  // The scrim fades in on the frame after the overlay mounts.
   const [entered, setEntered] = React.useState(false);
   React.useEffect(() => {
     if (!drag) {
@@ -47,8 +40,6 @@ export const ZoneDropOverlay: React.FC = () => {
 
   return createPortal(
     <div className="pointer-events-none fixed inset-0 z-[60]" aria-hidden="true">
-      {/* Dims the app around the targets; the dialog scrim's tone, lighter and
-          without blur so the layout under the targets stays recognisable. */}
       <div
         className={cn(
           'absolute inset-0 bg-surface-overlay/40 transition-opacity duration-150 ease-out motion-reduce:transition-none',
@@ -64,7 +55,6 @@ export const ZoneDropOverlay: React.FC = () => {
             key={zone}
             className={cn(
               'absolute flex items-center justify-center rounded-[10px] border transition-colors duration-100',
-              // Opaque enough that the label reads over whatever is under it.
               active
                 ? 'border-primary bg-background/90 text-foreground shadow-sm'
                 : 'border-border bg-background/80 text-muted-foreground',

@@ -4,11 +4,6 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 import { useOpenChatLink } from '../../useOpenChatLink';
 
-/**
- * A web address a tool part shows, outside markdown. A plain click goes where
- * a link in the text goes (`useOpenChatLink`), so the link settings apply;
- * modified clicks keep the browser's own meaning.
- */
 export const ChatExternalLink: React.FC<React.ComponentProps<'a'> & { href: string }> = ({ href, children, ...props }) => {
     const openChatLink = useOpenChatLink(useEffectiveDirectory() ?? '');
     const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {

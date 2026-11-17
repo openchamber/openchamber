@@ -1,16 +1,25 @@
 import { isActiveClient } from '../client-auth/remote-clients.js';
-import { clientSessionKeyFor } from './session-key.js';
+import { clientSessionKeyFor, sessionKeyFor } from './session-key.js';
 
-// Connects the paired-device list to the push stores: a device whose client
-// was revoked or expired gets no notification.
-export const createClientPushAccess = ({ listClients, removeDevicesOfSessions }) => {
+const isLocalOnlyClient = (client) => client.localOnly === true;
+
+export const createClientPushAccess = ({ listClients, removeDevicesOfSessions, authenticateBearerClient }) => {
   const sessionKeysOf = (clients) => clients.map((client) => clientSessionKeyFor(client.id));
 
-  // Read before every send, so a registration that outlived its cleanup, or one
-  // left by a build without it, still gets nothing while its client is listed.
   const invalidSessionKeys = async () => {
     const clients = await listClients();
-    return new Set(sessionKeysOf(clients.filter((client) => !isActiveClient(client))));
+    return new Set(sessionKeysOf(clients.filter((client) => !isActiveClient(client) || isLocalOnlyClient(client))));
+  };
+
+  const isLocalOnlySession = async (uiSessionToken) => {
+    const sessionKey = sessionKeyFor(uiSessionToken);
+    const clients = await listClients();
+    return clients.some((client) => isLocalOnlyClient(client) && isActiveClient(client) && clientSessionKeyFor(client.id) === sessionKey);
+  };
+
+  const isLocalOnlyRequest = async (req, uiSessionToken) => {
+    const bearerClient = await authenticateBearerClient(req);
+    return bearerClient ? isLocalOnlyClient(bearerClient) : isLocalOnlySession(uiSessionToken);
   };
 
   const removeDevicesOfClients = async (clientIds) => {
@@ -20,5 +29,5 @@ export const createClientPushAccess = ({ listClients, removeDevicesOfSessions })
     await Promise.all(removeDevicesOfSessions.map((remove) => remove(sessionKeys, keep)));
   };
 
-  return { invalidSessionKeys, removeDevicesOfClients };
+  return { invalidSessionKeys, isLocalOnlyRequest, removeDevicesOfClients };
 };

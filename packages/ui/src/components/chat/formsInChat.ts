@@ -1,3 +1,14 @@
+import React from 'react';
+
+type FormDockMode = 'dock' | 'reading' | 'in-chat';
+
+export const FormDockModeContext = React.createContext<FormDockMode>('dock');
+
+export const resolveFormDockMode = (formsInChat: boolean, readingHistory: boolean): FormDockMode => {
+    if (formsInChat) return 'in-chat';
+    return readingHistory ? 'reading' : 'dock';
+};
+
 /**
  * Whether a chat column draws waiting questions as cards at the end of its
  * transcript ("Questions: in the chat") instead of the composer's dock.

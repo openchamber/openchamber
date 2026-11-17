@@ -2,11 +2,6 @@ import { create } from 'zustand';
 
 export type ChatSettingsTab = 'messages' | 'composer' | 'assistance';
 
-/**
- * The tab the Settings Chat page shows. It lives outside the page so a
- * Settings search result can open the tab that holds its target before the
- * page highlights it, and so leaving the page and coming back keeps the tab.
- */
 export const useChatSettingsTabStore = create<{
   tab: ChatSettingsTab;
   setTab: (tab: ChatSettingsTab) => void;
@@ -62,6 +57,5 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
 
 export const chatSettingsTabForSearchTarget = (id: string): ChatSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;
 
-/** The search targets one tab holds, for the tab's "new" badge. */
 export const chatSettingsTabAnchors = (tab: ChatSettingsTab): string[] =>
   [...SEARCH_TARGET_TABS].filter(([, owner]) => owner === tab).map(([id]) => id);

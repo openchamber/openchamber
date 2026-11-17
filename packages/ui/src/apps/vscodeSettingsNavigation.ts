@@ -23,7 +23,6 @@ export const applyVSCodeSettingsNavigation = (navigation: VSCodeSettingsNavigati
   ui.requestSettingsJump(page, navigation.itemId ?? null);
 };
 
-/** Chat entry points keep their view while the native host reveals Settings. */
 export const connectVSCodeSettingsNavigation = (
   vscode: VSCodeAPI,
   onFailure: (error: Error) => void,
@@ -43,11 +42,9 @@ export const connectVSCodeSettingsNavigation = (
       directory: resolveSettingsDirectory(ui.settingsProjectPath, projects.projects, projects.activeProjectId),
       connectProvider: ui.settingsProvidersConnectRequested,
       providerId: ui.settingsProvidersOpenRequested,
-      // The skill the entry point selected, so the tab's Skills page opens on it.
       skillName: resolveSettingsSlug(page) === 'skills.installed' ? useSkillsStore.getState().selectedSkillName ?? undefined : undefined,
       snippetDraft: draft ? { name: draft.name, scope: draft.scope } : undefined,
     };
-    // This flag belongs to an in-page dialog. Leaving it set blocks chat shortcuts.
     ui.setSettingsDialogOpen(false);
     const revision = ++requestRevision;
     void vscode.executeCommand('openchamber.showSettings', navigation).then(() => {

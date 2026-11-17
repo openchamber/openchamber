@@ -45,7 +45,6 @@ const compareVersions = (left: unknown, right: unknown): number => {
 const getCapability = (manager?: OpenCodeUpgradeManager): UpgradeCapability => {
   if (!manager) return { supported: false, manager: null, reason: 'unavailable' };
   if (manager.getDebugInfo().mode !== 'managed') return { supported: false, manager: 'external', reason: 'external' };
-  // The administrator pinned the CLI in the policy file and owns its updates.
   if (readEnterprisePolicy().opencodeBinary) return { supported: false, manager: 'administrator', reason: 'policy' };
   if (!manager.getApiUrl() || !manager.getDebugInfo().cliPath) return { supported: false, manager: null, reason: 'unavailable' };
   return { supported: true, manager: 'opencode', reason: null };
@@ -56,8 +55,6 @@ const getApiUrl = (manager?: OpenCodeUpgradeManager): string | null => {
   return apiUrl ? `${apiUrl.replace(/\/+$/, '')}/` : null;
 };
 
-// OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub release
-// assets, so the registry is the one source of "latest".
 const fetchLatestVersion = async (): Promise<string> => {
   const request = resolveNpmRegistryRequest('@opencode/cli', 'latest');
   const response = await fetch(request.url, {
@@ -76,11 +73,9 @@ const fetchLatestVersion = async (): Promise<string> => {
 export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager): Promise<Record<string, unknown>> => {
   const upgrade = getCapability(manager);
   const apiUrl = getApiUrl(manager);
-  // External runtimes still report their version without offering an upgrade.
   if (!apiUrl || !manager) return { available: false, currentVersion: null, latestVersion: null, upgrade };
   try {
     const [healthResponse, latestVersion] = await Promise.all([
-      // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
       fetch(new URL('/api/info', apiUrl).toString(), { method: 'GET', headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() } }),
       fetchLatestVersion(),
     ]);
@@ -90,7 +85,6 @@ export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager)
       return { available: null, error, upgrade };
     }
     const currentVersion = typeof health?.version === 'string' && health.version.trim() ? health.version.trim().replace(/^v/, '') : null;
-    // A pinned CLI updates with the administrator's rollout: nothing to announce.
     if (upgrade.reason === 'policy') return { available: false, currentVersion, latestVersion, upgrade };
     return { available: currentVersion ? compareVersions(latestVersion, currentVersion) > 0 : null, currentVersion, latestVersion, upgrade };
   } catch (error) {

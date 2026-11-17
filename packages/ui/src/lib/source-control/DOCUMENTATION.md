@@ -1,5 +1,74 @@
 # UI source control
 
+## Invariants
+
+- Applying an identity retains successful provider, transport and author writes
+  when another part fails. The author still applies after a transfer failure,
+  because a usable partial configuration remains available for repair.
+- Identity application checks the captured runtime before further writes and
+  reconciliation. Runtime APIs resolve their endpoint on each call, so a switch
+  can otherwise write to another machine's repository at the same path.
+- Identity replacement leaves non-ready grants for explicit repair. A moved
+  endpoint or questioned credential no longer provides the authority needed to
+  rewrite that grant. Failure to remove one ready grant leaves other grants intact.
+- Granting an identity to an additional remote changes transport alone. The
+  repository's provider account and author remain the choices made when applying
+  its identity. An explicit grant authorizes its exact endpoint; sharing a host
+  alone does not grant access to every repository there.
+- Active-identity selection uses the bound account to distinguish profiles with
+  the same author. An explicit null account selects System when its author
+  matches; author identity alone cannot distinguish those profiles.
+- An unconfigured repository's ready System grants still carry the binding
+  store's tombstone revision. A later configuration invalidates plans made
+  against that revision.
+- Repository item reads use the bound project, including an upstream project
+  named by a fork's binding. Remotes identify the project only without a binding.
+  Cross-repository account contexts authorize reads alone.
+- Remembered filters belong to the resolved provider, instance, project and tab.
+  Clones resolving to the same repository share filters; a fork resolving through
+  its own origin remains separate. Across-repository lists have no filter entry.
+- Stored filters validate known state and people values; consumers check whether
+  their tab offers those values. Label names stay within the shell's 256-character
+  limit so a displayed filter cannot name a label the shell drops.
+- Malformed provider-memory and filter-memory entries leave valid siblings
+  readable. Blocked or full storage leaves current session state usable; these
+  remembered values provide a head start while authoritative reads remain available.
+- Review mutations pin `headSha` so a push beyond the revision being reviewed
+  refuses the review. The host owns unpublished review drafts, so another device
+  or agent reads the same draft.
+- Optional provider results preserve uncertainty and partial success. An absent
+  stack or permission means it is unknown, while a null stack means none exists.
+  An accepted queued merge requires live state to establish completion, and a
+  posted verdict can survive failure to post its accompanying text.
+
+### Why account pickers group credentials by person and source
+
+Re-authentication retains older credentials that existing identities can still
+use. The current credential represents each person and source in the picker,
+because duplicate credentials carry indistinguishable names; CLI and stored
+credentials remain separate choices, and opaque credential references stay out
+of labels.
+
+### Why repository provider memory stands in during loading
+
+The last authoritative provider is remembered per runtime and project across its
+worktrees to prevent host labels from flipping during binding and account loading.
+A newer authoritative answer replaces it; the same path on another runtime has
+its own entry.
+
+### Why small registry lists use JSON equality
+
+Parsed descriptor lists contain only a handful of entries, so JSON comparison
+provides a cheap exact equality check. Keeping equal held objects prevents
+selector updates on a no-op refresh without a separate field-by-field comparator.
+
+### Why blocked coloring requires a failure or conflict
+
+The shared sidebar, Git view and reference-picker color marks a PR as blocked
+when failed checks or a conflict require repair. Running checks and a provider's
+blocked merge state alone keep the open color, because waiting for a required
+review does not establish a failure.
+
 ## Repository binding authority
 
 `repository-binding.ts` owns binding reads and their lifecycle for the shared UI.
@@ -119,6 +188,8 @@ Remote recognition compares the separate SSH address only with SSH remotes,
 using normalized hostname and SSH port. SCP, omitted port and explicit port 22
 have the same default-port identity. An HTTP(S) remote on an SSH-only host
 produces neither a provider identity nor a repository link.
+SCP detection excludes URLs with a scheme, because an HTTPS URL also has a
+colon-separated form that can otherwise look like SCP.
 `proposeIdentityForHost` proposes, among applicable identities,
 the one whose account answers for the remote host, then the default identity,
 then the System identity — the repository as it is. The add screen shows the
@@ -128,7 +199,7 @@ never rewrites an author or binds an account on its own.
 
 Applying an identity grants its own remote; every other remote follows it
 through a grant the server derives on each read and transfer (`inherited: true`
-on the binding read, never persisted): all of them for the System identity,
+on the binding read, never persisted or used as a mutation target): all of them for the System identity,
 those on the identity's host and protocol for any other, so a fork answers
 beside its upstream without being named twice and a remote added later is
 covered too. Applying an identity removes grants an earlier identity saved on
@@ -320,7 +391,9 @@ Invariants:
   `issuesList` / `changeRequestsList`.
 - Provider ids match `^[a-z][a-z0-9-]{0,31}$` and share one namespace with the
   tracker registry: `linear`, `guest`, `link`, `external` and `repository` are
-  refused. One malformed or reserved descriptor is left out of a list and never
+  refused. Tracked items and read-cache keys identify both families by provider;
+  older Linear items carry only `provider: 'linear'`, without a kind to distinguish
+  the families. One malformed or reserved descriptor is left out of a list and never
   fails the others; a repeated id keeps its first entry. A value a newer server
   may send reads as its closest known meaning: an unknown change-request term as
   `pullRequest`, an unknown CI term as `checks`, an unknown auth method is

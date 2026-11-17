@@ -42,6 +42,13 @@ and what made it fragile per framework.
 
 ## Invariants
 
+- A connection failure, including a synchronous WebSocket constructor error,
+  closes only that connection. It cannot escape the connection handler and
+  terminate the process or an otherwise usable listener.
+- Socket reads pause while the other end drains. Pre-handshake bytes remain
+  bounded and ordered so the first HTTP request survives without buffering a
+  stalled request or a fast response without limit. Refusal logs omit URLs
+  because a URL can carry an authentication token.
 - The reachable set is exactly what dev-server discovery offers the user, never
   "any loopback port". Without that restriction an authenticated client could
   dial arbitrary local services on the host — databases, admin panels, the

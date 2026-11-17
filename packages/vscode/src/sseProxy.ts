@@ -20,9 +20,8 @@ const SSE_RESPONSE_HEADERS = {
   'cache-control': 'no-cache',
 } as const;
 
-// SSE reconnect configuration
 const MAX_RECONNECTS = 3;
-const BASE_RECONNECT_DELAY = 1000; // 1 second
+const BASE_RECONNECT_DELAY = 1000;
 const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20000;
 
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
@@ -44,8 +43,6 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) =
 
 const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
 
-// OpenCode 2.x serves one global stream at `GET /api/event`; every frame carries
-// its own `location.directory`, so there is nothing to scope the request with.
 const OPENCODE_EVENT_PATH = '/api/event';
 
 const normalizeSseSearchParams = (path: string): URLSearchParams => {
@@ -194,7 +191,6 @@ export const openSseProxy = async ({
   onChunk,
   stallTimeoutMs,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
-  // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
 
   const connect = async (): Promise<Response> => {
@@ -209,10 +205,9 @@ export const openSseProxy = async ({
         throw error;
       }
 
-      // Implement reconnect logic
       if (!signal.aborted && reconnectAttempts < MAX_RECONNECTS) {
         reconnectAttempts++;
-        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1); // Exponential backoff
+        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
 
         console.warn(
           `[SSE] Connection failed (attempt ${reconnectAttempts}/${MAX_RECONNECTS}), ` +
@@ -224,7 +219,7 @@ export const openSseProxy = async ({
         if (signal.aborted) {
           throw getAbortReason(signal);
         }
-        return connect(); // Recursive retry
+        return connect();
       }
 
       console.error(`[SSE] Connection failed after ${reconnectAttempts} attempts`, error);
@@ -241,7 +236,6 @@ export const openSseProxy = async ({
     } catch (error: unknown) {
       const cause = (error as { cause?: { code?: string } } | null)?.cause;
 
-      // Attempt reconnect on socket errors
       if (!signal.aborted) {
         if (cause?.code === 'UND_ERR_SOCKET' || cause?.code === 'ECONNRESET') {
           console.warn('[SSE] Socket error detected, attempting reconnect...');
@@ -254,18 +248,16 @@ export const openSseProxy = async ({
               return;
             }
 
-            // Attempt to reconnect
             try {
               activeResponse = await connect();
               await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
-              return; // Successfully reconnected
+              return;
             } catch (reconnectError) {
               console.error('[SSE] Reconnect failed', reconnectError);
             }
           }
         }
 
-        // Re-throw if we couldn't recover
         throw error;
       }
     }

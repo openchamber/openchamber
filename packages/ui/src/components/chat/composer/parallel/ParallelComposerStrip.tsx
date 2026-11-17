@@ -25,12 +25,6 @@ function SettingsColumnBlock({ title, children }: { title: string; children: Rea
   );
 }
 
-/**
- * Launch settings of a parallel run in two fixed columns: where the lanes
- * work on the left, how they are fused and varied on the right. Controls that
- * do not apply are disabled rather than hidden, so the dialog keeps its size
- * whatever is chosen.
- */
 function LaunchSettingsDialog({
   parallel,
   project,
@@ -53,7 +47,6 @@ function LaunchSettingsDialog({
   }, [open, setupCommands]);
   if (!state) return null;
   const firstModel = state.variants[state.active]?.models[0];
-  // The judge shown while fusion is off is the one "Automatic" would pick.
   const judge = state.fuse ?? (firstModel
     ? { providerID: firstModel.providerID, modelID: firstModel.modelID, variant: firstModel.variant, displayName: firstModel.displayName }
     : null);
@@ -180,13 +173,6 @@ function LaunchSettingsDialog({
   );
 }
 
-/**
- * The composer's "Run in parallel" controls, above the editor inside the
- * composer box, so entering the mode grows the box upward and the text field
- * never moves. One row: the active variant's models, then a summary of the
- * launch settings that opens them. Variant tabs get a row only when there are
- * two or more variants.
- */
 export function ParallelComposerStrip({
   parallel,
   project,
@@ -200,7 +186,6 @@ export function ParallelComposerStrip({
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const { setIsolate, setSetupCommands } = parallel;
 
-  // A project that is not a git repository cannot have worktrees.
   React.useEffect(() => {
     if (isGitRepository === false && state?.isolate) setIsolate(false);
   }, [isGitRepository, setIsolate, state?.isolate]);
@@ -209,8 +194,6 @@ export function ParallelComposerStrip({
   React.useEffect(() => {
     if (!project || !needsSetupCommands) return;
     let cancelled = false;
-    // Reading the commands may ask to trust the shared ones first, the same
-    // way preparing a worktree does.
     resolveWorktreeSetupCommands(project).then(
       (commands) => { if (!cancelled) setSetupCommands(commands); },
       () => { if (!cancelled) setSetupCommands([]); },

@@ -1,16 +1,3 @@
-/**
- * Composer dictation controls: a mic button for the composer footer plus a
- * full-composer overlay while dictation is active (recording, transcribing,
- * or failed). The overlay mirrors the composer's own layout — the transcript
- * area uses the same paddings/typography as the textarea and the action row
- * reuses the footer icon-button styling — so toggling dictation causes no
- * vertical shift.
- *
- * No text appears while recording. The server transcribes the audio once the
- * user stops, so the overlay shows the recording state and then Transcribing.
- * The only transcript rendered here is the salvage text of a failed dictation.
- */
-
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -30,7 +17,6 @@ import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-// One composer owns microphone capture and its keyboard confirmation in a window.
 let recordingOwner: HTMLSpanElement | null = null;
 
 interface ComposerDictationProps {
@@ -43,23 +29,11 @@ interface ComposerDictationProps {
     disabled?: boolean;
     onInsert: (text: string) => void;
     onInsertAndSend: (text: string) => void;
-    /** Called once when a dictation leaves idle, before any transcript exists,
-        so the host can record which draft the dictation belongs to. */
     onStart?: () => void;
-    /** Called when the record-and-send button is pressed, before the async
-        transcript resolves; the host holds the composer open until onInsert
-        or onInsertAndSend settles. */
     onSendStart?: () => void;
-    /** Reports whether dictation is active (recording/transcribing/failed overlay shown). */
     onActiveChange?: (active: boolean) => void;
-    /** Reports the height (px) failed-dictation salvage text needs, so the host
-        can grow the composer like typed text would; null when none is shown. */
     onContentHeightChange?: (height: number | null) => void;
-    /** Render the mic trigger button (default). Pass false when the host renders
-        its own trigger and only needs the overlay + recording engine. */
     renderTrigger?: boolean;
-    /** Rendered at the very top of the active overlay (e.g. the mobile composer
-        drag handle, so swipe-expand keeps working in Listening mode). */
     topAccessory?: React.ReactNode;
 }
 
@@ -69,10 +43,6 @@ const formatDuration = (seconds: number): string => {
     return `${mins}:${String(secs).padStart(2, '0')}`;
 };
 
-/**
- * Polls the dictation status route while the local model is downloading and
- * returns the download percent (null while unknown / not downloading).
- */
 const useModelDownloadProgress = (active: boolean): number | null => {
     const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
     const [percent, setPercent] = React.useState<number | null>(null);
@@ -92,8 +62,6 @@ const useModelDownloadProgress = (active: boolean): number | null => {
                     return;
                 }
                 const data = await response.json();
-                // activeModel is the model the server dictates with, which
-                // differs from the saved one when that left the catalog.
                 const modelId = data?.activeModel ?? sttLocalModel;
                 const model = Array.isArray(data?.models)
                     ? data.models.find((m: { id: string }) => m.id === modelId)
@@ -141,8 +109,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '');
-    // The dictation server (WebSocket + STT worker) lives in the OpenChamber
-    // web server; the VS Code bridge has no server process for it.
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
 
     const pendingActionRef = React.useRef<'insert' | 'send' | null>(null);
@@ -199,8 +165,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         void startDictation();
     }, [supported, dictationEnabled, disabled, startDictation]);
 
-    // The transcript arrives long after the start; report the start itself so
-    // the host can keep the transcript with the draft that was on screen then.
     const onStartRef = React.useRef(onStart);
     React.useEffect(() => {
         onStartRef.current = onStart;
@@ -212,7 +176,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 
     const confirmWith = React.useCallback((action: 'insert' | 'send') => {
         pendingActionRef.current = action;
-        // Hold the mobile composer open until the asynchronous submit settles.
         if (action === 'send') {
             onSendStartRef.current?.();
         }
@@ -228,16 +191,10 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         wasIdleRef.current = idle;
     }, [status]);
 
-    // Layout effect on purpose: the host may expand/collapse the composer in
-    // response, and that state change must land in the same paint as the
-    // overlay (a plain effect painted one clipped frame of overlay content
-    // inside the still-collapsed pill before the morph started).
     React.useLayoutEffect(() => {
         onActiveChange?.(status !== 'idle');
     }, [status, onActiveChange]);
 
-    // Keyboard shortcut (toggle_dictation): idle -> start recording,
-    // recording -> confirm. Dispatched by useKeyboardShortcuts.
     React.useEffect(() => {
         if (!supported || !dictationEnabled) return;
         const marker = composerMarkerRef.current;
@@ -267,8 +224,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         };
     }, [supported, dictationEnabled]);
 
-    // While recording: Enter confirms, Escape cancels. Capture-phase
-    // so the composer's own Enter-to-send never fires underneath the overlay.
     React.useEffect(() => {
         if (status !== 'recording') {
             return;
@@ -293,10 +248,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
     }, [status, confirmWith, cancelDictation, dictationAutoSend]);
 
-    // Pixel-parity with the composer: the real footer row is taller than our
-    // buttons (its height comes from the tallest control, e.g. the model
-    // picker), so measure it — it stays mounted underneath the overlay — and
-    // give our action row the same height so the icons line up exactly.
     const overlayRef = React.useRef<HTMLDivElement | null>(null);
     const transcriptAreaRef = React.useRef<HTMLDivElement | null>(null);
     const transcriptContentRef = React.useRef<HTMLDivElement | null>(null);
@@ -304,18 +255,10 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const isActiveStatus = status !== 'idle';
     const hasSalvageText = status === 'failed' && Boolean(partialTranscript.trim());
 
-    // Grow the composer with failed-dictation salvage text, the way typing grows
-    // the textarea. The overlay is absolutely positioned over the composer, so
-    // it can't push the composer's height itself. Measure how much room the text
-    // wants and report it to the host, which applies the editor's line and
-    // viewport caps before the salvage area scrolls.
     const onContentHeightChangeRef = React.useRef(onContentHeightChange);
     React.useEffect(() => {
         onContentHeightChangeRef.current = onContentHeightChange;
     }, [onContentHeightChange]);
-    // Two instances can coexist (mobile footer + wrapper engine); only the one
-    // that reported salvage height may clear it, or an idle sibling mounting
-    // beside a failed dictation would zero the active overlay's height.
     const hasReportedHeightRef = React.useRef(false);
     React.useLayoutEffect(() => {
         if (!hasSalvageText) {
@@ -328,10 +271,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         const area = transcriptAreaRef.current;
         const content = transcriptContentRef.current;
         if (!area || !content) return;
-        // Measure the salvage text block, not the container: the container is flex-1
-        // inside the overlay, so its scrollHeight tracks the composer's own
-        // height — feeding that back would creep a few px on every transcript
-        // update instead of stepping per wrapped line.
         const firstReport = !hasReportedHeightRef.current;
         let followEnd = firstReport
             || area.scrollHeight - area.scrollTop - area.clientHeight <= 24;
@@ -342,9 +281,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         const reportHeight = () => {
             const style = window.getComputedStyle(area);
             const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-            // Keep the reader's position through rewraps. The first host cap
-            // is committed after this report, so follow again when the area
-            // shrinks, unless the reader has scrolled away from the end.
             hasReportedHeightRef.current = true;
             onContentHeightChangeRef.current?.(content.offsetHeight + padding);
             if (followEnd) {
@@ -352,9 +288,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             }
         };
         reportHeight();
-        // The parent applies its measured cap in a second layout commit. Follow
-        // once after that commit, before paint, rather than scrolling the old
-        // unbounded area where there was no overflow yet.
         const initialFollowFrame = firstReport ? window.requestAnimationFrame(() => {
             area.scrollTop = area.scrollHeight;
             followEnd = true;
@@ -365,7 +298,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         };
         if (!window.ResizeObserver) return cleanupScroll;
         const observer = new window.ResizeObserver(reportHeight);
-        // Re-report after rotation or any other width change rewraps the text.
         observer.observe(content);
         observer.observe(area);
         return () => {
@@ -383,8 +315,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         if (!isActiveStatus) {
             return;
         }
-        // The overlay is rendered inside the composer footer itself, so the
-        // real footer is an ancestor, not a sibling.
         const realFooter = overlayRef.current?.closest<HTMLElement>('[data-chat-input-footer="true"]');
         if (realFooter && realFooter.offsetHeight > 0) {
             setFooterHeight(realFooter.offsetHeight);
@@ -417,9 +347,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         return t('chat.dictation.listening');
     })();
 
-    // Dictation must not dismiss the soft keyboard: block the focus transfer
-    // iOS performs on tap for the mic and every overlay control (same pattern
-    // as PermissionAutoAcceptButton).
     const keepKeyboardFocusProps = {
         onMouseDown: (event: React.MouseEvent) => event.preventDefault(),
         onPointerDownCapture: (event: React.PointerEvent) => {
@@ -452,24 +379,9 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             {isActive ? (
                 <div
                     ref={overlayRef}
-                    // overflow-x/y split on purpose: mobile.css rewrites the
-                    // shorthand `.overflow-hidden` to overflow-y:auto on touch
-                    // devices, which painted a phantom scrollbar on Android.
                     className={cn(
-                        // Exactly one surface while dictating (see the
-                        // .oc-dictation-overlay rule in design-system.css):
-                        // desktop mounts the overlay inside the box and hides
-                        // the box's other contents, so the overlay is
-                        // transparent; mobile mounts it beside the pill/box,
-                        // hides those, and the overlay carries the surface on
-                        // an inner layer; this element keeps the surface's
-                        // text context.
                         'oc-dictation-overlay absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
                         isMobile && 'oc-surface-elevated border border-edge shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
-                        // Mobile: the overlay surface shows instantly (riding the
-                        // pill → voice morph), its content fades in only after the
-                        // shape has grown — otherwise the controls paint clipped
-                        // inside the still-small pill.
                         isMobile && 'oc-composer-morph-content-fade',
                     )}
                     style={{ borderRadius: radius }}
@@ -482,22 +394,13 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                     {topAccessory}
                     <ScrollableOverlay
                         ref={transcriptAreaRef}
-                        // min-h-0 (not a fixed min height): the mobile composer is shorter than
-                        // 52px of text area + footer, and a fixed min pushed the action row 4px
-                        // below the real footer. The area must shrink to whatever space the
-                        // underlying composer actually has.
                         outerClassName="flex-1 min-h-0"
                         className={cn(
-                            // Text paddings match the composer textarea, plus the 4px (pt-1)
-                            // attachment-chips row that always renders above it: desktop 16+4px,
-                            // mobile 10+4px from the top.
                             'px-3',
                             isMobile ? 'pt-3.5 pb-2.5' : 'pt-5 pb-2',
                         )}
                         disableHorizontal
                     >
-                        {/* Measured for the composer-growth report — keep all
-                            transcript/placeholder/error content inside. */}
                         <div ref={transcriptContentRef}>
                             {status === 'failed' && partialTranscript ? (
                                 <p className="typography-markdown md:typography-ui-label whitespace-pre-wrap" style={{ color: currentTheme.colors.surface.foreground }}>
@@ -540,8 +443,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         ) : status === 'uploading' ? (
                             <Icon name="loader-4" className="ms-1 h-4 w-4 animate-spin" style={{ color: currentTheme.colors.surface.mutedForeground }} />
                         ) : null}
-                        {/* Same inter-control gap as the composer's right cluster:
-                            gap-x-1 on mobile, md:gap-x-3 on desktop. */}
                         <div className={cn('ms-auto flex flex-shrink-0 items-center', isMobile ? 'gap-x-1' : 'gap-x-1.5 md:gap-x-3')}>
                             {status === 'recording' ? (
                                 <>

@@ -14,22 +14,13 @@ const alignCatalogRuntime = (runtimeKey: string): void => {
   }
 };
 
-/** Changes the server announced; a request answers only for those it started after. */
 let announcedChanges = 0;
 let inFlight: { runtimeKey: string; changes: number; request: Promise<void> } | null = null;
 
-/**
- * One request at a time per runtime: the rail, the composer, and the dialogs
- * all ask on mount. A request still running for the previous server is not
- * reused after a switch; its answer is dropped by the runtime check below,
- * and the new server gets its own request. A request that started before an
- * announced change may hold the old list, so a new one runs after it.
- */
 export const loadGuestCatalog = (): Promise<void> => {
   const runtimeKey = getRuntimeKey();
   const running = inFlight?.runtimeKey === runtimeKey ? inFlight : null;
   if (running && running.changes === announcedChanges) return running.request;
-  // After a switch the queued read belongs to a server the store no longer follows.
   const after = () => (getRuntimeKey() === runtimeKey ? loadGuestCatalogOnce(runtimeKey) : undefined);
   const request = (running ? running.request.then(after) : loadGuestCatalogOnce(runtimeKey))
     .finally(() => {
@@ -39,7 +30,6 @@ export const loadGuestCatalog = (): Promise<void> => {
   return request;
 };
 
-/** The server announced a catalog change; read it from a request that starts after now. */
 export const reloadGuestCatalog = (): Promise<void> => {
   announcedChanges += 1;
   return loadGuestCatalog();
@@ -49,8 +39,6 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
   alignCatalogRuntime(runtimeKey);
 
   const store = useGuestsStore.getState();
-  // VS Code runs its own OpenCode and mounts no extensions. The phone loads the
-  // catalog for what the host draws; its frame gates live with each surface.
   if (isVSCodeRuntime()) {
     store.markUnsupported(runtimeKey);
     return;

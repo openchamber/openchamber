@@ -1,9 +1,3 @@
-/**
- * Antigravity Provider - Transforms
- *
- * Data transformation functions for Antigravity quota responses.
- * @module quota/providers/antigravity/transforms
- */
 
 import {
   asNonEmptyString,
@@ -84,9 +78,6 @@ export const transformSummary = (summaryPayload) => {
     });
   }
 
-  // The card carries no top-level windows: each model row shows its own
-  // group's 5h/weekly, so a single overview row would only mislead (for
-  // example a Gemini 5h window shown for someone whose Claude limit is spent).
   return { modelGroupWindows };
 };
 
@@ -130,7 +121,6 @@ export const transformModels = (modelsPayload, modelGroupWindows = []) => {
 
       transformed[name] = { windows: reorderedWindows };
     } else {
-      // Fallback: if retrieveUserQuotaSummary did not return, fall back to the single-window quotaInfo from fetchAvailableModels
       const remainingFraction = toNumber(modelData?.quotaInfo?.remainingFraction);
       const remainingPercent = remainingFraction !== null
         ? Math.round(remainingFraction * 100)

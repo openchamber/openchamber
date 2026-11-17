@@ -1,11 +1,3 @@
-/**
- * Drives one annotation session end to end.
- *
- * The overlay resolves only after tearing its own chrome down and waiting for a
- * repaint, so the capture that follows shows the page and none of our UI. The
- * page itself is never modified: annotation marks what is there, it does not
- * edit it.
- */
 import {
   ANNOTATION_TEARDOWN_SCRIPT,
   buildAnnotationOverlayScript,
@@ -22,26 +14,11 @@ export type PageCapture = {
   readonly base64: string;
   readonly width: number;
   readonly height: number;
-  /**
-   * The part of the page's viewport the capture shows, in CSS pixels. Absent
-   * when it shows the whole viewport; a page in the chat is often taller than
-   * the window, and only the part on screen can be photographed.
-   */
   readonly viewportArea?: BrowserRect;
 };
 
-/**
- * The capabilities an annotation session needs from its host, named so the
- * session can be exercised without a live `<webview>`.
- */
 export type AnnotationHost = {
   readonly executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
-  /**
-   * Runs the overlay in a world of its own beside the page's, the one place
-   * its microphone can reach the app from. Throws when it cannot start there;
-   * the overlay then runs in the page's world, without a microphone. Absent
-   * where the host has no such world.
-   */
   readonly runIsolated?: (script: string) => Promise<JsonValue>;
   readonly capturePage: () => Promise<PageCapture | null>;
 };
@@ -66,7 +43,6 @@ const readViewport = async (host: AnnotationHost): Promise<{ width: number; heig
   }
 };
 
-/** Best-effort cleanup of an overlay left behind by a previous session. */
 export const cancelAnnotationSession = async (host: AnnotationHost): Promise<void> => {
   try {
     await host.executeJavaScript(ANNOTATION_TEARDOWN_SCRIPT, false);
@@ -93,7 +69,6 @@ const runOverlay = async (
   }
   if (!started) raw = await host.executeJavaScript(buildAnnotationOverlayScript(theme, labels), true);
 
-  // Cancelled from inside the page.
   if (raw === null || raw === undefined) return null;
   if (!isBrowserAnnotationPayload(raw)) {
     await cancelAnnotationSession(host);
@@ -111,7 +86,6 @@ export const runAnnotationSession = async ({
   host: AnnotationHost;
   theme: BrowserAnnotationOverlayTheme;
   labels: BrowserAnnotationOverlayLabels;
-  /** Dictation into the comment; it takes effect only where `host.runIsolated` runs the overlay. */
   voice?: BrowserAnnotationVoice | null;
 }): Promise<AnnotationSessionResult | null> => {
   const payload = await runOverlay(host, theme, labels, voice);

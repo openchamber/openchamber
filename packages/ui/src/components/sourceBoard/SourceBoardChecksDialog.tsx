@@ -18,20 +18,13 @@ import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { getChangeRequestContextKey, useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-// The PR panel's pace for running checks.
 const RUNNING_REFRESH_MS = 35_000;
 
-/**
- * A pull request's check runs, read when the dialog opens: the board's lists
- * ask only for each PR's totals, the runs and their steps come one PR at a
- * time. The same cache the PR panel reads, so either fills the other.
- */
 export const SourceBoardChecksDialog: React.FC<{
     pull: RepositoryChangeRequestReference;
     context: SourceControlReadContext;
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    /** Pins the failed runs, with their steps and annotations, above the composer. */
     onAttachFailed?: (runs: CIRun[]) => void;
 }> = ({ pull, context, open, onOpenChange, onAttachFailed }) => {
     const { t } = useI18n();
@@ -47,7 +40,6 @@ export const SourceBoardChecksDialog: React.FC<{
     const running = runs.some((run) => run.status === 'in_progress' || run.status === 'queued');
     const [now, setNow] = React.useState(() => Date.now());
 
-    // Fresh on every open; again while checks still run, as the PR panel does.
     React.useEffect(() => {
         if (!open) return;
         const load = () => {

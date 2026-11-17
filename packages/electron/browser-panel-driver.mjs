@@ -1,44 +1,12 @@
-/**
- * The agent's hands in a browser panel page, over the page's own DevTools
- * protocol session (`webContents.debugger`).
- *
- * Scripts run in an isolated world of each frame, cross-origin frames
- * included: Chromium puts those in processes of their own, which the session
- * reaches by auto-attaching to them. The page cannot see or change what the
- * scripts keep there. Clicks, keys and drags go in as real input, so the page
- * gets trusted events, its hit testing and its focus rules, the way a
- * person's would. A pointer action goes to the session that holds its frame,
- * at that session's coordinates.
- *
- * A JavaScript dialog (alert, confirm, prompt) stops the page until it is
- * answered, and with it every script and input sent there. The driver tracks
- * the open dialog, and an operation that opens one returns as soon as it does.
- * On a page set to answer its own dialogs (an agent's tab), the driver answers
- * each at once, no unless the running action asked for yes, and keeps what it
- * answered for the action to report: the system shows each dialog as a sheet
- * on the app's window, which would otherwise hold the user's whole window
- * until the agent's next step.
- *
- * DevTools can be open at the same time: Chromium lets both sessions attach.
- */
 
 import { z } from 'zod';
 
 const ISOLATED_WORLD = 'openchamber-agent';
 
-/**
- * The annotation overlay runs in a world of its own, one per session, and
- * reaches the app through a binding only that world has
- * (`ANNOTATION_BINDING` in `annotationOverlay.ts`): the page cannot call it,
- * so it cannot start the app's microphone. The app answers by calling the
- * overlay's receiver in the same world.
- */
 const ANNOTATION_WORLD = 'openchamber-annotation';
 const ANNOTATION_BINDING = '__openchamberAnnotationSend';
 const ANNOTATION_RECEIVER = '__openchamberAnnotationReceive';
-/** Messages the overlay sent that the app has not read yet; a few clicks' worth. */
 const MAX_ANNOTATION_MESSAGES = 20;
-/** How long one read of the overlay's messages waits, below the IPC's patience. */
 const MAX_ANNOTATION_WAIT_MS = 25_000;
 
 const annotationSendSchema = z.object({ message: z.record(z.string(), z.json()) }).passthrough();
@@ -49,7 +17,6 @@ const annotationCancelSchema = z.object({ sessionId: z.number() }).passthrough()
 const dialogAnswerSchema = z.object({ accept: z.boolean().optional(), promptText: z.string().optional() }).passthrough();
 const emulationSchema = z.object({ colorScheme: z.enum(['light', 'dark', 'system']).optional() }).passthrough();
 
-/** Key names the agent may press, with what Chromium needs to make the event. */
 const NAMED_KEYS = {
   Enter: { code: 'Enter', keyCode: 13, text: '\r' },
   Tab: { code: 'Tab', keyCode: 9 },
@@ -69,16 +36,9 @@ const NAMED_KEYS = {
 
 const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 };
 
-/**
- * Editing shortcuts Chromium runs from the menu on macOS rather than from the
- * key event, so a synthesized Cmd+A alone selects nothing there.
- */
+// external: https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent macOS editing shortcuts require the corresponding edit command as well as synthesized keys.
 const EDITING_COMMANDS = { a: 'selectAll', c: 'copy', v: 'paste', x: 'cut', z: 'undo' };
 
-/**
- * The key events for a combination such as `Enter`, `Shift+Tab` or `Meta+a`,
- * or an error naming what is accepted.
- */
 export const keyEventsFor = (combo, platform = process.platform) => {
   const parts = String(combo || '').split('+').map((part) => part.trim());
   const keyName = parts.pop() ?? '';
@@ -117,7 +77,6 @@ export const keyEventsFor = (combo, platform = process.platform) => {
     throw new Error(`Unknown key ${keyName || '(empty)'}; use one character or ${Object.keys(NAMED_KEYS).join(', ')}`);
   }
 
-  // A shortcut types nothing, whatever its letter.
   const chord = modifiers & (MODIFIER_BITS.Control | MODIFIER_BITS.Meta | MODIFIER_BITS.Alt);
   if (chord) text = undefined;
   const commandModifier = platform === 'darwin' ? MODIFIER_BITS.Meta : MODIFIER_BITS.Control;
@@ -136,7 +95,6 @@ export const keyEventsFor = (combo, platform = process.platform) => {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Reads the position of a frame's content box inside the viewport of the frame that holds it. */
 const OWNER_CONTENT_ORIGIN = `function () {
   var rect = this.getBoundingClientRect();
   var style = getComputedStyle(this);
@@ -178,11 +136,7 @@ export const createBrowserPanelDriver = () => {
     state.contents.debugger.sendCommand(method, params, sessionId)
   );
 
-  /**
-   * Frames only. Attaching to a page's workers as well and detaching from
-   * them again crashed the whole app (Electron 45, a page with a worker), and
-   * a worker holds nothing to act in.
-   */
+  // external: https://chromedevtools.github.io/devtools-protocol/tot/Target/#method-setAutoAttach Attach only to frames; attaching and detaching workers can crash Electron 45.
   const AUTO_ATTACH_FRAMES_ONLY = [{ type: 'iframe', exclude: false }, { exclude: true }];
 
   const prepareSession = async (state, sessionId) => {
@@ -199,7 +153,6 @@ export const createBrowserPanelDriver = () => {
     const fromSession = sessionId || undefined;
     if (method === 'Target.attachedToTarget') {
       const childId = params.sessionId;
-      // The filter above lets only frames through; anything else is left alone.
       if (params.targetInfo?.type !== 'iframe') return;
       state.sessions.set(childId, { sessionId: childId, parentSessionId: fromSession });
       void prepareSession(state, childId).catch(() => {});
@@ -230,7 +183,6 @@ export const createBrowserPanelDriver = () => {
     }
     if (method === 'Runtime.bindingCalled') {
       const annotation = state.annotation;
-      // Only the overlay's own world, in the top page, holds the binding.
       if (!annotation || fromSession || params.name !== ANNOTATION_BINDING) return;
       if (params.executionContextId !== annotation.contextId) return;
       deliverAnnotationMessage(annotation, String(params.payload ?? ''));
@@ -246,18 +198,8 @@ export const createBrowserPanelDriver = () => {
     if (annotation.messages.length < MAX_ANNOTATION_MESSAGES) annotation.messages.push(message);
   };
 
-  /**
-   * Runs the annotation overlay and answers with what it resolved to, or
-   * null when the page navigated from under it or the app cancelled the
-   * session before the overlay showed. Throws only when it could not start,
-   * so the app can run it the old way, without a microphone.
-   *
-   * Sessions are numbered by the app, rising; a cancel names the session, and
-   * may arrive before the session reaches here.
-   */
   const annotate = async (state, expression, sessionId) => {
     const cancelled = () => sessionId <= state.annotationCancelledUpTo;
-    // The last session's cleanup still runs after its overlay is gone.
     await state.annotationEnded;
     if (cancelled()) return { value: null };
     /** @type {AnnotationChannel} */
@@ -269,7 +211,6 @@ export const createBrowserPanelDriver = () => {
       const [top] = await listFrames(state);
       annotationSessions += 1;
       const worldName = `${ANNOTATION_WORLD}-${annotationSessions}`;
-      // Binding calls arrive as Runtime events, so the domain is on for the session only.
       await send(state, 'Runtime.enable');
       await send(state, 'Runtime.addBinding', { name: ANNOTATION_BINDING, executionContextName: worldName });
       const world = await send(state, 'Page.createIsolatedWorld', { frameId: top.frameId, worldName });
@@ -285,7 +226,6 @@ export const createBrowserPanelDriver = () => {
           userGesture: true,
         });
       } catch {
-        // The page navigated or closed, and the overlay went with it.
         return { value: null };
       }
       if (reply.exceptionDetails) {
@@ -302,7 +242,6 @@ export const createBrowserPanelDriver = () => {
     }
   };
 
-  /** The overlay's next message in session `sessionId`; `ended` while that session is not the running one. */
   const nextAnnotationMessage = (state, sessionId, timeoutMs) => {
     const annotation = state.annotation;
     if (annotation?.sessionId !== sessionId) return Promise.resolve({ ended: true });
@@ -332,7 +271,6 @@ export const createBrowserPanelDriver = () => {
     return { delivered: Boolean(reply && !reply.exceptionDetails) };
   };
 
-  /** Kept small: an action reports these, and a page can loop on alerts. */
   const MAX_ANSWERED_DIALOGS = 5;
 
   const answerAutomatically = (state, sessionId, params) => {
@@ -346,7 +284,6 @@ export const createBrowserPanelDriver = () => {
     }
   };
 
-  /** Attaches once per page and keeps the session for the page's lifetime. */
   const stateFor = (contents) => {
     const existing = states.get(contents);
     if (existing && contents.debugger.isAttached()) return existing;
@@ -360,9 +297,6 @@ export const createBrowserPanelDriver = () => {
         contents.debugger.removeListener('message', listener);
         if (states.get(contents) === created) states.delete(contents);
       });
-      // Not awaited here: a dialog the page shows while it loads holds the
-      // renderer, and with it the answer to Page.enable. The dialog events
-      // still arrive, so answering a dialog must not wait for it.
       state.ready = prepareSession(state, undefined);
       state.ready.catch(() => {});
       return state;
@@ -372,10 +306,6 @@ export const createBrowserPanelDriver = () => {
     return created;
   };
 
-  /**
-   * Runs `operation`, or answers with the dialog it opened as soon as one
-   * opens: a page held by a dialog finishes nothing until it is answered.
-   */
   const watchingDialog = (state, operation) => new Promise((resolve, reject) => {
     if (state.dialog) {
       resolve({ dialog: publicDialog(state.dialog) });
@@ -395,7 +325,6 @@ export const createBrowserPanelDriver = () => {
     return shown;
   };
 
-  /** Every frame with the session that reaches it, the top frame first. */
   const listFrames = async (state) => {
     const frames = [];
     const walk = (node, sessionId, parentFrameId) => {
@@ -436,7 +365,6 @@ export const createBrowserPanelDriver = () => {
     return byValue ? reply.result.value : reply.result;
   };
 
-  /** Where `frame`'s content box starts inside the viewport of `parent`, which holds it. */
   const ownerOrigin = async (state, frame, parent) => {
     const owner = await send(state, 'DOM.getFrameOwner', { frameId: frame.frameId }, parent.sessionId);
     const resolved = await send(state, 'DOM.resolveNode', { backendNodeId: owner.backendNodeId }, parent.sessionId);
@@ -452,14 +380,6 @@ export const createBrowserPanelDriver = () => {
     }
   };
 
-  /**
-   * Where a frame's content starts: in the top viewport (`top`), or in the
-   * viewport of the frame its session is rooted at (`session`). Input goes to
-   * the session that holds the frame, at that session's coordinates: sent to
-   * the top page instead, a press meant for a cross-origin frame depends on
-   * how the app draws the panel, and lands on the page around the frame when
-   * the panel is hidden.
-   */
   const frameOrigin = async (state, frame, within) => {
     const frames = await listFrames(state);
     let x = 0;
@@ -477,7 +397,6 @@ export const createBrowserPanelDriver = () => {
     return { x, y };
   };
 
-  /** The session that takes input for a point in a frame, and the point in its coordinates. */
   const inputTarget = async (state, value, name) => {
     const local = point(value, name);
     const frame = await frameById(state, String(value?.frameId ?? ''));
@@ -495,12 +414,6 @@ export const createBrowserPanelDriver = () => {
     ...extra,
   }, at.sessionId);
 
-  /**
-   * A pointer drag: press, move in steps, release. Only for elements that are
-   * not HTML-draggable: an HTML drag would start the system's own drag
-   * session in the app's window, which a guest cannot intercept, so the page
-   * scripts those itself (`buildHtmlDragScript`).
-   */
   const drag = async (state, from, to) => {
     if (from.sessionId !== to.sessionId) throw new Error('Both ends of a drag must be in the same frame of the page');
     const sessionId = from.sessionId;
@@ -522,11 +435,6 @@ export const createBrowserPanelDriver = () => {
     return { x, y };
   };
 
-  /**
-   * One driver operation on a panel page. `contents` is already checked to
-   * be a panel page by the caller.
-   */
-  /** Operations that only answer or read dialog state, or set emulation. */
   const NEEDS_NO_PAGE = new Set(['dialog', 'dialogPolicy', 'armDialog', 'takeAnsweredDialogs', 'answerDialog', 'emulate', 'annotationMessage', 'annotationSend', 'annotationCancel']);
 
   const run = async (contents, op, args) => {
@@ -599,7 +507,6 @@ export const createBrowserPanelDriver = () => {
       case 'dialog':
         return state.dialog ? publicDialog(state.dialog) : null;
       case 'dialogPolicy': {
-        // Turning it on also answers a dialog that opened before it was on.
         state.autoAnswer = args.auto === true;
         const open = state.dialog;
         if (state.autoAnswer && open) {
@@ -609,7 +516,6 @@ export const createBrowserPanelDriver = () => {
         return { auto: state.autoAnswer };
       }
       case 'armDialog':
-        // The answer for dialogs during the action that asks; no otherwise.
         state.accept = args.accept === true;
         return { accept: state.accept };
       case 'takeAnsweredDialogs': {
@@ -627,11 +533,6 @@ export const createBrowserPanelDriver = () => {
         return { answered: publicDialog(dialog), accepted: args.accept === true };
       }
       case 'emulate': {
-        // Emulation lives in this session, so it lasts as long as the page does.
-        // A guest view is transparent, so a page with no background of its
-        // own showed the app behind it, and captured as black. A white base
-        // is what a browser draws; Chromium still uses its dark canvas for a
-        // page that asks for `color-scheme: dark`.
         if (args.pageBackground === true) {
           await send(state, 'Emulation.setDefaultBackgroundColorOverride', { color: { r: 255, g: 255, b: 255, a: 1 } });
         }

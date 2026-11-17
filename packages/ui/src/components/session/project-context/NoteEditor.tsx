@@ -16,21 +16,7 @@ import { tags } from '@lezer/highlight';
 
 import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 
-/**
- * The note editor: one surface that is always editable and always reads as
- * formatted text.
- *
- * Notes used to open rendered and turn into a plain textarea on click, so the
- * same note looked like two different things depending on whether you were
- * touching it. Here headings, emphasis, code and links keep their look while
- * you type. Markdown markers (`#`, `**`, backticks, link targets) are hidden
- * except on the lines the cursor is on, where you need them to edit; without
- * focus every line shows formatted. List markers become bullets.
- *
- * The text is plain Markdown in and out; nothing here changes what is stored.
- */
 
-/** Marker nodes hidden off the cursor's lines. */
 const HIDDEN_MARKS = new Set(['HeaderMark', 'EmphasisMark', 'CodeMark', 'StrikethroughMark', 'LinkMark', 'URL', 'QuoteMark']);
 
 const HEADING_LINE_CLASS = new Map([
@@ -61,7 +47,6 @@ const codeBlockLine = Decoration.line({ class: 'cm-note-codeblock' });
 const quoteLine = Decoration.line({ class: 'cm-note-quote' });
 const inlineCode = Decoration.mark({ class: 'cm-note-inline-code' });
 
-/** Line numbers the selection touches; their markers stay visible. */
 const activeLines = (view: EditorView): Set<number> => {
   const lines = new Set<number>();
   if (!view.hasFocus) return lines;
@@ -97,22 +82,18 @@ const buildDecorations = (view: EditorView): DecorationSet => {
             lineClasses.set(line.from, decoration);
             if (line.to >= node.to || line.number === state.doc.lines) break;
           }
-          // Fences and code stay as typed; only quote markers are hidden.
           return node.name === 'Blockquote';
         }
         if (node.name === 'InlineCode') {
           marks.push(inlineCode.range(node.from, node.to));
-          // Its backticks are hidden below like any other marker.
         }
         if (node.name === 'ListMark' && !isActive(node.from)) {
           const text = state.doc.sliceString(node.from, node.to);
-          // Ordered lists keep their numbers.
           if (text === '-' || text === '*' || text === '+') marks.push(bulletWidget.range(node.from, node.to));
           return;
         }
         if (!HIDDEN_MARKS.has(node.name) || isActive(node.from)) return;
         let end = node.to;
-        // "# Title" and "> quote" hide the space after the marker too.
         if ((node.name === 'HeaderMark' || node.name === 'QuoteMark') && state.doc.sliceString(end, end + 1) === ' ') end += 1;
         if (node.name === 'URL' && node.node.parent?.name !== 'Link') return;
         if (end > node.from) marks.push(hiddenMark.range(node.from, end));
@@ -166,7 +147,6 @@ const noteTheme = EditorView.theme({
   '.cm-note-h2': { fontSize: '1.3em', fontWeight: '600', paddingTop: '0.3em' },
   '.cm-note-h3': { fontSize: '1.15em', fontWeight: '600', paddingTop: '0.2em' },
   '.cm-note-h4': { fontWeight: '600' },
-  // The same chip the rendered Markdown draws for inline code (index.css).
   '.cm-note-inline-code': {
     backgroundColor: 'color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent)',
     color: 'color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent)',
@@ -198,7 +178,6 @@ export const NoteEditor: React.FC<{
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
   const [scroller, setScroller] = React.useState<HTMLElement | null>(null);
-  // The view is built once; the callbacks it calls must stay current.
   const onChangeRef = React.useRef(onChange);
   const onBlurRef = React.useRef(onBlur);
   onChangeRef.current = onChange;
@@ -220,7 +199,6 @@ export const NoteEditor: React.FC<{
           noteTheme,
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': ariaLabel, spellcheck: 'true' }),
-          // The server caps a note's length; typing past it does nothing.
           EditorState.changeFilter.of((transaction) => transaction.newDoc.length <= maxLength),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString());
@@ -240,12 +218,9 @@ export const NoteEditor: React.FC<{
       setScroller(null);
       view.destroy();
     };
-    // Built once per mounted note; later values arrive through the effect below.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A body adopted from elsewhere (an agent, another window) replaces the text;
-  // the note view only passes one in while the user's edits are saved.
   React.useEffect(() => {
     const view = viewRef.current;
     if (!view || view.state.doc.toString() === value) return;

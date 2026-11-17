@@ -38,10 +38,6 @@ type SessionSwitcherDropdownProps = {
   variant?: SwitcherVariant;
   scopeProjectId?: string | null;
   align?: 'start' | 'center' | 'end';
-  /**
-   * The surface keeps no complete session list (Mini Chat): opening reads the
-   * newest page, which covers the rows shown, not every session.
-   */
   recentOnly?: boolean;
 };
 
@@ -89,14 +85,9 @@ type SwitcherContentProps = {
 function SwitcherContent({ onSelect, variant, scopeProjectId, recentOnly }: SwitcherContentProps): React.ReactElement {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
-  // Plain recency, same as the mobile switcher: with pins first, a few pinned
-  // sessions (ordered by creation) fill every slot and hide the recent ones.
   const items = useSwitcherItems(true, { scopeProjectId, currentSessionId, maxParents: RECENT_SESSIONS_LIMIT, ignorePins: true });
 
   React.useEffect(() => {
-    // Fresh records on open: updated stamps re-sort recents (see
-    // raiseSessionOrderingBaselines) while the cached list shows first. The
-    // complete snapshot, or the newest page where that is all the surface keeps.
     void (recentOnly ? refreshRecentGlobalSessions() : refreshGlobalSessions());
   }, [recentOnly]);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -358,7 +349,6 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
           />
         </span>
       ) : null}
-      {/* Compact rows have no meta line; the time sits on the right, as on mobile. */}
       {variant === 'compact' ? (
         <span className="shrink-0 self-center typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
       ) : null}

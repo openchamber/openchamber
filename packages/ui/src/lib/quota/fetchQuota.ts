@@ -41,12 +41,6 @@ export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 
 const PROVIDER_LIST_TIMEOUT_MS = 10_000;
 
-/**
- * Providers the instance has a credential for, or null when it could not say.
- * Null is not "none": the caller asks every provider, as a cold instance, a
- * restarting OpenCode or a server without this route answer here. The deadline
- * covers the body too, because every quota load waits on this read.
- */
 export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TIMEOUT_MS): Promise<ReadonlySet<string> | null> => {
   const controller = new AbortController();
   const read = async () => {
@@ -68,7 +62,6 @@ export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TI
   }
 };
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
 export const fetchQuota = async (
   providerId: QuotaProviderId,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
@@ -117,7 +110,6 @@ export const fetchQuota = async (
   }
 };
 
-/** The deadline covers response bodies too, including transports that ignore abort. */
 export const activateGiftReset = async (
   providerId: QuotaProviderId,
   recordId: number,
@@ -141,8 +133,6 @@ export const activateGiftReset = async (
     const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}/gift-reset/use`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // grantType is omitted from the JSON when undefined (the record carried
-      // none); the server then falls back to 'GLOBAL'.
       body: JSON.stringify({ recordId, resetType, grantType }),
       signal: controller.signal,
     });

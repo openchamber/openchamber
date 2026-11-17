@@ -13,9 +13,6 @@ interface OpenChamberLogoProps {
   variant?: 'default' | 'splash';
 }
 
-// The open-shell cube in one colour, the theme's text colour. The drawing is
-// generated from scripts/brand, which also writes the HTML splashes that show
-// before React, so the hand-off between them does not change the logo.
 export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   className = '',
   width = 70,
@@ -27,13 +24,10 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   const themeContext = useOptionalThemeSystem();
   const gradientId = useId();
   const reducedMotion = useReducedMotion();
-  // While loading, the roof tiers light up one at a time, one step a second
-  // on the shared clock.
   const animated = isAnimated && !reducedMotion;
   const litTier = useWaitingPhase(animated, ART.tiers.length);
 
   const color = useMemo(() => {
-    // Startup stages share the pre-paint palette while the app theme hydrates.
     if (variant === 'splash') {
       return 'var(--splash-stroke, var(--surface-foreground))';
     }

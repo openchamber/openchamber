@@ -7,14 +7,6 @@ import { useI18n } from '@/lib/i18n';
 import { browserUrlLabel } from '@/lib/browser/url';
 import type { BrowserHistoryEntry } from '@/lib/browser/history';
 
-/**
- * Addresses already visited in this project, offered under the address bar.
- *
- * Kept deliberately plain: it is a short list of places, so it borrows the
- * app's dropdown surface rather than introducing a second look for the same
- * idea. Selection is driven from the address bar's own keyboard handling, which
- * is why the highlighted row arrives as a prop instead of being tracked here.
- */
 export const BrowserAddressSuggestions: React.FC<{
   entries: readonly BrowserHistoryEntry[];
   activeIndex: number;
@@ -40,8 +32,6 @@ export const BrowserAddressSuggestions: React.FC<{
             'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1',
             index === activeIndex ? 'bg-interactive-hover' : 'hover:bg-interactive-hover',
           )}
-          // Pointer down rather than click: the address bar loses focus first,
-          // and a blur that closes the list would cancel the click.
           onPointerDown={(event) => {
             event.preventDefault();
             onSelect(entry.url);

@@ -7,9 +7,6 @@ import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './la
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 
-// HTTP header values must be printable latin1; macOS voice names can be localized
-// (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
-// outright. Percent-encode so the X-Speech-Voice header is always safe.
 export function speechVoiceHeaderValue(voice) {
   return encodeURIComponent(voice);
 }
@@ -23,7 +20,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     return ttsModulePromise;
   };
 
-  // Which voice keys are stored; the keys themselves never leave the server.
   app.get('/api/voice/keys', (_req, res) => {
     res.json(describeVoiceKeys());
   });
@@ -54,7 +50,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         });
       }
 
-      // Return success - OpenAI TTS is available
       res.json({
         allowed: true,
         provider: 'openai',
@@ -69,7 +64,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     }
   });
 
-  // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
     try {
       const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL, endpointPath } = req.body || {};
@@ -95,20 +89,14 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         return res.status(400).json({ error: 'Text is required' });
       }
 
-      // Without a custom server this is OpenAI's cloud; a custom one has
-      // already been held to this machine by the URL check above.
       if (isEnterpriseMode() && !normalizedBaseURL) {
         return res.status(403).json({ error: ENTERPRISE_MODE_ERROR });
       }
 
-      // Dynamically import the TTS service (ESM)
       const { ttsService } = await getTtsModule();
 
-      // Check availability - server-configured key, client-provided key, or custom server URL
       const hasServerKey = await ttsService.isAvailable();
       const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
-      // The key stored for this kind of server; a key in the body is what
-      // clients from before the server kept them sent, and still wins.
       const requestKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : undefined;
       const clientKey = requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
       const hasClientKey = Boolean(clientKey);
@@ -120,9 +108,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       }
 
       let textToSpeak = text.trim();
-
-      // Historical summarize request fields are intentionally ignored. The
-      // model-backed summarization provider is retired.
 
       const result = await ttsService.generateSpeechStream({
         text: textToSpeak,
@@ -177,7 +162,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   });
 
        
-  // TTS status endpoint
   app.get('/api/tts/status', async (_req, res) => {
     try {
       const { ttsService } = await getTtsModule();
@@ -195,13 +179,10 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     }
   });
 
-  // The startup probe runs concurrently with server bootstrap. An unusually
-  // early status request waits for that same authoritative result.
   app.get('/api/tts/say/status', async (_req, res) => {
     res.json(await sayTTSCapability);
   });
 
-  // macOS 'say' command TTS speak endpoint
   app.post('/api/tts/say/speak', async (req, res) => {
     try {
       const { text, rate = 200, language, languageSample } = req.body || {};
@@ -211,15 +192,10 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         return res.status(400).json({ error: 'Text is required' });
       }
       
-      // Check if we're on macOS
       if (process.platform !== 'darwin') {
         return res.status(503).json({ error: 'macOS say command not available on this platform' });
       }
 
-      // `language: 'auto'`: keep the chosen voice while it speaks the text's
-      // language, otherwise switch to an installed voice that does. A
-      // language with no installed voice keeps the chosen voice — say still
-      // reads the text, just with an accent — rather than failing.
       let resolvedLanguage = null;
       if (language === 'auto') {
         const capability = await sayTTSCapability;
@@ -240,28 +216,20 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const path = await import('path');
       const execAsync = promisify(exec);
       
-      // Create temp file for audio output (use m4a for browser compatibility)
       const tempDir = os.tmpdir();
       const tempFile = path.join(tempDir, `say-${Date.now()}.m4a`);
       
-      // Escape text for shell - escape both single quotes and double quotes
       const escapedText = text.trim().replace(/'/g, "'\\''").replace(/"/g, '\\"');
       
-      // Generate audio file using 'say' command
-      // -o outputs to file, -r sets rate (words per minute)
-      // --data-format=aac outputs as m4a which browsers can decode
       const cmd = `say -v "${voice}" -r ${rate} -o "${tempFile}" --data-format=aac '${escapedText}'`;
       console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate });
       
       await execAsync(cmd);
       
-      // Read the generated audio file
       const audioBuffer = await fs.promises.readFile(tempFile);
       
-      // Clean up temp file
       fs.promises.unlink(tempFile).catch(() => {});
       
-      // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
       res.setHeader('X-Speech-Voice', speechVoiceHeaderValue(voice));
       if (resolvedLanguage) res.setHeader('X-Speech-Language', resolvedLanguage);
@@ -276,7 +244,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     }
   });
 
-  // Server-side STT: receive raw audio, proxy to OpenAI-compatible transcription endpoint
   app.post(
     '/api/stt/transcribe',
     express.raw({ type: (req) => (req.headers['content-type'] || '').startsWith('audio/'), limit: '20mb' }),
